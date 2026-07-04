@@ -1308,7 +1308,11 @@ impl Parser {
                 if self.state.destination == Destination::Ignored
                     || destination_allows_visible_content(&self.state) =>
             {
-                self.state.destination = Destination::Body;
+                self.state.destination = self
+                    .current_shape
+                    .as_ref()
+                    .map(|shape| shape.owner_destination)
+                    .unwrap_or(Destination::Body);
                 self.state.inside_shape_picture = true;
                 self.state.shape_picture_rendered = false;
                 if self.state.inside_shape {
@@ -1323,7 +1327,11 @@ impl Parser {
                     self.state.destination = Destination::Ignored;
                     self.state.suppressing_nonshape_picture = true;
                 } else {
-                    self.state.destination = Destination::Body;
+                    self.state.destination = self
+                        .current_shape
+                        .as_ref()
+                        .map(|shape| shape.owner_destination)
+                        .unwrap_or(Destination::Body);
                 }
             }
             "pict" if destination_allows_visible_content(&self.state) => {
@@ -1355,7 +1363,11 @@ impl Parser {
             {
                 self.finish_paragraph();
                 self.state.shape_result_seen = true;
-                self.state.destination = Destination::Body;
+                self.state.destination = self
+                    .current_shape
+                    .as_ref()
+                    .map(|shape| shape.owner_destination)
+                    .unwrap_or(Destination::Body);
                 self.diagnostics.push(Diagnostic::warning(
                     "rendering safe passive shape text/result and stripping shape properties",
                     Some(offset),
@@ -12253,6 +12265,52 @@ After\par}"#;
                 .iter()
                 .all(|block| !matches!(block, Block::Shape(_)))
         );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_header_shape_text_as_safe_repeating_metadata() {
+        let output = parse_rtf(
+            r"{\rtf1{\header Logo {\shp{\*\shpinst{\sp{\sn pFragments}{\sv hostile-shape-payload}}}{\shptxt Box text\par}}\par}Body\par}",
+        )
+        .unwrap();
+
+        let body_text = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(
+                    paragraph
+                        .runs
+                        .iter()
+                        .map(|run| run.text.as_str())
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect::<String>();
+
+        assert_eq!(output.document.header.len(), 1);
+        assert_eq!(output.document.header[0].runs[0].text, "Logo Box text");
+        assert_eq!(body_text, "Body");
+        for forbidden in [
+            "pFragments",
+            "hostile-shape-payload",
+            "shpinst",
+            "shptxt",
+            "[Shape skipped",
+        ] {
+            assert!(
+                !body_text.contains(forbidden),
+                "forbidden shape text content leaked to body: {forbidden}"
+            );
+        }
         assert!(
             output
                 .diagnostics

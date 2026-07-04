@@ -14698,6 +14698,147 @@ fn header_static_shape_renders_passively_without_body_flow_or_property_leakage()
 }
 
 #[test]
+fn header_shape_text_and_picture_render_passively_without_body_flow_or_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "header Logo {",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-shape-payload}}}{",
+        "\\",
+        "*",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "}}{",
+        "\\",
+        "shptxt Box text",
+        "\\",
+        "par}}",
+        "\\",
+        "par} Body",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let body_image_count = parsed
+        .document
+        .blocks
+        .iter()
+        .filter(|block| matches!(block, Block::Image(_)))
+        .count();
+    let body_text = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(
+                paragraph
+                    .runs
+                    .iter()
+                    .map(|run| run.text.as_str())
+                    .collect::<String>(),
+            ),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert!(text.contains("Logo"));
+    assert!(text.contains("Box text"));
+    assert!(text.contains("Body"));
+    assert_eq!(parsed.document.header_images.len(), 1);
+    assert_eq!(body_image_count, 0);
+    assert_eq!(body_text.trim(), "Body");
+    for forbidden in [
+        "pFragments",
+        "hostile-shape-payload",
+        "shpinst",
+        "shppict",
+        "jpegblip",
+        "picwgoal",
+        "shptxt",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden header shape fallback content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Logo"));
+    assert!(rendered_text.contains("Box text"));
+    assert!(rendered_text.contains("Body"));
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image")
+    );
+    for forbidden in [
+        b"pFragments".as_slice(),
+        b"hostile-shape-payload",
+        b"shpinst",
+        b"shppict",
+        b"jpegblip",
+        b"picwgoal",
+        b"shptxt",
+        b"[Shape skipped",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden header shape fallback content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_drawing_zero_width_outline_renders_fill_only_without_control_leakage() {
     let input = rtf(&[
         "{",
