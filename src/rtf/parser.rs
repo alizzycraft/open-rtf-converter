@@ -71,6 +71,7 @@ struct ParserState {
     destination: Destination,
     inside_metadata: bool,
     inside_object: bool,
+    object_owner_destination: Destination,
     object_result_seen: bool,
     inside_shape: bool,
     shape_result_seen: bool,
@@ -122,6 +123,7 @@ impl Default for ParserState {
             destination: Destination::Body,
             inside_metadata: false,
             inside_object: false,
+            object_owner_destination: Destination::Body,
             object_result_seen: false,
             inside_shape: false,
             shape_result_seen: false,
@@ -887,7 +889,11 @@ impl Parser {
                     && self.options.active_content_policy == ActiveContentPolicy::Placeholder
                     && !self.state.character.hidden
                 {
-                    self.push_placeholder("[Embedded object removed]".to_string());
+                    self.push_placeholder_for_destination(
+                        self.state.object_owner_destination,
+                        "[Embedded object removed]".to_string(),
+                        offset,
+                    )?;
                 }
             }
 
@@ -1558,8 +1564,10 @@ impl Parser {
                 self.state.bookmark_name_text.clear();
             }
             "object" if destination_allows_visible_content(&self.state) => {
+                let owner_destination = self.state.destination;
                 self.handle_active_content("OLE object", offset)?;
                 self.state.inside_object = true;
+                self.state.object_owner_destination = owner_destination;
                 self.state.object_result_seen = false;
                 self.state.destination = Destination::ObjectData;
             }
@@ -1573,7 +1581,7 @@ impl Parser {
                 if self.state.inside_object && destination_allows_visible_content(&self.state) =>
             {
                 self.state.object_result_seen = true;
-                self.state.destination = Destination::Body;
+                self.state.destination = self.state.object_owner_destination;
                 self.diagnostics.push(Diagnostic::warning(
                     "rendering safe embedded object result and stripping active object data",
                     Some(offset),
@@ -4329,6 +4337,38 @@ impl Parser {
     fn push_placeholder(&mut self, text: String) {
         self.finish_paragraph();
         self.document.blocks.push(Block::Placeholder(text));
+    }
+
+    fn push_placeholder_for_destination(
+        &mut self,
+        destination: Destination,
+        text: String,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        match destination {
+            destination
+                if is_header_destination(destination) || is_footer_destination(destination) =>
+            {
+                let previous_destination = self.state.destination;
+                self.state.destination = destination;
+                self.push_text(&text, offset)?;
+                self.finish_current_paragraph_for_destination(offset);
+                self.state.destination = previous_destination;
+                Ok(())
+            }
+            Destination::Footnote | Destination::Endnote => {
+                let previous_destination = self.state.destination;
+                self.state.destination = destination;
+                self.push_text(&text, offset)?;
+                self.finish_current_paragraph_for_destination(offset);
+                self.state.destination = previous_destination;
+                Ok(())
+            }
+            _ => {
+                self.push_placeholder(text);
+                Ok(())
+            }
+        }
     }
 
     fn start_table_row(&mut self) {
@@ -12078,6 +12118,51 @@ After\par}"#;
         assert!(!text.contains("HiddenClass"));
         assert!(!text.contains("HiddenName"));
         assert!(!text.contains("414243"));
+    }
+
+    #[test]
+    fn header_object_result_stays_in_safe_repeating_metadata() {
+        let output = parse_rtf(
+            r"{\rtf1{\header Prefix {\object\objdata 414243{\result Object fallback\par}}\par}Body\par}",
+        )
+        .unwrap();
+        let header_text = output.document.header[0]
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+        let body_text = document_text(&output.document);
+
+        assert_eq!(header_text, "Prefix Object fallback");
+        assert_eq!(body_text, "Body");
+        for forbidden in ["objdata", "414243", "[Embedded object removed]"] {
+            assert!(
+                !header_text.contains(forbidden),
+                "object internals leaked to header result text: {forbidden}"
+            );
+            assert!(
+                !body_text.contains(forbidden),
+                "object internals leaked to body text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn header_resultless_object_placeholder_stays_in_safe_repeating_metadata() {
+        let output =
+            parse_rtf(r"{\rtf1{\header Prefix {\object\objdata 414243}\par}Body\par}").unwrap();
+        let header_text = output.document.header[0]
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+        let body_text = document_text(&output.document);
+
+        assert_eq!(header_text, "Prefix [Embedded object removed]");
+        assert_eq!(body_text, "Body");
+        assert!(!body_text.contains("[Embedded object removed]"));
+        assert!(!header_text.contains("objdata"));
+        assert!(!header_text.contains("414243"));
     }
 
     #[test]
