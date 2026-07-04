@@ -1439,10 +1439,10 @@ impl Parser {
                 self.set_picture_height_hint(control.parameter.unwrap_or(0))
             }
             "picwgoal" if self.state.destination == Destination::Picture => {
-                self.set_picture_display_width(control.parameter.unwrap_or(0))
+                self.set_picture_display_width(control.parameter, offset)
             }
             "pichgoal" if self.state.destination == Destination::Picture => {
-                self.set_picture_display_height(control.parameter.unwrap_or(0))
+                self.set_picture_display_height(control.parameter, offset)
             }
             "picscalex" if self.state.destination == Destination::Picture => {
                 self.set_picture_scale_x(control.parameter, offset)
@@ -5655,16 +5655,36 @@ impl Parser {
         }
     }
 
-    fn set_picture_display_width(&mut self, width: i32) {
+    fn set_picture_display_width(&mut self, width: Option<i32>, offset: usize) {
+        let normalized = self.clamp_picture_display_dimension(width, "width", offset);
         if let Some(picture) = self.current_picture.as_mut() {
-            picture.display_width_twips = Some(width.max(0));
+            picture.display_width_twips = Some(normalized);
         }
     }
 
-    fn set_picture_display_height(&mut self, height: i32) {
+    fn set_picture_display_height(&mut self, height: Option<i32>, offset: usize) {
+        let normalized = self.clamp_picture_display_dimension(height, "height", offset);
         if let Some(picture) = self.current_picture.as_mut() {
-            picture.display_height_twips = Some(height.max(0));
+            picture.display_height_twips = Some(normalized);
         }
+    }
+
+    fn clamp_picture_display_dimension(
+        &mut self,
+        dimension: Option<i32>,
+        axis: &str,
+        offset: usize,
+    ) -> i32 {
+        let value = dimension.unwrap_or(0);
+        let max = self.limits().max_image_display_twips.max(1);
+        let clamped = value.clamp(0, max);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("picture display {axis} clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        clamped
     }
 
     fn set_picture_scale_x(&mut self, scale: Option<i32>, offset: usize) {
@@ -14537,6 +14557,40 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("picture vertical scaling clamped")
+        }));
+    }
+
+    #[test]
+    fn clamps_extreme_picture_display_goal_controls() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_image_display_twips: 720,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal999999\\pichgoal-99 {}}}}}",
+            bytes_to_hex(&minimal_rgb_png_with_dimensions(1, 1))
+        );
+        let output = parse_rtf_bytes_with_options(input.as_bytes(), &options).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(0));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("picture display width clamped") })
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("picture display height clamped")
         }));
     }
 
