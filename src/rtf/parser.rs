@@ -2231,6 +2231,16 @@ impl Parser {
                     Some(offset),
                 ));
             }
+            "hyphhotz" => {
+                self.default_paragraph_style.hyphenation_zone_twips =
+                    self.clamp_hyphenation_zone(control.parameter, offset);
+                self.state.paragraph.hyphenation_zone_twips =
+                    self.default_paragraph_style.hyphenation_zone_twips;
+                self.diagnostics.push(Diagnostic::warning(
+                    "hyphenation zone applied to bounded passive hyphenation",
+                    Some(offset),
+                ));
+            }
             "hyphpar" => {
                 self.state.paragraph.auto_hyphenation = control.parameter.unwrap_or(1) != 0;
                 let message = if self.state.paragraph.auto_hyphenation {
@@ -3157,6 +3167,19 @@ impl Parser {
             ));
         }
         Some(clamped)
+    }
+
+    fn clamp_hyphenation_zone(&mut self, value: Option<i32>, offset: usize) -> i32 {
+        let value = value.unwrap_or(ParagraphStyle::default().hyphenation_zone_twips);
+        let limit = self.limits().max_hyphenation_zone_twips.max(0);
+        let clamped = value.clamp(0, limit);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("hyphenation zone clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        clamped
     }
 
     fn clamp_character_spacing(&mut self, value: i32, offset: usize) -> i32 {
@@ -6927,6 +6950,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.max_consecutive_hyphenated_lines == default.max_consecutive_hyphenated_lines {
         output.max_consecutive_hyphenated_lines = base.max_consecutive_hyphenated_lines;
+    }
+    if output.hyphenation_zone_twips == default.hyphenation_zone_twips {
+        output.hyphenation_zone_twips = base.hyphenation_zone_twips;
     }
     if output.drop_cap_lines == default.drop_cap_lines {
         output.drop_cap_lines = base.drop_cap_lines;
@@ -13320,6 +13346,41 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("consecutive hyphenation limit clamped from 999 to 2")
+        }));
+    }
+
+    #[test]
+    fn hyphenation_zone_sets_paragraph_default_across_resets() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_hyphenation_zone_twips: 720,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\hyphauto\hyphhotz480\pard First\par\hyphhotz9999\pard Second\par}",
+            &options,
+        )
+        .unwrap();
+        let paragraph = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph,
+            other => panic!("expected paragraph {index}, got {other:?}"),
+        };
+
+        assert!(paragraph(0).style.auto_hyphenation);
+        assert_eq!(paragraph(0).style.hyphenation_zone_twips, 480);
+        assert!(paragraph(1).style.auto_hyphenation);
+        assert_eq!(paragraph(1).style.hyphenation_zone_twips, 720);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("hyphenation zone applied to bounded passive hyphenation")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("hyphenation zone clamped from 9999 to 720 twips")
         }));
     }
 

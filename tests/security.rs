@@ -8206,6 +8206,84 @@ fn consecutive_hyphenation_limit_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn hyphenation_zone_renders_passively_without_control_leakage() {
+    let word = "Antidisestablishment";
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw3000",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "hyphauto",
+        "\\",
+        "hyphhotz0",
+        "\\",
+        "pard ",
+        word,
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        other => panic!("expected paragraph, got {other:?}"),
+    };
+
+    assert!(paragraph.style.auto_hyphenation);
+    assert_eq!(paragraph.style.hyphenation_zone_twips, 0);
+    assert!(text.contains(word));
+    assert!(!text.contains("hyphhotz"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("hyphenation zone applied to bounded passive hyphenation")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains('-'),
+        "tight hyphenation zone should permit passive line-end hyphenation: {rendered_text:?}"
+    );
+    assert_eq!(rendered_text.replace('-', ""), word);
+    for forbidden in [
+        b"hyphhotz".as_slice(),
+        b"hyphauto",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden hyphenation-zone content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn nonbreaking_hyphen_renders_passively_without_control_leakage() {
     let input = rtf(&["{", "\\", "rtf1 Before A", "\\", "_B after", "\\", "par}"]);
     let parsed = parse_rtf_bytes(&input).unwrap();

@@ -2722,6 +2722,7 @@ fn apply_passive_auto_hyphenation(
 ) -> Vec<FlowRun> {
     let max_line_width = paragraph_line_width(content_width, paragraph_style, false)
         .max(paragraph_line_width(content_width, paragraph_style, true));
+    let hyphenation_zone = twips_to_points(paragraph_style.hyphenation_zone_twips.max(0));
     let mut output = Vec::new();
     let mut consecutive_hyphenated = 0usize;
 
@@ -2733,7 +2734,9 @@ fn apply_passive_auto_hyphenation(
         }
         let display = display_text(&segment.text, &segment.style);
         let family = font_family_for_run_text(document, &segment.style, &display);
-        if measure_text_with_family(&display, &segment.style, family) <= max_line_width {
+        if measure_text_with_family(&display, &segment.style, family)
+            <= max_line_width + hyphenation_zone
+        {
             consecutive_hyphenated = 0;
             output.push(segment);
             continue;
@@ -7137,6 +7140,43 @@ mod tests {
             .collect::<String>()
             .replace('-', "");
         assert_eq!(joined, word);
+    }
+
+    #[test]
+    fn passive_auto_hyphenation_respects_hot_zone() {
+        let document = Document::default();
+        let style = CharacterStyle::default();
+        let word = "Antidisestablishment";
+        let tight_zone_style = ParagraphStyle {
+            auto_hyphenation: true,
+            hyphenation_zone_twips: 0,
+            ..ParagraphStyle::default()
+        };
+        let wide_zone_style = ParagraphStyle {
+            hyphenation_zone_twips: 1_440,
+            ..tight_zone_style.clone()
+        };
+        let tight_zone = Paragraph {
+            style: tight_zone_style.clone(),
+            runs: vec![Run {
+                text: word.to_string(),
+                style: style.clone(),
+            }],
+        };
+        let wide_zone = Paragraph {
+            style: wide_zone_style,
+            runs: tight_zone.runs.clone(),
+        };
+
+        let markers = test_markers("1", "1");
+        let width = measure_text(word, &style) - 1.0;
+        let tight_lines = wrap_paragraph(&tight_zone, width, &markers, &document);
+        let wide_lines = wrap_paragraph(&wide_zone, width, &markers, &document);
+
+        assert!(tight_lines.len() > 1);
+        assert!(line_text(&tight_lines[0]).ends_with('-'));
+        assert_eq!(wide_lines.len(), 1);
+        assert_eq!(line_text(&wide_lines[0]), word);
     }
 
     #[test]
