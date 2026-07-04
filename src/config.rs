@@ -62,6 +62,7 @@ pub struct RtfLimits {
     pub max_paragraph_indent_twips: i32,
     pub max_paragraph_spacing_twips: i32,
     pub max_line_spacing_twips: i32,
+    pub max_hyphenation_consecutive_lines: usize,
     pub max_font_size_half_points: i32,
     pub max_character_spacing_twips: i32,
     pub min_character_scaling_percent: i32,
@@ -115,6 +116,7 @@ impl Default for RtfLimits {
             max_paragraph_indent_twips: 31_680,
             max_paragraph_spacing_twips: 5_760,
             max_line_spacing_twips: 2_880,
+            max_hyphenation_consecutive_lines: 16,
             max_font_size_half_points: 400,
             max_character_spacing_twips: 1_000,
             min_character_scaling_percent: 25,
@@ -141,6 +143,7 @@ impl RtfLimits {
             max_shape_points: 1_024,
             max_image_pixels: 50_000_000,
             max_tab_stops: 96,
+            max_hyphenation_consecutive_lines: 8,
             max_output_text_chars: 5_000_000,
             max_pdf_output_bytes: 20 * 1024 * 1024,
             ..Self::default()

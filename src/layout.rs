@@ -2723,25 +2723,35 @@ fn apply_passive_auto_hyphenation(
     let max_line_width = paragraph_line_width(content_width, paragraph_style, false)
         .max(paragraph_line_width(content_width, paragraph_style, true));
     let mut output = Vec::new();
+    let mut consecutive_hyphenated = 0usize;
 
     for segment in segments {
-        if !segment_can_auto_hyphenate(&segment) {
+        if !segment_can_auto_hyphenate(&segment, paragraph_style) {
+            consecutive_hyphenated = 0;
             output.push(segment);
             continue;
         }
         let display = display_text(&segment.text, &segment.style);
         let family = font_family_for_run_text(document, &segment.style, &display);
         if measure_text_with_family(&display, &segment.style, family) <= max_line_width {
+            consecutive_hyphenated = 0;
             output.push(segment);
             continue;
         }
-        push_auto_hyphenated_segment(&mut output, segment, max_line_width, family);
+        push_auto_hyphenated_segment(
+            &mut output,
+            segment,
+            max_line_width,
+            family,
+            paragraph_style.max_consecutive_hyphenated_lines,
+            &mut consecutive_hyphenated,
+        );
     }
 
     output
 }
 
-fn segment_can_auto_hyphenate(segment: &FlowRun) -> bool {
+fn segment_can_auto_hyphenate(segment: &FlowRun, paragraph_style: &ParagraphStyle) -> bool {
     segment.tab_stop_position.is_none()
         && segment.text != "\t"
         && segment.text != "\n"
@@ -2749,6 +2759,20 @@ fn segment_can_auto_hyphenate(segment: &FlowRun) -> bool {
         && !segment.text.contains('\u{00ad}')
         && segment.text.chars().count() >= 10
         && segment.text.chars().all(|ch| ch.is_alphabetic())
+        && (paragraph_style.hyphenate_caps || !is_all_caps_word(&segment.text))
+}
+
+fn is_all_caps_word(text: &str) -> bool {
+    let mut has_uppercase = false;
+    for ch in text.chars().filter(|ch| ch.is_alphabetic()) {
+        if ch.is_lowercase() {
+            return false;
+        }
+        if ch.is_uppercase() {
+            has_uppercase = true;
+        }
+    }
+    has_uppercase
 }
 
 fn push_auto_hyphenated_segment(
@@ -2756,10 +2780,23 @@ fn push_auto_hyphenated_segment(
     segment: FlowRun,
     max_line_width: f32,
     family: PdfFontFamily,
+    max_consecutive_hyphenated: Option<usize>,
+    consecutive_hyphenated: &mut usize,
 ) {
     let chars = segment.text.chars().collect::<Vec<_>>();
     let mut start = 0;
     while start < chars.len() {
+        if max_consecutive_hyphenated.is_some_and(|max| *consecutive_hyphenated >= max) {
+            push_flow_run(
+                output,
+                &chars[start..].iter().collect::<String>(),
+                &segment.style,
+                segment.soft_hyphen_after,
+            );
+            *consecutive_hyphenated = 0;
+            break;
+        }
+
         let remaining = chars.len() - start;
         if remaining <= 6 {
             push_flow_run(
@@ -2768,6 +2805,7 @@ fn push_auto_hyphenated_segment(
                 &segment.style,
                 segment.soft_hyphen_after,
             );
+            *consecutive_hyphenated = 0;
             break;
         }
 
@@ -2789,6 +2827,7 @@ fn push_auto_hyphenated_segment(
                 &segment.style,
                 segment.soft_hyphen_after,
             );
+            *consecutive_hyphenated = 0;
             break;
         }
 
@@ -2798,6 +2837,7 @@ fn push_auto_hyphenated_segment(
             &segment.style,
             true,
         );
+        *consecutive_hyphenated = consecutive_hyphenated.saturating_add(1);
         start = end;
     }
 }
@@ -7092,6 +7132,84 @@ mod tests {
         assert!(hyphenated_lines.len() > 1);
         assert!(line_text(&hyphenated_lines[0]).ends_with('-'));
         let joined = hyphenated_lines
+            .iter()
+            .map(line_text)
+            .collect::<String>()
+            .replace('-', "");
+        assert_eq!(joined, word);
+    }
+
+    #[test]
+    fn passive_auto_hyphenation_respects_capital_word_suppression() {
+        let document = Document::default();
+        let style = CharacterStyle::default();
+        let word = "ANTIDISESTABLISHMENTARIANISM";
+        let mut hyphenated_style = ParagraphStyle::default();
+        hyphenated_style.auto_hyphenation = true;
+        let mut suppressed_style = hyphenated_style.clone();
+        suppressed_style.hyphenate_caps = false;
+        let hyphenated = Paragraph {
+            style: hyphenated_style,
+            runs: vec![Run {
+                text: word.to_string(),
+                style: style.clone(),
+            }],
+        };
+        let suppressed = Paragraph {
+            style: suppressed_style,
+            runs: hyphenated.runs.clone(),
+        };
+
+        let markers = test_markers("1", "1");
+        let width = measure_text("ANTIDIS", &style);
+        let hyphenated_lines = wrap_paragraph(&hyphenated, width, &markers, &document);
+        let suppressed_lines = wrap_paragraph(&suppressed, width, &markers, &document);
+
+        assert!(hyphenated_lines.len() > 1);
+        assert!(line_text(&hyphenated_lines[0]).ends_with('-'));
+        assert_eq!(suppressed_lines.len(), 1);
+        assert_eq!(line_text(&suppressed_lines[0]), word);
+    }
+
+    #[test]
+    fn passive_auto_hyphenation_limits_consecutive_hyphenated_lines() {
+        let document = Document::default();
+        let style = CharacterStyle::default();
+        let word = "AntidisestablishmentarianismAntidisestablishmentarianism";
+        let mut unlimited_style = ParagraphStyle::default();
+        unlimited_style.auto_hyphenation = true;
+        let mut limited_style = unlimited_style.clone();
+        limited_style.max_consecutive_hyphenated_lines = Some(1);
+        let unlimited = Paragraph {
+            style: unlimited_style,
+            runs: vec![Run {
+                text: word.to_string(),
+                style: style.clone(),
+            }],
+        };
+        let limited = Paragraph {
+            style: limited_style,
+            runs: unlimited.runs.clone(),
+        };
+
+        let markers = test_markers("1", "1");
+        let width = measure_text("Antidis", &style);
+        let unlimited_lines = wrap_paragraph(&unlimited, width, &markers, &document);
+        let limited_lines = wrap_paragraph(&limited, width, &markers, &document);
+        let unlimited_hyphens = unlimited_lines
+            .iter()
+            .filter(|line| line_text(line).ends_with('-'))
+            .count();
+        let limited_hyphens = limited_lines
+            .iter()
+            .filter(|line| line_text(line).ends_with('-'))
+            .count();
+
+        assert!(unlimited_hyphens > 1);
+        assert_eq!(limited_lines.len(), 2);
+        assert!(line_text(&limited_lines[0]).ends_with('-'));
+        assert_eq!(limited_hyphens, 1);
+        let joined = limited_lines
             .iter()
             .map(line_text)
             .collect::<String>()

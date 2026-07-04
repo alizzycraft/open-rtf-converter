@@ -7960,6 +7960,159 @@ fn document_hyphenation_default_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn capital_word_hyphenation_control_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw3000",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "hyphauto",
+        "\\",
+        "hyphcaps0",
+        "\\",
+        "pard ANTIDISESTABLISHMENTARIANISM",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        other => panic!("expected paragraph, got {other:?}"),
+    };
+
+    assert!(paragraph.style.auto_hyphenation);
+    assert!(!paragraph.style.hyphenate_caps);
+    assert!(text.contains("ANTIDISESTABLISHMENTARIANISM"));
+    assert!(!text.contains("hyphcaps"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("capitalized word hyphenation disabled")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert_eq!(
+        rendered_text, "ANTIDISESTABLISHMENTARIANISM",
+        "all-caps automatic hyphenation should be suppressed when hyphcaps0 is active: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"hyphcaps".as_slice(),
+        b"hyphauto",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden capital-word hyphenation content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn consecutive_hyphenation_limit_renders_passively_without_control_leakage() {
+    let word = "AntidisestablishmentarianismAntidisestablishmentarianism";
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw3000",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "hyphauto",
+        "\\",
+        "hyphconsec1",
+        "\\",
+        "pard ",
+        word,
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        other => panic!("expected paragraph, got {other:?}"),
+    };
+
+    assert!(paragraph.style.auto_hyphenation);
+    assert_eq!(paragraph.style.max_consecutive_hyphenated_lines, Some(1));
+    assert!(text.contains(word));
+    assert!(!text.contains("hyphconsec"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("consecutive automatic hyphenation limit applied")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.matches('-').count() <= 1,
+        "consecutive automatic hyphenation should be bounded to one line-end hyphen: {rendered_text:?}"
+    );
+    assert_eq!(rendered_text.replace('-', ""), word);
+    for forbidden in [
+        b"hyphconsec".as_slice(),
+        b"hyphauto",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden consecutive hyphenation content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn nonbreaking_hyphen_renders_passively_without_control_leakage() {
     let input = rtf(&["{", "\\", "rtf1 Before A", "\\", "_B after", "\\", "par}"]);
     let parsed = parse_rtf_bytes(&input).unwrap();

@@ -2195,6 +2195,29 @@ impl Parser {
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
             }
+            "hyphcaps" => {
+                self.default_paragraph_style.hyphenate_caps = control.parameter.unwrap_or(1) != 0;
+                self.state.paragraph.hyphenate_caps = self.default_paragraph_style.hyphenate_caps;
+                let message = if self.default_paragraph_style.hyphenate_caps {
+                    "capitalized word hyphenation enabled for passive automatic hyphenation"
+                } else {
+                    "capitalized word hyphenation disabled for passive automatic hyphenation"
+                };
+                self.diagnostics
+                    .push(Diagnostic::warning(message, Some(offset)));
+            }
+            "hyphconsec" => {
+                self.default_paragraph_style
+                    .max_consecutive_hyphenated_lines =
+                    self.clamp_consecutive_hyphenated_lines(control.parameter, offset);
+                self.state.paragraph.max_consecutive_hyphenated_lines = self
+                    .default_paragraph_style
+                    .max_consecutive_hyphenated_lines;
+                self.diagnostics.push(Diagnostic::warning(
+                    "consecutive automatic hyphenation limit applied to passive layout",
+                    Some(offset),
+                ));
+            }
             "hyphpar" => {
                 self.state.paragraph.auto_hyphenation = control.parameter.unwrap_or(1) != 0;
                 let message = if self.state.paragraph.auto_hyphenation {
@@ -3087,6 +3110,27 @@ impl Parser {
             ));
         }
         clamped
+    }
+
+    fn clamp_consecutive_hyphenated_lines(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Option<usize> {
+        let value = value.unwrap_or(0);
+        if value <= 0 {
+            return None;
+        }
+        let limit = self.limits().max_hyphenation_consecutive_lines.max(1);
+        let normalized = value as usize;
+        let clamped = normalized.min(limit);
+        if clamped != normalized {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("consecutive hyphenation limit clamped from {normalized} to {clamped}"),
+                Some(offset),
+            ));
+        }
+        Some(clamped)
     }
 
     fn clamp_character_spacing(&mut self, value: i32, offset: usize) -> i32 {
@@ -6560,8 +6604,6 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "listtable"
                 | "listoverridetable"
                 | "hich"
-                | "hyphcaps"
-                | "hyphconsec"
                 | "lang"
                 | "langfe"
                 | "langfenp"
@@ -6825,6 +6867,12 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.auto_hyphenation == default.auto_hyphenation {
         output.auto_hyphenation = base.auto_hyphenation;
+    }
+    if output.hyphenate_caps == default.hyphenate_caps {
+        output.hyphenate_caps = base.hyphenate_caps;
+    }
+    if output.max_consecutive_hyphenated_lines == default.max_consecutive_hyphenated_lines {
+        output.max_consecutive_hyphenated_lines = base.max_consecutive_hyphenated_lines;
     }
     if output.drop_cap_lines == default.drop_cap_lines {
         output.drop_cap_lines = base.drop_cap_lines;
@@ -13107,6 +13155,70 @@ After\par}"#;
                 .iter()
                 .any(|diagnostic| { diagnostic.message.contains("document hyphenation disabled") })
         );
+    }
+
+    #[test]
+    fn capital_word_hyphenation_sets_paragraph_default_across_resets() {
+        let output = parse_rtf(
+            r"{\rtf1\hyphauto\hyphcaps0\pard Caps suppressed\par\hyphcaps\pard Caps enabled\par}",
+        )
+        .unwrap();
+        let paragraph = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph,
+            other => panic!("expected paragraph {index}, got {other:?}"),
+        };
+
+        assert!(paragraph(0).style.auto_hyphenation);
+        assert!(!paragraph(0).style.hyphenate_caps);
+        assert!(paragraph(1).style.auto_hyphenation);
+        assert!(paragraph(1).style.hyphenate_caps);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("capitalized word hyphenation disabled")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("capitalized word hyphenation enabled")
+        }));
+    }
+
+    #[test]
+    fn consecutive_hyphenation_limit_sets_paragraph_default_across_resets() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_hyphenation_consecutive_lines: 2,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\hyphauto\hyphconsec1\pard Limited\par\hyphconsec0\pard Unlimited\par\hyphconsec999\pard Clamped\par}",
+            &options,
+        )
+        .unwrap();
+        let paragraph = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph,
+            other => panic!("expected paragraph {index}, got {other:?}"),
+        };
+
+        assert!(paragraph(0).style.auto_hyphenation);
+        assert_eq!(paragraph(0).style.max_consecutive_hyphenated_lines, Some(1));
+        assert!(paragraph(1).style.auto_hyphenation);
+        assert_eq!(paragraph(1).style.max_consecutive_hyphenated_lines, None);
+        assert!(paragraph(2).style.auto_hyphenation);
+        assert_eq!(paragraph(2).style.max_consecutive_hyphenated_lines, Some(2));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("consecutive automatic hyphenation limit applied")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("consecutive hyphenation limit clamped from 999 to 2")
+        }));
     }
 
     #[test]
