@@ -10340,6 +10340,95 @@ fn nested_shape_picture_renders_without_shape_placeholder_or_property_leakage() 
 }
 
 #[test]
+fn header_picture_renders_passively_without_body_flow_or_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "header Logo {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "}",
+        "\\",
+        "par} Body",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let body_image_count = parsed
+        .document
+        .blocks
+        .iter()
+        .filter(|block| matches!(block, open_rtf_converter::model::Block::Image(_)))
+        .count();
+
+    assert!(text.contains("Logo"));
+    assert!(text.contains("Body"));
+    assert_eq!(parsed.document.header_images.len(), 1);
+    assert_eq!(body_image_count, 0);
+    for forbidden in ["jpegblip", "picwgoal", "pichgoal"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden header picture control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Logo"));
+    assert!(rendered_text.contains("Body"));
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "header picture should render as a passive PDF image"
+    );
+    for forbidden in [
+        b"jpegblip".as_slice(),
+        b"picwgoal",
+        b"pichgoal",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden header picture content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unsupported_picture_formats_are_placeholdered_without_payload_leakage() {
     let input = rtf(&[
         "{",

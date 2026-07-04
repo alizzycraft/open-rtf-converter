@@ -405,9 +405,10 @@ impl TableCellBorderFlags {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct PictureBuilder {
     kind: PictureKind,
+    owner_destination: Destination,
     bytes: Vec<u8>,
     pending_hex: Option<u8>,
     width_px_hint: Option<u32>,
@@ -417,6 +418,24 @@ struct PictureBuilder {
     scale_x_percent: Option<i32>,
     scale_y_percent: Option<i32>,
     crop: ImageCrop,
+}
+
+impl Default for PictureBuilder {
+    fn default() -> Self {
+        Self {
+            kind: PictureKind::Unknown,
+            owner_destination: Destination::Body,
+            bytes: Vec::new(),
+            pending_hex: None,
+            width_px_hint: None,
+            height_px_hint: None,
+            display_width_twips: None,
+            display_height_twips: None,
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1307,8 +1326,12 @@ impl Parser {
             }
             "pict" if destination_allows_visible_content(&self.state) => {
                 self.finish_paragraph();
+                let owner_destination = self.state.destination;
                 self.state.destination = Destination::Picture;
-                self.current_picture = Some(PictureBuilder::default());
+                self.current_picture = Some(PictureBuilder {
+                    owner_destination,
+                    ..PictureBuilder::default()
+                });
                 if self.state.inside_shape {
                     self.state.shape_result_seen = true;
                 }
@@ -5303,20 +5326,23 @@ impl Parser {
                     let width_px = jpeg.width_px;
                     let height_px = jpeg.height_px;
                     self.ensure_image_pixels(width_px, height_px, offset)?;
-                    self.document.blocks.push(Block::Image(StaticImage {
-                        format: jpeg.format,
-                        bytes: picture.bytes,
-                        palette: Vec::new(),
-                        width_px,
-                        height_px,
-                        natural_width_px_hint: picture.width_px_hint,
-                        natural_height_px_hint: picture.height_px_hint,
-                        display_width_twips: picture.display_width_twips,
-                        display_height_twips: picture.display_height_twips,
-                        scale_x_percent: picture.scale_x_percent,
-                        scale_y_percent: picture.scale_y_percent,
-                        crop: picture.crop,
-                    }));
+                    self.push_static_image(
+                        picture.owner_destination,
+                        StaticImage {
+                            format: jpeg.format,
+                            bytes: picture.bytes,
+                            palette: Vec::new(),
+                            width_px,
+                            height_px,
+                            natural_width_px_hint: picture.width_px_hint,
+                            natural_height_px_hint: picture.height_px_hint,
+                            display_width_twips: picture.display_width_twips,
+                            display_height_twips: picture.display_height_twips,
+                            scale_x_percent: picture.scale_x_percent,
+                            scale_y_percent: picture.scale_y_percent,
+                            crop: picture.crop,
+                        },
+                    );
                     if self.state.inside_shape_picture {
                         self.state.shape_picture_rendered = true;
                     }
@@ -5332,20 +5358,23 @@ impl Parser {
             PictureKind::Png => match parse_png_image_data(&picture.bytes) {
                 Some(png) => {
                     self.ensure_image_pixels(png.width_px, png.height_px, offset)?;
-                    self.document.blocks.push(Block::Image(StaticImage {
-                        format: png.format,
-                        bytes: png.idat,
-                        palette: png.palette,
-                        width_px: png.width_px,
-                        height_px: png.height_px,
-                        natural_width_px_hint: picture.width_px_hint,
-                        natural_height_px_hint: picture.height_px_hint,
-                        display_width_twips: picture.display_width_twips,
-                        display_height_twips: picture.display_height_twips,
-                        scale_x_percent: picture.scale_x_percent,
-                        scale_y_percent: picture.scale_y_percent,
-                        crop: picture.crop,
-                    }));
+                    self.push_static_image(
+                        picture.owner_destination,
+                        StaticImage {
+                            format: png.format,
+                            bytes: png.idat,
+                            palette: png.palette,
+                            width_px: png.width_px,
+                            height_px: png.height_px,
+                            natural_width_px_hint: picture.width_px_hint,
+                            natural_height_px_hint: picture.height_px_hint,
+                            display_width_twips: picture.display_width_twips,
+                            display_height_twips: picture.display_height_twips,
+                            scale_x_percent: picture.scale_x_percent,
+                            scale_y_percent: picture.scale_y_percent,
+                            crop: picture.crop,
+                        },
+                    );
                     if self.state.inside_shape_picture {
                         self.state.shape_picture_rendered = true;
                     }
@@ -5362,20 +5391,23 @@ impl Parser {
                 match parse_dib_image_data(&picture.bytes, self.limits().max_image_pixels) {
                     Some(dib) => {
                         self.ensure_image_pixels(dib.width_px, dib.height_px, offset)?;
-                        self.document.blocks.push(Block::Image(StaticImage {
-                            format: ImageFormat::Rgb8,
-                            bytes: dib.rgb,
-                            palette: Vec::new(),
-                            width_px: dib.width_px,
-                            height_px: dib.height_px,
-                            natural_width_px_hint: picture.width_px_hint,
-                            natural_height_px_hint: picture.height_px_hint,
-                            display_width_twips: picture.display_width_twips,
-                            display_height_twips: picture.display_height_twips,
-                            scale_x_percent: picture.scale_x_percent,
-                            scale_y_percent: picture.scale_y_percent,
-                            crop: picture.crop,
-                        }));
+                        self.push_static_image(
+                            picture.owner_destination,
+                            StaticImage {
+                                format: ImageFormat::Rgb8,
+                                bytes: dib.rgb,
+                                palette: Vec::new(),
+                                width_px: dib.width_px,
+                                height_px: dib.height_px,
+                                natural_width_px_hint: picture.width_px_hint,
+                                natural_height_px_hint: picture.height_px_hint,
+                                display_width_twips: picture.display_width_twips,
+                                display_height_twips: picture.display_height_twips,
+                                scale_x_percent: picture.scale_x_percent,
+                                scale_y_percent: picture.scale_y_percent,
+                                crop: picture.crop,
+                            },
+                        );
                         if self.state.inside_shape_picture {
                             self.state.shape_picture_rendered = true;
                         }
@@ -5401,6 +5433,64 @@ impl Parser {
             }
         }
         Ok(())
+    }
+
+    fn push_static_image(&mut self, destination: Destination, image: StaticImage) {
+        if is_header_destination(destination) {
+            self.finish_header_paragraph();
+            if self.has_started_visible_body() {
+                match destination {
+                    Destination::FirstPageHeader => self
+                        .current_section_page
+                        .first_page_header_images
+                        .push(image),
+                    Destination::EvenPageHeader => self
+                        .current_section_page
+                        .even_page_header_images
+                        .push(image),
+                    _ => self.current_section_page.header_images.push(image),
+                }
+                self.upsert_current_section_settings();
+            } else {
+                match destination {
+                    Destination::FirstPageHeader => {
+                        self.document.first_page_header_images.push(image)
+                    }
+                    Destination::EvenPageHeader => {
+                        self.document.even_page_header_images.push(image)
+                    }
+                    _ => self.document.header_images.push(image),
+                }
+            }
+        } else if is_footer_destination(destination) {
+            self.finish_footer_paragraph();
+            if self.has_started_visible_body() {
+                match destination {
+                    Destination::FirstPageFooter => self
+                        .current_section_page
+                        .first_page_footer_images
+                        .push(image),
+                    Destination::EvenPageFooter => self
+                        .current_section_page
+                        .even_page_footer_images
+                        .push(image),
+                    _ => self.current_section_page.footer_images.push(image),
+                }
+                self.upsert_current_section_settings();
+            } else {
+                match destination {
+                    Destination::FirstPageFooter => {
+                        self.document.first_page_footer_images.push(image)
+                    }
+                    Destination::EvenPageFooter => {
+                        self.document.even_page_footer_images.push(image)
+                    }
+                    _ => self.document.footer_images.push(image),
+                }
+            }
+        } else {
+            self.document.blocks.push(Block::Image(image));
+        }
     }
 
     fn finish_shape(&mut self, offset: usize) -> Result<bool, ParseError> {
@@ -14547,6 +14637,32 @@ After\par}"#;
         assert_eq!(image.scale_x_percent, Some(50));
         assert_eq!(image.scale_y_percent, Some(200));
         assert!(!image.bytes.is_empty());
+    }
+
+    #[test]
+    fn normalizes_header_picture_as_safe_repeating_image_metadata() {
+        let input = format!(
+            "{{\\rtf1{{\\header Logo {{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}\\par}}Body\\par}}",
+            bytes_to_hex(&minimal_rgb_png_with_dimensions(1, 1))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert_eq!(output.document.header.len(), 1);
+        assert_eq!(output.document.header[0].runs[0].text, "Logo ");
+        assert_eq!(output.document.header_images.len(), 1);
+        assert!(
+            output
+                .document
+                .blocks
+                .iter()
+                .all(|block| !matches!(block, Block::Image(_)))
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]

@@ -549,9 +549,15 @@ struct HeaderFooterSet {
     header: Vec<Paragraph>,
     first_page_header: Vec<Paragraph>,
     even_page_header: Vec<Paragraph>,
+    header_images: Vec<StaticImage>,
+    first_page_header_images: Vec<StaticImage>,
+    even_page_header_images: Vec<StaticImage>,
     footer: Vec<Paragraph>,
     first_page_footer: Vec<Paragraph>,
     even_page_footer: Vec<Paragraph>,
+    footer_images: Vec<StaticImage>,
+    first_page_footer_images: Vec<StaticImage>,
+    even_page_footer_images: Vec<StaticImage>,
 }
 
 impl HeaderFooterSet {
@@ -560,9 +566,15 @@ impl HeaderFooterSet {
             header: document.header.clone(),
             first_page_header: document.first_page_header.clone(),
             even_page_header: document.even_page_header.clone(),
+            header_images: document.header_images.clone(),
+            first_page_header_images: document.first_page_header_images.clone(),
+            even_page_header_images: document.even_page_header_images.clone(),
             footer: document.footer.clone(),
             first_page_footer: document.first_page_footer.clone(),
             even_page_footer: document.even_page_footer.clone(),
+            footer_images: document.footer_images.clone(),
+            first_page_footer_images: document.first_page_footer_images.clone(),
+            even_page_footer_images: document.even_page_footer_images.clone(),
         }
     }
 
@@ -571,9 +583,15 @@ impl HeaderFooterSet {
             header: settings.header.clone(),
             first_page_header: settings.first_page_header.clone(),
             even_page_header: settings.even_page_header.clone(),
+            header_images: settings.header_images.clone(),
+            first_page_header_images: settings.first_page_header_images.clone(),
+            even_page_header_images: settings.even_page_header_images.clone(),
             footer: settings.footer.clone(),
             first_page_footer: settings.first_page_footer.clone(),
             even_page_footer: settings.even_page_footer.clone(),
+            footer_images: settings.footer_images.clone(),
+            first_page_footer_images: settings.first_page_footer_images.clone(),
+            even_page_footer_images: settings.even_page_footer_images.clone(),
         }
     }
 }
@@ -1009,6 +1027,30 @@ fn layout_image(
     geometry: &mut PageGeometry,
     current_column: &mut usize,
 ) {
+    let (mut width, mut height) = image_display_size(image, content_width);
+
+    if *cursor_y - height < margin_bottom {
+        advance_column_or_page(pages, cursor_y, geometry, current_column);
+        margin_left = geometry.body_left(*current_column);
+        (width, height) = image_display_size(image, content_width);
+    }
+
+    let y = *cursor_y - height;
+    pages
+        .last_mut()
+        .expect("layout always has a page")
+        .items
+        .push(LayoutItem::Image(ImageFragment {
+            image: image.clone(),
+            x: margin_left,
+            y,
+            width,
+            height,
+        }));
+    *cursor_y = y - 6.0;
+}
+
+fn image_display_size(image: &StaticImage, content_width: f32) -> (f32, f32) {
     let natural_width_px = image.natural_width_px_hint.unwrap_or(image.width_px).max(1);
     let natural_height_px = image
         .natural_height_px_hint
@@ -1037,24 +1079,7 @@ fn layout_image(
         height *= scale;
     }
 
-    if *cursor_y - height < margin_bottom {
-        advance_column_or_page(pages, cursor_y, geometry, current_column);
-        margin_left = geometry.body_left(*current_column);
-    }
-
-    let y = *cursor_y - height;
-    pages
-        .last_mut()
-        .expect("layout always has a page")
-        .items
-        .push(LayoutItem::Image(ImageFragment {
-            image: image.clone(),
-            x: margin_left,
-            y,
-            width,
-            height,
-        }));
-    *cursor_y = y - 6.0;
+    (width, height)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1648,7 +1673,14 @@ fn layout_repeating_header_footer(
             geometry,
             is_header,
         );
-        if paragraphs.is_empty() {
+        let images = select_repeating_header_footer_images(
+            document,
+            header_footer_sets,
+            physical_page_number,
+            geometry,
+            is_header,
+        );
+        if paragraphs.is_empty() && images.is_empty() {
             continue;
         }
         let mut scratch_pages = vec![new_layout_page(geometry, physical_page_number)];
@@ -1733,6 +1765,21 @@ fn layout_repeating_header_footer(
             }
         }
 
+        for image in images {
+            let (width, height) = image_display_size(image, geometry.content_width);
+            let y = cursor_y - height;
+            scratch_pages[0]
+                .items
+                .push(LayoutItem::Image(ImageFragment {
+                    image: image.clone(),
+                    x: geometry.margin_left,
+                    y,
+                    width,
+                    height,
+                }));
+            cursor_y = y - 6.0;
+        }
+
         page.items.extend(scratch_pages.remove(0).items);
     }
 }
@@ -1787,6 +1834,76 @@ fn repeating_paragraphs_for_page<'a>(
 }
 
 fn first_non_empty<'a>(primary: &'a [Paragraph], fallback: &'a [Paragraph]) -> &'a [Paragraph] {
+    if primary.is_empty() {
+        fallback
+    } else {
+        primary
+    }
+}
+
+fn select_repeating_header_footer_images<'a>(
+    document: &'a Document,
+    header_footer_sets: &'a [HeaderFooterSet],
+    physical_page_number: usize,
+    geometry: PageGeometry,
+    is_header: bool,
+) -> &'a [StaticImage] {
+    let section = header_footer_sets
+        .get(geometry.header_footer_index)
+        .unwrap_or_else(|| {
+            header_footer_sets
+                .first()
+                .expect("document header/footer set")
+        });
+    let is_first_section_page =
+        geometry.title_page && physical_page_number == geometry.numbering.base_physical_page;
+    if is_header {
+        if is_first_section_page {
+            let images = first_non_empty_images(
+                &section.first_page_header_images,
+                &document.first_page_header_images,
+            );
+            if !images.is_empty() {
+                return images;
+            }
+        }
+        if physical_page_number % 2 == 0 {
+            let images = first_non_empty_images(
+                &section.even_page_header_images,
+                &document.even_page_header_images,
+            );
+            if !images.is_empty() {
+                return images;
+            }
+        }
+        first_non_empty_images(&section.header_images, &document.header_images)
+    } else {
+        if is_first_section_page {
+            let images = first_non_empty_images(
+                &section.first_page_footer_images,
+                &document.first_page_footer_images,
+            );
+            if !images.is_empty() {
+                return images;
+            }
+        }
+        if physical_page_number % 2 == 0 {
+            let images = first_non_empty_images(
+                &section.even_page_footer_images,
+                &document.even_page_footer_images,
+            );
+            if !images.is_empty() {
+                return images;
+            }
+        }
+        first_non_empty_images(&section.footer_images, &document.footer_images)
+    }
+}
+
+fn first_non_empty_images<'a>(
+    primary: &'a [StaticImage],
+    fallback: &'a [StaticImage],
+) -> &'a [StaticImage] {
     if primary.is_empty() {
         fallback
     } else {
@@ -10143,6 +10260,46 @@ mod tests {
             assert!(page.items.iter().any(
                 |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "Footer")
             ));
+        }
+    }
+
+    #[test]
+    fn repeats_header_images_on_each_page() {
+        let mut document = Document::default();
+        document.header_images = vec![StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            palette: Vec::new(),
+            width_px: 8,
+            height_px: 4,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(360),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+        }];
+        document.blocks.clear();
+        for _ in 0..120 {
+            document.blocks.push(Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Body paragraph.".to_string(),
+                    style: Default::default(),
+                }],
+            }));
+        }
+
+        let layout = LayoutEngine::layout(&document);
+        assert!(layout.pages.len() > 1);
+        for page in &layout.pages {
+            assert!(
+                page.items
+                    .iter()
+                    .any(|item| matches!(item, LayoutItem::Image(_))),
+                "expected repeated header image on every page"
+            );
         }
     }
 
