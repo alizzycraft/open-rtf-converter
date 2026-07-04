@@ -1649,7 +1649,10 @@ impl Parser {
                 self.current_color_seen = true;
             }
             "bin" => {}
-            "uc" => self.state.unicode_skip = control.parameter.unwrap_or(1).max(0) as usize,
+            "uc" => {
+                self.state.unicode_skip =
+                    self.clamp_unicode_fallback_skip(control.parameter.unwrap_or(1), offset)
+            }
             "u" if self.state.capturing_form_default_text => {
                 self.push_form_default_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -3116,6 +3119,19 @@ impl Parser {
         if clamped != value {
             self.diagnostics.push(Diagnostic::warning(
                 format!("font size clamped from {value} to {clamped} half-points"),
+                Some(offset),
+            ));
+        }
+        clamped
+    }
+
+    fn clamp_unicode_fallback_skip(&mut self, value: i32, offset: usize) -> usize {
+        let normalized = value.max(0) as usize;
+        let limit = self.limits().max_unicode_fallback_skip;
+        let clamped = normalized.min(limit);
+        if clamped != normalized {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("Unicode fallback skip clamped from {normalized} to {clamped} characters"),
                 Some(offset),
             ));
         }
@@ -9127,6 +9143,31 @@ mod tests {
             _ => panic!("expected paragraph"),
         };
         assert_eq!(paragraph.runs[0].text, "Hello \u{2014} world");
+    }
+
+    #[test]
+    fn clamps_unicode_fallback_skip_count() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_unicode_fallback_skip: 1,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output =
+            parse_rtf_bytes_with_options(br"{\rtf1\ansi\uc999 Before \u8212- after\par}", &options)
+                .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "Before \u{2014} after");
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("Unicode fallback skip clamped from 999 to 1")
+        }));
     }
 
     #[test]

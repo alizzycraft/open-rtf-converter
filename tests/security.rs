@@ -8464,6 +8464,77 @@ fn unicode_alternate_destinations_render_passively_without_fallback_leakage() {
 }
 
 #[test]
+fn oversized_unicode_fallback_skip_is_bounded_before_pdf_rendering() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "uc999 Before ",
+        "\\",
+        "u65? after",
+        "\\",
+        "par}",
+    ]);
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_unicode_fallback_skip: 1,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+    let parsed = parse_rtf_bytes_with_options(&input, &options).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before A after"));
+    assert!(!text.contains("uc999"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("Unicode fallback skip clamped from 999 to 1")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            parse_options: options,
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Before A after"),
+        "bounded Unicode fallback skip should preserve following visible text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"uc999".as_slice(),
+        b"u65",
+        b"999",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Unicode fallback content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unicode_surrogate_pairs_are_normalized_before_pdf_rendering() {
     let input = rtf(&[
         "{",
