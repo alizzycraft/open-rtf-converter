@@ -1680,6 +1680,13 @@ fn layout_repeating_header_footer(
                     paragraph_line_width(geometry.content_width, &paragraph.style, line_idx == 0),
                     line_idx + 1 == line_count,
                 );
+                push_bar_tab_stops(
+                    &mut scratch_pages,
+                    &paragraph.style,
+                    x,
+                    cursor_y,
+                    line.height,
+                );
                 push_line(
                     &mut scratch_pages,
                     &line,
@@ -2037,6 +2044,13 @@ fn push_table_row(
                     prepared_line.is_first_line,
                 ),
                 prepared_line.is_last_line,
+            );
+            push_bar_tab_stops(
+                pages,
+                &prepared_line.style,
+                x,
+                line_top,
+                prepared_line.line.height,
             );
             push_line(
                 pages,
@@ -8790,6 +8804,83 @@ mod tests {
         assert!(
             (text_x(page, "Right").expect("tabbed text") - 144.0).abs() < 0.01,
             "bar tab should not consume the normal left tab stop"
+        );
+    }
+
+    #[test]
+    fn lays_out_header_bar_tab_stops_as_passive_vertical_lines() {
+        let mut header_style = ParagraphStyle::default();
+        header_style.tab_stops_twips = vec![720, 1440];
+        header_style.tab_stop_alignments = vec![TabAlignment::Bar, TabAlignment::Left];
+        let mut document = Document::default();
+        document.header = vec![Paragraph {
+            style: header_style,
+            runs: vec![Run {
+                text: "Head\tRight".to_string(),
+                style: Default::default(),
+            }],
+        }];
+        document.blocks = vec![paragraph_with_text("Body")];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+
+        assert!(page.items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Line { x1, x2, .. } if (*x1 - 108.0).abs() < 0.01 && (*x2 - 108.0).abs() < 0.01
+        )));
+        assert!(
+            (text_x(page, "Right").expect("header tabbed text") - 144.0).abs() < 0.01,
+            "header bar tab should not consume the normal left tab stop"
+        );
+    }
+
+    #[test]
+    fn lays_out_table_cell_bar_tab_stops_as_passive_vertical_lines() {
+        let mut paragraph_style = ParagraphStyle::default();
+        paragraph_style.tab_stops_twips = vec![360, 720];
+        paragraph_style.tab_stop_alignments = vec![TabAlignment::Bar, TabAlignment::Left];
+        let mut document = Document::default();
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440],
+            borders_visible: false,
+            rows: vec![TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    borders: TableCellBorders::default(),
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: paragraph_style,
+                        runs: vec![Run {
+                            text: "A\tB".to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+
+        assert!(page.items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Line { x1, x2, .. } if (*x1 - 93.0).abs() < 0.01 && (*x2 - 93.0).abs() < 0.01
+        )));
+        assert!(
+            (text_x(page, "B").expect("table tabbed text") - 111.0).abs() < 0.01,
+            "table bar tab should not consume the normal left tab stop"
         );
     }
 

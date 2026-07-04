@@ -8987,6 +8987,134 @@ fn bar_tab_stops_render_passive_lines_without_control_leakage() {
 }
 
 #[test]
+fn bar_tab_stops_render_in_headers_and_tables_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "header",
+        "\\",
+        "tb",
+        "\\",
+        "tx720",
+        "\\",
+        "tx1440 Head",
+        "\\",
+        "tab Right",
+        "\\",
+        "par}",
+        "\\",
+        "trowd",
+        "\\",
+        "tb",
+        "\\",
+        "tx360",
+        "\\",
+        "tx720 Cell",
+        "\\",
+        "tab Value",
+        "\\",
+        "cellx1440",
+        "\\",
+        "cell",
+        "\\",
+        "row Body",
+        "\\",
+        "par} ",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let header = parsed.document.header.first().expect("header paragraph");
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+    let cell_paragraph = &table.rows[0].cells[0].paragraphs[0];
+
+    assert!(text.contains("Head\tRight"));
+    assert!(text.contains("Cell\tValue"));
+    assert!(text.contains("Body"));
+    assert_eq!(
+        header.style.tab_stop_alignments,
+        vec![TabAlignment::Bar, TabAlignment::Left]
+    );
+    assert_eq!(
+        cell_paragraph.style.tab_stop_alignments,
+        vec![TabAlignment::Bar, TabAlignment::Left]
+    );
+    for forbidden in ["tb", "tx360", "tx720", "tx1440", "header", "trowd", "cellx"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden header/table bar-tab control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let vertical_strokes = content
+        .operations
+        .windows(3)
+        .filter(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+                && operations[0].operands.first().and_then(pdf_operand_number)
+                    == operations[1].operands.first().and_then(pdf_operand_number)
+        })
+        .count();
+
+    for expected in ["Head", "Right", "Cell", "Value", "Body"] {
+        assert!(
+            rendered_text.contains(expected),
+            "visible text {expected:?} missing from PDF text {rendered_text:?}"
+        );
+    }
+    assert!(
+        vertical_strokes >= 2,
+        "header and table bar tabs should render passive vertical strokes"
+    );
+    for forbidden in [
+        b"tb".as_slice(),
+        b"tx360",
+        b"tx720",
+        b"tx1440",
+        b"header",
+        b"trowd",
+        b"cellx",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden header/table bar-tab content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn picture_scaling_controls_render_passively_without_control_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(2, 2));
     let input = rtf(&[
