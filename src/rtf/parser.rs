@@ -1584,7 +1584,17 @@ impl Parser {
             "froman" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Roman);
             }
+            "flomajor" | "fhimajor" | "fdbmajor" | "fbimajor"
+                if self.state.destination == Destination::FontTable =>
+            {
+                self.set_current_font_family(FontFamilyHint::Roman);
+            }
             "fswiss" if self.state.destination == Destination::FontTable => {
+                self.set_current_font_family(FontFamilyHint::Swiss);
+            }
+            "flominor" | "fhiminor" | "fdbminor" | "fbiminor"
+                if self.state.destination == Destination::FontTable =>
+            {
                 self.set_current_font_family(FontFamilyHint::Swiss);
             }
             "fmodern" if self.state.destination == Destination::FontTable => {
@@ -6590,6 +6600,14 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "fbidis"
                 | "fromtext"
                 | "fcharset"
+                | "fbimajor"
+                | "fbiminor"
+                | "fdbmajor"
+                | "fdbminor"
+                | "fhimajor"
+                | "fhiminor"
+                | "flomajor"
+                | "flominor"
                 | "fprq"
                 | "fmodern"
                 | "fnil"
@@ -9571,6 +9589,29 @@ mod tests {
         assert_eq!(family_for("Mystery Serif"), FontFamilyHint::Roman);
         assert_eq!(family_for("Mystery Mono"), FontFamilyHint::Modern);
         assert_eq!(family_for("Symbolish"), FontFamilyHint::Tech);
+    }
+
+    #[test]
+    fn normalizes_theme_font_hints_as_safe_family_metadata() {
+        let input = r"{\rtf1{\fonttbl{\f0\flomajor Mystery Heading;}{\f1\fhiminor Mystery Body;}{\f2\fdbmajor Mystery EastAsia Heading;}{\f3\fbiminor Mystery Bidi Body;}}\f0 A\f1 B\f2 C\f3 D\par}";
+        let output = parse_rtf(input).unwrap();
+        let family_for = |name: &str| {
+            output
+                .document
+                .fonts
+                .iter()
+                .find(|font| font.name == name)
+                .map(|font| font.family)
+                .unwrap_or_else(|| panic!("missing font {name}"))
+        };
+
+        assert_eq!(family_for("Mystery Heading"), FontFamilyHint::Roman);
+        assert_eq!(family_for("Mystery Body"), FontFamilyHint::Swiss);
+        assert_eq!(
+            family_for("Mystery EastAsia Heading"),
+            FontFamilyHint::Roman
+        );
+        assert_eq!(family_for("Mystery Bidi Body"), FontFamilyHint::Swiss);
     }
 
     #[test]

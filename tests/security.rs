@@ -4,8 +4,9 @@ use lopdf::Document as PdfDocument;
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER,
-    EndnotePlacement, FontPitch, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, TOTAL_PAGES_MARKER, UnderlineStyle,
+    EndnotePlacement, FontFamilyHint, FontPitch, PAGE_NUMBER_MARKER, PageVerticalAlignment,
+    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, TOTAL_PAGES_MARKER,
+    UnderlineStyle,
 };
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
@@ -6033,6 +6034,98 @@ fn font_family_hints_render_passively_without_control_leakage() {
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden),
             "{} leaked into PDF",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn theme_font_hints_render_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "fonttbl{",
+        "\\",
+        "f0",
+        "\\",
+        "flomajor Mystery Heading;}{",
+        "\\",
+        "f1",
+        "\\",
+        "fhiminor Mystery Body;}}",
+        "\\",
+        "f0 Major ",
+        "\\",
+        "f1 Minor",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let heading_font = parsed
+        .document
+        .fonts
+        .iter()
+        .find(|font| font.name == "Mystery Heading")
+        .expect("theme heading font");
+    let body_font = parsed
+        .document
+        .fonts
+        .iter()
+        .find(|font| font.name == "Mystery Body")
+        .expect("theme body font");
+
+    assert_eq!(heading_font.family, FontFamilyHint::Roman);
+    assert_eq!(body_font.family, FontFamilyHint::Swiss);
+    assert!(text.contains("Major Minor"));
+    for forbidden in ["fonttbl", "flomajor", "fhiminor", "Mystery Heading"] {
+        assert!(
+            !text.contains(forbidden),
+            "theme font metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let font_names = pdf_text_font_names(&content);
+
+    assert!(
+        font_names.iter().any(|name| name.as_slice() == b"F9"),
+        "major theme font should use passive Times substitution; font selections were {font_names:?}"
+    );
+    assert!(
+        font_names.iter().any(|name| name.as_slice() == b"F1"),
+        "minor theme font should use passive Helvetica substitution; font selections were {font_names:?}"
+    );
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"flomajor",
+        b"fhiminor",
+        b"Mystery Heading",
+        b"Mystery Body",
+        b"fontemb",
+        b"fontfile",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden theme font content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
