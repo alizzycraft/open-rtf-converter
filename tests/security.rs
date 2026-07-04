@@ -2430,6 +2430,116 @@ fn fields_render_result_without_executing_instruction() {
 }
 
 #[test]
+fn header_field_results_and_placeholders_render_passively_without_body_flow_or_instruction_leakage()
+{
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "header Logo {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst HYPERLINK \"https://example.com/click\"}{",
+        "\\",
+        "fldrslt Stored link}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst INCLUDEPICTURE \"https://example.com/pixel.png\"}}",
+        "\\",
+        "par} Body",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let body_text = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(
+                paragraph
+                    .runs
+                    .iter()
+                    .map(|run| run.text.as_str())
+                    .collect::<String>(),
+            ),
+            Block::Placeholder(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert!(text.contains("Logo"));
+    assert!(text.contains("Stored link"));
+    assert!(text.contains("[Field removed: no passive result]"));
+    assert_eq!(body_text.trim(), "Body");
+    for forbidden in [
+        "HYPERLINK",
+        "INCLUDEPICTURE",
+        "https://example.com",
+        "fldinst",
+        "fldrslt",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "field instruction leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Logo"));
+    assert!(rendered_text.contains("Stored link"));
+    assert!(rendered_text.contains("[Field removed: no passive result]"));
+    assert!(rendered_text.contains("Body"));
+    for forbidden in [
+        b"HYPERLINK".as_slice(),
+        b"INCLUDEPICTURE",
+        b"https://example.com",
+        b"fldinst",
+        b"fldrslt",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "field instruction or active PDF content leaked: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn hyperlink_stored_results_render_as_inert_pdf_text_under_passive_link_policies() {
     for policy in [
         PdfLinkPolicy::RenderVisibleTextOnly,

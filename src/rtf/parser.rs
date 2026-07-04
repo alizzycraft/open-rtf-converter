@@ -79,6 +79,7 @@ struct ParserState {
     shape_picture_rendered: bool,
     suppressing_nonshape_picture: bool,
     inside_field: bool,
+    field_owner_destination: Destination,
     field_result_seen: bool,
     field_instruction: String,
     field_form_result_value: Option<i32>,
@@ -131,6 +132,7 @@ impl Default for ParserState {
             shape_picture_rendered: false,
             suppressing_nonshape_picture: false,
             inside_field: false,
+            field_owner_destination: Destination::Body,
             field_result_seen: false,
             field_instruction: String::new(),
             field_form_result_value: None,
@@ -980,6 +982,7 @@ impl Parser {
                     )?;
                 }
                 let field_result_seen = self.state.field_result_seen;
+                let field_owner_destination = self.state.field_owner_destination;
                 let field_instruction = self.state.field_instruction.clone();
                 let field_form_checkbox_checked = self
                     .state
@@ -1013,8 +1016,11 @@ impl Parser {
                             ),
                             Some(offset),
                         ));
-                        self.finish_paragraph();
-                        self.push_placeholder("[Field removed: no passive result]".to_string());
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
                     } else if let Some(result) = self.passive_field_result_for_instruction(
                         &field_instruction,
                         field_form_checkbox_checked,
@@ -1040,8 +1046,11 @@ impl Parser {
                                 Some(offset),
                             ));
                         }
-                        self.finish_paragraph();
-                        self.push_placeholder("[Field removed: no passive result]".to_string());
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
                     }
                 } else if !field_result_seen
                     && self.options.active_content_policy == ActiveContentPolicy::Strip
@@ -1588,8 +1597,10 @@ impl Parser {
                 ));
             }
             "field" if destination_allows_visible_content(&self.state) => {
+                let owner_destination = self.state.destination;
                 self.handle_active_content("field instruction", offset)?;
                 self.state.inside_field = true;
+                self.state.field_owner_destination = owner_destination;
                 self.state.field_result_seen = false;
                 self.state.destination = Destination::FieldInstruction;
             }
@@ -1603,7 +1614,7 @@ impl Parser {
                 if self.state.inside_field && destination_allows_visible_content(&self.state) =>
             {
                 self.state.field_result_seen = true;
-                self.state.destination = Destination::Body;
+                self.state.destination = self.state.field_owner_destination;
             }
             "fldrslt" if destination_allows_visible_content(&self.state) => {
                 self.state.destination = Destination::Body
@@ -11185,6 +11196,61 @@ mod tests {
         assert!(text.contains("After"));
         assert!(!text.contains("INCLUDEPICTURE"));
         assert!(!text.contains("https://example.com"));
+    }
+
+    #[test]
+    fn header_field_stored_result_stays_in_safe_repeating_metadata() {
+        let output = parse_rtf(
+            r#"{\rtf1{\header Prefix {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Stored link}}\par}Body\par}"#,
+        )
+        .unwrap();
+        let header_text = output.document.header[0]
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+        let body_text = document_text(&output.document);
+
+        assert_eq!(header_text, "Prefix Stored link");
+        assert_eq!(body_text, "Body");
+        for forbidden in ["HYPERLINK", "https://example.com", "fldinst", "fldrslt"] {
+            assert!(
+                !header_text.contains(forbidden),
+                "field instruction leaked to header result text: {forbidden}"
+            );
+            assert!(
+                !body_text.contains(forbidden),
+                "field instruction leaked to body text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn header_resultless_external_field_placeholder_stays_in_safe_repeating_metadata() {
+        let output = parse_rtf(
+            r#"{\rtf1{\header Prefix {\field{\*\fldinst INCLUDEPICTURE "https://example.com/a.png"}}\par}Body\par}"#,
+        )
+        .unwrap();
+        let header_text = output.document.header[0]
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+        let body_text = document_text(&output.document);
+
+        assert_eq!(header_text, "Prefix [Field removed: no passive result]");
+        assert_eq!(body_text, "Body");
+        assert!(!body_text.contains("[Field removed"));
+        for forbidden in ["INCLUDEPICTURE", "https://example.com", "fldinst"] {
+            assert!(
+                !header_text.contains(forbidden),
+                "field instruction leaked to header placeholder text: {forbidden}"
+            );
+            assert!(
+                !body_text.contains(forbidden),
+                "field instruction leaked to body text: {forbidden}"
+            );
+        }
     }
 
     #[test]
