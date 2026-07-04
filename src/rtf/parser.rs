@@ -410,8 +410,8 @@ struct PictureBuilder {
     kind: PictureKind,
     bytes: Vec<u8>,
     pending_hex: Option<u8>,
-    width_px_hint: Option<i32>,
-    height_px_hint: Option<i32>,
+    width_px_hint: Option<u32>,
+    height_px_hint: Option<u32>,
     display_width_twips: Option<i32>,
     display_height_twips: Option<i32>,
     scale_x_percent: Option<i32>,
@@ -1433,10 +1433,10 @@ impl Parser {
                 self.set_picture_kind(PictureKind::Unsupported)
             }
             "picw" if self.state.destination == Destination::Picture => {
-                self.set_picture_width_hint(control.parameter.unwrap_or(0))
+                self.set_picture_width_hint(control.parameter, offset)
             }
             "pich" if self.state.destination == Destination::Picture => {
-                self.set_picture_height_hint(control.parameter.unwrap_or(0))
+                self.set_picture_height_hint(control.parameter, offset)
             }
             "picwgoal" if self.state.destination == Destination::Picture => {
                 self.set_picture_display_width(control.parameter, offset)
@@ -5308,6 +5308,8 @@ impl Parser {
                         palette: Vec::new(),
                         width_px,
                         height_px,
+                        natural_width_px_hint: picture.width_px_hint,
+                        natural_height_px_hint: picture.height_px_hint,
                         display_width_twips: picture.display_width_twips,
                         display_height_twips: picture.display_height_twips,
                         scale_x_percent: picture.scale_x_percent,
@@ -5335,6 +5337,8 @@ impl Parser {
                         palette: png.palette,
                         width_px: png.width_px,
                         height_px: png.height_px,
+                        natural_width_px_hint: picture.width_px_hint,
+                        natural_height_px_hint: picture.height_px_hint,
                         display_width_twips: picture.display_width_twips,
                         display_height_twips: picture.display_height_twips,
                         scale_x_percent: picture.scale_x_percent,
@@ -5363,6 +5367,8 @@ impl Parser {
                             palette: Vec::new(),
                             width_px: dib.width_px,
                             height_px: dib.height_px,
+                            natural_width_px_hint: picture.width_px_hint,
+                            natural_height_px_hint: picture.height_px_hint,
                             display_width_twips: picture.display_width_twips,
                             display_height_twips: picture.display_height_twips,
                             scale_x_percent: picture.scale_x_percent,
@@ -5682,16 +5688,39 @@ impl Parser {
         }
     }
 
-    fn set_picture_width_hint(&mut self, width: i32) {
+    fn set_picture_width_hint(&mut self, width: Option<i32>, offset: usize) {
+        let normalized = self.clamp_picture_dimension_hint(width, "width", offset);
         if let Some(picture) = self.current_picture.as_mut() {
-            picture.width_px_hint = Some(width.max(0));
+            picture.width_px_hint = normalized;
         }
     }
 
-    fn set_picture_height_hint(&mut self, height: i32) {
+    fn set_picture_height_hint(&mut self, height: Option<i32>, offset: usize) {
+        let normalized = self.clamp_picture_dimension_hint(height, "height", offset);
         if let Some(picture) = self.current_picture.as_mut() {
-            picture.height_px_hint = Some(height.max(0));
+            picture.height_px_hint = normalized;
         }
+    }
+
+    fn clamp_picture_dimension_hint(
+        &mut self,
+        dimension: Option<i32>,
+        axis: &str,
+        offset: usize,
+    ) -> Option<u32> {
+        let value = dimension.unwrap_or(0);
+        let max = self
+            .limits()
+            .max_image_dimension_hint_px
+            .clamp(1, i32::MAX as u32) as i32;
+        let clamped = value.clamp(0, max);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("picture natural {axis} clamped from {value} to {clamped} px"),
+                Some(offset),
+            ));
+        }
+        (clamped > 0).then_some(clamped as u32)
     }
 
     fn set_picture_display_width(&mut self, width: Option<i32>, offset: usize) {
@@ -14494,6 +14523,27 @@ After\par}"#;
     }
 
     #[test]
+    fn normalizes_picture_natural_size_hints_as_safe_layout_metadata() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picw80\\pich40 {}}}}}",
+            bytes_to_hex(&minimal_rgb_png_with_dimensions(1, 1))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 1);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.natural_width_px_hint, Some(80));
+        assert_eq!(image.natural_height_px_hint, Some(40));
+        assert_eq!(image.display_width_twips, None);
+        assert_eq!(image.display_height_twips, None);
+    }
+
+    #[test]
     fn normalizes_grayscale_png_picture_as_safe_static_image() {
         let input = format!(
             "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
@@ -14727,6 +14777,42 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("picture display height clamped")
+        }));
+    }
+
+    #[test]
+    fn clamps_extreme_picture_natural_size_hints() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_image_dimension_hint_px: 10,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picw999999\\pich-99 {}}}}}",
+            bytes_to_hex(&minimal_rgb_png_with_dimensions(1, 1))
+        );
+        let output = parse_rtf_bytes_with_options(input.as_bytes(), &options).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.width_px, 1);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.natural_width_px_hint, Some(10));
+        assert_eq!(image.natural_height_px_hint, None);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("picture natural width clamped") })
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("picture natural height clamped")
         }));
     }
 

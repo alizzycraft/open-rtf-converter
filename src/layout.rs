@@ -1009,8 +1009,13 @@ fn layout_image(
     geometry: &mut PageGeometry,
     current_column: &mut usize,
 ) {
-    let natural_width = image.width_px as f32 * 0.75;
-    let natural_height = image.height_px as f32 * 0.75;
+    let natural_width_px = image.natural_width_px_hint.unwrap_or(image.width_px).max(1);
+    let natural_height_px = image
+        .natural_height_px_hint
+        .unwrap_or(image.height_px)
+        .max(1);
+    let natural_width = natural_width_px as f32 * 0.75;
+    let natural_height = natural_height_px as f32 * 0.75;
     let mut width = image
         .display_width_twips
         .map(twips_to_points)
@@ -4920,6 +4925,8 @@ mod tests {
             palette: Vec::new(),
             width_px: 100,
             height_px: 50,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
             display_width_twips: None,
             display_height_twips: None,
             scale_x_percent: Some(50),
@@ -4942,6 +4949,40 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_picture_natural_size_hints_when_goals_are_absent() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            palette: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: Some(80),
+            natural_height_px_hint: Some(40),
+            display_width_twips: None,
+            display_height_twips: None,
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let image = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("hint-sized image");
+
+        assert!((image.width - 60.0).abs() < 0.01);
+        assert!((image.height - 30.0).abs() < 0.01);
+        assert_eq!(image.image.width_px, 1);
+        assert_eq!(image.image.height_px, 1);
+    }
+
+    #[test]
     fn applies_picture_scaling_to_goal_dimensions() {
         let mut document = Document::default();
         document.blocks = vec![Block::Image(StaticImage {
@@ -4950,6 +4991,8 @@ mod tests {
             palette: Vec::new(),
             width_px: 100,
             height_px: 50,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
             display_width_twips: Some(720),
             display_height_twips: Some(1440),
             scale_x_percent: Some(50),

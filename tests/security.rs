@@ -9073,6 +9073,97 @@ fn picture_goal_dimensions_and_scaling_combine_in_passive_pdf_transform() {
 }
 
 #[test]
+fn picture_natural_size_hints_shape_passive_pdf_without_raw_control_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picw80",
+        "\\",
+        "pich40 ",
+        &image_hex,
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.width_px, 1);
+    assert_eq!(image.height_px, 1);
+    assert_eq!(image.natural_width_px_hint, Some(80));
+    assert_eq!(image.natural_height_px_hint, Some(40));
+    assert!(!text.contains("picw"));
+    assert!(!text.contains("pich"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let image_transform = content
+        .operations
+        .iter()
+        .find(|operation| operation.operator == "cm")
+        .expect("image transform");
+
+    assert_eq!(image_transform.operands.len(), 6);
+    assert!(
+        pdf_operand_number(&image_transform.operands[0])
+            .is_some_and(|value| (value - 60.0).abs() < 0.01),
+        "horizontal image matrix should use picw natural size; got {:?}",
+        image_transform.operands
+    );
+    assert!(
+        pdf_operand_number(&image_transform.operands[3])
+            .is_some_and(|value| (value - 30.0).abs() < 0.01),
+        "vertical image matrix should use pich natural size; got {:?}",
+        image_transform.operands
+    );
+    for forbidden in [
+        b"picw".as_slice(),
+        b"pich",
+        b"jpegblip",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden picture natural-size content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn oversized_picture_goal_dimensions_are_bounded_before_pdf_rendering() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(2, 2));
     let input = rtf(&[

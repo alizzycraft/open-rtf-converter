@@ -284,6 +284,8 @@ pub struct StaticImage {
     pub palette: Vec<u8>,
     pub width_px: u32,
     pub height_px: u32,
+    pub natural_width_px_hint: Option<u32>,
+    pub natural_height_px_hint: Option<u32>,
     pub display_width_twips: Option<i32>,
     pub display_height_twips: Option<i32>,
     pub scale_x_percent: Option<i32>,
