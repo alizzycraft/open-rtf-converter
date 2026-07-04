@@ -552,12 +552,18 @@ struct HeaderFooterSet {
     header_images: Vec<StaticImage>,
     first_page_header_images: Vec<StaticImage>,
     even_page_header_images: Vec<StaticImage>,
+    header_shapes: Vec<StaticShape>,
+    first_page_header_shapes: Vec<StaticShape>,
+    even_page_header_shapes: Vec<StaticShape>,
     footer: Vec<Paragraph>,
     first_page_footer: Vec<Paragraph>,
     even_page_footer: Vec<Paragraph>,
     footer_images: Vec<StaticImage>,
     first_page_footer_images: Vec<StaticImage>,
     even_page_footer_images: Vec<StaticImage>,
+    footer_shapes: Vec<StaticShape>,
+    first_page_footer_shapes: Vec<StaticShape>,
+    even_page_footer_shapes: Vec<StaticShape>,
 }
 
 impl HeaderFooterSet {
@@ -569,12 +575,18 @@ impl HeaderFooterSet {
             header_images: document.header_images.clone(),
             first_page_header_images: document.first_page_header_images.clone(),
             even_page_header_images: document.even_page_header_images.clone(),
+            header_shapes: document.header_shapes.clone(),
+            first_page_header_shapes: document.first_page_header_shapes.clone(),
+            even_page_header_shapes: document.even_page_header_shapes.clone(),
             footer: document.footer.clone(),
             first_page_footer: document.first_page_footer.clone(),
             even_page_footer: document.even_page_footer.clone(),
             footer_images: document.footer_images.clone(),
             first_page_footer_images: document.first_page_footer_images.clone(),
             even_page_footer_images: document.even_page_footer_images.clone(),
+            footer_shapes: document.footer_shapes.clone(),
+            first_page_footer_shapes: document.first_page_footer_shapes.clone(),
+            even_page_footer_shapes: document.even_page_footer_shapes.clone(),
         }
     }
 
@@ -586,12 +598,18 @@ impl HeaderFooterSet {
             header_images: settings.header_images.clone(),
             first_page_header_images: settings.first_page_header_images.clone(),
             even_page_header_images: settings.even_page_header_images.clone(),
+            header_shapes: settings.header_shapes.clone(),
+            first_page_header_shapes: settings.first_page_header_shapes.clone(),
+            even_page_header_shapes: settings.even_page_header_shapes.clone(),
             footer: settings.footer.clone(),
             first_page_footer: settings.first_page_footer.clone(),
             even_page_footer: settings.even_page_footer.clone(),
             footer_images: settings.footer_images.clone(),
             first_page_footer_images: settings.first_page_footer_images.clone(),
             even_page_footer_images: settings.even_page_footer_images.clone(),
+            footer_shapes: settings.footer_shapes.clone(),
+            first_page_footer_shapes: settings.first_page_footer_shapes.clone(),
+            even_page_footer_shapes: settings.even_page_footer_shapes.clone(),
         }
     }
 }
@@ -1680,7 +1698,14 @@ fn layout_repeating_header_footer(
             geometry,
             is_header,
         );
-        if paragraphs.is_empty() && images.is_empty() {
+        let shapes = select_repeating_header_footer_shapes(
+            document,
+            header_footer_sets,
+            physical_page_number,
+            geometry,
+            is_header,
+        );
+        if paragraphs.is_empty() && images.is_empty() && shapes.is_empty() {
             continue;
         }
         let mut scratch_pages = vec![new_layout_page(geometry, physical_page_number)];
@@ -1778,6 +1803,21 @@ fn layout_repeating_header_footer(
                     height,
                 }));
             cursor_y = y - 6.0;
+        }
+
+        for shape in shapes {
+            let mut shape_geometry = geometry;
+            let mut shape_column = 0usize;
+            layout_shape(
+                &mut scratch_pages,
+                &mut cursor_y,
+                shape,
+                geometry.content_width,
+                geometry.margin_left,
+                -1_000_000.0,
+                &mut shape_geometry,
+                &mut shape_column,
+            );
         }
 
         page.items.extend(scratch_pages.remove(0).items);
@@ -1904,6 +1944,76 @@ fn first_non_empty_images<'a>(
     primary: &'a [StaticImage],
     fallback: &'a [StaticImage],
 ) -> &'a [StaticImage] {
+    if primary.is_empty() {
+        fallback
+    } else {
+        primary
+    }
+}
+
+fn select_repeating_header_footer_shapes<'a>(
+    document: &'a Document,
+    header_footer_sets: &'a [HeaderFooterSet],
+    physical_page_number: usize,
+    geometry: PageGeometry,
+    is_header: bool,
+) -> &'a [StaticShape] {
+    let section = header_footer_sets
+        .get(geometry.header_footer_index)
+        .unwrap_or_else(|| {
+            header_footer_sets
+                .first()
+                .expect("document header/footer set")
+        });
+    let is_first_section_page =
+        geometry.title_page && physical_page_number == geometry.numbering.base_physical_page;
+    if is_header {
+        if is_first_section_page {
+            let shapes = first_non_empty_shapes(
+                &section.first_page_header_shapes,
+                &document.first_page_header_shapes,
+            );
+            if !shapes.is_empty() {
+                return shapes;
+            }
+        }
+        if physical_page_number % 2 == 0 {
+            let shapes = first_non_empty_shapes(
+                &section.even_page_header_shapes,
+                &document.even_page_header_shapes,
+            );
+            if !shapes.is_empty() {
+                return shapes;
+            }
+        }
+        first_non_empty_shapes(&section.header_shapes, &document.header_shapes)
+    } else {
+        if is_first_section_page {
+            let shapes = first_non_empty_shapes(
+                &section.first_page_footer_shapes,
+                &document.first_page_footer_shapes,
+            );
+            if !shapes.is_empty() {
+                return shapes;
+            }
+        }
+        if physical_page_number % 2 == 0 {
+            let shapes = first_non_empty_shapes(
+                &section.even_page_footer_shapes,
+                &document.even_page_footer_shapes,
+            );
+            if !shapes.is_empty() {
+                return shapes;
+            }
+        }
+        first_non_empty_shapes(&section.footer_shapes, &document.footer_shapes)
+    }
+}
+
+fn first_non_empty_shapes<'a>(
+    primary: &'a [StaticShape],
+    fallback: &'a [StaticShape],
+) -> &'a [StaticShape] {
     if primary.is_empty() {
         fallback
     } else {
@@ -10299,6 +10409,58 @@ mod tests {
                     .iter()
                     .any(|item| matches!(item, LayoutItem::Image(_))),
                 "expected repeated header image on every page"
+            );
+        }
+    }
+
+    #[test]
+    fn repeats_header_shapes_on_each_page() {
+        let mut document = Document::default();
+        document.header_shapes = vec![StaticShape {
+            kind: StaticShapeKind::Rectangle,
+            left_twips: 0,
+            top_twips: 0,
+            width_twips: 720,
+            height_twips: 360,
+            stroke_width_twips: 30,
+            stroke_color: Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            stroke_style: BorderStyle::Single,
+            fill_color: Some(Color {
+                red: 10,
+                green: 20,
+                blue: 30,
+            }),
+            points: Vec::new(),
+        }];
+        document.blocks.clear();
+        for _ in 0..120 {
+            document.blocks.push(Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Body paragraph.".to_string(),
+                    style: Default::default(),
+                }],
+            }));
+        }
+
+        let layout = LayoutEngine::layout(&document);
+        assert!(layout.pages.len() > 1);
+        for page in &layout.pages {
+            assert!(
+                page.items
+                    .iter()
+                    .any(|item| matches!(item, LayoutItem::Highlight { .. })),
+                "expected repeated header shape fill on every page"
+            );
+            assert!(
+                page.items
+                    .iter()
+                    .any(|item| matches!(item, LayoutItem::Line { .. })),
+                "expected repeated header shape outline on every page"
             );
         }
     }

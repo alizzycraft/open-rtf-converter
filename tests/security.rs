@@ -14581,6 +14581,123 @@ fn old_drawing_static_shapes_render_passively_without_property_leakage() {
 }
 
 #[test]
+fn header_static_shape_renders_passively_without_body_flow_or_property_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "header Logo {",
+        "\\",
+        "do",
+        "\\",
+        "dprect",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dplinew30",
+        "\\",
+        "dpfillfgcr10",
+        "\\",
+        "dpfillfgcg20",
+        "\\",
+        "dpfillfgcb30",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-shape-payload}}}",
+        "\\",
+        "par} Body",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let body_shape_count = parsed
+        .document
+        .blocks
+        .iter()
+        .filter(|block| matches!(block, Block::Shape(_)))
+        .count();
+
+    assert!(text.contains("Logo"));
+    assert!(text.contains("Body"));
+    assert_eq!(parsed.document.header_shapes.len(), 1);
+    assert_eq!(body_shape_count, 0);
+    for forbidden in [
+        "dprect",
+        "dpxsize",
+        "dpfillfg",
+        "pFragments",
+        "hostile-shape-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden header static shape content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let stroke_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "S")
+        .count();
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+
+    assert!(rendered_text.contains("Logo"));
+    assert!(rendered_text.contains("Body"));
+    assert!(stroke_count >= 4);
+    assert!(fill_count >= 1);
+    for forbidden in [
+        b"dprect".as_slice(),
+        b"dpxsize",
+        b"dpfillfg",
+        b"pFragments",
+        b"hostile-shape-payload",
+        b"[Shape skipped",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden header static shape content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_drawing_zero_width_outline_renders_fill_only_without_control_leakage() {
     let input = rtf(&[
         "{",

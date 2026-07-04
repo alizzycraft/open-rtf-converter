@@ -440,6 +440,7 @@ impl Default for PictureBuilder {
 
 #[derive(Debug, Clone)]
 struct ShapeBuilder {
+    owner_destination: Destination,
     kind: Option<StaticShapeKind>,
     rounded_rectangle: bool,
     base_x_twips: i32,
@@ -459,6 +460,7 @@ struct ShapeBuilder {
 impl Default for ShapeBuilder {
     fn default() -> Self {
         Self {
+            owner_destination: Destination::Body,
             kind: None,
             rounded_rectangle: false,
             base_x_twips: 0,
@@ -1337,12 +1339,16 @@ impl Parser {
                 }
             }
             "shp" | "do" if destination_allows_visible_content(&self.state) => {
+                let owner_destination = self.state.destination;
                 self.finish_table(offset)?;
                 self.finish_paragraph();
                 self.state.inside_shape = true;
                 self.state.shape_result_seen = false;
                 self.state.destination = Destination::Shape;
-                self.current_shape = Some(ShapeBuilder::default());
+                self.current_shape = Some(ShapeBuilder {
+                    owner_destination,
+                    ..ShapeBuilder::default()
+                });
             }
             "shptxt" | "shprslt" | "dptxbx"
                 if self.state.inside_shape && destination_allows_visible_content(&self.state) =>
@@ -5554,25 +5560,86 @@ impl Parser {
             });
         }
         self.shape_count += 1;
-        self.document.blocks.push(Block::Shape(StaticShape {
-            kind,
-            left_twips,
-            top_twips,
-            width_twips,
-            height_twips,
-            stroke_width_twips: shape
-                .stroke_width_twips
-                .clamp(0, self.limits().max_shape_stroke_width_twips.max(1)),
-            stroke_color: shape.stroke_color,
-            stroke_style: shape.stroke_style,
-            fill_color: shape.fill_color,
-            points,
-        }));
+        self.push_static_shape(
+            shape.owner_destination,
+            StaticShape {
+                kind,
+                left_twips,
+                top_twips,
+                width_twips,
+                height_twips,
+                stroke_width_twips: shape
+                    .stroke_width_twips
+                    .clamp(0, self.limits().max_shape_stroke_width_twips.max(1)),
+                stroke_color: shape.stroke_color,
+                stroke_style: shape.stroke_style,
+                fill_color: shape.fill_color,
+                points,
+            },
+        );
         self.diagnostics.push(Diagnostic::warning(
             "rendering bounded passive static drawing shape and stripping raw drawing properties",
             Some(offset),
         ));
         Ok(true)
+    }
+
+    fn push_static_shape(&mut self, destination: Destination, shape: StaticShape) {
+        if is_header_destination(destination) {
+            self.finish_header_paragraph();
+            if self.has_started_visible_body() {
+                match destination {
+                    Destination::FirstPageHeader => self
+                        .current_section_page
+                        .first_page_header_shapes
+                        .push(shape),
+                    Destination::EvenPageHeader => self
+                        .current_section_page
+                        .even_page_header_shapes
+                        .push(shape),
+                    _ => self.current_section_page.header_shapes.push(shape),
+                }
+                self.upsert_current_section_settings();
+            } else {
+                match destination {
+                    Destination::FirstPageHeader => {
+                        self.document.first_page_header_shapes.push(shape)
+                    }
+                    Destination::EvenPageHeader => {
+                        self.document.even_page_header_shapes.push(shape)
+                    }
+                    _ => self.document.header_shapes.push(shape),
+                }
+            }
+        } else if is_footer_destination(destination) {
+            self.finish_footer_paragraph();
+            if self.has_started_visible_body() {
+                match destination {
+                    Destination::FirstPageFooter => self
+                        .current_section_page
+                        .first_page_footer_shapes
+                        .push(shape),
+                    Destination::EvenPageFooter => self
+                        .current_section_page
+                        .even_page_footer_shapes
+                        .push(shape),
+                    _ => self.current_section_page.footer_shapes.push(shape),
+                }
+                self.upsert_current_section_settings();
+            } else {
+                match destination {
+                    Destination::FirstPageFooter => {
+                        self.document.first_page_footer_shapes.push(shape)
+                    }
+                    Destination::EvenPageFooter => {
+                        self.document.even_page_footer_shapes.push(shape)
+                    }
+                    _ => self.document.footer_shapes.push(shape),
+                }
+            }
+        } else {
+            self.document.blocks.push(Block::Shape(shape));
+        }
     }
 
     fn set_current_shape_kind(&mut self, kind: StaticShapeKind) {
@@ -12161,6 +12228,31 @@ After\par}"#;
         for forbidden in ["dprect", "dobx", "dpfill", "pFragments", "hostile-payload"] {
             assert!(!text.contains(forbidden));
         }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_header_static_drawing_shapes_as_safe_repeating_metadata() {
+        let output = parse_rtf(
+            r"{\rtf1{\header Logo {\do\dprect\dpxsize1440\dpysize720\dplinew30\dpfillfgcr10\dpfillfgcg20\dpfillfgcb30}\par}Body\par}",
+        )
+        .unwrap();
+
+        assert_eq!(output.document.header.len(), 1);
+        assert_eq!(output.document.header[0].runs[0].text, "Logo ");
+        assert_eq!(output.document.header_shapes.len(), 1);
+        assert!(
+            output
+                .document
+                .blocks
+                .iter()
+                .all(|block| !matches!(block, Block::Shape(_)))
+        );
         assert!(
             output
                 .diagnostics
