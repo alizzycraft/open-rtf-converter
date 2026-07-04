@@ -5,7 +5,7 @@ use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER,
     EndnotePlacement, FontFamilyHint, FontPitch, PAGE_NUMBER_MARKER, PageVerticalAlignment,
-    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, TOTAL_PAGES_MARKER,
+    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, TOTAL_PAGES_MARKER, TabAlignment,
     UnderlineStyle,
 };
 use open_rtf_converter::rtf::{
@@ -8889,6 +8889,99 @@ fn tab_alignment_controls_render_passively_without_control_leakage() {
         assert!(
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
+fn bar_tab_stops_render_passive_lines_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "tb",
+        "\\",
+        "tx720",
+        "\\",
+        "tx1440 Left",
+        "\\",
+        "tab Right",
+        "\\",
+        "par} ",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let paragraph = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .expect("paragraph");
+
+    assert!(text.contains("Left\tRight"));
+    assert_eq!(paragraph.style.tab_stops_twips, vec![720, 1440]);
+    assert_eq!(
+        paragraph.style.tab_stop_alignments,
+        vec![TabAlignment::Bar, TabAlignment::Left]
+    );
+    for forbidden in ["tb", "tx720", "tx1440"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden bar-tab control leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("bar-tab.rtf");
+    let output_path = dir.path().join("bar-tab.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let has_bar_line = content.operations.windows(3).any(|operations| {
+        operations[0].operator == "m"
+            && operations[1].operator == "l"
+            && operations[2].operator == "S"
+            && operations[0].operands.first().and_then(pdf_operand_number)
+                == operations[1].operands.first().and_then(pdf_operand_number)
+    });
+
+    assert!(rendered_text.contains("Left"));
+    assert!(rendered_text.contains("Right"));
+    assert!(
+        has_bar_line,
+        "bar tab stop should render a passive vertical stroke"
+    );
+    for forbidden in [
+        b"tb".as_slice(),
+        b"tx720",
+        b"tx1440",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden bar-tab content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
         );
     }
 }

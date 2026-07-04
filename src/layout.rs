@@ -2471,6 +2471,7 @@ fn layout_paragraph(
         if let Some(state) = line_numbers.as_mut().map(|state| &mut **state) {
             push_passive_line_number(pages, line, margin_left, *cursor_y, *geometry, state);
         }
+        push_bar_tab_stops(pages, &paragraph.style, x, *cursor_y, line.height);
         push_line(pages, &line, x, *cursor_y, document, word_spacing);
         *cursor_y -= line.height;
     }
@@ -3574,7 +3575,7 @@ fn adjust_pending_aligned_tab(line: &mut Line, following: &FlowRun, document: &D
     let Some(tab) = line.runs.last_mut() else {
         return;
     };
-    if tab.text != "\t" || tab.tab_alignment == TabAlignment::Left {
+    if tab.text != "\t" || matches!(tab.tab_alignment, TabAlignment::Left | TabAlignment::Bar) {
         return;
     }
     let Some(target) = tab.tab_stop_position else {
@@ -3588,6 +3589,7 @@ fn adjust_pending_aligned_tab(line: &mut Line, following: &FlowRun, document: &D
         TabAlignment::Decimal => {
             decimal_tab_start(target, following, document).unwrap_or(target - following.width)
         }
+        TabAlignment::Bar => target,
     };
     let adjusted_width = (desired_start - width_before_tab).max(0.0);
     tab.width = adjusted_width;
@@ -3659,7 +3661,14 @@ fn next_tab_position(
     paragraph_style: &ParagraphStyle,
     document: &Document,
 ) -> f32 {
-    for stop_twips in &paragraph_style.tab_stops_twips {
+    for (idx, stop_twips) in paragraph_style.tab_stops_twips.iter().enumerate() {
+        if paragraph_style
+            .tab_stop_alignments
+            .get(idx)
+            .is_some_and(|alignment| *alignment == TabAlignment::Bar)
+        {
+            continue;
+        }
         let stop = twips_to_points(*stop_twips);
         if stop > current_line_width + 0.01 {
             return stop;
@@ -3672,6 +3681,13 @@ fn next_tab_position(
 
 fn next_tab_leader(current_line_width: f32, paragraph_style: &ParagraphStyle) -> TabLeader {
     for (idx, stop_twips) in paragraph_style.tab_stops_twips.iter().enumerate() {
+        if paragraph_style
+            .tab_stop_alignments
+            .get(idx)
+            .is_some_and(|alignment| *alignment == TabAlignment::Bar)
+        {
+            continue;
+        }
         let stop = twips_to_points(*stop_twips);
         if stop > current_line_width + 0.01 {
             return paragraph_style
@@ -3686,6 +3702,13 @@ fn next_tab_leader(current_line_width: f32, paragraph_style: &ParagraphStyle) ->
 
 fn next_tab_alignment(current_line_width: f32, paragraph_style: &ParagraphStyle) -> TabAlignment {
     for (idx, stop_twips) in paragraph_style.tab_stops_twips.iter().enumerate() {
+        if paragraph_style
+            .tab_stop_alignments
+            .get(idx)
+            .is_some_and(|alignment| *alignment == TabAlignment::Bar)
+        {
+            continue;
+        }
         let stop = twips_to_points(*stop_twips);
         if stop > current_line_width + 0.01 {
             return paragraph_style
@@ -3716,6 +3739,39 @@ fn apply_line_spacing(line_height: f32, style: &ParagraphStyle) -> f32 {
         spacing_points
     } else {
         line_height.max(spacing_points)
+    }
+}
+
+fn push_bar_tab_stops(
+    pages: &mut [LayoutPage],
+    style: &ParagraphStyle,
+    line_left: f32,
+    top_y: f32,
+    line_height: f32,
+) {
+    let page = pages.last_mut().expect("layout always has a page");
+    for (idx, stop_twips) in style.tab_stops_twips.iter().enumerate() {
+        if !style
+            .tab_stop_alignments
+            .get(idx)
+            .is_some_and(|alignment| *alignment == TabAlignment::Bar)
+        {
+            continue;
+        }
+        let x = line_left + twips_to_points(*stop_twips);
+        page.items.push(LayoutItem::Line {
+            x1: x,
+            y1: top_y,
+            x2: x,
+            y2: top_y - line_height,
+            width: 0.5,
+            color: PdfColor {
+                red: 0.0,
+                green: 0.0,
+                blue: 0.0,
+            },
+            style: LineStyle::Solid,
+        });
     }
 }
 
@@ -8708,6 +8764,33 @@ mod tests {
         assert!(page.items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.text.starts_with("..."))
         ));
+    }
+
+    #[test]
+    fn lays_out_bar_tab_stops_as_passive_vertical_lines() {
+        let mut paragraph_style = ParagraphStyle::default();
+        paragraph_style.tab_stops_twips = vec![720, 1440];
+        paragraph_style.tab_stop_alignments = vec![TabAlignment::Bar, TabAlignment::Left];
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: paragraph_style,
+            runs: vec![Run {
+                text: "Left\tRight".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+
+        assert!(page.items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Line { x1, x2, .. } if (*x1 - 108.0).abs() < 0.01 && (*x2 - 108.0).abs() < 0.01
+        )));
+        assert!(
+            (text_x(page, "Right").expect("tabbed text") - 144.0).abs() < 0.01,
+            "bar tab should not consume the normal left tab stop"
+        );
     }
 
     #[test]

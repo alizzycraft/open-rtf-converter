@@ -2282,6 +2282,7 @@ impl Parser {
             "tqc" => self.state.current_tab_alignment = TabAlignment::Center,
             "tqr" => self.state.current_tab_alignment = TabAlignment::Right,
             "tqdec" => self.state.current_tab_alignment = TabAlignment::Decimal,
+            "tb" => self.state.current_tab_alignment = TabAlignment::Bar,
             "tx" => self.push_tab_stop(control.parameter, offset)?,
             "deftab" => {
                 self.document.default_tab_width_twips =
@@ -14307,6 +14308,32 @@ After\par}"#;
                 TabAlignment::Center,
                 TabAlignment::Decimal
             ]
+        );
+    }
+
+    #[test]
+    fn normalizes_bar_tab_stops_as_passive_tab_metadata() {
+        let output =
+            parse_rtf(r"{\rtf1\tb\tx720\tqr\tx1440 Left\tab 9\par\tb\tx2160 Bar only\par}")
+                .unwrap();
+        let first = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let second = match &output.document.blocks[1] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(first.style.tab_stops_twips, vec![720, 1440]);
+        assert_eq!(
+            first.style.tab_stop_alignments,
+            vec![TabAlignment::Bar, TabAlignment::Right]
+        );
+        assert_eq!(second.style.tab_stops_twips, vec![720, 1440, 2160]);
+        assert_eq!(
+            second.style.tab_stop_alignments,
+            vec![TabAlignment::Bar, TabAlignment::Right, TabAlignment::Bar]
         );
     }
 

@@ -583,6 +583,7 @@ pub enum TabAlignment {
     Center,
     Right,
     Decimal,
+    Bar,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
