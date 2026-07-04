@@ -722,6 +722,9 @@ fn draw_passive_ellipse(
 ) {
     const KAPPA: f32 = 0.552_284_8;
 
+    if stroke_width <= 0.0 && fill_color.is_none() {
+        return;
+    }
     let width = width.max(0.1);
     let height = height.max(0.1);
     let rx = width / 2.0;
@@ -731,10 +734,13 @@ fn draw_passive_ellipse(
     let dx = rx * KAPPA;
     let dy = ry * KAPPA;
 
+    let has_stroke = stroke_width > 0.0;
     content.save_state();
-    content.set_line_width(stroke_width.max(0.25));
-    set_stroke_color(content, stroke_color);
-    set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    if has_stroke {
+        content.set_line_width(stroke_width.max(0.25));
+        set_stroke_color(content, stroke_color);
+        set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    }
     if let Some(fill_color) = fill_color {
         set_fill_color(content, fill_color);
     }
@@ -744,8 +750,10 @@ fn draw_passive_ellipse(
     content.cubic_to(cx - rx, cy - dy, cx - dx, cy - ry, cx, cy - ry);
     content.cubic_to(cx + dx, cy - ry, cx + rx, cy - dy, cx + rx, cy);
     content.close_path();
-    if fill_color.is_some() {
+    if fill_color.is_some() && has_stroke {
         content.fill_nonzero_and_stroke();
+    } else if fill_color.is_some() {
+        content.fill_nonzero();
     } else {
         content.stroke();
     }
@@ -767,6 +775,9 @@ fn draw_passive_rounded_rectangle(
 ) {
     const KAPPA: f32 = 0.552_284_8;
 
+    if stroke_width <= 0.0 && fill_color.is_none() {
+        return;
+    }
     let width = width.max(0.1);
     let height = height.max(0.1);
     let radius = radius.clamp(0.1, width.min(height) / 2.0);
@@ -774,10 +785,13 @@ fn draw_passive_rounded_rectangle(
     let right = x + width;
     let top = y + height;
 
+    let has_stroke = stroke_width > 0.0;
     content.save_state();
-    content.set_line_width(stroke_width.max(0.25));
-    set_stroke_color(content, stroke_color);
-    set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    if has_stroke {
+        content.set_line_width(stroke_width.max(0.25));
+        set_stroke_color(content, stroke_color);
+        set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    }
     if let Some(fill_color) = fill_color {
         set_fill_color(content, fill_color);
     }
@@ -819,8 +833,10 @@ fn draw_passive_rounded_rectangle(
         y,
     );
     content.close_path();
-    if fill_color.is_some() {
+    if fill_color.is_some() && has_stroke {
         content.fill_nonzero_and_stroke();
+    } else if fill_color.is_some() {
+        content.fill_nonzero();
     } else {
         content.stroke();
     }
@@ -838,11 +854,17 @@ fn draw_passive_polygon(
     let Some(first) = points.first() else {
         return;
     };
+    if stroke_width <= 0.0 && fill_color.is_none() {
+        return;
+    }
 
+    let has_stroke = stroke_width > 0.0;
     content.save_state();
-    content.set_line_width(stroke_width.max(0.25));
-    set_stroke_color(content, stroke_color);
-    set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    if has_stroke {
+        content.set_line_width(stroke_width.max(0.25));
+        set_stroke_color(content, stroke_color);
+        set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    }
     if let Some(fill_color) = fill_color {
         set_fill_color(content, fill_color);
     }
@@ -851,8 +873,10 @@ fn draw_passive_polygon(
         content.line_to(point.x, point.y);
     }
     content.close_path();
-    if fill_color.is_some() {
+    if fill_color.is_some() && has_stroke {
         content.fill_nonzero_and_stroke();
+    } else if fill_color.is_some() {
+        content.fill_nonzero();
     } else {
         content.stroke();
     }

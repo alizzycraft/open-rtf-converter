@@ -1083,7 +1083,11 @@ fn layout_shape(
     let top_y = *cursor_y - top;
     let bottom_y = top_y - height;
     let right_x = x + width;
-    let width_points = twips_to_points(shape.stroke_width_twips.max(1)).clamp(0.25, 12.0);
+    let stroke_width_points = if shape.stroke_width_twips > 0 {
+        Some(twips_to_points(shape.stroke_width_twips).clamp(0.25, 12.0))
+    } else {
+        None
+    };
     let color = PdfColor {
         red: shape.stroke_color.red as f32 / 255.0,
         green: shape.stroke_color.green as f32 / 255.0,
@@ -1092,35 +1096,45 @@ fn layout_shape(
     let stroke_style = line_style_for_border_style(shape.stroke_style);
     let page = pages.last_mut().expect("layout always has a page");
     match shape.kind {
-        StaticShapeKind::Line => page.items.push(LayoutItem::Line {
-            x1: x,
-            y1: top_y,
-            x2: right_x,
-            y2: bottom_y,
-            width: width_points,
-            color,
-            style: stroke_style,
-        }),
-        StaticShapeKind::Polyline => {
-            let natural_width = twips_to_points(shape.width_twips.max(1)).max(1.0);
-            let natural_height = twips_to_points(shape.height_twips.max(1)).max(1.0);
-            let scale_x = width / natural_width;
-            let scale_y = height / natural_height;
-            for points in shape.points.windows(2) {
-                let start = points[0];
-                let end = points[1];
+        StaticShapeKind::Line => {
+            if let Some(width_points) = stroke_width_points {
                 page.items.push(LayoutItem::Line {
-                    x1: x + (twips_to_points(start.x_twips) * scale_x),
-                    y1: top_y - (twips_to_points(start.y_twips) * scale_y),
-                    x2: x + (twips_to_points(end.x_twips) * scale_x),
-                    y2: top_y - (twips_to_points(end.y_twips) * scale_y),
+                    x1: x,
+                    y1: top_y,
+                    x2: right_x,
+                    y2: bottom_y,
                     width: width_points,
                     color,
                     style: stroke_style,
                 });
             }
         }
+        StaticShapeKind::Polyline => {
+            let natural_width = twips_to_points(shape.width_twips.max(1)).max(1.0);
+            let natural_height = twips_to_points(shape.height_twips.max(1)).max(1.0);
+            let scale_x = width / natural_width;
+            let scale_y = height / natural_height;
+            if let Some(width_points) = stroke_width_points {
+                for points in shape.points.windows(2) {
+                    let start = points[0];
+                    let end = points[1];
+                    page.items.push(LayoutItem::Line {
+                        x1: x + (twips_to_points(start.x_twips) * scale_x),
+                        y1: top_y - (twips_to_points(start.y_twips) * scale_y),
+                        x2: x + (twips_to_points(end.x_twips) * scale_x),
+                        y2: top_y - (twips_to_points(end.y_twips) * scale_y),
+                        width: width_points,
+                        color,
+                        style: stroke_style,
+                    });
+                }
+            }
+        }
         StaticShapeKind::Polygon => {
+            if stroke_width_points.is_none() && shape.fill_color.is_none() {
+                *cursor_y -= block_height + 6.0;
+                return;
+            }
             let natural_width = twips_to_points(shape.width_twips.max(1)).max(1.0);
             let natural_height = twips_to_points(shape.height_twips.max(1)).max(1.0);
             let scale_x = width / natural_width;
@@ -1135,7 +1149,7 @@ fn layout_shape(
                 .collect::<Vec<_>>();
             page.items.push(LayoutItem::Polygon {
                 points,
-                stroke_width: width_points,
+                stroke_width: stroke_width_points.unwrap_or(0.0),
                 stroke_color: color,
                 stroke_style,
                 fill_color: shape.fill_color.map(|fill_color| PdfColor {
@@ -1159,44 +1173,50 @@ fn layout_shape(
                     },
                 });
             }
-            page.items.push(LayoutItem::Line {
-                x1: x,
-                y1: top_y,
-                x2: right_x,
-                y2: top_y,
-                width: width_points,
-                color,
-                style: stroke_style,
-            });
-            page.items.push(LayoutItem::Line {
-                x1: right_x,
-                y1: top_y,
-                x2: right_x,
-                y2: bottom_y,
-                width: width_points,
-                color,
-                style: stroke_style,
-            });
-            page.items.push(LayoutItem::Line {
-                x1: right_x,
-                y1: bottom_y,
-                x2: x,
-                y2: bottom_y,
-                width: width_points,
-                color,
-                style: stroke_style,
-            });
-            page.items.push(LayoutItem::Line {
-                x1: x,
-                y1: bottom_y,
-                x2: x,
-                y2: top_y,
-                width: width_points,
-                color,
-                style: stroke_style,
-            });
+            if let Some(width_points) = stroke_width_points {
+                page.items.push(LayoutItem::Line {
+                    x1: x,
+                    y1: top_y,
+                    x2: right_x,
+                    y2: top_y,
+                    width: width_points,
+                    color,
+                    style: stroke_style,
+                });
+                page.items.push(LayoutItem::Line {
+                    x1: right_x,
+                    y1: top_y,
+                    x2: right_x,
+                    y2: bottom_y,
+                    width: width_points,
+                    color,
+                    style: stroke_style,
+                });
+                page.items.push(LayoutItem::Line {
+                    x1: right_x,
+                    y1: bottom_y,
+                    x2: x,
+                    y2: bottom_y,
+                    width: width_points,
+                    color,
+                    style: stroke_style,
+                });
+                page.items.push(LayoutItem::Line {
+                    x1: x,
+                    y1: bottom_y,
+                    x2: x,
+                    y2: top_y,
+                    width: width_points,
+                    color,
+                    style: stroke_style,
+                });
+            }
         }
         StaticShapeKind::RoundedRectangle => {
+            if stroke_width_points.is_none() && shape.fill_color.is_none() {
+                *cursor_y -= block_height + 6.0;
+                return;
+            }
             let min_dimension = width.min(height).max(1.0);
             page.items.push(LayoutItem::RoundedRectangle {
                 x,
@@ -1204,7 +1224,7 @@ fn layout_shape(
                 width,
                 height,
                 radius: (min_dimension * 0.2).clamp(1.0, min_dimension / 2.0),
-                stroke_width: width_points,
+                stroke_width: stroke_width_points.unwrap_or(0.0),
                 stroke_color: color,
                 stroke_style,
                 fill_color: shape.fill_color.map(|fill_color| PdfColor {
@@ -1214,20 +1234,24 @@ fn layout_shape(
                 }),
             });
         }
-        StaticShapeKind::Ellipse => page.items.push(LayoutItem::Ellipse {
-            x,
-            y: bottom_y,
-            width,
-            height,
-            stroke_width: width_points,
-            stroke_color: color,
-            stroke_style,
-            fill_color: shape.fill_color.map(|fill_color| PdfColor {
-                red: fill_color.red as f32 / 255.0,
-                green: fill_color.green as f32 / 255.0,
-                blue: fill_color.blue as f32 / 255.0,
-            }),
-        }),
+        StaticShapeKind::Ellipse => {
+            if stroke_width_points.is_some() || shape.fill_color.is_some() {
+                page.items.push(LayoutItem::Ellipse {
+                    x,
+                    y: bottom_y,
+                    width,
+                    height,
+                    stroke_width: stroke_width_points.unwrap_or(0.0),
+                    stroke_color: color,
+                    stroke_style,
+                    fill_color: shape.fill_color.map(|fill_color| PdfColor {
+                        red: fill_color.red as f32 / 255.0,
+                        green: fill_color.green as f32 / 255.0,
+                        blue: fill_color.blue as f32 / 255.0,
+                    }),
+                });
+            }
+        }
     }
     *cursor_y -= block_height + 6.0;
 }
@@ -4995,6 +5019,46 @@ mod tests {
                 && (color.green - 0.5019608).abs() < 0.01
                 && color.blue == 0.0
         }));
+    }
+
+    #[test]
+    fn lays_out_zero_width_static_drawing_outline_as_fill_only() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Shape(StaticShape {
+            kind: StaticShapeKind::Rectangle,
+            left_twips: 360,
+            top_twips: 240,
+            width_twips: 1440,
+            height_twips: 720,
+            stroke_width_twips: 0,
+            stroke_color: Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            stroke_style: BorderStyle::Single,
+            fill_color: Some(Color {
+                red: 10,
+                green: 20,
+                blue: 30,
+            }),
+            points: Vec::new(),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let fill_count = layout.pages[0]
+            .items
+            .iter()
+            .filter(|item| matches!(item, LayoutItem::Highlight { .. }))
+            .count();
+        let stroke_count = layout.pages[0]
+            .items
+            .iter()
+            .filter(|item| matches!(item, LayoutItem::Line { .. }))
+            .count();
+
+        assert_eq!(fill_count, 1);
+        assert_eq!(stroke_count, 0);
     }
 
     #[test]

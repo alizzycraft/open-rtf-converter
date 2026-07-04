@@ -14050,6 +14050,129 @@ fn old_drawing_static_shapes_render_passively_without_property_leakage() {
 }
 
 #[test]
+fn old_drawing_zero_width_outline_renders_fill_only_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dprect",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dplinew0",
+        "\\",
+        "dplinecor255",
+        "\\",
+        "dplinecog0",
+        "\\",
+        "dplinecob0",
+        "\\",
+        "dpfillfgcr10",
+        "\\",
+        "dpfillfgcg20",
+        "\\",
+        "dpfillfgcb30",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-fill-only-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("fill-only shape");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.stroke_width_twips, 0);
+    assert!(shape.fill_color.is_some());
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "dplinew",
+        "dpfillfg",
+        "pFragments",
+        "hostile-fill-only-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden fill-only drawing content leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("old-drawing-fill-only-shape.rtf");
+    let output_path = dir.path().join("old-drawing-fill-only-shape.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+    let stroke_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "S")
+        .count();
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(fill_count >= 1);
+    assert_eq!(stroke_count, 0);
+    for forbidden in [
+        b"dplinew".as_slice(),
+        b"dpfillfg",
+        b"pFragments",
+        b"hostile-fill-only-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden fill-only drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_drawing_line_styles_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

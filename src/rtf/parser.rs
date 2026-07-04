@@ -5465,7 +5465,7 @@ impl Parser {
             height_twips,
             stroke_width_twips: shape
                 .stroke_width_twips
-                .clamp(1, self.limits().max_shape_stroke_width_twips.max(1)),
+                .clamp(0, self.limits().max_shape_stroke_width_twips.max(1)),
             stroke_color: shape.stroke_color,
             stroke_style: shape.stroke_style,
             fill_color: shape.fill_color,
@@ -5666,7 +5666,7 @@ impl Parser {
 
     fn clamp_shape_stroke_width(&mut self, value: i32, offset: usize) -> i32 {
         let max = self.limits().max_shape_stroke_width_twips.max(1);
-        let clamped = value.clamp(1, max);
+        let clamped = value.clamp(0, max);
         if clamped != value {
             self.diagnostics.push(Diagnostic::warning(
                 format!("shape stroke width clamped from {value} to {clamped} twips"),
@@ -12041,6 +12041,40 @@ After\par}"#;
         for forbidden in ["dprect", "dobx", "dpfill", "pFragments", "hostile-payload"] {
             assert!(!text.contains(forbidden));
         }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_zero_width_static_drawing_outline_as_safe_fill_only_shape() {
+        let output = parse_rtf(
+            r"{\rtf1 Before\par{\do\dprect\dpxsize1440\dpysize720\dplinew0\dpfillfgcr10\dpfillfgcg20\dpfillfgcb30}After\par}",
+        )
+        .unwrap();
+        let shape = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("shape");
+
+        assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+        assert_eq!(shape.stroke_width_twips, 0);
+        assert_eq!(
+            shape.fill_color,
+            Some(Color {
+                red: 10,
+                green: 20,
+                blue: 30,
+            })
+        );
         assert!(
             output
                 .diagnostics
