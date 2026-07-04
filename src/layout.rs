@@ -1680,6 +1680,40 @@ fn layout_repeating_header_footer(
                     paragraph_line_width(geometry.content_width, &paragraph.style, line_idx == 0),
                     line_idx + 1 == line_count,
                 );
+                if let Some(color_index) = paragraph.style.shading_color_index
+                    && color_index > 0
+                {
+                    let line_left_indent = twips_to_points(paragraph_line_left_indent_twips(
+                        &paragraph.style,
+                        line_idx == 0,
+                    ));
+                    push_shading_rect(
+                        &mut scratch_pages,
+                        document,
+                        geometry.margin_left + line_left_indent,
+                        cursor_y - line.height,
+                        paragraph_line_width(
+                            geometry.content_width,
+                            &paragraph.style,
+                            line_idx == 0,
+                        ),
+                        line.height,
+                        color_index,
+                        paragraph.style.shading_basis_points,
+                        paragraph.style.shading_pattern,
+                    );
+                }
+                push_paragraph_borders(
+                    &mut scratch_pages,
+                    geometry.margin_left,
+                    geometry.content_width,
+                    &paragraph.style,
+                    line_idx,
+                    line_count,
+                    cursor_y,
+                    line.height,
+                    document,
+                );
                 push_bar_tab_stops(
                     &mut scratch_pages,
                     &paragraph.style,
@@ -1990,7 +2024,6 @@ fn push_table_row(
         if cell.vertical_merge == TableCellVerticalMerge::Continuation {
             continue;
         }
-        let content_width = (visual_cell.width - padding.left - padding.right).max(12.0);
         let content_height = lines
             .iter()
             .map(|prepared_line| prepared_line.line.height)
@@ -2005,6 +2038,7 @@ fn push_table_row(
         let mut line_top = top - padding.top - vertical_offset;
         for prepared_line in lines {
             let content_left = row_left + visual_cell.x_offset + padding.left;
+            let cell_content_width = (visual_cell.width - padding.left - padding.right).max(1.0);
             if let Some(color_index) = prepared_line.style.shading_color_index
                 && color_index > 0
             {
@@ -2018,7 +2052,7 @@ fn push_table_row(
                     content_left + line_left_indent,
                     line_top - prepared_line.line.height,
                     paragraph_line_width(
-                        content_width,
+                        cell_content_width,
                         &prepared_line.style,
                         prepared_line.is_first_line,
                     ),
@@ -2030,7 +2064,7 @@ fn push_table_row(
             }
             let x = aligned_x(
                 content_left,
-                content_width,
+                cell_content_width,
                 prepared_line.line.width,
                 &prepared_line.style,
                 prepared_line.is_first_line,
@@ -2039,11 +2073,26 @@ fn push_table_row(
                 &prepared_line.line,
                 &prepared_line.style,
                 paragraph_line_width(
-                    visual_cell.width - padding.left - padding.right,
+                    cell_content_width,
                     &prepared_line.style,
                     prepared_line.is_first_line,
                 ),
                 prepared_line.is_last_line,
+            );
+            let (border_line_idx, border_line_count) = paragraph_border_line_position(
+                prepared_line.is_first_line,
+                prepared_line.is_last_line,
+            );
+            push_paragraph_borders(
+                pages,
+                content_left,
+                cell_content_width,
+                &prepared_line.style,
+                border_line_idx,
+                border_line_count,
+                line_top,
+                prepared_line.line.height,
+                document,
             );
             push_bar_tab_stops(
                 pages,
@@ -2065,6 +2114,15 @@ fn push_table_row(
     }
 
     *cursor_y -= prepared.row_height;
+}
+
+fn paragraph_border_line_position(is_first_line: bool, is_last_line: bool) -> (usize, usize) {
+    match (is_first_line, is_last_line) {
+        (true, true) => (0, 1),
+        (true, false) => (0, 2),
+        (false, true) => (1, 2),
+        (false, false) => (1, 3),
+    }
 }
 
 fn table_visual_cells(
@@ -6392,6 +6450,55 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_table_cell_paragraph_borders() {
+        let mut paragraph_style = ParagraphStyle::default();
+        paragraph_style.borders.bottom = TableCellBorder {
+            visible: true,
+            width_twips: 40,
+            style: BorderStyle::Single,
+            ..TableCellBorder::default()
+        };
+
+        let mut document = Document::default();
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440],
+            borders_visible: false,
+            rows: vec![TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    borders: TableCellBorders::default(),
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: paragraph_style,
+                        runs: vec![Run {
+                            text: "Cell".to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+
+        assert!(page.items.iter().any(
+            |item| matches!(item, LayoutItem::Line { x1, x2, .. } if (*x2 - *x1).abs() > 60.0)
+        ));
+    }
+
+    #[test]
     fn lays_out_table_cell_first_line_indent_only_on_first_line() {
         let mut paragraph_style = ParagraphStyle::default();
         paragraph_style.left_indent_twips = 360;
@@ -10070,6 +10177,47 @@ mod tests {
             layout.pages[0].height
         );
         assert!((footer_y - 42.75).abs() < 0.01, "footer_y={footer_y}");
+    }
+
+    #[test]
+    fn lays_out_header_paragraph_shading_and_borders() {
+        let mut document = Document::default();
+        document.colors = vec![
+            Color::default(),
+            Color {
+                red: 220,
+                green: 230,
+                blue: 240,
+            },
+        ];
+        let mut header_style = ParagraphStyle::default();
+        header_style.shading_color_index = Some(1);
+        header_style.borders.bottom = TableCellBorder {
+            visible: true,
+            width_twips: 40,
+            style: BorderStyle::Single,
+            ..TableCellBorder::default()
+        };
+        document.header = vec![Paragraph {
+            style: header_style,
+            runs: vec![Run {
+                text: "Header".to_string(),
+                style: Default::default(),
+            }],
+        }];
+        document.blocks = vec![paragraph_with_text("Body")];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+
+        assert!(
+            page.items
+                .iter()
+                .any(|item| matches!(item, LayoutItem::Highlight { .. }))
+        );
+        assert!(page.items.iter().any(
+            |item| matches!(item, LayoutItem::Line { x1, x2, .. } if (*x2 - *x1).abs() > 100.0)
+        ));
     }
 
     #[test]

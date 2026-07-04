@@ -12465,6 +12465,136 @@ fn character_borders_are_bounded_passive_pdf_lines() {
 }
 
 #[test]
+fn header_and_table_paragraph_shading_borders_render_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "colortbl;",
+        "\\",
+        "red220",
+        "\\",
+        "green230",
+        "\\",
+        "blue240;}",
+        "{",
+        "\\",
+        "header",
+        "\\",
+        "cbpat1",
+        "\\",
+        "brdrb",
+        "\\",
+        "brdrs",
+        "\\",
+        "brdrw40 Header",
+        "\\",
+        "par}",
+        "\\",
+        "trowd",
+        "\\",
+        "cellx1440",
+        "\\",
+        "intbl",
+        "\\",
+        "brdrb",
+        "\\",
+        "brdrs",
+        "\\",
+        "brdrw40 Cell",
+        "\\",
+        "cell",
+        "\\",
+        "row Body",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Header"));
+    assert!(text.contains("Cell"));
+    assert!(text.contains("Body"));
+
+    let header = parsed.document.header.first().expect("header paragraph");
+    assert_eq!(header.style.shading_color_index, Some(1));
+    assert!(header.style.borders.bottom.visible);
+    assert_eq!(header.style.borders.bottom.width_twips, 40);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+    let cell_paragraph = &table.rows[0].cells[0].paragraphs[0];
+    assert!(cell_paragraph.style.borders.bottom.visible);
+    assert_eq!(cell_paragraph.style.borders.bottom.width_twips, 40);
+    for forbidden in ["cbpat", "brdrb", "brdrs", "brdrw", "trowd", "cellx"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden header/table paragraph decoration control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Header"));
+    assert!(rendered_text.contains("Cell"));
+    assert!(rendered_text.contains("Body"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "f" || operation.operator == "f*"),
+        "header shading should render passive fill"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count()
+            >= 2,
+        "header and table paragraph borders should render passive strokes"
+    );
+    for forbidden in [
+        b"cbpat".as_slice(),
+        b"brdrb",
+        b"brdrs",
+        b"brdrw",
+        b"trowd",
+        b"cellx",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden header/table paragraph decoration content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn styled_borders_stay_passive_pdf_strokes() {
     let input = rtf(&[
         "{",
