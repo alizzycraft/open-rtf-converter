@@ -1,3 +1,4 @@
+pub mod config;
 pub mod convert;
 pub mod diagnostics;
 pub mod layout;
@@ -5,5 +6,12 @@ pub mod model;
 pub mod pdf;
 pub mod rtf;
 
-pub use convert::{ConvertOptions, convert_rtf_to_pdf};
+pub use config::{
+    ActiveContentPolicy, CompatibilityMode, PdfLinkPolicy, RtfLimits, RtfParseOptions,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use convert::convert_rtf_file_to_pdf;
+pub use convert::{
+    ConversionOutput, ConvertError, ConvertOptions, convert_rtf_bytes_to_pdf, convert_rtf_to_pdf,
+};
 pub use diagnostics::{Diagnostic, Severity};

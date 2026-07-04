@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use open_rtf_converter::{ConvertOptions, convert_rtf_to_pdf};
+use open_rtf_converter::{ConvertOptions, convert_rtf_file_to_pdf};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -45,9 +45,10 @@ fn main() {
 
     let options = ConvertOptions {
         diagnostics: cli.diagnostics,
+        ..ConvertOptions::default()
     };
 
-    match convert_rtf_to_pdf(&cli.input, &output, &options) {
+    match convert_rtf_file_to_pdf(&cli.input, &output, &options) {
         Ok(report) => {
             for diagnostic in report.diagnostics {
                 eprintln!("{diagnostic}");

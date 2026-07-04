@@ -3,9 +3,12 @@ name = "open-rtf-converter"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["cli"]
+cli = ["dep:clap"]
+
 [dependencies]
-clap = { version = "4.6.1", features = ["derive"] }
-fontdb = "0.23.0"
+clap = { version = "4.6.1", features = ["derive"], optional = true }
 pdf-writer = "0.15.0"
 thiserror = "2.0.17"
 unicode-linebreak = "0.1.5"
@@ -13,3 +16,8 @@ unicode-linebreak = "0.1.5"
 [dev-dependencies]
 lopdf = "0.38.0"
 tempfile = "3.24.0"
+
+[[bin]]
+name = "open-rtf-converter"
+path = "src/main.rs"
+required-features = ["cli"]
