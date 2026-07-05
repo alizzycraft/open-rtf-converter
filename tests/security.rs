@@ -2175,6 +2175,61 @@ fn list_level_marker_formatting_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn list_level_marker_double_strike_renders_passively_without_control_leakage() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\strikedl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Double strike item\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+
+    assert_eq!(paragraph.runs[0].text, "1.\t");
+    assert!(paragraph.runs[0].style.strike);
+    assert!(paragraph.runs[0].style.double_strike);
+    assert_eq!(paragraph.runs[1].text, "Double strike item");
+    assert!(!paragraph.runs[1].style.strike);
+    assert!(!paragraph.runs[1].style.double_strike);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("1.Double strike item"),
+        "decoded PDF text did not contain double-struck list-table marker: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"strikedl".as_slice(),
+        b"levelnfc",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level marker double-strike leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn list_level_legal_numbering_renders_passively_without_control_leakage() {
     let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc1\levelstartat4{\leveltext\'02\'00.;}{\levelnumbers\'01;}}{\listlevel\levelnfc0\levellegal1\levelstartat1{\leveltext\'04\'00.\'01.;}{\levelnumbers\'01\'03;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Parent\par\pard\ls1\ilvl1 Child\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

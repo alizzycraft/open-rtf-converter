@@ -1353,6 +1353,12 @@ impl Parser {
             {
                 self.set_current_list_level_strike(control.parameter.unwrap_or(1) != 0);
             }
+            "strikedl"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_double_strike(control.parameter.unwrap_or(1) != 0);
+            }
             "caps"
                 if self.state.destination == Destination::ListTable
                     && self.state.list_context == ListContext::ListLevel =>
@@ -6968,6 +6974,13 @@ impl Parser {
         });
     }
 
+    fn set_current_list_level_double_strike(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| {
+            style.strike = enabled;
+            style.double_strike = enabled;
+        });
+    }
+
     fn set_current_list_level_caps(&mut self, enabled: bool) {
         self.update_current_list_level_character_style(|style| style.all_caps = enabled);
     }
@@ -12533,6 +12546,31 @@ After\par}"#;
         assert_eq!(paragraph.runs[1].style.color_index, 0);
         assert_eq!(paragraph.runs[1].style.highlight_index, None);
         assert_eq!(paragraph.runs[1].style.underline_color_index, None);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn applies_list_level_marker_double_strike_to_marker_run_only() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\strikedl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Double strike item\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert!(paragraph.runs[0].style.strike);
+        assert!(paragraph.runs[0].style.double_strike);
+        assert_eq!(paragraph.runs[1].text, "Double strike item");
+        assert!(!paragraph.runs[1].style.strike);
+        assert!(!paragraph.runs[1].style.double_strike);
         assert!(
             output
                 .diagnostics
