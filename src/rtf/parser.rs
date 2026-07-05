@@ -566,6 +566,8 @@ struct ListLevelOverride {
     level_index: usize,
     start_at: Option<i32>,
     restart_enabled: bool,
+    format_override_enabled: bool,
+    level_definition: Option<ListLevelDefinition>,
 }
 
 #[derive(Debug, Clone)]
@@ -1299,10 +1301,28 @@ impl Parser {
             "listlevel" if self.state.destination == Destination::ListTable => {
                 self.start_list_level();
             }
+            "listlevel"
+                if self.state.destination == Destination::ListOverrideTable
+                    && self.state.list_context == ListContext::ListOverrideLevel =>
+            {
+                self.start_list_level();
+            }
             "leveltext" if self.state.destination == Destination::ListTable => {
                 self.start_list_level_text();
             }
+            "leveltext"
+                if self.state.destination == Destination::ListOverrideTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.start_list_level_text();
+            }
             "levelnfc" | "levelnfcn" if self.state.destination == Destination::ListTable => {
+                self.set_current_list_level_format(control.parameter.unwrap_or(0));
+            }
+            "levelnfc" | "levelnfcn"
+                if self.state.destination == Destination::ListOverrideTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
                 self.set_current_list_level_format(control.parameter.unwrap_or(0));
             }
             "levelstartat"
@@ -1314,6 +1334,12 @@ impl Parser {
             "levelstartat" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_start(control.parameter.unwrap_or(1));
             }
+            "levelstartat"
+                if self.state.destination == Destination::ListOverrideTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_start(control.parameter.unwrap_or(1));
+            }
             "levelindent" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_indent(control.parameter, offset);
             }
@@ -1323,10 +1349,28 @@ impl Parser {
             "levelfollow" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_follow(control.parameter.unwrap_or(0));
             }
+            "levelfollow"
+                if self.state.destination == Destination::ListOverrideTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_follow(control.parameter.unwrap_or(0));
+            }
             "levellegal" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_legal_numbering(control.parameter.unwrap_or(1) != 0);
             }
+            "levellegal"
+                if self.state.destination == Destination::ListOverrideTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_legal_numbering(control.parameter.unwrap_or(1) != 0);
+            }
             "levelnorestart" if self.state.destination == Destination::ListTable => {
+                self.set_current_list_level_no_restart(control.parameter.unwrap_or(1) != 0);
+            }
+            "levelnorestart"
+                if self.state.destination == Destination::ListOverrideTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
                 self.set_current_list_level_no_restart(control.parameter.unwrap_or(1) != 0);
             }
             "b" if self.state.destination == Destination::ListTable
@@ -1654,6 +1698,12 @@ impl Parser {
             }
             "lfolevel" if self.state.destination == Destination::ListOverrideTable => {
                 self.start_list_override_level();
+            }
+            "listoverrideformat"
+                if self.state.destination == Destination::ListOverrideTable
+                    && self.state.list_context == ListContext::ListOverrideLevel =>
+            {
+                self.enable_current_list_override_level_format(control.parameter.unwrap_or(1));
             }
             "listoverridestartat"
                 if self.state.destination == Destination::ListOverrideTable
@@ -2125,6 +2175,11 @@ impl Parser {
                 self.push_list_marker_unicode(control.parameter.unwrap_or(0), offset)?
             }
             "u" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevelText =>
+            {
+                self.push_list_level_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if self.state.destination == Destination::ListOverrideTable
                 && self.state.list_context == ListContext::ListLevelText =>
             {
                 self.push_list_level_unicode(control.parameter.unwrap_or(0), offset)?
@@ -3028,6 +3083,11 @@ impl Parser {
             Destination::ListTable if self.state.list_context == ListContext::ListLevelText => {
                 self.push_list_level_text(text, offset)?
             }
+            Destination::ListOverrideTable
+                if self.state.list_context == ListContext::ListLevelText =>
+            {
+                self.push_list_level_text(text, offset)?
+            }
             Destination::FieldInstruction => self.push_field_instruction_text(text, offset)?,
             Destination::BookmarkStart | Destination::BookmarkEnd => {
                 self.push_bookmark_name_text(text, offset)?
@@ -3151,6 +3211,12 @@ impl Parser {
                 self.push_font_alternate_text(&ch.to_string(), offset)?;
             }
             Destination::ListTable if self.state.list_context == ListContext::ListLevelText => {
+                let ch = decode_hex_byte(byte, self.state.code_page);
+                self.push_list_level_text(&ch.to_string(), offset)?;
+            }
+            Destination::ListOverrideTable
+                if self.state.list_context == ListContext::ListLevelText =>
+            {
                 let ch = decode_hex_byte(byte, self.state.code_page);
                 self.push_list_level_text(&ch.to_string(), offset)?;
             }
@@ -6810,10 +6876,17 @@ impl Parser {
         let Some(list) = list else {
             return Ok(None);
         };
-        let level = list.levels.get(level_index).cloned();
-        let Some(level) = level else {
+        let base_level = list.levels.get(level_index).cloned();
+        let Some(base_level) = base_level else {
             return Ok(None);
         };
+        let level = list_override
+            .level_overrides
+            .iter()
+            .find(|level_override| level_override.level_index == level_index)
+            .filter(|level_override| level_override.format_override_enabled)
+            .and_then(|level_override| level_override.level_definition.clone())
+            .unwrap_or(base_level);
         self.apply_list_level_layout(&level, offset)?;
         let follow = list_level_follow_text(level.follow);
         let character_style = level
@@ -6850,11 +6923,11 @@ impl Parser {
                         text: format!(
                             "{}{}",
                             self.render_list_level_template(
+                                &level.text_template,
                                 &list,
                                 &list_override,
                                 override_index,
                                 level_index,
-                                value,
                                 &marker,
                                 level.legal_numbering,
                             ),
@@ -6901,35 +6974,36 @@ impl Parser {
 
     fn render_list_level_template(
         &self,
+        current_template: &str,
         list: &ListDefinition,
         list_override: &ListOverride,
         override_index: i32,
         current_level_index: usize,
-        current_value: i32,
         current_marker: &str,
         legal_numbering: bool,
     ) -> String {
         let mut output = String::new();
-        for ch in list.levels[current_level_index].text_template.chars() {
+        for ch in current_template.chars() {
             if let Some(template_level_index) = list_level_placeholder_index(ch) {
+                if template_level_index == current_level_index {
+                    output.push_str(current_marker);
+                    continue;
+                }
                 let Some(template_level) = list.levels.get(template_level_index) else {
                     output.push_str(current_marker);
                     continue;
                 };
-                let value = if template_level_index == current_level_index {
-                    current_value
-                } else {
-                    self.list_counters
-                        .iter()
-                        .find(|counter| {
-                            counter.override_index == override_index
-                                && counter.level_index == template_level_index
-                        })
-                        .map(|counter| counter.value)
-                        .unwrap_or_else(|| {
-                            list_level_start_at(list_override, template_level, template_level_index)
-                        })
-                };
+                let value = self
+                    .list_counters
+                    .iter()
+                    .find(|counter| {
+                        counter.override_index == override_index
+                            && counter.level_index == template_level_index
+                    })
+                    .map(|counter| counter.value)
+                    .unwrap_or_else(|| {
+                        list_level_start_at(list_override, template_level, template_level_index)
+                    });
                 let format = if legal_numbering && template_level_index < current_level_index {
                     ListNumberFormat::Decimal
                 } else {
@@ -7551,6 +7625,12 @@ impl Parser {
         let Some(level) = self.current_list_level.take() else {
             return Ok(());
         };
+        if self.state.destination == Destination::ListOverrideTable {
+            if let Some(level_override) = self.current_list_override_level.as_mut() {
+                level_override.level_definition = Some(level);
+            }
+            return Ok(());
+        }
         let Some(list) = self.current_list.as_mut() else {
             return Ok(());
         };
@@ -7605,6 +7685,8 @@ impl Parser {
             level_index,
             start_at: None,
             restart_enabled: false,
+            format_override_enabled: false,
+            level_definition: None,
         });
         self.state.list_context = ListContext::ListOverrideLevel;
     }
@@ -7633,11 +7715,21 @@ impl Parser {
         }
     }
 
+    fn enable_current_list_override_level_format(&mut self, enabled: i32) {
+        if let Some(level_override) = self.current_list_override_level.as_mut() {
+            level_override.format_override_enabled = enabled != 0;
+        }
+    }
+
     fn finish_list_override_level(&mut self, offset: usize) -> Result<(), ParseError> {
         let Some(level_override) = self.current_list_override_level.take() else {
             return Ok(());
         };
-        if !level_override.restart_enabled || level_override.start_at.is_none() {
+        let has_start_override =
+            level_override.restart_enabled && level_override.start_at.is_some();
+        let has_format_override =
+            level_override.format_override_enabled && level_override.level_definition.is_some();
+        if !has_start_override && !has_format_override {
             return Ok(());
         }
         let Some(list_override) = self.current_list_override.as_mut() else {
@@ -13350,6 +13442,31 @@ After\par}"#;
 
         assert_eq!(first.runs[0].text, "3.\tFirst");
         assert_eq!(second.runs[0].text, "4.\tSecond");
+    }
+
+    #[test]
+    fn list_override_format_replaces_synthesized_marker_definition() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5{\lfolevel\listoverrideformat{\listlevel\levelnfc4\levelstartat3{\leveltext\'02\'00);}{\levelnumbers\'01;}}}\ls1}}\pard\ls1\ilvl0 First\par\pard\ls1\ilvl0 Second\par}",
+        )
+        .unwrap();
+        let first = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let second = match &output.document.blocks[1] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(first.runs[0].text, "c)\tFirst");
+        assert_eq!(second.runs[0].text, "d)\tSecond");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]

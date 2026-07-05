@@ -3194,6 +3194,139 @@ fn list_override_start_values_render_as_passive_pdf_text() {
 }
 
 #[test]
+fn list_override_format_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "*",
+        "\\",
+        "listtable{",
+        "\\",
+        "list{",
+        "\\",
+        "listlevel",
+        "\\",
+        "levelnfc0",
+        "\\",
+        "levelstartat1{",
+        "\\",
+        "leveltext",
+        "\\",
+        "'02",
+        "\\",
+        "'00.;}{",
+        "\\",
+        "levelnumbers",
+        "\\",
+        "'01;}}",
+        "\\",
+        "listid5}}{",
+        "\\",
+        "*",
+        "\\",
+        "listoverridetable{",
+        "\\",
+        "listoverride",
+        "\\",
+        "listid5{",
+        "\\",
+        "lfolevel",
+        "\\",
+        "listoverrideformat{",
+        "\\",
+        "listlevel",
+        "\\",
+        "levelnfc4",
+        "\\",
+        "levelstartat3{",
+        "\\",
+        "leveltext",
+        "\\",
+        "'02",
+        "\\",
+        "'00);}{",
+        "\\",
+        "levelnumbers",
+        "\\",
+        "'01;}}}",
+        "\\",
+        "ls1}}",
+        "\\",
+        "pard",
+        "\\",
+        "ls1",
+        "\\",
+        "ilvl0 First",
+        "\\",
+        "par",
+        "\\",
+        "pard",
+        "\\",
+        "ls1",
+        "\\",
+        "ilvl0 Second",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("c)\tFirst"));
+    assert!(text.contains("d)\tSecond"));
+    for forbidden in [
+        "listoverrideformat",
+        "lfolevel",
+        "levelnfc",
+        "listoverridetable",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden list override format control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("c)First"),
+        "decoded PDF text did not contain override formatted first marker: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("d)Second"),
+        "decoded PDF text did not contain override formatted second marker: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"listoverrideformat".as_slice(),
+        b"lfolevel",
+        b"levelnfc",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list override format content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn multilevel_list_markers_render_as_passive_pdf_text() {
     let input = rtf(&[
         "{",
