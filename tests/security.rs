@@ -6772,6 +6772,103 @@ visible after\par}"#
 }
 
 #[test]
+fn resultless_template_barcode_equation_embed_and_gotobutton_fields_stay_passive() {
+    let input = br#"{\rtf1 Visible before
+{\field{\*\fldinst AUTOTEXT HiddenBlock}}
+list {\field{\*\fldinst AUTOTEXTLIST "Hidden menu" \s HiddenStyle}}
+barcode {\field{\*\fldinst BARCODE "Hidden address" QR \h 720}}
+display {\field{\*\fldinst DISPLAYBARCODE "Hidden code" QR}}
+eq {\field{\*\fldinst EQ \f(1,2)}}
+embed {\field{\*\fldinst EMBED Word.Document.8}}
+go {\field{\*\fldinst GOTOBUTTON HiddenBookmark "Visible jump"}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("visible after"));
+    assert!(text.contains("go Visible jump"));
+    assert_eq!(
+        text.matches("[Field removed: no passive result]").count(),
+        6
+    );
+    for forbidden in [
+        "AUTOTEXT",
+        "AUTOTEXTLIST",
+        "BARCODE",
+        "DISPLAYBARCODE",
+        "EMBED",
+        "EQ",
+        "GOTOBUTTON",
+        "HiddenBlock",
+        "Hidden menu",
+        "HiddenStyle",
+        "Hidden address",
+        "Hidden code",
+        "HiddenBookmark",
+        "Word.Document.8",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden template/generated/embedded field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("visible after"));
+    assert!(rendered_text.contains("go Visible jump"));
+    assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for forbidden in [
+        b"AUTOTEXT".as_slice(),
+        b"AUTOTEXTLIST",
+        b"BARCODE",
+        b"DISPLAYBARCODE",
+        b"EMBED",
+        b"EQ",
+        b"GOTOBUTTON",
+        b"HiddenBlock",
+        b"Hidden menu",
+        b"HiddenStyle",
+        b"Hidden address",
+        b"Hidden code",
+        b"HiddenBookmark",
+        b"Word.Document.8",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden template/generated/embedded field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_environment_fields_do_not_expose_host_state_to_pdf() {
     let input = br#"{\rtf1 Visible before
 {\field{\*\fldinst FILENAME \p}}

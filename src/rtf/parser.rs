@@ -1310,7 +1310,35 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "generated field {name} removed without building document index or bibliography"
+                                "generated field {name} removed without synthesizing generated field output"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_building_block_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "building-block field {name} removed without reading template storage"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_embedded_object_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "embedded object field {name} removed without activating embedded object"
                             ),
                             Some(offset),
                         ));
@@ -1411,7 +1439,25 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "generated field {name} stripped without building document index or bibliography"
+                                "generated field {name} stripped without synthesizing generated field output"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_building_block_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "building-block field {name} stripped without reading template storage"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_embedded_object_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "embedded object field {name} stripped without activating embedded object"
                             ),
                             Some(offset),
                         ));
@@ -9848,6 +9894,7 @@ fn passive_field_result(
         }),
         "FORMULA" => passive_formula_field_result(instruction),
         "IF" => passive_if_field_result(instruction),
+        "GOTOBUTTON" => passive_gotobutton_field_result(instruction),
         "MACROBUTTON" => passive_macrobutton_field_result(instruction),
         "MERGEFIELD" => passive_mergefield_result(instruction),
         "QUOTE" => passive_quote_field_result(instruction),
@@ -9870,9 +9917,12 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "ADDIN" => Some("ADDIN"),
         "ASK" => Some("ASK"),
         "AUTHOR" => Some("AUTHOR"),
+        "AUTOTEXT" => Some("AUTOTEXT"),
+        "AUTOTEXTLIST" => Some("AUTOTEXTLIST"),
         "AUTONUM" => Some("AUTONUM"),
         "AUTONUMLGL" => Some("AUTONUMLGL"),
         "AUTONUMOUT" => Some("AUTONUMOUT"),
+        "BARCODE" => Some("BARCODE"),
         "BIBLIOGRAPHY" => Some("BIBLIOGRAPHY"),
         "CITATION" => Some("CITATION"),
         "COMMENTS" => Some("COMMENTS"),
@@ -9897,6 +9947,8 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "DOCPROPERTY" => Some("DOCPROPERTY"),
         "DOCVARIABLE" => Some("DOCVARIABLE"),
         "EDITTIME" => Some("EDITTIME"),
+        "EMBED" => Some("EMBED"),
+        "EQ" => Some("EQ"),
         "FILENAME" => Some("FILENAME"),
         "FILESIZE" => Some("FILESIZE"),
         "FILLIN" => Some("FILLIN"),
@@ -9906,6 +9958,8 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "DATABASE" => Some("DATABASE"),
         "DDE" => Some("DDE"),
         "DDEAUTO" => Some("DDEAUTO"),
+        "DISPLAYBARCODE" => Some("DISPLAYBARCODE"),
+        "GOTOBUTTON" => Some("GOTOBUTTON"),
         "HYPERLINK" => Some("HYPERLINK"),
         "IF" => Some("IF"),
         "INDEX" => Some("INDEX"),
@@ -10130,7 +10184,18 @@ fn is_mail_merge_data_resultless_field(name: &str) -> bool {
 }
 
 fn is_generated_resultless_field(name: &str) -> bool {
-    matches!(name, "BIBLIOGRAPHY" | "CITATION" | "INDEX" | "TOA" | "TOC")
+    matches!(
+        name,
+        "BARCODE" | "BIBLIOGRAPHY" | "CITATION" | "DISPLAYBARCODE" | "EQ" | "INDEX" | "TOA" | "TOC"
+    )
+}
+
+fn is_building_block_resultless_field(name: &str) -> bool {
+    matches!(name, "AUTOTEXT" | "AUTOTEXTLIST")
+}
+
+fn is_embedded_object_resultless_field(name: &str) -> bool {
+    matches!(name, "EMBED")
 }
 
 fn is_builtin_passive_result_font(font_name: &str) -> bool {
@@ -10241,6 +10306,34 @@ fn passive_macrobutton_field_result(instruction: &str) -> Option<PassiveFieldRes
         display.trim_end().to_string()
     };
     if text.is_empty() || text.chars().any(|ch| ch.is_control()) {
+        return None;
+    }
+
+    Some(PassiveFieldResult {
+        text,
+        font_name: None,
+        form_field: false,
+    })
+}
+
+fn passive_gotobutton_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    let rest = field_rest_after_name(instruction)?;
+    let rest = skip_field_argument(rest)?;
+    let display = rest.trim_start();
+    if display.is_empty() {
+        return None;
+    }
+
+    let text = if display.starts_with('"') {
+        field_quoted_prefix(display)?
+    } else {
+        display.trim_end().to_string()
+    };
+    if text.is_empty()
+        || text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
+        || text.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(&text)
+    {
         return None;
     }
 
@@ -14934,6 +15027,104 @@ After\par}"#;
                 .iter()
                 .any(|diagnostic| { diagnostic.message.contains("generated field TOC stripped") })
         );
+    }
+
+    #[test]
+    fn resultless_template_barcode_equation_and_embed_fields_do_not_execute_or_leak() {
+        let input = r#"{\rtf1 Before {\field{\*\fldinst AUTOTEXT HiddenBlock}} list {\field{\*\fldinst AUTOTEXTLIST "Hidden menu" \s HiddenStyle}} barcode {\field{\*\fldinst BARCODE "Hidden address" QR \h 720}} display {\field{\*\fldinst DISPLAYBARCODE "Hidden code" QR}} eq {\field{\*\fldinst EQ \f(1,2)}} embed {\field{\*\fldinst EMBED Word.Document.8}} go {\field{\*\fldinst GOTOBUTTON HiddenBookmark "Visible jump"}} After\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Before"));
+        assert!(text.contains("list"));
+        assert!(text.contains("barcode"));
+        assert!(text.contains("display"));
+        assert!(text.contains("eq"));
+        assert!(text.contains("embed"));
+        assert!(text.contains("go Visible jump"));
+        assert!(text.contains("After"));
+        assert_eq!(
+            text.matches("[Field removed: no passive result]").count(),
+            6
+        );
+        for forbidden in [
+            "AUTOTEXT",
+            "AUTOTEXTLIST",
+            "BARCODE",
+            "DISPLAYBARCODE",
+            "EMBED",
+            "EQ",
+            "GOTOBUTTON",
+            "HiddenBlock",
+            "Hidden menu",
+            "HiddenStyle",
+            "Hidden address",
+            "Hidden code",
+            "HiddenBookmark",
+            "Word.Document.8",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "template/generated/embedded field leaked instruction text: {forbidden}"
+            );
+        }
+        for name in ["AUTOTEXT", "AUTOTEXTLIST"] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("building-block field {name} removed"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
+        for name in ["BARCODE", "DISPLAYBARCODE", "EQ"] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("generated field {name} removed"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("embedded object field EMBED removed")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering passive field GOTOBUTTON without executing field instruction")
+        }));
+
+        let strip_options = RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Strip,
+            ..RtfParseOptions::default()
+        };
+        let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
+        let stripped_text = document_text(&stripped.document);
+        assert!(stripped_text.contains("Before"));
+        assert!(stripped_text.contains("go Visible jump"));
+        assert!(stripped_text.contains("After"));
+        assert!(!stripped_text.contains("[Field removed"));
+        assert!(stripped.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("building-block field AUTOTEXT stripped")
+        }));
+        assert!(stripped.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("generated field BARCODE stripped")
+        }));
+        assert!(stripped.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("embedded object field EMBED stripped")
+        }));
     }
 
     #[test]
