@@ -4696,6 +4696,10 @@ impl Parser {
             self.passive_page_ref_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("DOCPROPERTY") {
             self.passive_doc_property_field_result(instruction)
+        } else if let Some(property) =
+            field_instruction_name(instruction).and_then(document_shortcut_property_field_name)
+        {
+            self.passive_builtin_document_property_field_result(property)
         } else if let Some(kind) =
             field_instruction_name(instruction).and_then(document_timestamp_field_name)
         {
@@ -4716,9 +4720,7 @@ impl Parser {
     fn passive_doc_property_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
         let text = if let Some(property) = document_property_field_name(&name) {
-            self.document_properties
-                .iter()
-                .find_map(|(stored_property, text)| (*stored_property == property).then(|| text))?
+            self.document_property_text(property)?
         } else {
             self.custom_document_properties
                 .iter()
@@ -4731,6 +4733,23 @@ impl Parser {
             font_name: None,
             form_field: false,
         })
+    }
+
+    fn passive_builtin_document_property_field_result(
+        &self,
+        property: DocumentProperty,
+    ) -> Option<PassiveFieldResult> {
+        Some(PassiveFieldResult {
+            text: self.document_property_text(property)?.clone(),
+            font_name: None,
+            form_field: false,
+        })
+    }
+
+    fn document_property_text(&self, property: DocumentProperty) -> Option<&String> {
+        self.document_properties
+            .iter()
+            .find_map(|(stored_property, text)| (*stored_property == property).then(|| text))
     }
 
     fn passive_document_timestamp_field_result(
@@ -9267,9 +9286,11 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         .collect::<String>()
         .to_ascii_uppercase();
     match name.as_str() {
+        "AUTHOR" => Some("AUTHOR"),
         "AUTONUM" => Some("AUTONUM"),
         "AUTONUMLGL" => Some("AUTONUMLGL"),
         "AUTONUMOUT" => Some("AUTONUMOUT"),
+        "COMMENTS" => Some("COMMENTS"),
         "PAGE" => Some("PAGE"),
         "NUMPAGES" => Some("NUMPAGES"),
         "NUMWORDS" => Some("NUMWORDS"),
@@ -9297,14 +9318,18 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "IMPORT" => Some("IMPORT"),
         "INCLUDEPICTURE" => Some("INCLUDEPICTURE"),
         "INCLUDETEXT" => Some("INCLUDETEXT"),
+        "KEYWORDS" => Some("KEYWORDS"),
+        "LASTSAVEDBY" => Some("LASTSAVEDBY"),
         "LINK" => Some("LINK"),
         "LISTNUM" => Some("LISTNUM"),
         "MACROBUTTON" => Some("MACROBUTTON"),
         "MERGEFIELD" => Some("MERGEFIELD"),
         "PRINTDATE" => Some("PRINTDATE"),
         "SAVEDATE" => Some("SAVEDATE"),
+        "SUBJECT" => Some("SUBJECT"),
         "SYMBOL" => Some("SYMBOL"),
         "TIME" => Some("TIME"),
+        "TITLE" => Some("TITLE"),
         "XE" => Some("XE"),
         _ => None,
     }
@@ -9321,6 +9346,18 @@ fn document_property_field_name(name: &str) -> Option<DocumentProperty> {
         "manager" => Some(DocumentProperty::Manager),
         "company" => Some(DocumentProperty::Company),
         "category" => Some(DocumentProperty::Category),
+        _ => None,
+    }
+}
+
+fn document_shortcut_property_field_name(name: &str) -> Option<DocumentProperty> {
+    match name {
+        "AUTHOR" => Some(DocumentProperty::Author),
+        "TITLE" => Some(DocumentProperty::Title),
+        "SUBJECT" => Some(DocumentProperty::Subject),
+        "KEYWORDS" => Some(DocumentProperty::Keywords),
+        "COMMENTS" => Some(DocumentProperty::Comments),
+        "LASTSAVEDBY" => Some(DocumentProperty::Operator),
         _ => None,
     }
 }
@@ -15117,6 +15154,34 @@ After\par}"#;
                 .message
                 .contains("rendering passive field DOCPROPERTY without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_shortcut_document_property_fields_render_safe_metadata_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\title Visible Title}{\subject Visible Subject}{\author Alice}{\keywords alpha beta}{\operator Bob}{\doccomm Hidden comment}}Doc {\field{\*\fldinst TITLE}} by {\field{\*\fldinst AUTHOR \\* Upper}} about {\field{\*\fldinst SUBJECT}} tags {\field{\*\fldinst KEYWORDS}} saved {\field{\*\fldinst LASTSAVEDBY}} note {\field{\*\fldinst COMMENTS}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "Doc Visible Title by ALICE about Visible Subject tags alpha beta saved Bob note Hidden comment"
+        ));
+        for forbidden in [
+            "TITLE",
+            "AUTHOR",
+            "SUBJECT",
+            "KEYWORDS",
+            "LASTSAVEDBY",
+            "COMMENTS",
+            "fldinst",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "shortcut document property field leaked unsafe text: {forbidden}"
+            );
+        }
     }
 
     #[test]
