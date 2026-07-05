@@ -2100,6 +2100,65 @@ fn list_level_follow_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn list_level_marker_formatting_renders_passively_without_control_leakage() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\f1\fs28\b\i\ul\strike\caps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+
+    assert_eq!(paragraph.runs[0].text, "1.\t");
+    assert!(paragraph.runs[0].style.bold);
+    assert!(paragraph.runs[0].style.italic);
+    assert_eq!(paragraph.runs[0].style.underline, UnderlineStyle::Single);
+    assert!(paragraph.runs[0].style.strike);
+    assert!(paragraph.runs[0].style.all_caps);
+    assert_eq!(paragraph.runs[0].style.font_index, 1);
+    assert_eq!(paragraph.runs[0].style.font_size_half_points, 28);
+    assert_eq!(paragraph.runs[1].text, "Styled item");
+    assert!(!paragraph.runs[1].style.bold);
+    assert!(!paragraph.runs[1].style.italic);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("1.Styled item"),
+        "decoded PDF text did not contain styled list-table marker: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"levelnfc".as_slice(),
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level marker formatting leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn ordinal_list_markers_render_as_passive_pdf_text() {
     let input = rtf(&[
         "{",

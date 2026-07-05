@@ -510,6 +510,8 @@ struct ListLevelDefinition {
     indent_twips: Option<i32>,
     space_twips: Option<i32>,
     follow: ListLevelFollow,
+    character_style: CharacterStyle,
+    has_character_style: bool,
 }
 
 impl Default for ListLevelDefinition {
@@ -521,6 +523,8 @@ impl Default for ListLevelDefinition {
             indent_twips: None,
             space_twips: None,
             follow: ListLevelFollow::Tab,
+            character_style: CharacterStyle::default(),
+            has_character_style: false,
         }
     }
 }
@@ -1311,6 +1315,49 @@ impl Parser {
             }
             "levelfollow" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_follow(control.parameter.unwrap_or(0));
+            }
+            "b" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_bold(control.parameter.unwrap_or(1) != 0);
+            }
+            "i" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_italic(control.parameter.unwrap_or(1) != 0);
+            }
+            "ul" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline(control.parameter.unwrap_or(1) != 0);
+            }
+            "ulnone"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline(false);
+            }
+            "strike" | "striked"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_strike(control.parameter.unwrap_or(1) != 0);
+            }
+            "caps"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_caps(control.parameter.unwrap_or(1) != 0);
+            }
+            "f" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_font(control.parameter.unwrap_or(0));
+            }
+            "fs" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_font_size(control.parameter.unwrap_or(24), offset);
             }
             "listid" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_id(control.parameter.unwrap_or(0));
@@ -6423,6 +6470,9 @@ impl Parser {
         };
         self.apply_list_level_layout(&level, offset)?;
         let follow = list_level_follow_text(level.follow);
+        let character_style = level
+            .has_character_style
+            .then_some(level.character_style.clone());
 
         let marker = match level.format {
             ListNumberFormat::Bullet => {
@@ -6433,7 +6483,7 @@ impl Parser {
                 };
                 PendingListMarker {
                     text: format!("{bullet}{follow}"),
-                    character_style: None,
+                    character_style,
                 }
             }
             ListNumberFormat::Decimal
@@ -6461,12 +6511,12 @@ impl Parser {
                             ),
                             follow
                         ),
-                        character_style: None,
+                        character_style,
                     }
                 } else {
                     PendingListMarker {
                         text: format!("{marker}.{follow}"),
-                        character_style: None,
+                        character_style,
                     }
                 }
             }
@@ -6808,6 +6858,58 @@ impl Parser {
                 _ => ListLevelFollow::Tab,
             };
         }
+    }
+
+    fn update_current_list_level_character_style(
+        &mut self,
+        update: impl FnOnce(&mut CharacterStyle),
+    ) {
+        if let Some(level) = self.current_list_level.as_mut() {
+            update(&mut level.character_style);
+            level.has_character_style = true;
+        }
+    }
+
+    fn set_current_list_level_bold(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| style.bold = enabled);
+    }
+
+    fn set_current_list_level_italic(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| style.italic = enabled);
+    }
+
+    fn set_current_list_level_underline(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| {
+            style.underline = if enabled {
+                UnderlineStyle::Single
+            } else {
+                UnderlineStyle::None
+            };
+        });
+    }
+
+    fn set_current_list_level_strike(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| {
+            style.strike = enabled;
+            style.double_strike = false;
+        });
+    }
+
+    fn set_current_list_level_caps(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| style.all_caps = enabled);
+    }
+
+    fn set_current_list_level_font(&mut self, font_index: i32) {
+        self.update_current_list_level_character_style(|style| {
+            style.font_index = font_index.max(0)
+        });
+    }
+
+    fn set_current_list_level_font_size(&mut self, font_size_half_points: i32, offset: usize) {
+        let font_size_half_points = self.clamp_font_size(font_size_half_points, offset);
+        self.update_current_list_level_character_style(|style| {
+            style.font_size_half_points = font_size_half_points
+        });
     }
 
     fn clamp_list_level_spacing(&mut self, space_twips: Option<i32>, offset: usize) -> i32 {
@@ -12133,6 +12235,39 @@ After\par}"#;
         assert_eq!(paragraph_text(0), "1.\tTab");
         assert_eq!(paragraph_text(1), "1. Space");
         assert_eq!(paragraph_text(2), "1.Nothing");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn applies_list_level_marker_character_formatting_to_marker_run() {
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\*\listtable{\list{\listlevel\levelnfc0\f1\fs28\b\i\ul\strike\caps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert!(paragraph.runs[0].style.bold);
+        assert!(paragraph.runs[0].style.italic);
+        assert_eq!(paragraph.runs[0].style.underline, UnderlineStyle::Single);
+        assert!(paragraph.runs[0].style.strike);
+        assert!(paragraph.runs[0].style.all_caps);
+        assert_eq!(paragraph.runs[0].style.font_index, 1);
+        assert_eq!(paragraph.runs[0].style.font_size_half_points, 28);
+        assert_eq!(paragraph.runs[1].text, "Styled item");
+        assert!(!paragraph.runs[1].style.bold);
+        assert!(!paragraph.runs[1].style.italic);
+        assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
+        assert!(!paragraph.runs[1].style.strike);
+        assert_eq!(paragraph.runs[1].style.font_index, 0);
         assert!(
             output
                 .diagnostics
