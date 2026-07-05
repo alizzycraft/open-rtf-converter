@@ -661,6 +661,7 @@ struct Parser {
     current_table_row: Option<TableRowBuilder>,
     table_cell_count: usize,
     pending_list_marker: String,
+    pending_list_marker_character_style: Option<CharacterStyle>,
     current_picture: Option<PictureBuilder>,
     current_shape: Option<ShapeBuilder>,
     image_count: usize,
@@ -760,6 +761,7 @@ impl Parser {
             current_table_row: None,
             table_cell_count: 0,
             pending_list_marker: String::new(),
+            pending_list_marker_character_style: None,
             current_picture: None,
             current_shape: None,
             image_count: 0,
@@ -1885,6 +1887,7 @@ impl Parser {
             }
             "listtext" | "pntext" if destination_allows_safe_structural_content(&self.state) => {
                 self.pending_list_marker.clear();
+                self.pending_list_marker_character_style = None;
                 self.pending_old_style_list_marker = None;
                 self.state.destination = Destination::ListText;
             }
@@ -4053,6 +4056,11 @@ impl Parser {
         if self.state.character.hidden {
             self.count_skipped_destination_bytes(text.len(), offset)?;
             return Ok(());
+        }
+        if self.pending_list_marker_character_style.is_none()
+            && self.state.character != self.default_character_style()
+        {
+            self.pending_list_marker_character_style = Some(self.state.character.clone());
         }
         let new_len = self
             .pending_list_marker
@@ -6719,7 +6727,7 @@ impl Parser {
             self.pending_old_style_list_marker = None;
             return Ok(Some(PendingListMarker {
                 text: std::mem::take(&mut self.pending_list_marker),
-                character_style: None,
+                character_style: self.pending_list_marker_character_style.take(),
             }));
         }
 
@@ -12858,6 +12866,25 @@ After\par}"#;
             _ => panic!("expected list paragraph"),
         };
         assert_eq!(paragraph.runs[0].text, "\u{2022}\tBullet item");
+    }
+
+    #[test]
+    fn preserves_formatted_explicit_listtext_marker_style() {
+        let output = parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtext\b\cf1 1.\tab}Styled explicit\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected list paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert!(paragraph.runs[0].style.bold);
+        assert_eq!(paragraph.runs[0].style.color_index, 1);
+        assert_eq!(paragraph.runs[1].text, "Styled explicit");
+        assert!(!paragraph.runs[1].style.bold);
+        assert_eq!(paragraph.runs[1].style.color_index, 0);
     }
 
     #[test]

@@ -1686,6 +1686,60 @@ fn old_style_list_marker_text_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn formatted_explicit_listtext_marker_renders_passively_without_control_leakage() {
+    let input =
+        br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtext\b\cf1 1.\tab}Styled explicit\par}"
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected list paragraph"),
+    };
+
+    assert_eq!(paragraph.runs[0].text, "1.\t");
+    assert!(paragraph.runs[0].style.bold);
+    assert_eq!(paragraph.runs[0].style.color_index, 1);
+    assert_eq!(paragraph.runs[1].text, "Styled explicit");
+    assert!(!paragraph.runs[1].style.bold);
+    assert_eq!(paragraph.runs[1].style.color_index, 0);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("1.Styled explicit"),
+        "decoded PDF text did not contain explicit styled marker text: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"listtext".as_slice(),
+        b"pntext",
+        b"cf1",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden explicit list marker control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_style_list_format_controls_synthesize_passive_markers_without_leakage() {
     let input = br"{\rtf1{\pn\pnucrm\pnstart4}Fourth item\par{\pn\pnlcltr\pnstart28}Lower alpha\par{\pn\pnord\pnstart13}Ordinal\par{\pn\pnbul}Bullet\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
