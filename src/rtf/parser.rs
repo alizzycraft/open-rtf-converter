@@ -1396,11 +1396,49 @@ impl Parser {
             {
                 self.set_current_list_level_double_strike(control.parameter.unwrap_or(1) != 0);
             }
+            "outl"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_outline(control.parameter.unwrap_or(1) != 0);
+            }
+            "shad"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_shadow(control.parameter.unwrap_or(1) != 0);
+            }
+            "embo"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_relief(if control.parameter.unwrap_or(1) == 0 {
+                    TextRelief::None
+                } else {
+                    TextRelief::Emboss
+                });
+            }
+            "impr"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_relief(if control.parameter.unwrap_or(1) == 0 {
+                    TextRelief::None
+                } else {
+                    TextRelief::Engrave
+                });
+            }
             "caps"
                 if self.state.destination == Destination::ListTable
                     && self.state.list_context == ListContext::ListLevel =>
             {
                 self.set_current_list_level_caps(control.parameter.unwrap_or(1) != 0);
+            }
+            "scaps"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_small_caps(control.parameter.unwrap_or(1) != 0);
             }
             "f" if self.state.destination == Destination::ListTable
                 && self.state.list_context == ListContext::ListLevel =>
@@ -7023,8 +7061,24 @@ impl Parser {
         });
     }
 
+    fn set_current_list_level_outline(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| style.outline = enabled);
+    }
+
+    fn set_current_list_level_shadow(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| style.shadow = enabled);
+    }
+
+    fn set_current_list_level_relief(&mut self, relief: TextRelief) {
+        self.update_current_list_level_character_style(|style| style.relief = relief);
+    }
+
     fn set_current_list_level_caps(&mut self, enabled: bool) {
         self.update_current_list_level_character_style(|style| style.all_caps = enabled);
+    }
+
+    fn set_current_list_level_small_caps(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| style.small_caps = enabled);
     }
 
     fn set_current_list_level_font(&mut self, font_index: i32) {
@@ -12650,6 +12704,35 @@ After\par}"#;
             assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
         }
 
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn applies_list_level_marker_text_effects_to_marker_runs_only() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\outl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\shad{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\embo{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\impr{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\scaps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}}\pard\ls1\ilvl0 Outline marker\par\pard\ls2\ilvl0 Shadow marker\par\pard\ls3\ilvl0 Emboss marker\par\pard\ls4\ilvl0 Engrave marker\par\pard\ls5\ilvl0 Small caps marker\par}",
+        )
+        .unwrap();
+
+        let marker_style = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => {
+                assert_eq!(paragraph.runs[0].text, "1.\t");
+                assert_eq!(paragraph.runs[1].style, CharacterStyle::default());
+                &paragraph.runs[0].style
+            }
+            _ => panic!("expected paragraph"),
+        };
+
+        assert!(marker_style(0).outline);
+        assert!(marker_style(1).shadow);
+        assert_eq!(marker_style(2).relief, TextRelief::Emboss);
+        assert_eq!(marker_style(3).relief, TextRelief::Engrave);
+        assert!(marker_style(4).small_caps);
         assert!(
             output
                 .diagnostics
