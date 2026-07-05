@@ -1242,6 +1242,20 @@ impl Parser {
                             "[Field removed: no passive result]".to_string(),
                             offset,
                         )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_environment_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "environment field {name} removed without exposing converter host state"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
                     } else if let Some(result) = self.passive_field_result_for_instruction(
                         &field_instruction,
                         field_form_checkbox_checked,
@@ -1283,6 +1297,15 @@ impl Parser {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
                                 "external field {name} stripped without fetching external resource"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_environment_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "environment field {name} stripped without exposing converter host state"
                             ),
                             Some(offset),
                         ));
@@ -9660,6 +9683,8 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "DOCPROPERTY" => Some("DOCPROPERTY"),
         "DOCVARIABLE" => Some("DOCVARIABLE"),
         "EDITTIME" => Some("EDITTIME"),
+        "FILENAME" => Some("FILENAME"),
+        "FILESIZE" => Some("FILESIZE"),
         "FORMDROPDOWN" => Some("FORMDROPDOWN"),
         "FORMTEXT" => Some("FORMTEXT"),
         "FORMCHECKBOX" => Some("FORMCHECKBOX"),
@@ -9684,6 +9709,10 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "SYMBOL" => Some("SYMBOL"),
         "TIME" => Some("TIME"),
         "TITLE" => Some("TITLE"),
+        "TEMPLATE" => Some("TEMPLATE"),
+        "USERADDRESS" => Some("USERADDRESS"),
+        "USERINITIALS" => Some("USERINITIALS"),
+        "USERNAME" => Some("USERNAME"),
         "XE" => Some("XE"),
         _ => None,
     }
@@ -9825,6 +9854,13 @@ fn is_external_resultless_field(name: &str) -> bool {
             | "INCLUDEPICTURE"
             | "INCLUDETEXT"
             | "LINK"
+    )
+}
+
+fn is_environment_resultless_field(name: &str) -> bool {
+    matches!(
+        name,
+        "FILENAME" | "FILESIZE" | "TEMPLATE" | "USERADDRESS" | "USERINITIALS" | "USERNAME"
     )
 }
 
@@ -14345,6 +14381,75 @@ After\par}"#;
                 "missing diagnostic for {name}"
             );
         }
+    }
+
+    #[test]
+    fn resultless_environment_fields_are_placeholdered_without_host_state() {
+        let input = r#"{\rtf1 Before
+{\field{\*\fldinst FILENAME \p}}
+{\field{\*\fldinst FILESIZE}}
+{\field{\*\fldinst TEMPLATE}}
+{\field{\*\fldinst USERNAME}}
+{\field{\*\fldinst USERINITIALS}}
+{\field{\*\fldinst USERADDRESS}}
+After\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Before"));
+        assert!(text.contains("After"));
+        assert_eq!(
+            text.matches("[Field removed: no passive result]").count(),
+            6
+        );
+        for forbidden in [
+            "FILENAME",
+            "FILESIZE",
+            "TEMPLATE",
+            "USERNAME",
+            "USERINITIALS",
+            "USERADDRESS",
+            "Users\\",
+            "open-rtf-converter",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "environment field leaked host or instruction text: {forbidden}"
+            );
+        }
+        for name in [
+            "FILENAME",
+            "FILESIZE",
+            "TEMPLATE",
+            "USERNAME",
+            "USERINITIALS",
+            "USERADDRESS",
+        ] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("environment field {name} removed"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
+
+        let strip_options = RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Strip,
+            ..RtfParseOptions::default()
+        };
+        let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
+        let stripped_text = document_text(&stripped.document);
+        assert!(stripped_text.contains("Before"));
+        assert!(stripped_text.contains("After"));
+        assert!(!stripped_text.contains("[Field removed"));
+        assert!(stripped.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("environment field FILENAME stripped")
+        }));
     }
 
     #[test]
