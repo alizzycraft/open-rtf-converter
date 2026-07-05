@@ -5347,6 +5347,97 @@ fn resultless_field_number_switches_render_passively_without_instruction_leakage
 }
 
 #[test]
+fn resultless_numeric_picture_switches_render_passively_without_instruction_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Values {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 42 \\\\# \"0000\"}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 1234567 \\\\# \"#,##0\"}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst IF 1 = 1 \"5\" \"0\" \\\\# \"$0.00\"}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = -8 \\\\# \"000\"}}.",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Values 0042 1,234,567 $5.00 -008."),
+        "normalized numeric-picture text was {text:?}"
+    );
+    for forbidden in [
+        "fldinst",
+        "\\#",
+        "#,##0",
+        "$0.00",
+        "\"0000\"",
+        "[Field removed",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden numeric-picture content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Values 0042 1,234,567 $5.00 -008."),
+        "decoded PDF text did not contain passive numeric-picture values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"fldinst".as_slice(),
+        b"\\#",
+        b"#,##0",
+        b"$0.00",
+        b"\"0000\"",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden numeric-picture content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_quote_fields_render_without_executing_field_instruction() {
     let input = rtf(&[
         "{",

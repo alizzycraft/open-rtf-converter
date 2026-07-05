@@ -8687,6 +8687,7 @@ struct FormulaParser<'a> {
 }
 
 const MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS: usize = 4096;
+const MAX_PASSIVE_FIELD_NUMERIC_PICTURE_CHARS: usize = 64;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum FieldTextFormatSwitch {
@@ -8729,6 +8730,13 @@ fn apply_field_format_switches(
 ) -> Option<PassiveFieldResult> {
     if result.font_name.is_some() || contains_internal_marker(&result.text) {
         return Some(result);
+    }
+
+    if let Some(picture) = field_numeric_picture_switch(instruction)? {
+        result.text = apply_field_numeric_picture_switch(&result.text, &picture)?;
+        if result.text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS {
+            return None;
+        }
     }
 
     let switches = field_format_switches(instruction)?;
@@ -9144,6 +9152,195 @@ fn field_if_condition_matches(left: &str, operator: FieldIfOperator, right: &str
     }
 }
 
+fn field_numeric_picture_switch(instruction: &str) -> Option<Option<String>> {
+    let mut in_quote = false;
+    let mut escaped = false;
+
+    for (index, ch) in instruction.char_indices() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quote = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_quote = true;
+            continue;
+        }
+
+        if ch == '\\' {
+            let after_backslash = index + ch.len_utf8();
+            if instruction[after_backslash..].starts_with('#') {
+                let after_hash = after_backslash + '#'.len_utf8();
+                return field_numeric_picture_argument(&instruction[after_hash..]).map(Some);
+            }
+        }
+    }
+
+    Some(None)
+}
+
+fn field_numeric_picture_argument(input: &str) -> Option<String> {
+    field_numeric_picture_argument_with_rest(input).map(|(picture, _)| picture)
+}
+
+fn field_numeric_picture_argument_with_rest(input: &str) -> Option<(String, &str)> {
+    let input = input.trim_start();
+    if input.is_empty() {
+        return None;
+    }
+
+    let (picture, rest) = if input.starts_with('"') {
+        (field_quoted_prefix(input)?, skip_field_argument(input)?)
+    } else {
+        let end = input
+            .char_indices()
+            .find_map(|(index, ch)| (ch.is_whitespace() || ch == '\\').then_some(index))
+            .unwrap_or(input.len());
+        (input[..end].to_string(), &input[end..])
+    };
+    let picture = picture.trim().to_string();
+    if picture.is_empty()
+        || picture.chars().count() > MAX_PASSIVE_FIELD_NUMERIC_PICTURE_CHARS
+        || picture.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(&picture)
+    {
+        return None;
+    }
+    Some((picture, rest))
+}
+
+fn apply_field_numeric_picture_switch(text: &str, picture: &str) -> Option<String> {
+    let value = text.trim().parse::<i64>().ok()?;
+    let parsed = parse_simple_numeric_picture(picture)?;
+    if parsed.decimal_places > 8 || parsed.min_integer_digits > 18 {
+        return None;
+    }
+
+    let negative = value < 0;
+    let magnitude = value.checked_abs()?;
+    let mut integer = magnitude.to_string();
+    if integer.len() < parsed.min_integer_digits {
+        let mut padded = String::with_capacity(parsed.min_integer_digits);
+        for _ in 0..parsed.min_integer_digits - integer.len() {
+            padded.push('0');
+        }
+        padded.push_str(&integer);
+        integer = padded;
+    }
+    if parsed.group_thousands {
+        integer = group_decimal_digits(&integer);
+    }
+
+    let mut output = String::new();
+    if negative {
+        output.push('-');
+    }
+    output.push_str(&parsed.prefix);
+    output.push_str(&integer);
+    if parsed.decimal_places > 0 {
+        output.push('.');
+        for _ in 0..parsed.decimal_places {
+            output.push('0');
+        }
+    }
+    output.push_str(&parsed.suffix);
+    Some(output)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SimpleNumericPicture {
+    prefix: String,
+    suffix: String,
+    min_integer_digits: usize,
+    group_thousands: bool,
+    decimal_places: usize,
+}
+
+fn parse_simple_numeric_picture(picture: &str) -> Option<SimpleNumericPicture> {
+    if picture.contains(';')
+        || picture.contains('%')
+        || picture.contains('E')
+        || picture.contains('e')
+        || picture.contains('x')
+        || picture.contains('X')
+    {
+        return None;
+    }
+
+    let first_digit = picture
+        .char_indices()
+        .find_map(|(index, ch)| matches!(ch, '0' | '#').then_some(index))?;
+    let last_digit = picture
+        .char_indices()
+        .filter_map(|(index, ch)| matches!(ch, '0' | '#').then_some(index))
+        .last()?;
+    let suffix_start = last_digit + picture[last_digit..].chars().next()?.len_utf8();
+    let prefix = picture[..first_digit].to_string();
+    let suffix = picture[suffix_start..].to_string();
+    if !is_safe_numeric_picture_literal(&prefix) || !is_safe_numeric_picture_literal(&suffix) {
+        return None;
+    }
+
+    let core = &picture[first_digit..suffix_start];
+    if core.chars().any(|ch| !matches!(ch, '0' | '#' | ',' | '.')) {
+        return None;
+    }
+    if core.matches('.').count() > 1 {
+        return None;
+    }
+
+    let (integer_pattern, decimal_pattern) = core.split_once('.').unwrap_or((core, ""));
+    if integer_pattern.is_empty()
+        || integer_pattern.chars().filter(|ch| *ch == '0').count() == 0
+        || integer_pattern
+            .chars()
+            .rev()
+            .skip_while(|ch| *ch == ',')
+            .next()
+            .is_none()
+    {
+        return None;
+    }
+    if decimal_pattern.chars().any(|ch| ch != '0') {
+        return None;
+    }
+
+    let min_integer_digits = integer_pattern.chars().filter(|ch| *ch == '0').count();
+    Some(SimpleNumericPicture {
+        prefix,
+        suffix,
+        min_integer_digits,
+        group_thousands: integer_pattern.contains(','),
+        decimal_places: decimal_pattern.len(),
+    })
+}
+
+fn is_safe_numeric_picture_literal(text: &str) -> bool {
+    text.chars()
+        .all(|ch| ch.is_ascii() && !ch.is_ascii_control() && !matches!(ch, '\\' | '{' | '}'))
+}
+
+fn group_decimal_digits(digits: &str) -> String {
+    let mut output = String::new();
+    let first_group_len = digits.len() % 3;
+    for (index, ch) in digits.chars().enumerate() {
+        if index > 0
+            && (index == first_group_len
+                || (index > first_group_len && (index - first_group_len) % 3 == 0))
+        {
+            output.push(',');
+        }
+        output.push(ch);
+    }
+    output
+}
+
 fn field_format_switches(instruction: &str) -> Option<Vec<FieldFormatSwitch>> {
     let mut switches = Vec::new();
     let mut in_quote = false;
@@ -9190,13 +9387,20 @@ fn field_remainder_contains_only_passive_format_switches(input: &str) -> bool {
         let Some(after_backslash) = rest.strip_prefix('\\') else {
             return false;
         };
-        let Some(after_star) = after_backslash.strip_prefix('*') else {
+        if let Some(after_star) = after_backslash.strip_prefix('*') {
+            let Some((_, after_switch)) = field_format_switch_after_star(after_star) else {
+                return false;
+            };
+            rest = after_switch.trim_start();
+        } else if let Some(after_hash) = after_backslash.strip_prefix('#') {
+            let Some((_, after_picture)) = field_numeric_picture_argument_with_rest(after_hash)
+            else {
+                return false;
+            };
+            rest = after_picture.trim_start();
+        } else {
             return false;
-        };
-        let Some((_, after_switch)) = field_format_switch_after_star(after_star) else {
-            return false;
-        };
-        rest = after_switch.trim_start();
+        }
     }
     true
 }
@@ -12978,6 +13182,33 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "forbidden field number-switch content leaked to text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_fields_apply_simple_passive_numeric_picture_switches() {
+        let output = parse_rtf(
+            r##"{\rtf1 Values {\field{\*\fldinst = 42 \\# "0000"}} {\field{\*\fldinst = 1234567 \\# "#,##0"}} {\field{\*\fldinst IF 1 = 1 "5" "0" \\# "$0.00"}} {\field{\*\fldinst = -8 \\# "000"}}\par}"##,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Values 0042 1,234,567 $5.00 -008"),
+            "normalized numeric-picture text was {text:?}"
+        );
+        for forbidden in [
+            "fldinst",
+            "\\#",
+            "#,##0",
+            "$0.00",
+            "\"0000\"",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "forbidden numeric-picture content leaked to text: {forbidden}"
             );
         }
     }

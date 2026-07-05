@@ -224,6 +224,17 @@ fn seed_corpus() -> Vec<Vec<u8>> {
         rtf(&[
             "{",
             "\\",
+            "rtf1{",
+            "\\",
+            "field{",
+            "\\",
+            "*",
+            "\\",
+            "fldinst = 1234567 \\\\# \"#,##0\"}}}",
+        ]),
+        rtf(&[
+            "{",
+            "\\",
             "rtf1 visible{",
             "\\",
             "annotation hidden {",
