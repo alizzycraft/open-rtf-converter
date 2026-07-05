@@ -8958,6 +8958,119 @@ fn metadata_and_external_templates_do_not_reach_text_or_pdf() {
 }
 
 #[test]
+fn encapsulated_html_metadata_does_not_warn_or_reach_text_or_pdf() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "fromhtml1",
+        "\\",
+        "htmlrtf1",
+        "\\",
+        "b",
+        "\\",
+        "htmlrtf0 Visible body{",
+        "\\",
+        "*",
+        "\\",
+        "htmltag <p onclick=\"launch.exe\">Hidden HTML</p>}{",
+        "\\",
+        "htmltag <script>414243</script>}{",
+        "\\",
+        "htmlbase https://example.com/base/}{",
+        "\\",
+        "*",
+        "\\",
+        "htmltag {",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible body after"));
+    for forbidden in [
+        "Hidden HTML",
+        "script",
+        "onclick",
+        "launch.exe",
+        "htmltag",
+        "htmlbase",
+        "htmlrtf",
+        "fromhtml",
+        "https://example.com",
+        "objdata",
+        "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "encapsulated HTML metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "encapsulated HTML wrapper controls should be classified, got {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible body after"));
+    for forbidden in [
+        b"Hidden HTML".as_slice(),
+        b"script",
+        b"onclick",
+        b"launch.exe",
+        b"htmltag",
+        b"htmlbase",
+        b"htmlrtf",
+        b"fromhtml",
+        b"https://example.com",
+        b"objdata",
+        b"414243",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "encapsulated HTML metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn review_bookmark_and_annotation_payloads_do_not_reach_text_or_pdf() {
     let input = rtf(&[
         "{",

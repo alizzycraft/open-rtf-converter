@@ -1689,6 +1689,13 @@ impl Parser {
             "stylesheet" if destination_allows_safe_structural_content(&self.state) => {
                 self.state.destination = Destination::StyleSheet
             }
+            "htmltag" | "htmlbase"
+                if control_starts_group
+                    && destination_allows_safe_structural_content(&self.state) =>
+            {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
             "template" if destination_allows_visible_content(&self.state) => {
                 self.handle_active_content("external template", offset)?;
                 self.state.destination = Destination::Metadata;
@@ -9121,6 +9128,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "fhiminor"
                 | "flomajor"
                 | "flominor"
+                | "fromhtml"
                 | "fprq"
                 | "fmodern"
                 | "fnil"
@@ -9135,6 +9143,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "listtable"
                 | "listoverridetable"
                 | "hich"
+                | "htmlrtf"
                 | "lang"
                 | "langfe"
                 | "langfenp"
