@@ -9208,6 +9208,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "revised"
                 | "rsidroot"
                 | "sectrsid"
+                | "sectunlocked"
                 | "softline"
                 | "softpage"
                 | "saveinvalidxml"
@@ -9258,6 +9259,12 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
         }
         "nogrowautofit" => {
             Some("table autofit growth compatibility approximated by bounded table layout")
+        }
+        "pgnx" | "pgny" => {
+            Some("page number position approximated by passive header/footer layout")
+        }
+        "sectlinegrid" | "sectdefaultcl" | "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
+            Some("section text grid approximated by passive paragraph layout")
         }
         "lytexcttp" | "lytprtmet" | "noextrasprl" | "notcvasp" | "notvatxbx" | "expshrtn"
         | "useltbaln" | "htmautsp" => {

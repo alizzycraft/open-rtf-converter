@@ -6838,6 +6838,121 @@ fn section_page_number_format_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn page_number_position_and_section_grid_controls_warn_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "sectd",
+        "\\",
+        "pgnx720",
+        "\\",
+        "pgny720",
+        "\\",
+        "sectlinegrid360",
+        "\\",
+        "sectdefaultcl",
+        "\\",
+        "sectexpand720",
+        "\\",
+        "sectspecifycl",
+        "\\",
+        "sectspecifyl",
+        "\\",
+        "sectunlocked{",
+        "\\",
+        "header Page ",
+        "\\",
+        "chpgn",
+        "\\",
+        "par}Visible section grid",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible section grid"));
+    assert!(text.contains(PAGE_NUMBER_MARKER));
+    for forbidden in [
+        "pgnx",
+        "pgny",
+        "sectlinegrid",
+        "sectdefaultcl",
+        "sectexpand",
+        "sectspecifycl",
+        "sectspecifyl",
+        "sectunlocked",
+        "chpgn",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "section compatibility control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "section compatibility controls should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for expected in [
+        "page number position approximated by passive header/footer layout",
+        "section text grid approximated by passive paragraph layout",
+    ] {
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing diagnostic: {expected}; diagnostics were {:?}",
+            parsed.diagnostics
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let pdf_text = decoded_pdf_text(&content);
+    assert!(pdf_text.contains("Visible section grid"));
+    assert!(pdf_text.contains("Page 1"));
+    for forbidden in [
+        b"pgnx".as_slice(),
+        b"pgny",
+        b"sectlinegrid",
+        b"sectdefaultcl",
+        b"sectexpand",
+        b"sectspecifycl",
+        b"sectspecifyl",
+        b"sectunlocked",
+        b"chpgn",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "section compatibility content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_external_fields_are_placeholdered_without_fetching() {
     let parsed = parse_rtf_bytes(&rtf(&[
         "{",
