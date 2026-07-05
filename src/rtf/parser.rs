@@ -56,6 +56,7 @@ struct ParserState {
     style_based_on: Option<i32>,
     style_next: Option<i32>,
     style_kind: StyleKind,
+    style_name_text: String,
     paragraph_style_index: Option<i32>,
     list_override_index: Option<i32>,
     list_level_index: usize,
@@ -121,6 +122,7 @@ impl Default for ParserState {
             style_based_on: None,
             style_next: None,
             style_kind: StyleKind::Paragraph,
+            style_name_text: String::new(),
             paragraph_style_index: None,
             list_override_index: None,
             list_level_index: 0,
@@ -650,6 +652,7 @@ struct BookmarkCapture {
 #[derive(Debug, Clone)]
 struct StyleDefinition {
     index: i32,
+    name: Option<String>,
     based_on: Option<i32>,
     next_style: Option<i32>,
     kind: StyleKind,
@@ -755,6 +758,7 @@ struct Parser {
     document_edit_minutes: Option<i32>,
     document_revision_number: Option<i32>,
     field_bookmark_values: Vec<(String, String)>,
+    style_reference_texts: Vec<(i32, String)>,
     bookmark_captures: Vec<BookmarkCapture>,
     next_bookmark_marker_id: usize,
     styles: Vec<StyleDefinition>,
@@ -864,6 +868,7 @@ impl Parser {
             document_edit_minutes: None,
             document_revision_number: None,
             field_bookmark_values: Vec::new(),
+            style_reference_texts: Vec::new(),
             bookmark_captures: Vec::new(),
             next_bookmark_marker_id: 1,
             styles: Vec::new(),
@@ -2842,10 +2847,12 @@ impl Parser {
             "s" if self.state.destination == Destination::StyleSheet => {
                 self.state.style_index = Some(control.parameter.unwrap_or(0));
                 self.state.style_kind = StyleKind::Paragraph;
+                self.state.style_name_text.clear();
             }
             "cs" if self.state.destination == Destination::StyleSheet => {
                 self.state.style_index = Some(control.parameter.unwrap_or(0));
                 self.state.style_kind = StyleKind::Character;
+                self.state.style_name_text.clear();
             }
             "s" => {
                 self.apply_paragraph_style(control.parameter.unwrap_or(0), offset);
@@ -3334,8 +3341,8 @@ impl Parser {
             Destination::BookmarkStart | Destination::BookmarkEnd => {
                 self.push_bookmark_name_text(text, offset)?
             }
-            Destination::StyleSheet
-            | Destination::ListTable
+            Destination::StyleSheet => self.push_style_name_text(text, offset)?,
+            Destination::ListTable
             | Destination::ListOverrideTable
             | Destination::Shape
             | Destination::Ignored
@@ -4472,6 +4479,31 @@ impl Parser {
         Ok(())
     }
 
+    fn push_style_name_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes(text.len(), offset)?;
+        if self.state.style_index.is_none() {
+            return Ok(());
+        }
+        let Some(style_name) = text.split(';').next() else {
+            return Ok(());
+        };
+        let new_len = self
+            .state
+            .style_name_text
+            .chars()
+            .count()
+            .checked_add(style_name.chars().count())
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
+        if new_len > self.limits().max_text_run_len {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "style name".to_string(),
+                offset,
+            });
+        }
+        self.state.style_name_text.push_str(style_name);
+        Ok(())
+    }
+
     fn start_bookmark_capture(
         &mut self,
         name: String,
@@ -5039,6 +5071,8 @@ impl Parser {
             self.passive_ref_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("PAGEREF") {
             self.passive_page_ref_field_result(instruction, offset)?
+        } else if field_instruction_name(instruction) == Some("STYLEREF") {
+            self.passive_style_ref_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("DOCPROPERTY") {
             self.passive_doc_property_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("DOCVARIABLE") {
@@ -5441,6 +5475,42 @@ impl Parser {
         }))
     }
 
+    fn passive_style_ref_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
+        let Some(style_index) = self.field_style_ref_index(instruction) else {
+            return None;
+        };
+        let text = self
+            .style_reference_texts
+            .iter()
+            .rev()
+            .find_map(|(index, text)| (*index == style_index).then(|| text.clone()))?;
+        Some(PassiveFieldResult {
+            text,
+            font_name: None,
+            form_field: false,
+        })
+    }
+
+    fn field_style_ref_index(&self, instruction: &str) -> Option<i32> {
+        let name = field_first_argument(instruction)?;
+        let rest = field_rest_after_first_argument(instruction)?;
+        if !field_remainder_contains_only_passive_format_switches(rest) {
+            return None;
+        }
+        if let Ok(index) = name.trim().parse::<i32>() {
+            return Some(index);
+        }
+        let name = clean_style_ref_name(&name)?;
+        self.styles.iter().find_map(|style| {
+            (style.kind == StyleKind::Paragraph
+                && style
+                    .name
+                    .as_deref()
+                    .is_some_and(|stored_name| stored_name.eq_ignore_ascii_case(&name)))
+            .then_some(style.index)
+        })
+    }
+
     fn ensure_passive_result_font(
         &mut self,
         font_name: &str,
@@ -5512,6 +5582,8 @@ impl Parser {
     }
 
     fn finish_paragraph(&mut self) {
+        let paragraph_style_index = self.state.paragraph_style_index;
+        let mut pending_style_reference_text = None;
         if let Some(row) = self.current_table_row.as_mut() {
             if !row.current_cell_paragraph.runs.is_empty() {
                 let paragraph = std::mem::replace(
@@ -5521,8 +5593,15 @@ impl Parser {
                         runs: Vec::new(),
                     },
                 );
+                if paragraph_style_index.is_some() {
+                    pending_style_reference_text = paragraph_plain_text(&paragraph);
+                }
                 row.current_cell_paragraphs.push(paragraph);
                 row.cell_open = true;
+            }
+            if let (Some(index), Some(text)) = (paragraph_style_index, pending_style_reference_text)
+            {
+                self.store_style_reference_text(index, text);
             }
             return;
         }
@@ -5535,7 +5614,33 @@ impl Parser {
                     runs: Vec::new(),
                 },
             );
+            if let Some(index) = paragraph_style_index {
+                if let Some(text) = paragraph_plain_text(&paragraph) {
+                    self.store_style_reference_text(index, text);
+                }
+            }
             self.document.blocks.push(Block::Paragraph(paragraph));
+        }
+    }
+
+    fn store_style_reference_text(&mut self, style_index: i32, text: String) {
+        if text.is_empty()
+            || text.chars().count() > self.limits().max_text_run_len
+            || text.chars().any(|ch| ch.is_control())
+            || contains_internal_marker(&text)
+        {
+            return;
+        }
+        if let Some((_, stored_text)) = self
+            .style_reference_texts
+            .iter_mut()
+            .find(|(index, _)| *index == style_index)
+        {
+            *stored_text = text;
+            return;
+        }
+        if self.style_reference_texts.len() < self.limits().max_styles {
+            self.style_reference_texts.push((style_index, text));
         }
     }
 
@@ -8543,8 +8648,10 @@ impl Parser {
         let Some(index) = self.state.style_index else {
             return Ok(());
         };
+        let name = clean_style_name(&self.state.style_name_text, offset, self.limits())?;
 
         if let Some(style) = self.styles.iter_mut().find(|style| style.index == index) {
+            style.name = name;
             style.based_on = self.state.style_based_on;
             style.next_style = self.state.style_next;
             style.kind = self.state.style_kind;
@@ -8562,6 +8669,7 @@ impl Parser {
 
         self.styles.push(StyleDefinition {
             index,
+            name,
             based_on: self.state.style_based_on,
             next_style: self.state.style_next,
             kind: self.state.style_kind,
@@ -8643,6 +8751,7 @@ impl Parser {
         };
         Some(StyleDefinition {
             index: style.index,
+            name: style.name.clone(),
             based_on: style.based_on,
             next_style: style.next_style,
             kind: style.kind,
@@ -9796,6 +9905,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "SUBJECT" => Some("SUBJECT"),
         "SYMBOL" => Some("SYMBOL"),
         "SKIPIF" => Some("SKIPIF"),
+        "STYLEREF" => Some("STYLEREF"),
         "TIME" => Some("TIME"),
         "TITLE" => Some("TITLE"),
         "TEMPLATE" => Some("TEMPLATE"),
@@ -9875,6 +9985,25 @@ fn clean_field_bookmark_value(
     if text.chars().count() > limits.max_text_run_len {
         return Err(ParseError::ResourceLimitExceeded {
             resource: "field bookmark value".to_string(),
+            offset,
+        });
+    }
+    Ok(Some(text))
+}
+
+fn clean_style_name(
+    text: &str,
+    offset: usize,
+    limits: &RtfLimits,
+) -> Result<Option<String>, ParseError> {
+    let text = text.trim().trim_end_matches(';').trim().to_string();
+    if text.is_empty() || text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&text)
+    {
+        return Ok(None);
+    }
+    if text.chars().count() > limits.max_text_run_len {
+        return Err(ParseError::ResourceLimitExceeded {
+            resource: "style name".to_string(),
             offset,
         });
     }
@@ -10829,6 +10958,11 @@ fn field_first_argument(instruction: &str) -> Option<String> {
     Some(rest[..end].trim().to_string())
 }
 
+fn field_rest_after_first_argument(instruction: &str) -> Option<&str> {
+    let rest = field_rest_after_name(instruction)?.trim_start();
+    skip_field_argument(rest)
+}
+
 fn field_set_instruction(
     instruction: &str,
     offset: usize,
@@ -10861,6 +10995,15 @@ fn field_set_instruction(
         return Ok(None);
     };
     Ok(Some((name, value)))
+}
+
+fn clean_style_ref_name(name: &str) -> Option<String> {
+    let name = name.trim().to_string();
+    if name.is_empty() || name.chars().any(|ch| ch.is_control()) || contains_internal_marker(&name)
+    {
+        return None;
+    }
+    Some(name)
 }
 
 fn field_simple_argument_with_rest(input: &str) -> Option<(String, &str)> {
@@ -11435,6 +11578,18 @@ fn push_text_to_paragraph(
         text: text.to_string(),
         style: character_style.clone(),
     });
+}
+
+fn paragraph_plain_text(paragraph: &Paragraph) -> Option<String> {
+    let mut text = String::new();
+    for run in &paragraph.runs {
+        if run.style.hidden {
+            continue;
+        }
+        text.push_str(&run.text);
+    }
+    let text = text.trim().to_string();
+    (!text.is_empty()).then_some(text)
 }
 
 fn push_text_to_runs(runs: &mut Vec<Run>, text: &str, character_style: &CharacterStyle) {
@@ -14384,6 +14539,31 @@ mod tests {
             ),
             "unexpected result: {result:?}"
         );
+    }
+
+    #[test]
+    fn resultless_styleref_fields_render_latest_safe_styled_paragraph_text() {
+        let output = parse_rtf(
+            r#"{\rtf1{\stylesheet{\s1 Heading One;}{\s2 Other Style;}}\s1 Visible heading\par\pard Body {\field{\*\fldinst STYLEREF "Heading One" \\* Upper}} again {\field{\*\fldinst STYLEREF 1}} missing {\field{\*\fldinst STYLEREF Missing}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Visible headingBody VISIBLE HEADING again Visible heading missing [Field removed: no passive result]"),
+            "text was {text:?}"
+        );
+        for forbidden in ["STYLEREF", "Heading One", "Other Style", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "STYLEREF leaked style or instruction text: {forbidden}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering passive field STYLEREF without executing field instruction")
+        }));
     }
 
     #[test]

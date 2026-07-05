@@ -5222,6 +5222,101 @@ fn resultless_set_fields_feed_refs_without_instruction_or_payload_leakage() {
 }
 
 #[test]
+fn resultless_styleref_fields_render_safe_prior_style_text_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "stylesheet{",
+        "\\",
+        "s1 TitleStyle;}}{",
+        "\\",
+        "s1 Visible title {",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst HYPERLINK \"https://example.com/styleref\"}{",
+        "\\",
+        "fldrslt Hidden link}}}",
+        "\\",
+        "par}{",
+        "\\",
+        "pard Ref {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst STYLEREF TitleStyle \\\\* Upper}}",
+        "\\",
+        "par}}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible title"));
+    assert!(text.contains("Ref VISIBLE TITLE"));
+    for forbidden in [
+        "STYLEREF",
+        "TitleStyle",
+        "HYPERLINK",
+        "https://example.com",
+        "Hidden link",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "STYLEREF leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Visible title"));
+    assert!(
+        rendered_text.contains("Ref VISIBLE TITLE"),
+        "decoded PDF text did not contain passive STYLEREF value: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"STYLEREF".as_slice(),
+        b"TitleStyle",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Hidden link",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden STYLEREF content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_noteref_fields_render_bookmarked_note_reference_without_instruction_leakage() {
     let input = rtf(&[
         "{",
