@@ -604,6 +604,7 @@ impl Default for OldStyleListMarker {
 struct PendingListMarker {
     text: String,
     character_style: Option<CharacterStyle>,
+    runs: Vec<Run>,
 }
 
 #[derive(Debug, Clone)]
@@ -661,7 +662,7 @@ struct Parser {
     current_table_row: Option<TableRowBuilder>,
     table_cell_count: usize,
     pending_list_marker: String,
-    pending_list_marker_character_style: Option<CharacterStyle>,
+    pending_list_marker_runs: Vec<Run>,
     current_picture: Option<PictureBuilder>,
     current_shape: Option<ShapeBuilder>,
     image_count: usize,
@@ -761,7 +762,7 @@ impl Parser {
             current_table_row: None,
             table_cell_count: 0,
             pending_list_marker: String::new(),
-            pending_list_marker_character_style: None,
+            pending_list_marker_runs: Vec::new(),
             current_picture: None,
             current_shape: None,
             image_count: 0,
@@ -1887,7 +1888,7 @@ impl Parser {
             }
             "listtext" | "pntext" if destination_allows_safe_structural_content(&self.state) => {
                 self.pending_list_marker.clear();
-                self.pending_list_marker_character_style = None;
+                self.pending_list_marker_runs.clear();
                 self.pending_old_style_list_marker = None;
                 self.state.destination = Destination::ListText;
             }
@@ -3944,16 +3945,30 @@ impl Parser {
             return Ok(());
         }
         let pending_marker = self.take_pending_or_synthesized_list_marker(offset)?;
+        let marker_run_chars = pending_marker
+            .as_ref()
+            .map(|marker| {
+                marker
+                    .runs
+                    .iter()
+                    .map(|run| run.text.chars().count())
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
         let styled_marker = pending_marker.as_ref().and_then(|marker| {
-            marker
-                .character_style
-                .clone()
-                .map(|style| (marker.text.clone(), style))
+            if marker.runs.is_empty() {
+                marker
+                    .character_style
+                    .clone()
+                    .map(|style| (marker.text.clone(), style))
+            } else {
+                None
+            }
         });
         let synthesized_text;
         let text = if let Some(marker) = pending_marker
             .as_ref()
-            .filter(|marker| marker.character_style.is_none())
+            .filter(|marker| marker.runs.is_empty() && marker.character_style.is_none())
         {
             synthesized_text = format!("{}{text}", marker.text);
             synthesized_text.as_str()
@@ -3979,10 +3994,14 @@ impl Parser {
             text
         };
 
-        let styled_marker_chars = styled_marker
-            .as_ref()
-            .map(|(marker_text, _)| marker_text.chars().count())
-            .unwrap_or(0);
+        let styled_marker_chars = marker_run_chars
+            .checked_add(
+                styled_marker
+                    .as_ref()
+                    .map(|(marker_text, _)| marker_text.chars().count())
+                    .unwrap_or(0),
+            )
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
         let output_text_chars = styled_marker_chars
             .checked_add(text.chars().count())
             .ok_or(ParseError::OutputTextTooLarge(offset))?;
@@ -3992,6 +4011,11 @@ impl Parser {
             .ok_or(ParseError::OutputTextTooLarge(offset))?;
         if self.output_text_chars > self.limits().max_output_text_chars {
             return Err(ParseError::OutputTextTooLarge(offset));
+        }
+        if let Some(marker) = pending_marker.as_ref() {
+            for run in &marker.runs {
+                self.capture_bookmark_text(&run.text, offset)?;
+            }
         }
         if let Some((marker_text, _)) = styled_marker.as_ref() {
             self.capture_bookmark_text(marker_text, offset)?;
@@ -4021,6 +4045,11 @@ impl Parser {
             &mut self.current_paragraph
         };
 
+        if let Some(marker) = pending_marker.as_ref() {
+            for run in &marker.runs {
+                push_text_to_paragraph(paragraph, &run.text, &self.state.paragraph, &run.style);
+            }
+        }
         if let Some((marker_text, marker_style)) = styled_marker.as_ref() {
             push_text_to_paragraph(paragraph, marker_text, &self.state.paragraph, marker_style);
         }
@@ -4057,11 +4086,15 @@ impl Parser {
             self.count_skipped_destination_bytes(text.len(), offset)?;
             return Ok(());
         }
-        if self.pending_list_marker_character_style.is_none()
-            && self.state.character != self.default_character_style()
+        let font_mapped_text;
+        let text = if !contains_internal_marker(text)
+            && let Some(mapped) = self.map_symbol_like_font_text(text)
         {
-            self.pending_list_marker_character_style = Some(self.state.character.clone());
-        }
+            font_mapped_text = mapped;
+            font_mapped_text.as_str()
+        } else {
+            text
+        };
         let new_len = self
             .pending_list_marker
             .chars()
@@ -4075,6 +4108,11 @@ impl Parser {
             });
         }
         self.pending_list_marker.push_str(text);
+        push_text_to_runs(
+            &mut self.pending_list_marker_runs,
+            text,
+            &self.state.character,
+        );
         Ok(())
     }
 
@@ -6727,7 +6765,8 @@ impl Parser {
             self.pending_old_style_list_marker = None;
             return Ok(Some(PendingListMarker {
                 text: std::mem::take(&mut self.pending_list_marker),
-                character_style: self.pending_list_marker_character_style.take(),
+                character_style: None,
+                runs: std::mem::take(&mut self.pending_list_marker_runs),
             }));
         }
 
@@ -6791,6 +6830,7 @@ impl Parser {
                 PendingListMarker {
                     text: format!("{bullet}{follow}"),
                     character_style,
+                    runs: Vec::new(),
                 }
             }
             ListNumberFormat::Decimal
@@ -6821,11 +6861,13 @@ impl Parser {
                             follow
                         ),
                         character_style,
+                        runs: Vec::new(),
                     }
                 } else {
                     PendingListMarker {
                         text: format!("{marker}.{follow}"),
                         character_style,
+                        runs: Vec::new(),
                     }
                 }
             }
@@ -7069,6 +7111,7 @@ impl Parser {
         Ok(Some(PendingListMarker {
             text,
             character_style,
+            runs: Vec::new(),
         }))
     }
 
@@ -9526,6 +9569,20 @@ fn push_text_to_paragraph(
     }
 
     paragraph.runs.push(Run {
+        text: text.to_string(),
+        style: character_style.clone(),
+    });
+}
+
+fn push_text_to_runs(runs: &mut Vec<Run>, text: &str, character_style: &CharacterStyle) {
+    if let Some(last) = runs.last_mut()
+        && last.style == *character_style
+    {
+        last.text.push_str(text);
+        return;
+    }
+
+    runs.push(Run {
         text: text.to_string(),
         style: character_style.clone(),
     });
@@ -12885,6 +12942,28 @@ After\par}"#;
         assert_eq!(paragraph.runs[1].text, "Styled explicit");
         assert!(!paragraph.runs[1].style.bold);
         assert_eq!(paragraph.runs[1].style.color_index, 0);
+    }
+
+    #[test]
+    fn preserves_mixed_formatted_explicit_listtext_marker_runs() {
+        let output = parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtext\b 1\b0\cf1 .\cf0\tab}Styled explicit\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected list paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1");
+        assert!(paragraph.runs[0].style.bold);
+        assert_eq!(paragraph.runs[0].style.color_index, 0);
+        assert_eq!(paragraph.runs[1].text, ".");
+        assert!(!paragraph.runs[1].style.bold);
+        assert_eq!(paragraph.runs[1].style.color_index, 1);
+        assert_eq!(paragraph.runs[2].text, "\tStyled explicit");
+        assert!(!paragraph.runs[2].style.bold);
+        assert_eq!(paragraph.runs[2].style.color_index, 0);
     }
 
     #[test]
