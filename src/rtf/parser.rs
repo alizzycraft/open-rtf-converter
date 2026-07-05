@@ -509,6 +509,7 @@ struct ListLevelDefinition {
     text_template: String,
     indent_twips: Option<i32>,
     space_twips: Option<i32>,
+    follow: ListLevelFollow,
 }
 
 impl Default for ListLevelDefinition {
@@ -519,8 +520,17 @@ impl Default for ListLevelDefinition {
             text_template: String::new(),
             indent_twips: None,
             space_twips: None,
+            follow: ListLevelFollow::Tab,
         }
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+enum ListLevelFollow {
+    #[default]
+    Tab,
+    Space,
+    Nothing,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1298,6 +1308,9 @@ impl Parser {
             }
             "levelspace" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_spacing(control.parameter, offset);
+            }
+            "levelfollow" if self.state.destination == Destination::ListTable => {
+                self.set_current_list_level_follow(control.parameter.unwrap_or(0));
             }
             "listid" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_id(control.parameter.unwrap_or(0));
@@ -6409,6 +6422,7 @@ impl Parser {
             return Ok(None);
         };
         self.apply_list_level_layout(&level, offset)?;
+        let follow = list_level_follow_text(level.follow);
 
         let marker = match level.format {
             ListNumberFormat::Bullet => {
@@ -6418,7 +6432,7 @@ impl Parser {
                     level.text_template.replace('\0', "")
                 };
                 PendingListMarker {
-                    text: format!("{bullet}\t"),
+                    text: format!("{bullet}{follow}"),
                     character_style: None,
                 }
             }
@@ -6436,7 +6450,7 @@ impl Parser {
                 if has_list_level_placeholders(&level.text_template) {
                     PendingListMarker {
                         text: format!(
-                            "{}\t",
+                            "{}{}",
                             self.render_list_level_template(
                                 &list,
                                 &list_override,
@@ -6444,13 +6458,14 @@ impl Parser {
                                 level_index,
                                 value,
                                 &marker
-                            )
+                            ),
+                            follow
                         ),
                         character_style: None,
                     }
                 } else {
                     PendingListMarker {
-                        text: format!("{marker}.\t"),
+                        text: format!("{marker}.{follow}"),
                         character_style: None,
                     }
                 }
@@ -6782,6 +6797,16 @@ impl Parser {
         let space_twips = self.clamp_list_level_spacing(space_twips, offset);
         if let Some(level) = self.current_list_level.as_mut() {
             level.space_twips = Some(space_twips);
+        }
+    }
+
+    fn set_current_list_level_follow(&mut self, follow: i32) {
+        if let Some(level) = self.current_list_level.as_mut() {
+            level.follow = match follow {
+                1 => ListLevelFollow::Space,
+                2 => ListLevelFollow::Nothing,
+                _ => ListLevelFollow::Tab,
+            };
         }
     }
 
@@ -8751,6 +8776,14 @@ fn list_level_placeholder_index(ch: char) -> Option<usize> {
         Some(ch as usize)
     } else {
         None
+    }
+}
+
+fn list_level_follow_text(follow: ListLevelFollow) -> &'static str {
+    match follow {
+        ListLevelFollow::Tab => "\t",
+        ListLevelFollow::Space => " ",
+        ListLevelFollow::Nothing => "",
     }
 }
 
@@ -12078,6 +12111,28 @@ After\par}"#;
             paragraph.style.tab_stop_alignments,
             vec![TabAlignment::Left]
         );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn applies_list_level_follow_controls_to_synthesized_marker_suffix() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelfollow0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid1}{\list{\listlevel\levelnfc0\levelfollow1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid2}{\list{\listlevel\levelnfc0\levelfollow2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid3}}{\*\listoverridetable{\listoverride\listid1\ls1}{\listoverride\listid2\ls2}{\listoverride\listid3\ls3}}\pard\ls1\ilvl0 Tab\par\pard\ls2\ilvl0 Space\par\pard\ls3\ilvl0 Nothing\par}",
+        )
+        .unwrap();
+        let paragraph_text = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph.runs[0].text.as_str(),
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph_text(0), "1.\tTab");
+        assert_eq!(paragraph_text(1), "1. Space");
+        assert_eq!(paragraph_text(2), "1.Nothing");
         assert!(
             output
                 .diagnostics

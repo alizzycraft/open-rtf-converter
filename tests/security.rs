@@ -2045,6 +2045,61 @@ fn list_level_indent_and_spacing_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn list_level_follow_controls_render_passively_without_control_leakage() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelfollow1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelfollow2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}}{\*\listoverridetable{\listoverride\listid5\ls5}{\listoverride\listid6\ls6}}\pard\ls5\ilvl0 Space\par\pard\ls6\ilvl0 Nothing\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let first = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let second = match &parsed.document.blocks[1] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+
+    assert_eq!(first.runs[0].text, "1. Space");
+    assert_eq!(second.runs[0].text, "1.Nothing");
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("1. Space") && rendered_text.contains("1.Nothing"),
+        "decoded PDF text did not contain followed list-table markers: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"levelfollow".as_slice(),
+        b"levelnfc",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level follow content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn ordinal_list_markers_render_as_passive_pdf_text() {
     let input = rtf(&[
         "{",
