@@ -737,6 +737,7 @@ struct Parser {
     pending_custom_property_name: Option<String>,
     document_timestamps: Vec<(DocumentTimestampKind, DocumentTimestamp)>,
     document_edit_minutes: Option<i32>,
+    document_revision_number: Option<i32>,
     bookmark_captures: Vec<BookmarkCapture>,
     next_bookmark_marker_id: usize,
     styles: Vec<StyleDefinition>,
@@ -842,6 +843,7 @@ impl Parser {
             pending_custom_property_name: None,
             document_timestamps: Vec::new(),
             document_edit_minutes: None,
+            document_revision_number: None,
             bookmark_captures: Vec::new(),
             next_bookmark_marker_id: 1,
             styles: Vec::new(),
@@ -1442,6 +1444,12 @@ impl Parser {
                     && self.state.destination == Destination::Metadata =>
             {
                 self.set_document_edit_minutes(control.parameter, offset)?;
+            }
+            "version"
+                if self.state.inside_document_info
+                    && self.state.destination == Destination::Metadata =>
+            {
+                self.set_document_revision_number(control.parameter, offset)?;
             }
             "propname"
                 if control_starts_group
@@ -4617,6 +4625,29 @@ impl Parser {
         Ok(())
     }
 
+    fn set_document_revision_number(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes("version".len(), offset)?;
+        let Some(value) = value else {
+            return Ok(());
+        };
+        if value < 0 {
+            return Ok(());
+        }
+        let max = self.limits().max_output_text_chars.min(i32::MAX as usize) as i32;
+        if value > max {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "document revision number".to_string(),
+                offset,
+            });
+        }
+        self.document_revision_number = Some(value);
+        Ok(())
+    }
+
     fn push_user_property_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes(text.len(), offset)?;
         if contains_internal_marker(text) {
@@ -4739,6 +4770,8 @@ impl Parser {
             self.passive_document_timestamp_field_result(kind, instruction)
         } else if field_instruction_name(instruction) == Some("EDITTIME") {
             self.passive_edit_time_field_result()
+        } else if field_instruction_name(instruction) == Some("REVNUM") {
+            self.passive_revision_number_field_result()
         } else {
             passive_field_result(
                 instruction,
@@ -4821,6 +4854,14 @@ impl Parser {
     fn passive_edit_time_field_result(&self) -> Option<PassiveFieldResult> {
         Some(PassiveFieldResult {
             text: self.document_edit_minutes?.to_string(),
+            font_name: None,
+            form_field: false,
+        })
+    }
+
+    fn passive_revision_number_field_result(&self) -> Option<PassiveFieldResult> {
+        Some(PassiveFieldResult {
+            text: self.document_revision_number?.to_string(),
             font_name: None,
             form_field: false,
         })
@@ -9352,6 +9393,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "PAGEREF" => Some("PAGEREF"),
         "QUOTE" => Some("QUOTE"),
         "REF" => Some("REF"),
+        "REVNUM" => Some("REVNUM"),
         "SECTION" => Some("SECTION"),
         "SECTIONPAGES" => Some("SECTIONPAGES"),
         "SEQ" => Some("SEQ"),
@@ -14195,6 +14237,45 @@ After\par}"#;
             parse_rtf_bytes_with_options(br"{\rtf1{\info{\edmins42}}\par}", &options),
             Err(ParseError::ResourceLimitExceeded { resource, .. })
                 if resource == "document edit minutes"
+        ));
+    }
+
+    #[test]
+    fn resultless_revision_number_fields_render_from_metadata_only() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\version12}}Rev {\field{\*\fldinst REVNUM \\* ROMAN}} raw {\field{\*\fldinst REVNUM \\# "0000"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Rev XII raw 0012"));
+        for forbidden in ["REVNUM", "version", "fldinst", "[Field removed"] {
+            assert!(
+                !text.contains(forbidden),
+                "revision number field leaked unsafe text: {forbidden}"
+            );
+        }
+
+        let missing = parse_rtf(r"{\rtf1 Missing {\field{\*\fldinst REVNUM}}\par}").unwrap();
+        let missing_text = document_text(&missing.document);
+        assert!(missing_text.contains("Missing [Field removed: no passive result]"));
+        assert!(!missing_text.contains("REVNUM"));
+    }
+
+    #[test]
+    fn revision_number_metadata_obeys_output_bounds() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_output_text_chars: 3,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        assert!(matches!(
+            parse_rtf_bytes_with_options(br"{\rtf1{\info{\version42}}\par}", &options),
+            Err(ParseError::ResourceLimitExceeded { resource, .. })
+                if resource == "document revision number"
         ));
     }
 

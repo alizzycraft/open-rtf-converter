@@ -6400,6 +6400,76 @@ fn edit_time_field_uses_passive_metadata_without_pdf_leakage() {
 }
 
 #[test]
+fn revision_number_field_uses_passive_metadata_without_pdf_leakage() {
+    let input = br#"{\rtf1{\info{\version12}{\subject Hidden subject {\field{\*\fldinst HYPERLINK "https://example.com/revision"}{\fldrslt Hidden link}}}}Revision {\field{\*\fldinst REVNUM \\# "0000"}} dynamic {\field{\*\fldinst DATE}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Revision 0012"));
+    assert!(text.contains("dynamic [Field removed: no passive result]"));
+    for forbidden in [
+        "REVNUM",
+        "version",
+        "DATE",
+        "HYPERLINK",
+        "https://example.com",
+        "Hidden subject",
+        "Hidden link",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden revision metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("revision-number-field.rtf");
+    let output_path = dir.path().join("revision-number-field.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Revision 0012"));
+    assert!(rendered_text.contains("dynamic [Field removed: no passive result]"));
+    for forbidden in [
+        b"REVNUM".as_slice(),
+        b"version",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Hidden subject",
+        b"Hidden link",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden revision metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_index_entry_fields_are_stripped_without_pdf_leakage() {
     let input = rtf(&[
         "{",
