@@ -6967,6 +6967,68 @@ visible after\par}"#
 }
 
 #[test]
+fn shape_fields_render_stored_result_without_synthesizing_canvas_or_leaking_to_pdf() {
+    let input = br#"{\rtf1 Visible before
+stored {\field{\*\fldinst SHAPE \* MERGEFORMAT}{\fldrslt Visible drawing fallback}}
+resultless {\field{\*\fldinst SHAPE \* MERGEFORMAT}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("stored Visible drawing fallback"));
+    assert!(text.contains("resultless [Field removed: no passive result]"));
+    assert!(text.contains("visible after"));
+    for forbidden in ["SHAPE", "MERGEFORMAT", "fldinst", "fldrslt"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden SHAPE field content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("stored Visible drawing fallback"));
+    assert!(rendered_text.contains("resultless [Field removed: no passive result]"));
+    assert!(rendered_text.contains("visible after"));
+    for forbidden in [
+        b"SHAPE".as_slice(),
+        b"MERGEFORMAT",
+        b"fldinst",
+        b"fldrslt",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden SHAPE field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_active_control_fields_do_not_create_controls_or_leak_to_pdf() {
     let input = br#"{\rtf1 Visible before
 control {\field{\*\fldinst CONTROL Forms.CommandButton.1 "Hidden caption"}}

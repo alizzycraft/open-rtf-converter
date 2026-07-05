@@ -1327,6 +1327,20 @@ impl Parser {
                             offset,
                         )?;
                     } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_drawing_canvas_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "drawing field {name} removed without synthesizing drawing canvas output"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_active_control_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
@@ -1484,6 +1498,15 @@ impl Parser {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
                                 "mail-merge field {name} stripped without executing merge data source"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_drawing_canvas_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "drawing field {name} stripped without synthesizing drawing canvas output"
                             ),
                             Some(offset),
                         ));
@@ -10007,6 +10030,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "SECTIONPAGES" => Some("SECTIONPAGES"),
         "SEQ" => Some("SEQ"),
         "SET" => Some("SET"),
+        "SHAPE" => Some("SHAPE"),
         "TA" => Some("TA"),
         "TC" => Some("TC"),
         "CREATEDATE" => Some("CREATEDATE"),
@@ -10273,6 +10297,10 @@ fn is_mail_merge_data_resultless_field(name: &str) -> bool {
         name,
         "ADDRESSBLOCK" | "GREETINGLINE" | "MERGEREC" | "MERGESEQ"
     )
+}
+
+fn is_drawing_canvas_resultless_field(name: &str) -> bool {
+    matches!(name, "SHAPE")
 }
 
 fn is_active_control_resultless_field(name: &str) -> bool {
@@ -15381,6 +15409,46 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("embedded object field EMBED stripped")
+        }));
+    }
+
+    #[test]
+    fn shape_fields_use_stored_result_or_placeholder_without_synthesizing_canvas() {
+        let input = r#"{\rtf1 Stored {\field{\*\fldinst SHAPE \\* MERGEFORMAT}{\fldrslt Visible drawing fallback}} resultless {\field{\*\fldinst SHAPE \\* MERGEFORMAT}} After\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Stored Visible drawing fallback resultless [Field removed: no passive result] After"),
+            "text was {text:?}"
+        );
+        for forbidden in ["SHAPE", "MERGEFORMAT", "fldinst", "fldrslt"] {
+            assert!(
+                !text.contains(forbidden),
+                "shape field leaked instruction text: {forbidden}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("drawing field SHAPE removed without synthesizing drawing canvas output")
+        }));
+
+        let strip_options = RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Strip,
+            ..RtfParseOptions::default()
+        };
+        let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
+        let stripped_text = document_text(&stripped.document);
+        assert!(
+            stripped_text.contains("Stored Visible drawing fallback resultless  After"),
+            "stripped text was {stripped_text:?}"
+        );
+        assert!(!stripped_text.contains("[Field removed"));
+        assert!(stripped.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("drawing field SHAPE stripped without synthesizing drawing canvas output")
         }));
     }
 
