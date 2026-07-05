@@ -12868,6 +12868,124 @@ fn word_session_and_layout_flags_are_classified_without_payload_leakage() {
 }
 
 #[test]
+fn custom_xml_markup_preserves_visible_text_without_metadata_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "deff0{",
+        "\\",
+        "*",
+        "\\",
+        "xmlnstbl {",
+        "\\",
+        "xmlns1 http://schemas.example/payload}}{",
+        "\\",
+        "*",
+        "\\",
+        "datastore 414243 {",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}{",
+        "\\",
+        "*",
+        "\\",
+        "themedata 504b0304}{",
+        "\\",
+        "*",
+        "\\",
+        "colorschememapping 414243}",
+        "Before {",
+        "\\",
+        "xmlopen{",
+        "\\",
+        "xmlattrname secret}{",
+        "\\",
+        "xmlattrvalue 414243}tagged ",
+        "\\",
+        "xmlclose} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before tagged  After") || text.contains("Before tagged After"),
+        "custom XML visible text was not preserved: {text:?}"
+    );
+    for forbidden in [
+        "xmlopen",
+        "xmlclose",
+        "xmlattrname",
+        "xmlattrvalue",
+        "xmlnstbl",
+        "datastore",
+        "themedata",
+        "colorschememapping",
+        "secret",
+        "414243",
+        "objdata",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "custom XML metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported RTF control")
+            && !diagnostic.message.contains("unknown RTF destination")),
+        "custom XML controls should not be unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before tagged"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"xmlopen".as_slice(),
+        b"xmlclose",
+        b"xmlattrname",
+        b"xmlattrvalue",
+        b"xmlnstbl",
+        b"datastore",
+        b"themedata",
+        b"colorschememapping",
+        b"secret",
+        b"414243",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "custom XML metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
     let input = rtf(&[
         "{",
