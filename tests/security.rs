@@ -5217,6 +5217,136 @@ fn resultless_field_case_switches_render_passively_without_instruction_leakage()
 }
 
 #[test]
+fn resultless_field_number_switches_render_passively_without_instruction_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Values {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst SEQ Figure \\\\r 4 \\\\* ROMAN}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst SEQ Figure \\\\* roman}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 27 \\\\* alphabetic}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 27 \\\\* ALPHABETIC}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 255 \\\\* Hex}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst IF 1 = 1 \"7\" \"0\" \\\\* Ordinal}}.",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Values IV v aa AA FF 7th."),
+        "normalized field number-switch text was {text:?}"
+    );
+    for forbidden in [
+        "SEQ",
+        "IF",
+        "fldinst",
+        "\\r",
+        "Figure",
+        "ROMAN",
+        "roman",
+        "alphabetic",
+        "ALPHABETIC",
+        "Ordinal",
+        "Hex",
+        "[Field removed",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden field number-switch content leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field SEQ without executing field instruction")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field FORMULA without executing field instruction")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field IF without executing field instruction")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Values IV v aa AA FF 7th."),
+        "decoded PDF text did not contain passive field number-switch values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"SEQ".as_slice(),
+        b"IF",
+        b"fldinst",
+        b"\\r",
+        b"Figure",
+        b"ROMAN",
+        b"roman",
+        b"alphabetic",
+        b"ALPHABETIC",
+        b"Ordinal",
+        b"Hex",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden field number-switch content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_quote_fields_render_without_executing_field_instruction() {
     let input = rtf(&[
         "{",

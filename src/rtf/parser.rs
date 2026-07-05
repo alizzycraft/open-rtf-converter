@@ -4326,7 +4326,7 @@ impl Parser {
             )
         };
 
-        Ok(result.and_then(|result| apply_field_text_format_switches(instruction, result)))
+        Ok(result.and_then(|result| apply_field_format_switches(instruction, result)))
     }
 
     fn passive_sequence_field_result(
@@ -8696,6 +8696,23 @@ enum FieldTextFormatSwitch {
     Caps,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FieldNumberFormatSwitch {
+    Arabic,
+    UpperAlphabetic,
+    LowerAlphabetic,
+    UpperRoman,
+    LowerRoman,
+    Ordinal,
+    Hex,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FieldFormatSwitch {
+    Text(FieldTextFormatSwitch),
+    Number(FieldNumberFormatSwitch),
+}
+
 impl PassiveFieldResult {
     fn text(text: &'static str) -> Self {
         Self {
@@ -8706,7 +8723,7 @@ impl PassiveFieldResult {
     }
 }
 
-fn apply_field_text_format_switches(
+fn apply_field_format_switches(
     instruction: &str,
     mut result: PassiveFieldResult,
 ) -> Option<PassiveFieldResult> {
@@ -8714,7 +8731,7 @@ fn apply_field_text_format_switches(
         return Some(result);
     }
 
-    let switches = field_text_format_switches(instruction)?;
+    let switches = field_format_switches(instruction)?;
     if switches.is_empty() {
         return Some(result);
     }
@@ -8723,7 +8740,12 @@ fn apply_field_text_format_switches(
     }
 
     for switch in switches {
-        result.text = apply_field_text_format_switch(&result.text, switch);
+        result.text = match switch {
+            FieldFormatSwitch::Text(switch) => apply_field_text_format_switch(&result.text, switch),
+            FieldFormatSwitch::Number(switch) => {
+                apply_field_number_format_switch(&result.text, switch)?
+            }
+        };
         if result.text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS {
             return None;
         }
@@ -8911,7 +8933,7 @@ fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     let (right, rest) = field_if_operand(rest.trim_start())?;
     let (true_text, rest) = field_if_result_text(rest.trim_start())?;
     let (false_text, rest) = field_if_optional_result_text(rest.trim_start())?;
-    if !field_remainder_contains_only_text_format_switches(rest) {
+    if !field_remainder_contains_only_passive_format_switches(rest) {
         return None;
     }
 
@@ -9122,7 +9144,7 @@ fn field_if_condition_matches(left: &str, operator: FieldIfOperator, right: &str
     }
 }
 
-fn field_text_format_switches(instruction: &str) -> Option<Vec<FieldTextFormatSwitch>> {
+fn field_format_switches(instruction: &str) -> Option<Vec<FieldFormatSwitch>> {
     let mut switches = Vec::new();
     let mut in_quote = false;
     let mut escaped = false;
@@ -9150,9 +9172,7 @@ fn field_text_format_switches(instruction: &str) -> Option<Vec<FieldTextFormatSw
                 continue;
             }
             let after_star = after_backslash + '*'.len_utf8();
-            if let Some((switch, _)) =
-                field_text_format_switch_after_star(&instruction[after_star..])
-            {
+            if let Some((switch, _)) = field_format_switch_after_star(&instruction[after_star..]) {
                 if switches.len() >= 16 {
                     return None;
                 }
@@ -9164,7 +9184,7 @@ fn field_text_format_switches(instruction: &str) -> Option<Vec<FieldTextFormatSw
     Some(switches)
 }
 
-fn field_remainder_contains_only_text_format_switches(input: &str) -> bool {
+fn field_remainder_contains_only_passive_format_switches(input: &str) -> bool {
     let mut rest = input.trim_start();
     while !rest.is_empty() {
         let Some(after_backslash) = rest.strip_prefix('\\') else {
@@ -9173,7 +9193,7 @@ fn field_remainder_contains_only_text_format_switches(input: &str) -> bool {
         let Some(after_star) = after_backslash.strip_prefix('*') else {
             return false;
         };
-        let Some((_, after_switch)) = field_text_format_switch_after_star(after_star) else {
+        let Some((_, after_switch)) = field_format_switch_after_star(after_star) else {
             return false;
         };
         rest = after_switch.trim_start();
@@ -9181,7 +9201,7 @@ fn field_remainder_contains_only_text_format_switches(input: &str) -> bool {
     true
 }
 
-fn field_text_format_switch_after_star(input: &str) -> Option<(FieldTextFormatSwitch, &str)> {
+fn field_format_switch_after_star(input: &str) -> Option<(FieldFormatSwitch, &str)> {
     let input = input.trim_start();
     let (name, rest) = if input.starts_with('"') {
         (field_quoted_prefix(input)?, skip_field_argument(input)?)
@@ -9196,14 +9216,43 @@ fn field_text_format_switch_after_star(input: &str) -> Option<(FieldTextFormatSw
         (input[..end].to_string(), &input[end..])
     };
 
-    let switch = match name.trim().to_ascii_uppercase().as_str() {
-        "UPPER" => FieldTextFormatSwitch::Upper,
-        "LOWER" => FieldTextFormatSwitch::Lower,
-        "FIRSTCAP" => FieldTextFormatSwitch::FirstCap,
-        "CAPS" => FieldTextFormatSwitch::Caps,
-        _ => return None,
+    let name = name.trim();
+    let switch = if let Some(switch) = field_text_format_switch(name) {
+        FieldFormatSwitch::Text(switch)
+    } else if let Some(switch) = field_number_format_switch(name) {
+        FieldFormatSwitch::Number(switch)
+    } else {
+        return None;
     };
     Some((switch, rest))
+}
+
+fn field_text_format_switch(name: &str) -> Option<FieldTextFormatSwitch> {
+    match name.to_ascii_uppercase().as_str() {
+        "UPPER" => Some(FieldTextFormatSwitch::Upper),
+        "LOWER" => Some(FieldTextFormatSwitch::Lower),
+        "FIRSTCAP" => Some(FieldTextFormatSwitch::FirstCap),
+        "CAPS" => Some(FieldTextFormatSwitch::Caps),
+        _ => None,
+    }
+}
+
+fn field_number_format_switch(name: &str) -> Option<FieldNumberFormatSwitch> {
+    let upper = name.to_ascii_uppercase();
+    match upper.as_str() {
+        "ARABIC" => Some(FieldNumberFormatSwitch::Arabic),
+        "ALPHABETIC" if name.chars().all(|ch| !ch.is_ascii_lowercase()) => {
+            Some(FieldNumberFormatSwitch::UpperAlphabetic)
+        }
+        "ALPHABETIC" => Some(FieldNumberFormatSwitch::LowerAlphabetic),
+        "ROMAN" if name.chars().all(|ch| !ch.is_ascii_lowercase()) => {
+            Some(FieldNumberFormatSwitch::UpperRoman)
+        }
+        "ROMAN" => Some(FieldNumberFormatSwitch::LowerRoman),
+        "ORDINAL" => Some(FieldNumberFormatSwitch::Ordinal),
+        "HEX" => Some(FieldNumberFormatSwitch::Hex),
+        _ => None,
+    }
 }
 
 fn apply_field_text_format_switch(text: &str, switch: FieldTextFormatSwitch) -> String {
@@ -9212,6 +9261,20 @@ fn apply_field_text_format_switch(text: &str, switch: FieldTextFormatSwitch) -> 
         FieldTextFormatSwitch::Lower => text.chars().flat_map(char::to_lowercase).collect(),
         FieldTextFormatSwitch::FirstCap => uppercase_first_alphabetic(text),
         FieldTextFormatSwitch::Caps => uppercase_each_word_start(text),
+    }
+}
+
+fn apply_field_number_format_switch(text: &str, switch: FieldNumberFormatSwitch) -> Option<String> {
+    let value = text.trim().parse::<i32>().ok()?;
+    match switch {
+        FieldNumberFormatSwitch::Arabic => Some(value.to_string()),
+        FieldNumberFormatSwitch::UpperAlphabetic => Some(format_alpha_counter(value, false)),
+        FieldNumberFormatSwitch::LowerAlphabetic => Some(format_alpha_counter(value, true)),
+        FieldNumberFormatSwitch::UpperRoman => Some(format_roman_counter(value, false)),
+        FieldNumberFormatSwitch::LowerRoman => Some(format_roman_counter(value, true)),
+        FieldNumberFormatSwitch::Ordinal => Some(format_ordinal_counter(value)),
+        FieldNumberFormatSwitch::Hex if value >= 0 => Some(format!("{value:X}")),
+        FieldNumberFormatSwitch::Hex => None,
     }
 }
 
@@ -12884,6 +12947,37 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "forbidden field switch content leaked to text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_fields_apply_passive_number_format_switches() {
+        let output = parse_rtf(
+            r#"{\rtf1 Values {\field{\*\fldinst SEQ Figure \\r 4 \\* ROMAN}} {\field{\*\fldinst SEQ Figure \\* roman}} {\field{\*\fldinst = 27 \\* alphabetic}} {\field{\*\fldinst = 27 \\* ALPHABETIC}} {\field{\*\fldinst = 255 \\* Hex}} {\field{\*\fldinst IF 1 = 1 "7" "0" \\* Ordinal}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Values IV v aa AA FF 7th"),
+            "normalized field number-switch text was {text:?}"
+        );
+        for forbidden in [
+            "SEQ",
+            "IF",
+            "fldinst",
+            "ROMAN",
+            "roman",
+            "alphabetic",
+            "ALPHABETIC",
+            "Ordinal",
+            "Hex",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "forbidden field number-switch content leaked to text: {forbidden}"
             );
         }
     }
