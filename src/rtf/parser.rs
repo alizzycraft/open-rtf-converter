@@ -1327,6 +1327,20 @@ impl Parser {
                             offset,
                         )?;
                     } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_active_control_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "active control field {name} removed without creating active form or control content"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_generated_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
@@ -1470,6 +1484,15 @@ impl Parser {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
                                 "mail-merge field {name} stripped without executing merge data source"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_active_control_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "active control field {name} stripped without creating active form or control content"
                             ),
                             Some(offset),
                         ));
@@ -9969,6 +9992,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "CITATION" => Some("CITATION"),
         "COMMENTS" => Some("COMMENTS"),
         "COMPARE" => Some("COMPARE"),
+        "CONTROL" => Some("CONTROL"),
         "PAGE" => Some("PAGE"),
         "NUMPAGES" => Some("NUMPAGES"),
         "NUMWORDS" => Some("NUMWORDS"),
@@ -10004,6 +10028,19 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "DISPLAYBARCODE" => Some("DISPLAYBARCODE"),
         "GOTOBUTTON" => Some("GOTOBUTTON"),
         "GREETINGLINE" => Some("GREETINGLINE"),
+        "HTMLBUTTON" => Some("HTMLBUTTON"),
+        "HTMLCHECKBOX" => Some("HTMLCHECKBOX"),
+        "HTMLCONTROL" => Some("HTMLCONTROL"),
+        "HTMLHIDDEN" => Some("HTMLHIDDEN"),
+        "HTMLINPUT" => Some("HTMLINPUT"),
+        "HTMLLISTBOX" => Some("HTMLLISTBOX"),
+        "HTMLOPTION" => Some("HTMLOPTION"),
+        "HTMLPASSWORD" => Some("HTMLPASSWORD"),
+        "HTMLRADIO" => Some("HTMLRADIO"),
+        "HTMLRADIOBUTTON" => Some("HTMLRADIOBUTTON"),
+        "HTMLSELECT" => Some("HTMLSELECT"),
+        "HTMLTEXTAREA" => Some("HTMLTEXTAREA"),
+        "HTMLTEXTBOX" => Some("HTMLTEXTBOX"),
         "HYPERLINK" => Some("HYPERLINK"),
         "IF" => Some("IF"),
         "INDEX" => Some("INDEX"),
@@ -10235,6 +10272,26 @@ fn is_mail_merge_data_resultless_field(name: &str) -> bool {
     matches!(
         name,
         "ADDRESSBLOCK" | "GREETINGLINE" | "MERGEREC" | "MERGESEQ"
+    )
+}
+
+fn is_active_control_resultless_field(name: &str) -> bool {
+    matches!(
+        name,
+        "CONTROL"
+            | "HTMLBUTTON"
+            | "HTMLCHECKBOX"
+            | "HTMLCONTROL"
+            | "HTMLHIDDEN"
+            | "HTMLINPUT"
+            | "HTMLLISTBOX"
+            | "HTMLOPTION"
+            | "HTMLPASSWORD"
+            | "HTMLRADIO"
+            | "HTMLRADIOBUTTON"
+            | "HTMLSELECT"
+            | "HTMLTEXTAREA"
+            | "HTMLTEXTBOX"
     )
 }
 
@@ -15324,6 +15381,61 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("embedded object field EMBED stripped")
+        }));
+    }
+
+    #[test]
+    fn resultless_active_control_fields_do_not_create_controls_or_leak_payloads() {
+        let input = r#"{\rtf1 Before {\field{\*\fldinst CONTROL Forms.CommandButton.1 "Hidden caption"}} html {\field{\*\fldinst HTMLCHECKBOX "secret-name" checked}} select {\field{\*\fldinst HTMLSELECT "Secret option"}} After\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before [Field removed: no passive result] html [Field removed: no passive result] select [Field removed: no passive result] After"),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "CONTROL",
+            "HTMLCHECKBOX",
+            "HTMLSELECT",
+            "Forms.CommandButton",
+            "Hidden caption",
+            "secret-name",
+            "checked",
+            "Secret option",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "active control field leaked instruction or payload text: {forbidden}"
+            );
+        }
+        for name in ["CONTROL", "HTMLCHECKBOX", "HTMLSELECT"] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("active control field {name} removed"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
+
+        let strip_options = RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Strip,
+            ..RtfParseOptions::default()
+        };
+        let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
+        let stripped_text = document_text(&stripped.document);
+        assert!(
+            stripped_text.contains("Before  html  select  After"),
+            "stripped text was {stripped_text:?}"
+        );
+        assert!(!stripped_text.contains("[Field removed"));
+        assert!(stripped.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("active control field CONTROL stripped")
         }));
     }
 

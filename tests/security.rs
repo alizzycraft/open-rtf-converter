@@ -6967,6 +6967,91 @@ visible after\par}"#
 }
 
 #[test]
+fn resultless_active_control_fields_do_not_create_controls_or_leak_to_pdf() {
+    let input = br#"{\rtf1 Visible before
+control {\field{\*\fldinst CONTROL Forms.CommandButton.1 "Hidden caption"}}
+checkbox {\field{\*\fldinst HTMLCHECKBOX "secret-name" checked}}
+input {\field{\*\fldinst HTMLINPUT "password" value="secret"}}
+select {\field{\*\fldinst HTMLSELECT "Secret option"}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("visible after"));
+    assert_eq!(
+        text.matches("[Field removed: no passive result]").count(),
+        4
+    );
+    for forbidden in [
+        "CONTROL",
+        "HTMLCHECKBOX",
+        "HTMLINPUT",
+        "HTMLSELECT",
+        "Forms.CommandButton",
+        "Hidden caption",
+        "secret-name",
+        "password",
+        "value=",
+        "Secret option",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden active control field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("visible after"));
+    assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for forbidden in [
+        b"CONTROL".as_slice(),
+        b"HTMLCHECKBOX",
+        b"HTMLINPUT",
+        b"HTMLSELECT",
+        b"Forms.CommandButton",
+        b"Hidden caption",
+        b"secret-name",
+        b"password",
+        b"value=",
+        b"Secret option",
+        b"fldinst",
+        b"/AcroForm",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active control field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_environment_fields_do_not_expose_host_state_to_pdf() {
     let input = br#"{\rtf1 Visible before
 {\field{\*\fldinst FILENAME \p}}
