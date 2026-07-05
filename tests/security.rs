@@ -13324,6 +13324,117 @@ fn paragraph_bar_border_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn paragraph_between_borders_render_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "colortbl;",
+        "\\",
+        "red255",
+        "\\",
+        "green0",
+        "\\",
+        "blue0;}",
+        "\\",
+        "brdrbtw",
+        "\\",
+        "brdrs",
+        "\\",
+        "brdrw60",
+        "\\",
+        "brdrcf1 first paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "brdrbtw",
+        "\\",
+        "brdrs",
+        "\\",
+        "brdrw60",
+        "\\",
+        "brdrcf1 second paragraph",
+        "\\",
+        "par} ",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("first paragraph"));
+    assert!(text.contains("second paragraph"));
+    for forbidden in ["brdrbtw", "brdrw", "brdrcf"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden paragraph between border control leaked to text: {forbidden}"
+        );
+    }
+
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(paragraphs.len() >= 2);
+    for paragraph in paragraphs.iter().take(2) {
+        assert!(paragraph.style.borders.between.visible);
+        assert_eq!(paragraph.style.borders.between.width_twips, 60);
+        assert_eq!(paragraph.style.borders.between.color_index, Some(1));
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("paragraph-between-border.rtf");
+    let output_path = dir.path().join("paragraph-between-border.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("first paragraph"));
+    assert!(rendered_text.contains("second paragraph"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count()
+            >= 1
+    );
+    for forbidden in [
+        b"brdrbtw".as_slice(),
+        b"brdrs",
+        b"brdrw",
+        b"brdrcf",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden paragraph between border content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn font_code_page_hex_escapes_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

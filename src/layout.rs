@@ -772,6 +772,7 @@ impl LayoutEngine {
                         &paragraph,
                         false,
                         false,
+                        false,
                         geometry.body_width(current_column),
                         geometry.margin_bottom,
                         &mut geometry,
@@ -829,6 +830,10 @@ impl LayoutEngine {
                     let suppress_contextual_after =
                         next_paragraph_block(&document.blocks, block_idx)
                             .is_some_and(|next| paragraph_spacing_is_contextual(paragraph, next));
+                    let render_between_border_after =
+                        next_paragraph_block(&document.blocks, block_idx).is_some_and(|next| {
+                            paragraph_between_border_is_visible(paragraph, next)
+                        });
                     if paragraph.style.keep_with_next
                         && let Some(next_paragraph) =
                             next_paragraph_block(&document.blocks, block_idx)
@@ -859,6 +864,7 @@ impl LayoutEngine {
                         paragraph,
                         suppress_contextual_before,
                         suppress_contextual_after,
+                        render_between_border_after,
                         geometry.body_width(current_column),
                         geometry.margin_bottom,
                         &mut geometry,
@@ -1004,6 +1010,7 @@ fn layout_footnotes(
             pages,
             cursor_y,
             &paragraph,
+            false,
             false,
             false,
             content_width,
@@ -1438,6 +1445,10 @@ fn paragraph_spacing_is_contextual(first: &Paragraph, second: &Paragraph) -> boo
     first.style.contextual_spacing && second.style.contextual_spacing
 }
 
+fn paragraph_between_border_is_visible(first: &Paragraph, second: &Paragraph) -> bool {
+    first.style.borders.between.visible && second.style.borders.between.visible
+}
+
 fn apply_page_vertical_alignment(pages: &mut [LayoutPage]) {
     for page in pages {
         let alignment = page.geometry.vertical_alignment;
@@ -1796,6 +1807,7 @@ fn layout_repeating_header_footer(
                     cursor_y,
                     line.height,
                     document,
+                    false,
                 );
                 push_bar_tab_stops(
                     &mut scratch_pages,
@@ -2346,6 +2358,7 @@ fn push_table_row(
                 line_top,
                 prepared_line.line.height,
                 document,
+                false,
             );
             push_bar_tab_stops(
                 pages,
@@ -2595,6 +2608,7 @@ fn push_paragraph_borders(
     top_y: f32,
     line_height: f32,
     document: &Document,
+    render_between_border_after: bool,
 ) {
     if line_count == 0 {
         return;
@@ -2623,6 +2637,20 @@ fn push_paragraph_borders(
     }
     if style.borders.bottom.visible && line_idx + 1 == line_count {
         let border = &style.borders.bottom;
+        let (width, color, style) = table_border_stroke(border, document);
+        let spacing = twips_to_points(border.spacing_twips.max(0));
+        page.items.push(LayoutItem::Line {
+            x1,
+            y1: y2 - spacing,
+            x2,
+            y2: y2 - spacing,
+            width,
+            color,
+            style,
+        });
+    }
+    if render_between_border_after && style.borders.between.visible && line_idx + 1 == line_count {
+        let border = &style.borders.between;
         let (width, color, style) = table_border_stroke(border, document);
         let spacing = twips_to_points(border.spacing_twips.max(0));
         page.items.push(LayoutItem::Line {
@@ -2672,6 +2700,7 @@ fn layout_paragraph(
     paragraph: &Paragraph,
     suppress_contextual_space_before: bool,
     suppress_contextual_space_after: bool,
+    render_between_border_after: bool,
     content_width: f32,
     margin_bottom: f32,
     geometry: &mut PageGeometry,
@@ -2792,6 +2821,7 @@ fn layout_paragraph(
             *cursor_y,
             line.height,
             document,
+            render_between_border_after,
         );
         let word_spacing = justified_word_spacing(
             &line,
@@ -8818,6 +8848,113 @@ mod tests {
                     && (*x2 - 72.0).abs() < 0.01
                     && (*width - 2.0).abs() < 0.01
         )));
+    }
+
+    #[test]
+    fn lays_out_paragraph_between_borders_as_passive_lines() {
+        let mut document = Document::default();
+        document.colors = vec![
+            Color::default(),
+            Color {
+                red: 200,
+                green: 10,
+                blue: 20,
+            },
+        ];
+        let mut bordered = ParagraphStyle::default();
+        bordered.borders.between = TableCellBorder {
+            visible: true,
+            width_twips: 60,
+            color_index: Some(1),
+            ..TableCellBorder::default()
+        };
+
+        document.blocks = vec![
+            Block::Paragraph(Paragraph {
+                style: bordered.clone(),
+                runs: vec![Run {
+                    text: "First".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+            Block::Paragraph(Paragraph {
+                style: bordered,
+                runs: vec![Run {
+                    text: "Second".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let red = PdfColor {
+            red: 200.0 / 255.0,
+            green: 10.0 / 255.0,
+            blue: 20.0 / 255.0,
+        };
+        let between_lines = page
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item,
+                    LayoutItem::Line { x1, x2, y1, y2, width, color, .. }
+                        if (*x2 - *x1).abs() > 100.0
+                            && (*y1 - *y2).abs() < 0.01
+                            && (*width - 3.0).abs() < 0.01
+                            && *color == red
+                )
+            })
+            .count();
+
+        assert_eq!(between_lines, 1);
+        assert!(layout_text(page).contains("First"));
+        assert!(layout_text(page).contains("Second"));
+    }
+
+    #[test]
+    fn skips_paragraph_between_border_when_next_paragraph_does_not_opt_in() {
+        let mut document = Document::default();
+        let mut bordered = ParagraphStyle::default();
+        bordered.borders.between = TableCellBorder {
+            visible: true,
+            width_twips: 60,
+            ..TableCellBorder::default()
+        };
+        document.blocks = vec![
+            Block::Paragraph(Paragraph {
+                style: bordered,
+                runs: vec![Run {
+                    text: "First".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+            Block::Paragraph(Paragraph {
+                style: ParagraphStyle::default(),
+                runs: vec![Run {
+                    text: "Second".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let between_lines = layout.pages[0]
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item,
+                    LayoutItem::Line { x1, x2, y1, y2, width, .. }
+                        if (*x2 - *x1).abs() > 100.0
+                            && (*y1 - *y2).abs() < 0.01
+                            && (*width - 3.0).abs() < 0.01
+                )
+            })
+            .count();
+
+        assert_eq!(between_lines, 0);
     }
 
     #[test]

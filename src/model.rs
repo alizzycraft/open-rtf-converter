@@ -653,6 +653,7 @@ pub struct ParagraphBorders {
     pub right: TableCellBorder,
     pub top: TableCellBorder,
     pub bottom: TableCellBorder,
+    pub between: TableCellBorder,
 }
 
 impl Default for ParagraphBorders {
@@ -662,6 +663,7 @@ impl Default for ParagraphBorders {
             right: hidden_border(),
             top: hidden_border(),
             bottom: hidden_border(),
+            between: hidden_border(),
         }
     }
 }

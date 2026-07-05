@@ -237,6 +237,7 @@ enum BorderSelection {
     None,
     Character,
     Paragraph(TableCellBorderSide),
+    ParagraphBetween,
     ParagraphBox,
     Page(TableCellBorderSide),
 }
@@ -1890,6 +1891,7 @@ impl Parser {
             "brdrt" => self.select_current_paragraph_border(TableCellBorderSide::Top),
             "brdrb" => self.select_current_paragraph_border(TableCellBorderSide::Bottom),
             "brdrbar" => self.select_current_paragraph_border(TableCellBorderSide::Left),
+            "brdrbtw" => self.select_current_paragraph_between_border(),
             "pgbrdrl" => self.select_current_page_border(TableCellBorderSide::Left),
             "pgbrdrr" => self.select_current_page_border(TableCellBorderSide::Right),
             "pgbrdrt" => self.select_current_page_border(TableCellBorderSide::Top),
@@ -4718,6 +4720,10 @@ impl Parser {
         self.state.paragraph_border_selection = BorderSelection::Paragraph(side);
     }
 
+    fn select_current_paragraph_between_border(&mut self) {
+        self.state.paragraph_border_selection = BorderSelection::ParagraphBetween;
+    }
+
     fn select_current_paragraph_box_border(&mut self) {
         self.state.paragraph_border_selection = BorderSelection::ParagraphBox;
     }
@@ -4809,6 +4815,10 @@ impl Parser {
                 update(border);
                 true
             }
+            BorderSelection::ParagraphBetween => {
+                update(&mut self.state.paragraph.borders.between);
+                true
+            }
             BorderSelection::ParagraphBox => {
                 update(&mut self.state.paragraph.borders.left);
                 update(&mut self.state.paragraph.borders.right);
@@ -4884,6 +4894,10 @@ impl Parser {
                     }
                 };
                 border.spacing_twips = value;
+                true
+            }
+            BorderSelection::ParagraphBetween => {
+                self.state.paragraph.borders.between.spacing_twips = value;
                 true
             }
             BorderSelection::ParagraphBox => {
@@ -14344,6 +14358,27 @@ After\par}"#;
         assert_eq!(first.style.borders.left.width_twips, 60);
         assert_eq!(first.style.borders.left.color_index, Some(1));
         assert!(!second.style.borders.left.visible);
+    }
+
+    #[test]
+    fn normalizes_paragraph_between_border_controls() {
+        let output =
+            parse_rtf(r"{\rtf1\brdrbtw\brdrs\brdrw60\brdrcf1 First\par\brdrbtw\brdrs\brdrw60\brdrcf1 Second\par}").unwrap();
+
+        let first = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let second = match &output.document.blocks[1] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        for paragraph in [first, second] {
+            assert!(paragraph.style.borders.between.visible);
+            assert_eq!(paragraph.style.borders.between.width_twips, 60);
+            assert_eq!(paragraph.style.borders.between.color_index, Some(1));
+        }
     }
 
     #[test]
