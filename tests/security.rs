@@ -4124,6 +4124,98 @@ fn date_fields_use_stored_results_and_never_update_or_leak_instructions() {
 }
 
 #[test]
+fn metadata_timestamp_fields_render_passively_without_instruction_or_metadata_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "info{",
+        "\\",
+        "creatim",
+        "\\",
+        "yr2024",
+        "\\",
+        "mo7",
+        "\\",
+        "dy5",
+        "\\",
+        "hr14",
+        "\\",
+        "min30",
+        "\\",
+        "sec9}{",
+        "\\",
+        "revtim",
+        "\\",
+        "yr2025",
+        "\\",
+        "mo1",
+        "\\",
+        "dy2",
+        "\\",
+        "hr9",
+        "\\",
+        "min4",
+        "\\",
+        "sec5}}Created {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst CREATEDATE \\\\@ \"MMMM d, yyyy\"}} saved {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst SAVEDATE \\\\@ \"yyyy-MM-dd HH:mm:ss\"}} dynamic {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst DATE \\\\@ \"current-date-sentinel\"}}",
+        "\\",
+        "par}",
+    ]);
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Created July 5, 2024"));
+    assert!(rendered_text.contains("saved 2025-01-02 09:04:05"));
+    assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for forbidden in [
+        b"fldinst".as_slice(),
+        b"CREATEDATE",
+        b"SAVEDATE",
+        b"current-date-sentinel",
+        b"creatim",
+        b"revtim",
+        b"yr2024",
+        b"MMMM",
+        b"yyyy",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden metadata timestamp content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_page_count_fields_render_without_executing_field_instruction() {
     let input = rtf(&[
         "{",

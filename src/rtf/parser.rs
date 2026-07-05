@@ -101,6 +101,8 @@ struct ParserState {
     unicode_alternate_destination: Destination,
     metadata_property: Option<DocumentProperty>,
     metadata_property_text: String,
+    metadata_timestamp: Option<DocumentTimestampKind>,
+    metadata_timestamp_value: DocumentTimestamp,
     user_property_capture: Option<UserPropertyCapture>,
     user_property_capture_text: String,
     at_group_start: bool,
@@ -160,6 +162,8 @@ impl Default for ParserState {
             unicode_alternate_destination: Destination::Body,
             metadata_property: None,
             metadata_property_text: String::new(),
+            metadata_timestamp: None,
+            metadata_timestamp_value: DocumentTimestamp::default(),
             user_property_capture: None,
             user_property_capture_text: String::new(),
             at_group_start: false,
@@ -670,6 +674,23 @@ enum UserPropertyCapture {
     Value,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum DocumentTimestampKind {
+    Created,
+    Saved,
+    Printed,
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+struct DocumentTimestamp {
+    year: Option<i32>,
+    month: Option<i32>,
+    day: Option<i32>,
+    hour: Option<i32>,
+    minute: Option<i32>,
+    second: Option<i32>,
+}
+
 struct Parser {
     tokens: Vec<Token>,
     document: Document,
@@ -714,6 +735,7 @@ struct Parser {
     document_properties: Vec<(DocumentProperty, String)>,
     custom_document_properties: Vec<(String, String)>,
     pending_custom_property_name: Option<String>,
+    document_timestamps: Vec<(DocumentTimestampKind, DocumentTimestamp)>,
     bookmark_captures: Vec<BookmarkCapture>,
     next_bookmark_marker_id: usize,
     styles: Vec<StyleDefinition>,
@@ -817,6 +839,7 @@ impl Parser {
             document_properties: Vec::new(),
             custom_document_properties: Vec::new(),
             pending_custom_property_name: None,
+            document_timestamps: Vec::new(),
             bookmark_captures: Vec::new(),
             next_bookmark_marker_id: 1,
             styles: Vec::new(),
@@ -934,6 +957,11 @@ impl Parser {
             child.metadata_property_text.clear();
             child.inside_document_info = false;
         }
+        if parent.metadata_timestamp.is_some() {
+            child.metadata_timestamp = None;
+            child.metadata_timestamp_value = DocumentTimestamp::default();
+            child.inside_document_info = false;
+        }
         if parent.user_property_capture.is_some() {
             child.user_property_capture = None;
             child.user_property_capture_text.clear();
@@ -987,6 +1015,12 @@ impl Parser {
             {
                 let text = self.state.metadata_property_text.clone();
                 self.store_document_property(property, &text, offset)?;
+            }
+            if let Some(kind) = self.state.metadata_timestamp
+                && previous.metadata_timestamp.is_none()
+            {
+                let timestamp = self.state.metadata_timestamp_value;
+                self.store_document_timestamp(kind, timestamp, offset)?;
             }
             if let Some(capture) = self.state.user_property_capture
                 && previous.user_property_capture.is_none()
@@ -1390,6 +1424,16 @@ impl Parser {
                 self.state.inside_metadata = true;
                 self.state.metadata_property = document_property_control(name);
                 self.state.metadata_property_text.clear();
+            }
+            name if control_starts_group
+                && self.state.inside_document_info
+                && document_timestamp_control(name).is_some()
+                && self.state.destination == Destination::Metadata =>
+            {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+                self.state.metadata_timestamp = document_timestamp_control(name);
+                self.state.metadata_timestamp_value = DocumentTimestamp::default();
             }
             "propname"
                 if control_starts_group
@@ -2160,6 +2204,11 @@ impl Parser {
                 self.current_color_seen = true;
             }
             "bin" => {}
+            "yr" | "mo" | "dy" | "hr" | "min" | "sec"
+                if self.state.metadata_timestamp.is_some() =>
+            {
+                self.set_document_timestamp_part(control.name.as_str(), control.parameter, offset)?;
+            }
             "uc" => {
                 self.state.unicode_skip =
                     self.clamp_unicode_fallback_skip(control.parameter.unwrap_or(1), offset)
@@ -4489,6 +4538,54 @@ impl Parser {
         Ok(())
     }
 
+    fn set_document_timestamp_part(
+        &mut self,
+        name: &str,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let Some(value) = value else {
+            return Ok(());
+        };
+        match name {
+            "yr" => self.state.metadata_timestamp_value.year = Some(value),
+            "mo" => self.state.metadata_timestamp_value.month = Some(value),
+            "dy" => self.state.metadata_timestamp_value.day = Some(value),
+            "hr" => self.state.metadata_timestamp_value.hour = Some(value),
+            "min" => self.state.metadata_timestamp_value.minute = Some(value),
+            "sec" => self.state.metadata_timestamp_value.second = Some(value),
+            _ => {}
+        }
+        self.count_skipped_destination_bytes(name.len(), offset)
+    }
+
+    fn store_document_timestamp(
+        &mut self,
+        kind: DocumentTimestampKind,
+        timestamp: DocumentTimestamp,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let Some(timestamp) = normalize_document_timestamp(timestamp) else {
+            return Ok(());
+        };
+        if let Some((_, existing)) = self
+            .document_timestamps
+            .iter_mut()
+            .find(|(stored_kind, _)| *stored_kind == kind)
+        {
+            *existing = timestamp;
+        } else {
+            if self.document_timestamps.len() >= 3 {
+                return Err(ParseError::ResourceLimitExceeded {
+                    resource: "document timestamps".to_string(),
+                    offset,
+                });
+            }
+            self.document_timestamps.push((kind, timestamp));
+        }
+        Ok(())
+    }
+
     fn push_user_property_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes(text.len(), offset)?;
         if contains_internal_marker(text) {
@@ -4599,6 +4696,10 @@ impl Parser {
             self.passive_page_ref_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("DOCPROPERTY") {
             self.passive_doc_property_field_result(instruction)
+        } else if let Some(kind) =
+            field_instruction_name(instruction).and_then(document_timestamp_field_name)
+        {
+            self.passive_document_timestamp_field_result(kind, instruction)
         } else {
             passive_field_result(
                 instruction,
@@ -4627,6 +4728,27 @@ impl Parser {
         };
         Some(PassiveFieldResult {
             text: text.clone(),
+            font_name: None,
+            form_field: false,
+        })
+    }
+
+    fn passive_document_timestamp_field_result(
+        &self,
+        kind: DocumentTimestampKind,
+        instruction: &str,
+    ) -> Option<PassiveFieldResult> {
+        let timestamp = self
+            .document_timestamps
+            .iter()
+            .find_map(|(stored_kind, timestamp)| (*stored_kind == kind).then_some(timestamp))?;
+        let text = if let Some(picture) = field_date_picture_switch(instruction)? {
+            apply_field_date_picture(timestamp, &picture)?
+        } else {
+            format_default_document_timestamp(timestamp)
+        };
+        Some(PassiveFieldResult {
+            text,
             font_name: None,
             form_field: false,
         })
@@ -8745,6 +8867,15 @@ fn document_property_control(name: &str) -> Option<DocumentProperty> {
     }
 }
 
+fn document_timestamp_control(name: &str) -> Option<DocumentTimestampKind> {
+    match name {
+        "creatim" => Some(DocumentTimestampKind::Created),
+        "revtim" => Some(DocumentTimestampKind::Saved),
+        "printim" => Some(DocumentTimestampKind::Printed),
+        _ => None,
+    }
+}
+
 fn is_mail_merge_destination(name: &str) -> bool {
     matches!(
         name,
@@ -9006,6 +9137,7 @@ struct FormulaParser<'a> {
 
 const MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS: usize = 4096;
 const MAX_PASSIVE_FIELD_NUMERIC_PICTURE_CHARS: usize = 64;
+const MAX_PASSIVE_FIELD_DATE_PICTURE_CHARS: usize = 96;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum FieldTextFormatSwitch {
@@ -9193,6 +9325,15 @@ fn document_property_field_name(name: &str) -> Option<DocumentProperty> {
     }
 }
 
+fn document_timestamp_field_name(name: &str) -> Option<DocumentTimestampKind> {
+    match name {
+        "CREATEDATE" => Some(DocumentTimestampKind::Created),
+        "SAVEDATE" => Some(DocumentTimestampKind::Saved),
+        "PRINTDATE" => Some(DocumentTimestampKind::Printed),
+        _ => None,
+    }
+}
+
 fn clean_document_property_text(
     text: &str,
     offset: usize,
@@ -9210,6 +9351,49 @@ fn clean_document_property_text(
         });
     }
     Ok(Some(text))
+}
+
+fn normalize_document_timestamp(timestamp: DocumentTimestamp) -> Option<DocumentTimestamp> {
+    let year = timestamp.year?;
+    let month = timestamp.month?;
+    let day = timestamp.day?;
+    let hour = timestamp.hour.unwrap_or(0);
+    let minute = timestamp.minute.unwrap_or(0);
+    let second = timestamp.second.unwrap_or(0);
+    if !(1..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=59).contains(&second)
+    {
+        return None;
+    }
+    let max_day = days_in_month(year, month)?;
+    if !(1..=max_day).contains(&day) {
+        return None;
+    }
+    Some(DocumentTimestamp {
+        year: Some(year),
+        month: Some(month),
+        day: Some(day),
+        hour: Some(hour),
+        minute: Some(minute),
+        second: Some(second),
+    })
+}
+
+fn days_in_month(year: i32, month: i32) -> Option<i32> {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => Some(31),
+        4 | 6 | 9 | 11 => Some(30),
+        2 if is_leap_year(year) => Some(29),
+        2 => Some(28),
+        _ => None,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 fn is_non_visible_resultless_field(name: &str) -> bool {
@@ -9604,6 +9788,203 @@ fn apply_field_numeric_picture_switch(text: &str, picture: &str) -> Option<Strin
     }
     output.push_str(&parsed.suffix);
     Some(output)
+}
+
+fn field_date_picture_switch(instruction: &str) -> Option<Option<String>> {
+    let mut in_quote = false;
+    let mut escaped = false;
+
+    for (index, ch) in instruction.char_indices() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quote = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_quote = true;
+            continue;
+        }
+
+        if ch == '\\' {
+            let after_backslash = index + ch.len_utf8();
+            if instruction[after_backslash..].starts_with('@') {
+                let after_at = after_backslash + '@'.len_utf8();
+                return field_date_picture_argument(&instruction[after_at..]).map(Some);
+            }
+        }
+    }
+
+    Some(None)
+}
+
+fn field_date_picture_argument(input: &str) -> Option<String> {
+    let input = input.trim_start();
+    if input.is_empty() {
+        return None;
+    }
+
+    let picture = if input.starts_with('"') {
+        field_quoted_prefix(input)?
+    } else {
+        let end = input
+            .char_indices()
+            .find_map(|(index, ch)| (ch.is_whitespace() || ch == '\\').then_some(index))
+            .unwrap_or(input.len());
+        input[..end].to_string()
+    };
+    let picture = picture.trim().to_string();
+    if picture.is_empty()
+        || picture.chars().count() > MAX_PASSIVE_FIELD_DATE_PICTURE_CHARS
+        || picture.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(&picture)
+        || !picture
+            .chars()
+            .all(|ch| ch.is_ascii() && !matches!(ch, '\\' | '{' | '}'))
+    {
+        return None;
+    }
+    Some(picture)
+}
+
+fn format_default_document_timestamp(timestamp: &DocumentTimestamp) -> String {
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        timestamp.year.unwrap_or(1),
+        timestamp.month.unwrap_or(1),
+        timestamp.day.unwrap_or(1),
+        timestamp.hour.unwrap_or(0),
+        timestamp.minute.unwrap_or(0),
+        timestamp.second.unwrap_or(0)
+    )
+}
+
+fn apply_field_date_picture(timestamp: &DocumentTimestamp, picture: &str) -> Option<String> {
+    let mut output = String::new();
+    let mut index = 0;
+    while index < picture.len() {
+        let rest = &picture[index..];
+        if let Some(value) = rest.strip_prefix("AM/PM") {
+            output.push_str(if timestamp.hour.unwrap_or(0) < 12 {
+                "AM"
+            } else {
+                "PM"
+            });
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("am/pm") {
+            output.push_str(if timestamp.hour.unwrap_or(0) < 12 {
+                "am"
+            } else {
+                "pm"
+            });
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("yyyy") {
+            output.push_str(&format!("{:04}", timestamp.year.unwrap_or(1)));
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("yy") {
+            output.push_str(&format!("{:02}", timestamp.year.unwrap_or(1) % 100));
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("MMMM") {
+            output.push_str(month_name(timestamp.month.unwrap_or(1))?);
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("MMM") {
+            output.push_str(month_abbreviation(timestamp.month.unwrap_or(1))?);
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("MM") {
+            output.push_str(&format!("{:02}", timestamp.month.unwrap_or(1)));
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix('M') {
+            output.push_str(&timestamp.month.unwrap_or(1).to_string());
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("dd") {
+            output.push_str(&format!("{:02}", timestamp.day.unwrap_or(1)));
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix('d') {
+            output.push_str(&timestamp.day.unwrap_or(1).to_string());
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("HH") {
+            output.push_str(&format!("{:02}", timestamp.hour.unwrap_or(0)));
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix('H') {
+            output.push_str(&timestamp.hour.unwrap_or(0).to_string());
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("hh") {
+            output.push_str(&format!("{:02}", twelve_hour(timestamp.hour.unwrap_or(0))));
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix('h') {
+            output.push_str(&twelve_hour(timestamp.hour.unwrap_or(0)).to_string());
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("mm") {
+            output.push_str(&format!("{:02}", timestamp.minute.unwrap_or(0)));
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix('m') {
+            output.push_str(&timestamp.minute.unwrap_or(0).to_string());
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("ss") {
+            output.push_str(&format!("{:02}", timestamp.second.unwrap_or(0)));
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix('s') {
+            output.push_str(&timestamp.second.unwrap_or(0).to_string());
+            index = picture.len() - value.len();
+        } else {
+            let ch = rest.chars().next()?;
+            if ch.is_ascii_alphabetic() {
+                return None;
+            }
+            output.push(ch);
+            index += ch.len_utf8();
+        }
+        if output.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS {
+            return None;
+        }
+    }
+    Some(output)
+}
+
+fn twelve_hour(hour: i32) -> i32 {
+    let hour = hour % 12;
+    if hour == 0 { 12 } else { hour }
+}
+
+fn month_name(month: i32) -> Option<&'static str> {
+    Some(match month {
+        1 => "January",
+        2 => "February",
+        3 => "March",
+        4 => "April",
+        5 => "May",
+        6 => "June",
+        7 => "July",
+        8 => "August",
+        9 => "September",
+        10 => "October",
+        11 => "November",
+        12 => "December",
+        _ => return None,
+    })
+}
+
+fn month_abbreviation(month: i32) -> Option<&'static str> {
+    Some(match month {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13649,6 +14030,41 @@ After\par}"#;
                 .message
                 .contains("field DATE has no stored result and was not evaluated dynamically")
         }));
+    }
+
+    #[test]
+    fn resultless_document_timestamp_fields_render_from_metadata_only() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30\sec9}{\revtim\yr2025\mo1\dy2\hr9\min4\sec5}{\printim\yr2026\mo12\dy31}}Created {\field{\*\fldinst CREATEDATE \\@ "MMMM d, yyyy"}} saved {\field{\*\fldinst SAVEDATE \\@ "yyyy-MM-dd HH:mm:ss"}} printed {\field{\*\fldinst PRINTDATE \\@ "M/d/yy"}} missing {\field{\*\fldinst SAVEDATE \\@ "unknown-token"}} dynamic {\field{\*\fldinst DATE \\@ "yyyy"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Created July 5, 2024"));
+        assert!(text.contains("saved 2025-01-02 09:04:05"));
+        assert!(text.contains("printed 12/31/26"));
+        assert_eq!(
+            text.matches("[Field removed: no passive result]").count(),
+            2
+        );
+        for forbidden in [
+            "CREATEDATE",
+            "SAVEDATE",
+            "PRINTDATE",
+            "DATE",
+            "MMMM",
+            "yyyy",
+            "unknown-token",
+            "creatim",
+            "revtim",
+            "printim",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "timestamp field leaked unsafe text: {forbidden}"
+            );
+        }
     }
 
     #[test]
