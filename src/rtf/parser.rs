@@ -1440,6 +1440,83 @@ impl Parser {
             {
                 self.set_current_list_level_small_caps(control.parameter.unwrap_or(1) != 0);
             }
+            "super"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_super(control.parameter.unwrap_or(1) != 0);
+            }
+            "sub"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_sub(control.parameter.unwrap_or(1) != 0);
+            }
+            "nosupersub"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.reset_current_list_level_script_position();
+            }
+            "up" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_baseline_shift(
+                    control
+                        .parameter
+                        .unwrap_or(0)
+                        .max(0)
+                        .min(MAX_BASELINE_SHIFT_HALF_POINTS),
+                );
+            }
+            "dn" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_baseline_shift(
+                    -control
+                        .parameter
+                        .unwrap_or(0)
+                        .max(0)
+                        .min(MAX_BASELINE_SHIFT_HALF_POINTS),
+                );
+            }
+            "expnd"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                let half_points = control.parameter.unwrap_or(0);
+                self.set_current_list_level_character_spacing(
+                    half_points.saturating_mul(10),
+                    offset,
+                );
+            }
+            "expndtw"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_character_spacing(
+                    control.parameter.unwrap_or(0),
+                    offset,
+                );
+            }
+            "kerning"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_character_kerning(
+                    control.parameter.unwrap_or(0),
+                    offset,
+                );
+            }
+            "charscalex"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_character_scaling(
+                    control.parameter.unwrap_or(100),
+                    offset,
+                );
+            }
             "f" if self.state.destination == Destination::ListTable
                 && self.state.list_context == ListContext::ListLevel =>
             {
@@ -7079,6 +7156,71 @@ impl Parser {
 
     fn set_current_list_level_small_caps(&mut self, enabled: bool) {
         self.update_current_list_level_character_style(|style| style.small_caps = enabled);
+    }
+
+    fn set_current_list_level_super(&mut self, enabled: bool) {
+        if enabled {
+            self.update_current_list_level_character_style(|style| {
+                style.baseline_shift_half_points = DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                style.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+            });
+        } else {
+            self.reset_current_list_level_script_position();
+        }
+    }
+
+    fn set_current_list_level_sub(&mut self, enabled: bool) {
+        if enabled {
+            self.update_current_list_level_character_style(|style| {
+                style.baseline_shift_half_points = DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
+                style.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+            });
+        } else {
+            self.reset_current_list_level_script_position();
+        }
+    }
+
+    fn reset_current_list_level_script_position(&mut self) {
+        self.update_current_list_level_character_style(|style| {
+            style.baseline_shift_half_points = 0;
+            style.font_size_scale_percent = 100;
+        });
+    }
+
+    fn set_current_list_level_baseline_shift(&mut self, shift_half_points: i32) {
+        self.update_current_list_level_character_style(|style| {
+            style.baseline_shift_half_points = shift_half_points;
+            style.font_size_scale_percent = 100;
+        });
+    }
+
+    fn set_current_list_level_character_spacing(&mut self, spacing_twips: i32, offset: usize) {
+        let spacing_twips = self.clamp_character_spacing(spacing_twips, offset);
+        self.update_current_list_level_character_style(|style| {
+            style.character_spacing_twips = spacing_twips
+        });
+    }
+
+    fn set_current_list_level_character_kerning(
+        &mut self,
+        threshold_half_points: i32,
+        offset: usize,
+    ) {
+        let threshold_half_points = self.clamp_character_kerning(threshold_half_points, offset);
+        self.update_current_list_level_character_style(|style| {
+            style.character_kerning_half_points = threshold_half_points
+        });
+        self.diagnostics.push(Diagnostic::warning(
+            "character kerning approximated by passive pair spacing",
+            Some(offset),
+        ));
+    }
+
+    fn set_current_list_level_character_scaling(&mut self, scaling_percent: i32, offset: usize) {
+        let scaling_percent = self.clamp_character_scaling(scaling_percent, offset);
+        self.update_current_list_level_character_style(|style| {
+            style.character_scaling_percent = scaling_percent
+        });
     }
 
     fn set_current_list_level_font(&mut self, font_index: i32) {
@@ -12733,6 +12875,66 @@ After\par}"#;
         assert_eq!(marker_style(2).relief, TextRelief::Emboss);
         assert_eq!(marker_style(3).relief, TextRelief::Engrave);
         assert!(marker_style(4).small_caps);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn applies_list_level_marker_script_and_spacing_to_marker_runs_only() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par}",
+        )
+        .unwrap();
+
+        let marker_style = |index: usize, text: &str| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => {
+                assert_eq!(paragraph.runs[0].text, "1.\t");
+                assert_eq!(paragraph.runs[1].text, text);
+                assert_eq!(paragraph.runs[1].style, CharacterStyle::default());
+                &paragraph.runs[0].style
+            }
+            _ => panic!("expected paragraph"),
+        };
+
+        let raised = marker_style(0, "Raised marker");
+        assert_eq!(
+            raised.baseline_shift_half_points,
+            DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS
+        );
+        assert_eq!(
+            raised.font_size_scale_percent,
+            DEFAULT_SCRIPT_FONT_SCALE_PERCENT
+        );
+        let lowered = marker_style(1, "Lowered marker");
+        assert_eq!(
+            lowered.baseline_shift_half_points,
+            DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS
+        );
+        assert_eq!(
+            lowered.font_size_scale_percent,
+            DEFAULT_SCRIPT_FONT_SCALE_PERCENT
+        );
+        assert_eq!(
+            marker_style(2, "Manual up marker").baseline_shift_half_points,
+            8
+        );
+        assert_eq!(
+            marker_style(3, "Manual down marker").baseline_shift_half_points,
+            -6
+        );
+        assert_eq!(marker_style(4, "Spaced marker").character_spacing_twips, 80);
+        assert_eq!(
+            marker_style(5, "Kerned marker").character_kerning_half_points,
+            2
+        );
+        assert_eq!(
+            marker_style(6, "Scaled marker").character_scaling_percent,
+            150
+        );
         assert!(
             output
                 .diagnostics

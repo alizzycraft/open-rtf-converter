@@ -2413,6 +2413,126 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn list_level_marker_script_and_spacing_render_passively_without_control_leakage() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+
+    for (index, text) in [
+        "Raised marker",
+        "Lowered marker",
+        "Manual up marker",
+        "Manual down marker",
+        "Spaced marker",
+        "Kerned marker",
+        "Scaled marker",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let paragraph = match &parsed.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert_eq!(paragraph.runs[1].text, text);
+        assert_eq!(paragraph.runs[1].style.baseline_shift_half_points, 0);
+        assert_eq!(paragraph.runs[1].style.font_size_scale_percent, 100);
+        assert_eq!(paragraph.runs[1].style.character_spacing_twips, 0);
+        assert_eq!(paragraph.runs[1].style.character_kerning_half_points, 0);
+        assert_eq!(paragraph.runs[1].style.character_scaling_percent, 100);
+    }
+
+    let first = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let second = match &parsed.document.blocks[1] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let third = match &parsed.document.blocks[2] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let fourth = match &parsed.document.blocks[3] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let fifth = match &parsed.document.blocks[4] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let sixth = match &parsed.document.blocks[5] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let seventh = match &parsed.document.blocks[6] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    assert!(first.runs[0].style.baseline_shift_half_points > 0);
+    assert!(second.runs[0].style.baseline_shift_half_points < 0);
+    assert_eq!(third.runs[0].style.baseline_shift_half_points, 8);
+    assert_eq!(fourth.runs[0].style.baseline_shift_half_points, -6);
+    assert_eq!(fifth.runs[0].style.character_spacing_twips, 80);
+    assert_eq!(sixth.runs[0].style.character_kerning_half_points, 2);
+    assert_eq!(seventh.runs[0].style.character_scaling_percent, 150);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for expected in [
+        "1.Raised marker",
+        "1.Lowered marker",
+        "1.Manual up marker",
+        "1.Manual down marker",
+        "1.Spaced marker",
+        "1.Kerned marker",
+        "1.Scaled marker",
+    ] {
+        assert!(
+            rendered_text.contains(expected),
+            "decoded PDF text did not contain passive marker script/spacing text {expected:?}: {rendered_text:?}"
+        );
+    }
+
+    for forbidden in [
+        b"super".as_slice(),
+        b"sub",
+        b"expndtw",
+        b"kerning",
+        b"charscalex",
+        b"levelnfc",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level marker script/spacing control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn list_level_legal_numbering_renders_passively_without_control_leakage() {
     let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc1\levelstartat4{\leveltext\'02\'00.;}{\levelnumbers\'01;}}{\listlevel\levelnfc0\levellegal1\levelstartat1{\leveltext\'04\'00.\'01.;}{\levelnumbers\'01\'03;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Parent\par\pard\ls1\ilvl1 Child\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
