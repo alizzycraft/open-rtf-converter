@@ -15162,6 +15162,141 @@ fn grayscale_jpeg_picture_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn picture_metadata_controls_do_not_corrupt_image_or_leak_payloads() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "bliptag12345",
+        "\\",
+        "blipupi96",
+        "\\",
+        "blipuid 0123456789abcdef0123456789abcdef{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-picture-metadata-payload}}}{",
+        "\\",
+        "*",
+        "\\",
+        "picprop{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+
+    assert_eq!(image.format, open_rtf_converter::model::ImageFormat::Jpeg);
+    assert_eq!(image.width_px, 1);
+    assert_eq!(image.height_px, 1);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| {
+            !diagnostic.message.contains("unknown RTF")
+                && !diagnostic.message.contains("unsupported RTF control")
+                && !diagnostic
+                    .message
+                    .contains("JPEG picture data was malformed")
+        }),
+        "picture metadata should not corrupt image decoding or produce unknown-control noise: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "bliptag",
+        "blipupi",
+        "blipuid",
+        "0123456789abcdef",
+        "picprop",
+        "pFragments",
+        "hostile-picture-metadata-payload",
+        "objdata",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "picture metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "valid JPEG should still render as a passive image"
+    );
+    for forbidden in [
+        b"bliptag".as_slice(),
+        b"blipupi",
+        b"blipuid",
+        b"0123456789abcdef",
+        b"picprop",
+        b"pFragments",
+        b"hostile-picture-metadata-payload",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn hostile_binary_picture_payload_is_not_retokenized_or_copied_to_pdf() {
     let payload = br"{\object\objdata 414243 /JavaScript /EmbeddedFile}";
     let mut input = br"{\rtf1 before {\pict\jpegblip\bin".to_vec();

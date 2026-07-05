@@ -475,6 +475,7 @@ struct PictureBuilder {
     owner_destination: Destination,
     bytes: Vec<u8>,
     pending_hex: Option<u8>,
+    blip_uid_hex_nibbles_remaining: usize,
     width_px_hint: Option<u32>,
     height_px_hint: Option<u32>,
     display_width_twips: Option<i32>,
@@ -491,6 +492,7 @@ impl Default for PictureBuilder {
             owner_destination: Destination::Body,
             bytes: Vec::new(),
             pending_hex: None,
+            blip_uid_hex_nibbles_remaining: 0,
             width_px_hint: None,
             height_px_hint: None,
             display_width_twips: None,
@@ -2380,6 +2382,14 @@ impl Parser {
                 if self.state.destination == Destination::Picture =>
             {
                 self.set_picture_kind(PictureKind::Unsupported)
+            }
+            "bliptag" | "blipupi" if self.state.destination == Destination::Picture => {}
+            "blipuid" if self.state.destination == Destination::Picture => {
+                self.skip_picture_blip_uid(offset)
+            }
+            "picprop" if self.state.destination == Destination::Picture && control_starts_group => {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
             }
             "picw" if self.state.destination == Destination::Picture => {
                 self.set_picture_width_hint(control.parameter, offset)
@@ -8056,6 +8066,18 @@ impl Parser {
         }
     }
 
+    fn skip_picture_blip_uid(&mut self, offset: usize) {
+        if let Some(picture) = self.current_picture.as_mut() {
+            if picture.blip_uid_hex_nibbles_remaining > 0 {
+                self.diagnostics.push(Diagnostic::warning(
+                    "overlapping picture blip UID metadata replaced before previous UID completed",
+                    Some(offset),
+                ));
+            }
+            picture.blip_uid_hex_nibbles_remaining = 32;
+        }
+    }
+
     fn set_picture_width_hint(&mut self, width: Option<i32>, offset: usize) {
         let normalized = self.clamp_picture_dimension_hint(width, "width", offset);
         if let Some(picture) = self.current_picture.as_mut() {
@@ -8200,6 +8222,9 @@ impl Parser {
 
     fn push_picture_hex_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         for byte in text.bytes() {
+            if self.skip_picture_blip_uid_byte(byte, offset)? {
+                continue;
+            }
             if byte.is_ascii_whitespace() {
                 continue;
             }
@@ -8222,6 +8247,25 @@ impl Parser {
             }
         }
         Ok(())
+    }
+
+    fn skip_picture_blip_uid_byte(&mut self, byte: u8, offset: usize) -> Result<bool, ParseError> {
+        let Some(picture) = self.current_picture.as_ref() else {
+            return Ok(false);
+        };
+        if picture.blip_uid_hex_nibbles_remaining == 0 {
+            return Ok(false);
+        }
+
+        self.count_skipped_destination_bytes(1, offset)?;
+        if byte.is_ascii_whitespace() {
+            return Ok(true);
+        }
+        if let Some(picture) = self.current_picture.as_mut() {
+            picture.blip_uid_hex_nibbles_remaining =
+                picture.blip_uid_hex_nibbles_remaining.saturating_sub(1);
+        }
+        Ok(true)
     }
 
     fn push_picture_bytes(&mut self, bytes: &[u8], offset: usize) -> Result<(), ParseError> {
