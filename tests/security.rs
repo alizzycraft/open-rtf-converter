@@ -3626,6 +3626,111 @@ fn embedded_object_result_is_rendered_without_objdata() {
 }
 
 #[test]
+fn embedded_object_picture_result_renders_as_sanitized_static_image() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "object{",
+        "\\",
+        "objdata ",
+        payload_hex(),
+        "}{",
+        "\\",
+        "result{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].width_px, 1);
+    assert_eq!(images[0].height_px, 1);
+    assert_eq!(images[0].display_width_twips, Some(720));
+    assert_eq!(images[0].display_height_twips, Some(720));
+    for forbidden in [
+        "[Embedded object removed]",
+        "objdata",
+        "jpegblip",
+        "picwgoal",
+        "pichgoal",
+        payload_hex(),
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "object picture internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image")
+    );
+    for forbidden in [
+        b"objdata".as_slice(),
+        payload_hex().as_bytes(),
+        b"jpegblip",
+        b"picwgoal",
+        b"pichgoal",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "object picture result leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn header_object_results_and_placeholders_render_passively_without_body_flow_or_payload_leakage() {
     let input = rtf(&[
         "{",
