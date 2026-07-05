@@ -559,6 +559,7 @@ struct OldStyleListMarker {
     start_at: i32,
     indent_twips: Option<i32>,
     hanging: bool,
+    space_twips: Option<i32>,
     character_style: CharacterStyle,
     has_character_style: bool,
 }
@@ -570,6 +571,7 @@ impl Default for OldStyleListMarker {
             start_at: 1,
             indent_twips: None,
             hanging: false,
+            space_twips: None,
             character_style: CharacterStyle::default(),
             has_character_style: false,
         }
@@ -1591,6 +1593,9 @@ impl Parser {
             }
             "pnhang" if destination_allows_safe_structural_content(&self.state) => {
                 self.set_old_style_list_marker_hanging(control.parameter.unwrap_or(1) != 0);
+            }
+            "pnsp" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_spacing(control.parameter, offset);
             }
             "pntxtb" if destination_allows_safe_structural_content(&self.state) => {
                 self.pending_list_marker.clear();
@@ -3119,17 +3124,31 @@ impl Parser {
     }
 
     fn push_tab_stop(&mut self, value: Option<i32>, offset: usize) -> Result<(), ParseError> {
+        let leader = self.state.current_tab_leader;
+        let alignment = self.state.current_tab_alignment;
+        self.insert_paragraph_tab_stop(value, "tab stop", offset, leader, alignment)?;
+        self.state.current_tab_leader = TabLeader::None;
+        self.state.current_tab_alignment = TabAlignment::Left;
+        Ok(())
+    }
+
+    fn insert_paragraph_tab_stop(
+        &mut self,
+        value: Option<i32>,
+        label: &str,
+        offset: usize,
+        leader: TabLeader,
+        alignment: TabAlignment,
+    ) -> Result<(), ParseError> {
         let value = value.unwrap_or(0).max(0);
         let clamped = value.min(self.limits().max_tab_stop_twips);
         if clamped != value {
             self.diagnostics.push(Diagnostic::warning(
-                format!("tab stop clamped from {value} to {clamped} twips"),
+                format!("{label} clamped from {value} to {clamped} twips"),
                 Some(offset),
             ));
         }
         let max_tab_stops = self.limits().max_tab_stops;
-        let leader = self.state.current_tab_leader;
-        let alignment = self.state.current_tab_alignment;
         let paragraph = &mut self.state.paragraph;
         if let Some(existing_idx) = paragraph
             .tab_stops_twips
@@ -3166,8 +3185,6 @@ impl Parser {
             paragraph.tab_stop_alignments =
                 stops.iter().map(|(_, _, alignment)| *alignment).collect();
         }
-        self.state.current_tab_leader = TabLeader::None;
-        self.state.current_tab_alignment = TabAlignment::Left;
         Ok(())
     }
 
@@ -3572,7 +3589,7 @@ impl Parser {
             self.count_skipped_destination_bytes(text.len(), offset)?;
             return Ok(());
         }
-        let pending_marker = self.take_pending_or_synthesized_list_marker();
+        let pending_marker = self.take_pending_or_synthesized_list_marker(offset)?;
         let styled_marker = pending_marker.as_ref().and_then(|marker| {
             marker
                 .character_style
@@ -6320,26 +6337,31 @@ impl Parser {
         Ok(())
     }
 
-    fn take_pending_or_synthesized_list_marker(&mut self) -> Option<PendingListMarker> {
+    fn take_pending_or_synthesized_list_marker(
+        &mut self,
+        offset: usize,
+    ) -> Result<Option<PendingListMarker>, ParseError> {
         if self.state.destination != Destination::Body || !self.current_output_paragraph_is_empty()
         {
-            return None;
+            return Ok(None);
         }
 
         if !self.pending_list_marker.is_empty() {
             self.pending_old_style_list_marker = None;
-            return Some(PendingListMarker {
+            return Ok(Some(PendingListMarker {
                 text: std::mem::take(&mut self.pending_list_marker),
                 character_style: None,
-            });
+            }));
         }
 
-        if let Some(marker) = self.take_old_style_list_marker() {
-            return Some(marker);
+        if let Some(marker) = self.take_old_style_list_marker(offset)? {
+            return Ok(Some(marker));
         }
 
-        let override_index = self.state.list_override_index?;
-        self.synthesize_list_marker(override_index, self.state.list_level_index)
+        let Some(override_index) = self.state.list_override_index else {
+            return Ok(None);
+        };
+        Ok(self.synthesize_list_marker(override_index, self.state.list_level_index))
     }
 
     fn current_output_paragraph_is_empty(&self) -> bool {
@@ -6566,9 +6588,39 @@ impl Parser {
         marker.hanging = hanging;
     }
 
-    fn take_old_style_list_marker(&mut self) -> Option<PendingListMarker> {
-        let marker = self.pending_old_style_list_marker.take()?;
-        self.apply_old_style_list_marker_indent(&marker);
+    fn set_old_style_list_marker_spacing(&mut self, space_twips: Option<i32>, offset: usize) {
+        let space_twips = self.clamp_old_style_list_marker_spacing(space_twips, offset);
+        let marker = self
+            .pending_old_style_list_marker
+            .get_or_insert_with(OldStyleListMarker::default);
+        marker.space_twips = Some(space_twips);
+    }
+
+    fn clamp_old_style_list_marker_spacing(
+        &mut self,
+        space_twips: Option<i32>,
+        offset: usize,
+    ) -> i32 {
+        let value = space_twips.unwrap_or(0).max(0);
+        let max = self.limits().max_tab_stop_twips.max(0);
+        let clamped = value.min(max);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("old-style list marker spacing clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        clamped
+    }
+
+    fn take_old_style_list_marker(
+        &mut self,
+        offset: usize,
+    ) -> Result<Option<PendingListMarker>, ParseError> {
+        let Some(marker) = self.pending_old_style_list_marker.take() else {
+            return Ok(None);
+        };
+        self.apply_old_style_list_marker_layout(&marker, offset)?;
         let text = match marker.format {
             ListNumberFormat::Bullet => "\u{2022}\t".to_string(),
             _ => format!("{}.\t", format_list_counter(marker.start_at, marker.format)),
@@ -6576,21 +6628,35 @@ impl Parser {
         let character_style = marker
             .has_character_style
             .then_some(marker.character_style.clone());
-        Some(PendingListMarker {
+        Ok(Some(PendingListMarker {
             text,
             character_style,
-        })
+        }))
     }
 
-    fn apply_old_style_list_marker_indent(&mut self, marker: &OldStyleListMarker) {
-        let Some(indent_twips) = marker.indent_twips else {
-            return;
-        };
-
-        self.state.paragraph.left_indent_twips = indent_twips;
-        if marker.hanging {
-            self.state.paragraph.first_line_indent_twips = -indent_twips.min(360);
+    fn apply_old_style_list_marker_layout(
+        &mut self,
+        marker: &OldStyleListMarker,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(indent_twips) = marker.indent_twips {
+            self.state.paragraph.left_indent_twips = indent_twips;
+            if marker.hanging {
+                self.state.paragraph.first_line_indent_twips = -indent_twips.min(360);
+            }
         }
+
+        if let Some(space_twips) = marker.space_twips {
+            self.insert_paragraph_tab_stop(
+                Some(space_twips),
+                "old-style list marker spacing",
+                offset,
+                TabLeader::None,
+                TabAlignment::Left,
+            )?;
+        }
+
+        Ok(())
     }
 
     fn count_skipped_destination_bytes(
@@ -11814,6 +11880,48 @@ After\par}"#;
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
+    }
+
+    #[test]
+    fn applies_old_style_list_spacing_control_as_safe_tab_stop() {
+        let output =
+            parse_rtf(r"{\rtf1{\pn\pndec\pnstart2\pnindent720\pnhang\pnsp360}Spaced\par}").unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected old-style list paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "2.\tSpaced");
+        assert_eq!(paragraph.style.left_indent_twips, 720);
+        assert_eq!(paragraph.style.first_line_indent_twips, -360);
+        assert_eq!(paragraph.style.tab_stops_twips, vec![360]);
+        assert_eq!(paragraph.style.tab_stop_leaders, vec![TabLeader::None]);
+        assert_eq!(
+            paragraph.style.tab_stop_alignments,
+            vec![TabAlignment::Left]
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn old_style_list_spacing_obeys_tab_stop_limit() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_tab_stops: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        assert!(matches!(
+            parse_rtf_bytes_with_options(br"{\rtf1{\pn\pndec\pnsp360}Blocked\par}", &options),
+            Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "tab stops"
+        ));
     }
 
     #[test]
