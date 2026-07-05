@@ -6746,6 +6746,96 @@ visible after\par}"#
 }
 
 #[test]
+fn resultless_mail_merge_flow_fields_do_not_execute_or_leak_to_pdf() {
+    let input = br#"{\rtf1 Visible before
+{\field{\*\fldinst NEXT}}
+nextif {\field{\*\fldinst NEXTIF "City" = "Paris"}}
+skip {\field{\*\fldinst SKIPIF "Status" = "Hidden"}}
+record {\field{\*\fldinst MERGEREC}}
+seq {\field{\*\fldinst MERGESEQ}}
+name {\field{\*\fldinst MERGEFIELD Client}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("nextif"));
+    assert!(text.contains("skip"));
+    assert!(text.contains("record [Field removed: no passive result]"));
+    assert!(text.contains("seq [Field removed: no passive result]"));
+    assert!(text.contains("name \u{00ab}Client\u{00bb}"));
+    assert!(text.contains("visible after"));
+    for forbidden in [
+        "NEXT",
+        "NEXTIF",
+        "SKIPIF",
+        "MERGEREC",
+        "MERGESEQ",
+        "MERGEFIELD",
+        "City",
+        "Paris",
+        "Status",
+        "Hidden",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden mail-merge field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("record [Field removed: no passive result]"));
+    assert!(rendered_text.contains("seq [Field removed: no passive result]"));
+    assert!(rendered_text.contains("name"));
+    assert!(rendered_text.contains("Client"));
+    assert!(rendered_text.contains("visible after"));
+    for forbidden in [
+        b"NEXT".as_slice(),
+        b"NEXTIF",
+        b"SKIPIF",
+        b"MERGEREC",
+        b"MERGESEQ",
+        b"MERGEFIELD",
+        b"City",
+        b"Paris",
+        b"Status",
+        b"Hidden",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden mail-merge field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn edit_time_field_uses_passive_metadata_without_pdf_leakage() {
     let input = br#"{\rtf1{\info{\edmins42}{\title Hidden title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}}}}Edit {\field{\*\fldinst EDITTIME \\# "0000"}} dynamic {\field{\*\fldinst TIME}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

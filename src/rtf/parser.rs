@@ -1268,6 +1268,20 @@ impl Parser {
                             "[Field removed: no passive result]".to_string(),
                             offset,
                         )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_mail_merge_data_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "mail-merge field {name} removed without executing merge data source"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
                     } else if let Some(result) = self.passive_field_result_for_instruction(
                         &field_instruction,
                         field_form_checkbox_checked,
@@ -1326,6 +1340,15 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!("prompt field {name} stripped without requesting user input"),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_mail_merge_data_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "mail-merge field {name} stripped without executing merge data source"
+                            ),
                             Some(offset),
                         ));
                     } else if !field_instruction_name(&field_instruction)
@@ -9724,10 +9747,15 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "LISTNUM" => Some("LISTNUM"),
         "MACROBUTTON" => Some("MACROBUTTON"),
         "MERGEFIELD" => Some("MERGEFIELD"),
+        "MERGEREC" => Some("MERGEREC"),
+        "MERGESEQ" => Some("MERGESEQ"),
+        "NEXT" => Some("NEXT"),
+        "NEXTIF" => Some("NEXTIF"),
         "PRINTDATE" => Some("PRINTDATE"),
         "SAVEDATE" => Some("SAVEDATE"),
         "SUBJECT" => Some("SUBJECT"),
         "SYMBOL" => Some("SYMBOL"),
+        "SKIPIF" => Some("SKIPIF"),
         "TIME" => Some("TIME"),
         "TITLE" => Some("TITLE"),
         "TEMPLATE" => Some("TEMPLATE"),
@@ -9857,7 +9885,10 @@ fn is_leap_year(year: i32) -> bool {
 }
 
 fn is_non_visible_resultless_field(name: &str) -> bool {
-    matches!(name, "ASK" | "XE" | "TC" | "TA")
+    matches!(
+        name,
+        "ASK" | "NEXT" | "NEXTIF" | "SKIPIF" | "XE" | "TC" | "TA"
+    )
 }
 
 fn is_auto_number_field(name: &str) -> bool {
@@ -9887,6 +9918,10 @@ fn is_environment_resultless_field(name: &str) -> bool {
 
 fn is_prompt_resultless_field(name: &str) -> bool {
     matches!(name, "FILLIN")
+}
+
+fn is_mail_merge_data_resultless_field(name: &str) -> bool {
+    matches!(name, "MERGEREC" | "MERGESEQ")
 }
 
 fn is_builtin_passive_result_font(font_name: &str) -> bool {
@@ -14526,6 +14561,58 @@ After\par}"#;
                 .message
                 .contains("prompt field FILLIN stripped without requesting user input")
         }));
+    }
+
+    #[test]
+    fn resultless_mail_merge_flow_fields_do_not_execute_merge_data_source() {
+        let input = r#"{\rtf1 Before {\field{\*\fldinst NEXT}} nextif {\field{\*\fldinst NEXTIF "City" = "Paris"}} skip {\field{\*\fldinst SKIPIF "Status" = "Hidden"}} record {\field{\*\fldinst MERGEREC}} seq {\field{\*\fldinst MERGESEQ}} name {\field{\*\fldinst MERGEFIELD Client}}\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Before  nextif  skip  record [Field removed: no passive result] seq [Field removed: no passive result] name \u{00ab}Client\u{00bb}"
+            ),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "NEXT",
+            "NEXTIF",
+            "SKIPIF",
+            "MERGEREC",
+            "MERGESEQ",
+            "MERGEFIELD",
+            "City",
+            "Paris",
+            "Status",
+            "Hidden",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "mail-merge field leaked instruction or data-source text: {forbidden}"
+            );
+        }
+        for name in ["NEXT", "NEXTIF", "SKIPIF"] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("non-visible field {name} stripped"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
+        for name in ["MERGEREC", "MERGESEQ"] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("mail-merge field {name} removed"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
     }
 
     #[test]
