@@ -3327,6 +3327,60 @@ fn list_override_format_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn styled_list_override_format_renders_passively_without_control_leakage() {
+    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5{\lfolevel\listoverrideformat{\listlevel\levelnfc4\b\cf1\levelstartat3{\leveltext\'02\'00);}{\levelnumbers\'01;}}}\ls1}}\pard\ls1\ilvl0 Styled override\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+
+    assert_eq!(paragraph.runs[0].text, "c)\t");
+    assert!(paragraph.runs[0].style.bold);
+    assert_eq!(paragraph.runs[0].style.color_index, 1);
+    assert_eq!(paragraph.runs[1].text, "Styled override");
+    assert!(!paragraph.runs[1].style.bold);
+    assert_eq!(paragraph.runs[1].style.color_index, 0);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("c)Styled override"),
+        "decoded PDF text did not contain styled override marker text: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"listoverrideformat".as_slice(),
+        b"lfolevel",
+        b"levelnfc",
+        b"listoverridetable",
+        b"cf1",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden styled list override format content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn multilevel_list_markers_render_as_passive_pdf_text() {
     let input = rtf(&[
         "{",

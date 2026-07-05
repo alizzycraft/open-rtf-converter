@@ -794,6 +794,13 @@ impl Parser {
         }
     }
 
+    fn is_parsing_list_level_definition(&self) -> bool {
+        matches!(
+            self.state.destination,
+            Destination::ListTable | Destination::ListOverrideTable
+        ) && self.state.list_context == ListContext::ListLevel
+    }
+
     fn parse(mut self) -> Result<ParseOutput, ParseError> {
         let tokens = std::mem::take(&mut self.tokens);
         for token in &tokens {
@@ -1373,155 +1380,92 @@ impl Parser {
             {
                 self.set_current_list_level_no_restart(control.parameter.unwrap_or(1) != 0);
             }
-            "b" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "b" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_bold(control.parameter.unwrap_or(1) != 0);
             }
-            "i" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "i" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_italic(control.parameter.unwrap_or(1) != 0);
             }
-            "ul" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "ul" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Single, control);
             }
-            "ulnone"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "ulnone" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline_style(UnderlineStyle::None);
             }
-            "uldb"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "uldb" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Double, control);
             }
-            "ulth"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "ulth" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Thick, control);
             }
-            "uld" | "ulthd"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "uld" | "ulthd" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Dotted, control);
             }
             "uldash" | "uldashd" | "uldashdd" | "ulldash" | "ulthdash" | "ulthdashd"
             | "ulthdashdd" | "ulthldash"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
+                if self.is_parsing_list_level_definition() =>
             {
                 self.set_current_list_level_underline(UnderlineStyle::Dashed, control);
             }
             "ulwave" | "ulhwave" | "uldbwave" | "ululdbwave"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
+                if self.is_parsing_list_level_definition() =>
             {
                 self.set_current_list_level_underline(UnderlineStyle::Wave, control);
             }
-            "ulw"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "ulw" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Words, control);
             }
-            "strike" | "striked"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "strike" | "striked" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_strike(control.parameter.unwrap_or(1) != 0);
             }
-            "strikedl"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "strikedl" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_double_strike(control.parameter.unwrap_or(1) != 0);
             }
-            "outl"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "outl" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_outline(control.parameter.unwrap_or(1) != 0);
             }
-            "shad"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "shad" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_shadow(control.parameter.unwrap_or(1) != 0);
             }
-            "embo"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "embo" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_relief(if control.parameter.unwrap_or(1) == 0 {
                     TextRelief::None
                 } else {
                     TextRelief::Emboss
                 });
             }
-            "impr"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "impr" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_relief(if control.parameter.unwrap_or(1) == 0 {
                     TextRelief::None
                 } else {
                     TextRelief::Engrave
                 });
             }
-            "caps"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "caps" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_caps(control.parameter.unwrap_or(1) != 0);
             }
-            "scaps"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "scaps" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_small_caps(control.parameter.unwrap_or(1) != 0);
             }
-            "plain"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "plain" if self.is_parsing_list_level_definition() => {
                 self.reset_current_list_level_character_style();
             }
-            "cs" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "cs" if self.is_parsing_list_level_definition() => {
                 self.apply_current_list_level_character_style(
                     control.parameter.unwrap_or(0),
                     offset,
                 );
             }
-            "super"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "super" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_super(control.parameter.unwrap_or(1) != 0);
             }
-            "sub"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "sub" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_sub(control.parameter.unwrap_or(1) != 0);
             }
-            "nosupersub"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "nosupersub" if self.is_parsing_list_level_definition() => {
                 self.reset_current_list_level_script_position();
             }
-            "up" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "up" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_baseline_shift(
                     control
                         .parameter
@@ -1530,9 +1474,7 @@ impl Parser {
                         .min(MAX_BASELINE_SHIFT_HALF_POINTS),
                 );
             }
-            "dn" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "dn" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_baseline_shift(
                     -control
                         .parameter
@@ -1541,147 +1483,87 @@ impl Parser {
                         .min(MAX_BASELINE_SHIFT_HALF_POINTS),
                 );
             }
-            "expnd"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "expnd" if self.is_parsing_list_level_definition() => {
                 let half_points = control.parameter.unwrap_or(0);
                 self.set_current_list_level_character_spacing(
                     half_points.saturating_mul(10),
                     offset,
                 );
             }
-            "expndtw"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "expndtw" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_character_spacing(
                     control.parameter.unwrap_or(0),
                     offset,
                 );
             }
-            "kerning"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "kerning" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_character_kerning(
                     control.parameter.unwrap_or(0),
                     offset,
                 );
             }
-            "charscalex"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "charscalex" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_character_scaling(
                     control.parameter.unwrap_or(100),
                     offset,
                 );
             }
-            "f" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "f" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_font(control.parameter.unwrap_or(0));
             }
-            "fs" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "fs" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_font_size(control.parameter.unwrap_or(24), offset);
             }
-            "ulc"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "ulc" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline_color(control.parameter.unwrap_or(0));
             }
-            "cf" if self.state.destination == Destination::ListTable
-                && self.state.list_context == ListContext::ListLevel =>
-            {
+            "cf" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_color(control.parameter.unwrap_or(0));
             }
-            "highlight" | "cb" | "chcbpat"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "highlight" | "cb" | "chcbpat" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_highlight(control.parameter.unwrap_or(0));
             }
-            "chshdng"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "chshdng" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_highlight_shading(
                     control.parameter.unwrap_or(10_000),
                     offset,
                 );
             }
-            "chbrdr"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel => {}
-            "brdrnone" | "brdrnil"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "chbrdr" if self.is_parsing_list_level_definition() => {}
+            "brdrnone" | "brdrnil" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_visible(false);
             }
-            "brdrs"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brdrs" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Single);
             }
-            "brdrth"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brdrth" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Thick);
             }
-            "brdrhair"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brdrhair" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Hairline);
             }
-            "brdrdb"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brdrdb" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Double);
             }
-            "brdrdot"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brdrdot" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Dotted);
             }
             "brdrdash" | "brdrdashsm" | "brdrdashd" | "brdrdashdd" | "brdrdashdot"
             | "brdrdashdotstr" | "brdrdashdotdot"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
+                if self.is_parsing_list_level_definition() =>
             {
                 self.set_current_list_level_border_style(BorderStyle::Dashed);
             }
-            "brdrwavy" | "brdrwavydb"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brdrwavy" | "brdrwavydb" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Wavy);
             }
-            "brdrw"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brdrw" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_width(control.parameter, offset);
             }
-            "brsp"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brsp" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_spacing(control.parameter, offset);
             }
-            "brdrcf"
-                if self.state.destination == Destination::ListTable
-                    && self.state.list_context == ListContext::ListLevel =>
-            {
+            "brdrcf" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_color(control.parameter);
             }
             "listid" if self.state.destination == Destination::ListTable => {
@@ -13461,6 +13343,31 @@ After\par}"#;
 
         assert_eq!(first.runs[0].text, "c)\tFirst");
         assert_eq!(second.runs[0].text, "d)\tSecond");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn list_override_format_applies_marker_character_style_only() {
+        let output = parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5{\lfolevel\listoverrideformat{\listlevel\levelnfc4\b\cf1\levelstartat3{\leveltext\'02\'00);}{\levelnumbers\'01;}}}\ls1}}\pard\ls1\ilvl0 Styled override\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "c)\t");
+        assert!(paragraph.runs[0].style.bold);
+        assert_eq!(paragraph.runs[0].style.color_index, 1);
+        assert_eq!(paragraph.runs[1].text, "Styled override");
+        assert!(!paragraph.runs[1].style.bold);
+        assert_eq!(paragraph.runs[1].style.color_index, 0);
         assert!(
             output
                 .diagnostics
