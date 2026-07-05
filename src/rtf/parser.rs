@@ -9954,6 +9954,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         .to_ascii_uppercase();
     match name.as_str() {
         "ADDIN" => Some("ADDIN"),
+        "ADDRESSBLOCK" => Some("ADDRESSBLOCK"),
         "ADVANCE" => Some("ADVANCE"),
         "ASK" => Some("ASK"),
         "AUTHOR" => Some("AUTHOR"),
@@ -10000,6 +10001,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "DDEAUTO" => Some("DDEAUTO"),
         "DISPLAYBARCODE" => Some("DISPLAYBARCODE"),
         "GOTOBUTTON" => Some("GOTOBUTTON"),
+        "GREETINGLINE" => Some("GREETINGLINE"),
         "HYPERLINK" => Some("HYPERLINK"),
         "IF" => Some("IF"),
         "INDEX" => Some("INDEX"),
@@ -10228,7 +10230,10 @@ fn is_prompt_resultless_field(name: &str) -> bool {
 }
 
 fn is_mail_merge_data_resultless_field(name: &str) -> bool {
-    matches!(name, "MERGEREC" | "MERGESEQ")
+    matches!(
+        name,
+        "ADDRESSBLOCK" | "GREETINGLINE" | "MERGEREC" | "MERGESEQ"
+    )
 }
 
 fn is_generated_resultless_field(name: &str) -> bool {
@@ -15082,6 +15087,62 @@ After\par}"#;
                 "missing diagnostic for {name}"
             );
         }
+    }
+
+    #[test]
+    fn resultless_mail_merge_address_fields_do_not_execute_data_source() {
+        let input = r#"{\rtf1 Before address {\field{\*\fldinst ADDRESSBLOCK \f "<<_COMPANY_>>\r<<_ADDRESS1_>>" \l 1033}} greeting {\field{\*\fldinst GREETINGLINE \f "<<_TITLE0_>> <<_LAST0_>>" \e "Dear Sir or Madam,"}} After\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Before address [Field removed: no passive result] greeting [Field removed: no passive result] After"
+            ),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "ADDRESSBLOCK",
+            "GREETINGLINE",
+            "_COMPANY_",
+            "_ADDRESS1_",
+            "_TITLE0_",
+            "_LAST0_",
+            "Dear Sir",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "mail-merge address field leaked data-source text: {forbidden}"
+            );
+        }
+        for name in ["ADDRESSBLOCK", "GREETINGLINE"] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("mail-merge field {name} removed"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
+
+        let strip_options = RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Strip,
+            ..RtfParseOptions::default()
+        };
+        let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
+        let stripped_text = document_text(&stripped.document);
+        assert!(
+            stripped_text.contains("Before address  greeting  After"),
+            "stripped text was {stripped_text:?}"
+        );
+        assert!(!stripped_text.contains("[Field removed"));
+        assert!(stripped.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("mail-merge field ADDRESSBLOCK stripped")
+        }));
     }
 
     #[test]

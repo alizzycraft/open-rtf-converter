@@ -7194,6 +7194,81 @@ visible after\par}"#
 }
 
 #[test]
+fn resultless_mail_merge_address_fields_do_not_execute_or_leak_to_pdf() {
+    let input = br#"{\rtf1 Visible before
+address {\field{\*\fldinst ADDRESSBLOCK \f "<<_COMPANY_>>\r<<_ADDRESS1_>>" \l 1033}}
+greeting {\field{\*\fldinst GREETINGLINE \f "<<_TITLE0_>> <<_LAST0_>>" \e "Dear Sir or Madam,"}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("address [Field removed: no passive result]"));
+    assert!(text.contains("greeting [Field removed: no passive result]"));
+    assert!(text.contains("visible after"));
+    for forbidden in [
+        "ADDRESSBLOCK",
+        "GREETINGLINE",
+        "_COMPANY_",
+        "_ADDRESS1_",
+        "_TITLE0_",
+        "_LAST0_",
+        "Dear Sir",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden mail-merge address field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("address [Field removed: no passive result]"));
+    assert!(rendered_text.contains("greeting [Field removed: no passive result]"));
+    assert!(rendered_text.contains("visible after"));
+    for forbidden in [
+        b"ADDRESSBLOCK".as_slice(),
+        b"GREETINGLINE",
+        b"_COMPANY_",
+        b"_ADDRESS1_",
+        b"_TITLE0_",
+        b"_LAST0_",
+        b"Dear Sir",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden mail-merge address field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_private_and_print_fields_are_stripped_without_pdf_leakage() {
     let input = br#"{\rtf1 Visible before
 {\field{\*\fldinst ADDIN "Hidden addin payload"}}
