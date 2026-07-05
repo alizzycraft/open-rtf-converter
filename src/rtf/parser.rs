@@ -110,6 +110,12 @@ struct ParserState {
     document_variable_capture: Option<DocumentVariableCapture>,
     document_variable_capture_text: String,
     document_variable_child_index: usize,
+    office_math_delimiter_capture: Option<OfficeMathDelimiterCapture>,
+    office_math_delimiter_text: String,
+    office_math_pending_begin_delimiter: String,
+    office_math_pending_end_delimiter: String,
+    office_math_active_end_delimiter: String,
+    office_math_consumed_delimiter: bool,
     at_group_start: bool,
 }
 
@@ -176,6 +182,12 @@ impl Default for ParserState {
             document_variable_capture: None,
             document_variable_capture_text: String::new(),
             document_variable_child_index: 0,
+            office_math_delimiter_capture: None,
+            office_math_delimiter_text: String::new(),
+            office_math_pending_begin_delimiter: String::new(),
+            office_math_pending_end_delimiter: String::new(),
+            office_math_active_end_delimiter: String::new(),
+            office_math_consumed_delimiter: false,
             at_group_start: false,
         }
     }
@@ -215,6 +227,12 @@ enum UnicodeAlternateBranch {
     Container,
     AnsiFallback,
     UnicodeDestination,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum OfficeMathDelimiterCapture {
+    Begin,
+    End,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -982,6 +1000,8 @@ impl Parser {
         let mut parent = self.state.clone();
         let mut child = self.state.clone();
         child.at_group_start = true;
+        child.office_math_active_end_delimiter.clear();
+        child.office_math_consumed_delimiter = false;
         if parent.metadata_property.is_some() {
             child.metadata_property = None;
             child.metadata_property_text.clear();
@@ -1572,6 +1592,8 @@ impl Parser {
                 return Ok(());
             }
 
+            self.finish_office_math_delimiter_group(&mut previous, offset)?;
+
             if self.state.destination == Destination::BookmarkStart {
                 let name = self.state.bookmark_name_text.clone();
                 self.state = previous;
@@ -1651,8 +1673,21 @@ impl Parser {
             "mbar" if destination_allows_visible_content(&self.state) => {
                 self.push_text("\u{00af}", offset)?;
             }
+            "mbegChr" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_delimiter_capture = Some(OfficeMathDelimiterCapture::Begin);
+                self.state.office_math_delimiter_text.clear();
+            }
+            "mendChr" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_delimiter_capture = Some(OfficeMathDelimiterCapture::End);
+                self.state.office_math_delimiter_text.clear();
+            }
             "mrad" if destination_allows_visible_content(&self.state) => {
                 self.push_text("\u{221a}", offset)?;
+            }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.has_pending_office_math_delimiters() =>
+            {
+                self.start_office_math_delimited_expression(offset)?;
             }
             "msub" if destination_allows_visible_content(&self.state) => {
                 self.push_text("_", offset)?;
@@ -2560,6 +2595,9 @@ impl Parser {
                 self.state.unicode_skip =
                     self.clamp_unicode_fallback_skip(control.parameter.unwrap_or(1), offset)
             }
+            "u" if self.state.office_math_delimiter_capture.is_some() => {
+                self.push_office_math_delimiter_unicode(control.parameter.unwrap_or(0), offset)?
+            }
             "u" if self.state.capturing_form_default_text => {
                 self.push_form_default_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -3461,6 +3499,9 @@ impl Parser {
         if self.state.skip_password_hash_payload {
             return self.apply_password_hash_payload_text(text, offset);
         }
+        if self.state.office_math_delimiter_capture.is_some() {
+            return self.push_office_math_delimiter_text(text, offset);
+        }
         if self.state.capturing_form_default_text {
             return self.push_form_default_text(text, offset);
         }
@@ -3590,6 +3631,10 @@ impl Parser {
             return Ok(());
         }
         self.state.pending_unicode_high_surrogate = None;
+        if self.state.office_math_delimiter_capture.is_some() {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_delimiter_text(&ch.to_string(), offset);
+        }
         if self.state.capturing_form_default_text {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_form_default_text(&ch.to_string(), offset);
@@ -4322,6 +4367,68 @@ impl Parser {
         Ok(())
     }
 
+    fn has_pending_office_math_delimiters(&self) -> bool {
+        !self.state.office_math_pending_begin_delimiter.is_empty()
+            || !self.state.office_math_pending_end_delimiter.is_empty()
+    }
+
+    fn start_office_math_delimited_expression(&mut self, offset: usize) -> Result<(), ParseError> {
+        let begin = self.state.office_math_pending_begin_delimiter.clone();
+        let end = self.state.office_math_pending_end_delimiter.clone();
+        self.state.office_math_pending_begin_delimiter.clear();
+        self.state.office_math_pending_end_delimiter.clear();
+        self.state.office_math_active_end_delimiter = end;
+        self.state.office_math_consumed_delimiter = true;
+        self.push_text(&begin, offset)
+    }
+
+    fn finish_office_math_delimiter_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let end = self.state.office_math_active_end_delimiter.clone();
+        if !end.is_empty() {
+            self.push_text(&end, offset)?;
+        }
+
+        if self.state.office_math_consumed_delimiter {
+            previous.office_math_pending_begin_delimiter.clear();
+            previous.office_math_pending_end_delimiter.clear();
+        }
+
+        match self.state.office_math_delimiter_capture {
+            Some(capture) if previous.office_math_delimiter_capture == Some(capture) => {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_delimiter_text,
+                    &self.state.office_math_delimiter_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            }
+            Some(OfficeMathDelimiterCapture::Begin) => {
+                previous.office_math_pending_begin_delimiter =
+                    self.state.office_math_delimiter_text.clone();
+            }
+            Some(OfficeMathDelimiterCapture::End) => {
+                previous.office_math_pending_end_delimiter =
+                    self.state.office_math_delimiter_text.clone();
+            }
+            None => {
+                if !self.state.office_math_pending_begin_delimiter.is_empty() {
+                    previous.office_math_pending_begin_delimiter =
+                        self.state.office_math_pending_begin_delimiter.clone();
+                }
+                if !self.state.office_math_pending_end_delimiter.is_empty() {
+                    previous.office_math_pending_end_delimiter =
+                        self.state.office_math_pending_end_delimiter.clone();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn resolve_latest_pending_note_reference(
         &mut self,
         replacement: &str,
@@ -4642,6 +4749,34 @@ impl Parser {
         self.count_skipped_destination_bytes(text.len(), offset)?;
         let limit = self.limits().max_text_run_len;
         append_field_instruction(&mut self.state.field_instruction, text, limit, offset)
+    }
+
+    fn push_office_math_delimiter_text(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_delimiter_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_delimiter_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_delimiter_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
     }
 
     fn push_bookmark_name_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
@@ -9356,6 +9491,7 @@ fn is_office_math_control(name: &str) -> bool {
             | "maccPr"
             | "mbar"
             | "mbarPr"
+            | "mbegChr"
             | "mborderBox"
             | "mborderBoxPr"
             | "mbox"
@@ -9367,6 +9503,7 @@ fn is_office_math_control(name: &str) -> bool {
             | "mdiff"
             | "meqArr"
             | "meqArrPr"
+            | "mendChr"
             | "mf"
             | "mfPr"
             | "mfunc"
@@ -9868,6 +10005,27 @@ fn append_field_instruction(
     if new_len > limit {
         return Err(ParseError::ResourceLimitExceeded {
             resource: "field instruction".to_string(),
+            offset,
+        });
+    }
+    target.push_str(text);
+    Ok(())
+}
+
+fn append_office_math_delimiter_text(
+    target: &mut String,
+    text: &str,
+    limit: usize,
+    offset: usize,
+) -> Result<(), ParseError> {
+    let new_len = target
+        .chars()
+        .count()
+        .checked_add(text.chars().count())
+        .ok_or(ParseError::OutputTextTooLarge(offset))?;
+    if new_len > limit {
+        return Err(ParseError::ResourceLimitExceeded {
+            resource: "office math delimiter text".to_string(),
             offset,
         });
     }

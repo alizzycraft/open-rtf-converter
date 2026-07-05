@@ -12378,6 +12378,70 @@ fn office_math_property_controls_are_passive_structure() {
 }
 
 #[test]
+fn office_math_delimiters_render_passive_text_without_control_leakage() {
+    let input = br"{\rtf1 Before {\mmath{\moMath{\md{\mdPr{\mbegChr (}{\mendChr )}}{\me{\mtext x+1}}}}} After\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before (x+1) After"),
+        "unexpected delimiter math text: {text:?}"
+    );
+    for forbidden in ["mmath", "moMath", "mdPr", "mbegChr", "mendChr", "mtext"] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math delimiter control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math delimiter controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("Office math layout approximated as passive text")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before (x+1) After"));
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mdPr",
+        b"mbegChr",
+        b"mendChr",
+        b"mtext",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math delimiter control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn legacy_code_page_hex_escapes_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
