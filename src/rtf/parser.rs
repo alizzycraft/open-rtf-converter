@@ -1440,6 +1440,12 @@ impl Parser {
             {
                 self.set_current_list_level_small_caps(control.parameter.unwrap_or(1) != 0);
             }
+            "plain"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.reset_current_list_level_character_style();
+            }
             "super"
                 if self.state.destination == Destination::ListTable
                     && self.state.list_context == ListContext::ListLevel =>
@@ -7193,6 +7199,13 @@ impl Parser {
 
     fn set_current_list_level_italic(&mut self, enabled: bool) {
         self.update_current_list_level_character_style(|style| style.italic = enabled);
+    }
+
+    fn reset_current_list_level_character_style(&mut self) {
+        let default_style = self.default_character_style();
+        self.update_current_list_level_character_style(|style| {
+            *style = default_style;
+        });
     }
 
     fn set_current_list_level_underline(&mut self, style: UnderlineStyle, control: &Control) {
@@ -13103,6 +13116,36 @@ After\par}"#;
         assert_eq!(paragraph.runs[0].style.border.color_index, Some(1));
         assert_eq!(paragraph.runs[0].style.border.spacing_twips, 120);
         assert_eq!(paragraph.runs[1].text, "Bordered marker");
+        assert!(!paragraph.runs[1].style.border.visible);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn list_level_marker_plain_resets_accumulated_marker_character_style() {
+        let output = parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\b\ul\chbrdr\brdrs\brdrw80\plain\i\cf1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Reset item\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert!(!paragraph.runs[0].style.bold);
+        assert!(paragraph.runs[0].style.italic);
+        assert_eq!(paragraph.runs[0].style.underline, UnderlineStyle::None);
+        assert_eq!(paragraph.runs[0].style.color_index, 1);
+        assert!(!paragraph.runs[0].style.border.visible);
+        assert_eq!(paragraph.runs[1].text, "Reset item");
+        assert!(!paragraph.runs[1].style.bold);
+        assert!(!paragraph.runs[1].style.italic);
+        assert_eq!(paragraph.runs[1].style.color_index, 0);
         assert!(!paragraph.runs[1].style.border.visible);
         assert!(
             output
