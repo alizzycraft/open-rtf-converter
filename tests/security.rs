@@ -330,6 +330,96 @@ fn preferred_cell_widths_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn preferred_row_widths_fill_missing_table_geometry_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw7200",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "trowd",
+        "\\",
+        "trftsWidth3",
+        "\\",
+        "trwWidth2880 Exact left",
+        "\\",
+        "cell Exact right",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "\\",
+        "trowd",
+        "\\",
+        "trftsWidth2",
+        "\\",
+        "trwWidth2500 Percent left",
+        "\\",
+        "cell Percent right",
+        "\\",
+        "cell",
+        "\\",
+        "row}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+
+    assert_eq!(table.column_widths_twips, vec![1440, 1440]);
+    assert!(text.contains("Exact left"));
+    assert!(text.contains("Exact right"));
+    assert!(text.contains("Percent left"));
+    assert!(text.contains("Percent right"));
+    for forbidden in ["trftsWidth", "trwWidth"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden preferred row-width control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Exact left"));
+    assert!(rendered_text.contains("Exact right"));
+    assert!(rendered_text.contains("Percent left"));
+    assert!(rendered_text.contains("Percent right"));
+    for forbidden in [
+        b"trftsWidth".as_slice(),
+        b"trwWidth",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden preferred row-width content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shading_patterns_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

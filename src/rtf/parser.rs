@@ -341,6 +341,7 @@ struct TableRowBuilder {
     current_cell_border_flags: TableCellBorderFlags,
     current_cell_border_side: Option<TableCellBorderSide>,
     current_cell_preferred_width: PreferredTableWidth,
+    current_row_preferred_width: PreferredTableWidth,
     current_cell_no_wrap: bool,
     current_cell_text_direction: TableCellTextDirection,
     row_borders: TableCellBorders,
@@ -2687,6 +2688,8 @@ impl Parser {
             "trkeep" => {
                 self.set_current_table_row_keep_together(control.parameter.unwrap_or(1) != 0)
             }
+            "trftsWidth" => self.set_current_table_row_preferred_width_unit(control.parameter),
+            "trwWidth" => self.set_current_table_row_preferred_width(control.parameter),
             "trpaddl" => self.set_current_table_row_padding_left(control.parameter, offset),
             "trpaddr" => self.set_current_table_row_padding_right(control.parameter, offset),
             "trpaddt" => self.set_current_table_row_padding_top(control.parameter, offset),
@@ -5998,6 +6001,7 @@ impl Parser {
             current_cell_border_flags: TableCellBorderFlags::default(),
             current_cell_border_side: None,
             current_cell_preferred_width: PreferredTableWidth::default(),
+            current_row_preferred_width: PreferredTableWidth::default(),
             current_cell_no_wrap: false,
             current_cell_text_direction: TableCellTextDirection::LeftToRightTopToBottom,
             row_borders: TableCellBorders::default(),
@@ -6204,6 +6208,22 @@ impl Parser {
     fn set_current_cell_preferred_width(&mut self, value: Option<i32>) {
         if let Some(row) = self.current_table_row.as_mut() {
             row.current_cell_preferred_width.value = value;
+        }
+    }
+
+    fn set_current_table_row_preferred_width_unit(&mut self, value: Option<i32>) {
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.current_row_preferred_width.unit = match value.unwrap_or(0) {
+                2 => PreferredTableWidthUnit::FiftiethsPercent,
+                3 => PreferredTableWidthUnit::Twips,
+                _ => PreferredTableWidthUnit::Auto,
+            };
+        }
+    }
+
+    fn set_current_table_row_preferred_width(&mut self, value: Option<i32>) {
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.current_row_preferred_width.value = value;
         }
     }
 
@@ -6835,6 +6855,8 @@ impl Parser {
                 .expect("finish_table_cell preserves the active row");
         }
 
+        self.apply_table_row_preferred_width_fallback(&mut row);
+
         if row.right_to_left {
             Self::normalize_right_to_left_table_row(&mut row);
         }
@@ -6852,6 +6874,31 @@ impl Parser {
             keep_together: row.keep_together,
         });
         Ok(())
+    }
+
+    fn apply_table_row_preferred_width_fallback(&self, row: &mut TableRowBuilder) {
+        if !row.cell_right_edges_twips.is_empty() || row.cells.is_empty() {
+            return;
+        }
+        let Some(width_twips) = normalized_preferred_table_width_twips(
+            row.current_row_preferred_width,
+            self.current_page_content_width_twips(),
+            self.limits().max_page_dimension_twips,
+        ) else {
+            return;
+        };
+
+        let cell_count = row.cells.len() as i32;
+        let mut previous_edge = 0;
+        for cell_index in 0..row.cells.len() {
+            let edge = if cell_index + 1 == row.cells.len() {
+                width_twips
+            } else {
+                width_twips.saturating_mul((cell_index as i32) + 1) / cell_count
+            };
+            row.cell_right_edges_twips.push(edge.max(previous_edge + 1));
+            previous_edge = *row.cell_right_edges_twips.last().expect("edge just pushed");
+        }
     }
 
     fn normalize_right_to_left_table_row(row: &mut TableRowBuilder) {
@@ -9139,6 +9186,8 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "cellx"
                 | "clftsWidth"
                 | "clwWidth"
+                | "trftsWidth"
+                | "trwWidth"
                 | "viewscale"
                 | "viewzk"
                 | "taprtl"
@@ -9285,6 +9334,8 @@ fn is_nested_table_structural_control(name: &str) -> bool {
                 | "trrh"
                 | "trleft"
                 | "trgaph"
+                | "trftsWidth"
+                | "trwWidth"
                 | "trql"
                 | "trqc"
                 | "trqr"
@@ -14085,6 +14136,30 @@ mod tests {
 
         assert_eq!(table.column_widths_twips, vec![2880, 1440]);
         assert_eq!(table.rows[1].cells[0].paragraphs[0].runs[0].text, "Exact");
+    }
+
+    #[test]
+    fn preferred_row_widths_fill_missing_cell_geometry() {
+        let output = parse_rtf(
+            r"{\rtf1\paperw7200\margl720\margr720\trowd\trftsWidth3\trwWidth2880 A\cell B\cell\row\trowd\trftsWidth2\trwWidth2500 C\cell D\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.column_widths_twips, vec![1440, 1440]);
+        assert_eq!(table.rows.len(), 2);
+        assert_eq!(table.rows[0].cells.len(), 2);
+        assert_eq!(table.rows[1].cells.len(), 2);
+        let text = document_text(&output.document);
+        for forbidden in ["trftsWidth", "trwWidth"] {
+            assert!(
+                !text.contains(forbidden),
+                "row preferred-width control leaked to text: {forbidden}"
+            );
+        }
     }
 
     #[test]
