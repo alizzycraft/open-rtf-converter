@@ -557,6 +557,8 @@ struct ListCounter {
 struct OldStyleListMarker {
     format: ListNumberFormat,
     start_at: i32,
+    indent_twips: Option<i32>,
+    hanging: bool,
 }
 
 impl Default for OldStyleListMarker {
@@ -564,6 +566,8 @@ impl Default for OldStyleListMarker {
         Self {
             format: ListNumberFormat::Decimal,
             start_at: 1,
+            indent_twips: None,
+            hanging: false,
         }
     }
 }
@@ -1550,6 +1554,12 @@ impl Parser {
             }
             "pnstart" if destination_allows_safe_structural_content(&self.state) => {
                 self.set_old_style_list_marker_start(control.parameter.unwrap_or(1));
+            }
+            "pnindent" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_indent(control.parameter, offset);
+            }
+            "pnhang" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_hanging(control.parameter.unwrap_or(1) != 0);
             }
             "pntxtb" if destination_allows_safe_structural_content(&self.state) => {
                 self.pending_list_marker.clear();
@@ -6421,14 +6431,42 @@ impl Parser {
         marker.start_at = start_at.max(0);
     }
 
+    fn set_old_style_list_marker_indent(&mut self, indent_twips: Option<i32>, offset: usize) {
+        let indent_twips =
+            self.clamp_paragraph_indent(indent_twips, "old-style list indent", offset);
+        let marker = self
+            .pending_old_style_list_marker
+            .get_or_insert_with(OldStyleListMarker::default);
+        marker.indent_twips = Some(indent_twips.max(0));
+    }
+
+    fn set_old_style_list_marker_hanging(&mut self, hanging: bool) {
+        let marker = self
+            .pending_old_style_list_marker
+            .get_or_insert_with(OldStyleListMarker::default);
+        marker.hanging = hanging;
+    }
+
     fn take_old_style_list_marker(&mut self) -> Option<String> {
         let marker = self.pending_old_style_list_marker.take()?;
+        self.apply_old_style_list_marker_indent(marker);
         match marker.format {
             ListNumberFormat::Bullet => Some("\u{2022}\t".to_string()),
             _ => Some(format!(
                 "{}.\t",
                 format_list_counter(marker.start_at, marker.format)
             )),
+        }
+    }
+
+    fn apply_old_style_list_marker_indent(&mut self, marker: OldStyleListMarker) {
+        let Some(indent_twips) = marker.indent_twips else {
+            return;
+        };
+
+        self.state.paragraph.left_indent_twips = indent_twips;
+        if marker.hanging {
+            self.state.paragraph.first_line_indent_twips = -indent_twips.min(360);
         }
     }
 
@@ -11633,6 +11671,26 @@ After\par}"#;
         assert_eq!(paragraph_text(0), "ab.\tLower alpha");
         assert_eq!(paragraph_text(1), "13th.\tOrdinal");
         assert_eq!(paragraph_text(2), "\u{2022}\tBullet");
+    }
+
+    #[test]
+    fn applies_old_style_list_indent_controls_to_marker_paragraph() {
+        let output =
+            parse_rtf(r"{\rtf1{\pn\pndec\pnstart2\pnindent720\pnhang}Indented\par}").unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected old-style list paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "2.\tIndented");
+        assert_eq!(paragraph.style.left_indent_twips, 720);
+        assert_eq!(paragraph.style.first_line_indent_twips, -360);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
