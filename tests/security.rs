@@ -6330,6 +6330,76 @@ visible after\par}"#
 }
 
 #[test]
+fn edit_time_field_uses_passive_metadata_without_pdf_leakage() {
+    let input = br#"{\rtf1{\info{\edmins42}{\title Hidden title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}}}}Edit {\field{\*\fldinst EDITTIME \\# "0000"}} dynamic {\field{\*\fldinst TIME}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Edit 0042"));
+    assert!(text.contains("dynamic [Field removed: no passive result]"));
+    for forbidden in [
+        "EDITTIME",
+        "edmins",
+        "TIME",
+        "HYPERLINK",
+        "https://example.com",
+        "Hidden title",
+        "Hidden link",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden edit-time metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("edit-time-field.rtf");
+    let output_path = dir.path().join("edit-time-field.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Edit 0042"));
+    assert!(rendered_text.contains("dynamic [Field removed: no passive result]"));
+    for forbidden in [
+        b"EDITTIME".as_slice(),
+        b"edmins",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Hidden title",
+        b"Hidden link",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden edit-time metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_index_entry_fields_are_stripped_without_pdf_leakage() {
     let input = rtf(&[
         "{",
