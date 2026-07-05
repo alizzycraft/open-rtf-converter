@@ -1256,6 +1256,18 @@ impl Parser {
                             "[Field removed: no passive result]".to_string(),
                             offset,
                         )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_prompt_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!("prompt field {name} removed without requesting user input"),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
                     } else if let Some(result) = self.passive_field_result_for_instruction(
                         &field_instruction,
                         field_form_checkbox_checked,
@@ -1307,6 +1319,13 @@ impl Parser {
                             format!(
                                 "environment field {name} stripped without exposing converter host state"
                             ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_prompt_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!("prompt field {name} stripped without requesting user input"),
                             Some(offset),
                         ));
                     } else if !field_instruction_name(&field_instruction)
@@ -9657,6 +9676,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         .collect::<String>()
         .to_ascii_uppercase();
     match name.as_str() {
+        "ASK" => Some("ASK"),
         "AUTHOR" => Some("AUTHOR"),
         "AUTONUM" => Some("AUTONUM"),
         "AUTONUMLGL" => Some("AUTONUMLGL"),
@@ -9685,6 +9705,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "EDITTIME" => Some("EDITTIME"),
         "FILENAME" => Some("FILENAME"),
         "FILESIZE" => Some("FILESIZE"),
+        "FILLIN" => Some("FILLIN"),
         "FORMDROPDOWN" => Some("FORMDROPDOWN"),
         "FORMTEXT" => Some("FORMTEXT"),
         "FORMCHECKBOX" => Some("FORMCHECKBOX"),
@@ -9836,7 +9857,7 @@ fn is_leap_year(year: i32) -> bool {
 }
 
 fn is_non_visible_resultless_field(name: &str) -> bool {
-    matches!(name, "XE" | "TC" | "TA")
+    matches!(name, "ASK" | "XE" | "TC" | "TA")
 }
 
 fn is_auto_number_field(name: &str) -> bool {
@@ -9862,6 +9883,10 @@ fn is_environment_resultless_field(name: &str) -> bool {
         name,
         "FILENAME" | "FILESIZE" | "TEMPLATE" | "USERADDRESS" | "USERINITIALS" | "USERNAME"
     )
+}
+
+fn is_prompt_resultless_field(name: &str) -> bool {
+    matches!(name, "FILLIN")
 }
 
 fn is_builtin_passive_result_font(font_name: &str) -> bool {
@@ -14449,6 +14474,57 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("environment field FILENAME stripped")
+        }));
+    }
+
+    #[test]
+    fn resultless_prompt_fields_do_not_request_input_or_leak_prompt_text() {
+        let input = r#"{\rtf1 Before {\field{\*\fldinst ASK Client "Hidden prompt" \d "Hidden default"}} ask-ref {\field{\*\fldinst REF Client}} fill {\field{\*\fldinst FILLIN "Secret prompt" \d "Secret default"}} After\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before  ask-ref [Field removed: no passive result] fill [Field removed: no passive result] After"),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "ASK",
+            "FILLIN",
+            "Client",
+            "Hidden prompt",
+            "Hidden default",
+            "Secret prompt",
+            "Secret default",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "prompt field leaked prompt/input text: {forbidden}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("non-visible field ASK stripped")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("prompt field FILLIN removed without requesting user input")
+        }));
+
+        let strip_options = RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Strip,
+            ..RtfParseOptions::default()
+        };
+        let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
+        let stripped_text = document_text(&stripped.document);
+        assert!(stripped_text.contains("Before  ask-ref  fill  After"));
+        assert!(!stripped_text.contains("[Field removed"));
+        assert!(stripped.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("prompt field FILLIN stripped without requesting user input")
         }));
     }
 

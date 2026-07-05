@@ -6670,6 +6670,82 @@ visible after\par}"#
 }
 
 #[test]
+fn resultless_prompt_fields_do_not_request_input_or_leak_to_pdf() {
+    let input = br#"{\rtf1 Visible before
+{\field{\*\fldinst ASK Client "Hidden prompt" \d "Hidden default"}}
+ask-ref {\field{\*\fldinst REF Client}}
+fill {\field{\*\fldinst FILLIN "Secret prompt" \d "Secret default"}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("ask-ref [Field removed: no passive result]"));
+    assert!(text.contains("fill [Field removed: no passive result]"));
+    assert!(text.contains("visible after"));
+    for forbidden in [
+        "ASK",
+        "FILLIN",
+        "Client",
+        "Hidden prompt",
+        "Hidden default",
+        "Secret prompt",
+        "Secret default",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden prompt field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("ask-ref [Field removed: no passive result]"));
+    assert!(rendered_text.contains("fill [Field removed: no passive result]"));
+    assert!(rendered_text.contains("visible after"));
+    for forbidden in [
+        b"ASK".as_slice(),
+        b"FILLIN",
+        b"Client",
+        b"Hidden prompt",
+        b"Hidden default",
+        b"Secret prompt",
+        b"Secret default",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden prompt field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn edit_time_field_uses_passive_metadata_without_pdf_leakage() {
     let input = br#"{\rtf1{\info{\edmins42}{\title Hidden title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}}}}Edit {\field{\*\fldinst EDITTIME \\# "0000"}} dynamic {\field{\*\fldinst TIME}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
