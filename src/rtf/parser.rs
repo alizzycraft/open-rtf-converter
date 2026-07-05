@@ -4306,29 +4306,27 @@ impl Parser {
         form_dropdown_selected_index: Option<i32>,
         offset: usize,
     ) -> Result<Option<PassiveFieldResult>, ParseError> {
-        if field_instruction_name(instruction) == Some("SEQ") {
-            return self.passive_sequence_field_result(instruction, offset);
-        }
-        if field_instruction_name(instruction).is_some_and(is_auto_number_field) {
-            return self.passive_auto_number_field_result(offset);
-        }
-        if field_instruction_name(instruction) == Some("LISTNUM") {
-            return self.passive_list_number_field_result(instruction, offset);
-        }
-        if field_instruction_name(instruction) == Some("REF") {
-            return Ok(self.passive_ref_field_result(instruction));
-        }
-        if field_instruction_name(instruction) == Some("PAGEREF") {
-            return self.passive_page_ref_field_result(instruction, offset);
-        }
+        let result = if field_instruction_name(instruction) == Some("SEQ") {
+            self.passive_sequence_field_result(instruction, offset)?
+        } else if field_instruction_name(instruction).is_some_and(is_auto_number_field) {
+            self.passive_auto_number_field_result(offset)?
+        } else if field_instruction_name(instruction) == Some("LISTNUM") {
+            self.passive_list_number_field_result(instruction, offset)?
+        } else if field_instruction_name(instruction) == Some("REF") {
+            self.passive_ref_field_result(instruction)
+        } else if field_instruction_name(instruction) == Some("PAGEREF") {
+            self.passive_page_ref_field_result(instruction, offset)?
+        } else {
+            passive_field_result(
+                instruction,
+                form_checkbox_checked,
+                form_default_text,
+                form_dropdown_entries,
+                form_dropdown_selected_index,
+            )
+        };
 
-        Ok(passive_field_result(
-            instruction,
-            form_checkbox_checked,
-            form_default_text,
-            form_dropdown_entries,
-            form_dropdown_selected_index,
-        ))
+        Ok(result.and_then(|result| apply_field_text_format_switches(instruction, result)))
     }
 
     fn passive_sequence_field_result(
@@ -8688,6 +8686,16 @@ struct FormulaParser<'a> {
     pos: usize,
 }
 
+const MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS: usize = 4096;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FieldTextFormatSwitch {
+    Upper,
+    Lower,
+    FirstCap,
+    Caps,
+}
+
 impl PassiveFieldResult {
     fn text(text: &'static str) -> Self {
         Self {
@@ -8696,6 +8704,36 @@ impl PassiveFieldResult {
             form_field: false,
         }
     }
+}
+
+fn apply_field_text_format_switches(
+    instruction: &str,
+    mut result: PassiveFieldResult,
+) -> Option<PassiveFieldResult> {
+    if result.font_name.is_some() || contains_internal_marker(&result.text) {
+        return Some(result);
+    }
+
+    let switches = field_text_format_switches(instruction)?;
+    if switches.is_empty() {
+        return Some(result);
+    }
+    if result.text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS {
+        return None;
+    }
+
+    for switch in switches {
+        result.text = apply_field_text_format_switch(&result.text, switch);
+        if result.text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS {
+            return None;
+        }
+    }
+
+    if result.text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&result.text) {
+        return None;
+    }
+
+    Some(result)
 }
 
 fn passive_field_result(
@@ -8873,7 +8911,7 @@ fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     let (right, rest) = field_if_operand(rest.trim_start())?;
     let (true_text, rest) = field_if_result_text(rest.trim_start())?;
     let (false_text, rest) = field_if_optional_result_text(rest.trim_start())?;
-    if !rest.trim().is_empty() {
+    if !field_remainder_contains_only_text_format_switches(rest) {
         return None;
     }
 
@@ -9082,6 +9120,132 @@ fn field_if_condition_matches(left: &str, operator: FieldIfOperator, right: &str
         FieldIfOperator::Greater => left > right,
         FieldIfOperator::GreaterOrEqual => left >= right,
     }
+}
+
+fn field_text_format_switches(instruction: &str) -> Option<Vec<FieldTextFormatSwitch>> {
+    let mut switches = Vec::new();
+    let mut in_quote = false;
+    let mut escaped = false;
+
+    for (index, ch) in instruction.char_indices() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quote = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_quote = true;
+            continue;
+        }
+
+        if ch == '\\' {
+            let after_backslash = index + ch.len_utf8();
+            if !instruction[after_backslash..].starts_with('*') {
+                continue;
+            }
+            let after_star = after_backslash + '*'.len_utf8();
+            if let Some((switch, _)) =
+                field_text_format_switch_after_star(&instruction[after_star..])
+            {
+                if switches.len() >= 16 {
+                    return None;
+                }
+                switches.push(switch);
+            }
+        }
+    }
+
+    Some(switches)
+}
+
+fn field_remainder_contains_only_text_format_switches(input: &str) -> bool {
+    let mut rest = input.trim_start();
+    while !rest.is_empty() {
+        let Some(after_backslash) = rest.strip_prefix('\\') else {
+            return false;
+        };
+        let Some(after_star) = after_backslash.strip_prefix('*') else {
+            return false;
+        };
+        let Some((_, after_switch)) = field_text_format_switch_after_star(after_star) else {
+            return false;
+        };
+        rest = after_switch.trim_start();
+    }
+    true
+}
+
+fn field_text_format_switch_after_star(input: &str) -> Option<(FieldTextFormatSwitch, &str)> {
+    let input = input.trim_start();
+    let (name, rest) = if input.starts_with('"') {
+        (field_quoted_prefix(input)?, skip_field_argument(input)?)
+    } else {
+        let end = input
+            .char_indices()
+            .find_map(|(index, ch)| (!ch.is_ascii_alphabetic()).then_some(index))
+            .unwrap_or(input.len());
+        if end == 0 {
+            return None;
+        }
+        (input[..end].to_string(), &input[end..])
+    };
+
+    let switch = match name.trim().to_ascii_uppercase().as_str() {
+        "UPPER" => FieldTextFormatSwitch::Upper,
+        "LOWER" => FieldTextFormatSwitch::Lower,
+        "FIRSTCAP" => FieldTextFormatSwitch::FirstCap,
+        "CAPS" => FieldTextFormatSwitch::Caps,
+        _ => return None,
+    };
+    Some((switch, rest))
+}
+
+fn apply_field_text_format_switch(text: &str, switch: FieldTextFormatSwitch) -> String {
+    match switch {
+        FieldTextFormatSwitch::Upper => text.chars().flat_map(char::to_uppercase).collect(),
+        FieldTextFormatSwitch::Lower => text.chars().flat_map(char::to_lowercase).collect(),
+        FieldTextFormatSwitch::FirstCap => uppercase_first_alphabetic(text),
+        FieldTextFormatSwitch::Caps => uppercase_each_word_start(text),
+    }
+}
+
+fn uppercase_first_alphabetic(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut changed = false;
+    for ch in text.chars() {
+        if !changed && ch.is_alphabetic() {
+            output.extend(ch.to_uppercase());
+            changed = true;
+        } else {
+            output.push(ch);
+        }
+    }
+    output
+}
+
+fn uppercase_each_word_start(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut capitalize_next = true;
+    for ch in text.chars() {
+        if ch.is_alphabetic() {
+            if capitalize_next {
+                output.extend(ch.to_uppercase());
+            } else {
+                output.push(ch);
+            }
+            capitalize_next = false;
+        } else {
+            output.push(ch);
+            capitalize_next = !ch.is_alphanumeric();
+        }
+    }
+    output
 }
 
 fn field_first_quoted_argument(instruction: &str) -> Option<String> {
@@ -12693,6 +12857,35 @@ After\par}"#;
                 .message
                 .contains("rendering passive field IF without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_fields_apply_passive_case_format_switches() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\field{\*\fldinst QUOTE "mixed Case" \\* Upper}} and {\field{\*\fldinst QUOTE "MIXED Case" \\* Lower \\* FirstCap}} and {\field{\*\fldinst IF 1 = 1 "checked status" "other" \\* Caps}} After\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before MIXED CASE and Mixed case and Checked Status After"),
+            "normalized field switch text was {text:?}"
+        );
+        for forbidden in [
+            "QUOTE",
+            "IF",
+            "fldinst",
+            "Upper",
+            "Lower",
+            "FirstCap",
+            "Caps",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "forbidden field switch content leaked to text: {forbidden}"
+            );
+        }
     }
 
     #[test]

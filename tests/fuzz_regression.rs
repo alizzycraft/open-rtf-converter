@@ -196,6 +196,17 @@ fn seed_corpus() -> Vec<Vec<u8>> {
         rtf(&[
             "{",
             "\\",
+            "rtf1{",
+            "\\",
+            "field{",
+            "\\",
+            "*",
+            "\\",
+            "fldinst QUOTE \"mixed Case\" \\\\* Lower \\\\* FirstCap}}}",
+        ]),
+        rtf(&[
+            "{",
+            "\\",
             "rtf1 visible{",
             "\\",
             "annotation hidden {",

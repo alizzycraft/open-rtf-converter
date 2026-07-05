@@ -5117,6 +5117,106 @@ fn resultless_if_fields_render_passive_branches_without_instruction_leakage() {
 }
 
 #[test]
+fn resultless_field_case_switches_render_passively_without_instruction_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Values {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst QUOTE \"mixed Case\" \\\\* Upper}} and {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst QUOTE \"MIXED Case\" \\\\* Lower \\\\* FirstCap}} and {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst IF 1 = 1 \"checked status\" \"other\" \\\\* Caps}}.",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Values MIXED CASE and Mixed case and Checked Status."),
+        "normalized field switch text was {text:?}"
+    );
+    for forbidden in [
+        "QUOTE",
+        "IF",
+        "fldinst",
+        "Upper",
+        "Lower",
+        "FirstCap",
+        "Caps",
+        "checked status\"",
+        "[Field removed",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden field case-switch content leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field QUOTE without executing field instruction")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field IF without executing field instruction")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Values MIXED CASE and Mixed case and Checked Status."),
+        "decoded PDF text did not contain passive field case-switch values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"QUOTE".as_slice(),
+        b"IF",
+        b"fldinst",
+        b"Upper",
+        b"Lower",
+        b"FirstCap",
+        b"checked status\"",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden field case-switch content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_quote_fields_render_without_executing_field_instruction() {
     let input = rtf(&[
         "{",
