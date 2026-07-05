@@ -1992,6 +1992,59 @@ fn roman_and_alpha_list_markers_render_as_passive_pdf_text() {
 }
 
 #[test]
+fn list_level_indent_and_spacing_render_passively_without_control_leakage() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\levelindent720\levelspace1080{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Indented\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+
+    assert_eq!(paragraph.runs[0].text, "1.\tIndented");
+    assert_eq!(paragraph.style.left_indent_twips, 720);
+    assert_eq!(paragraph.style.tab_stops_twips, vec![1080]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("1.Indented"),
+        "decoded PDF text did not contain indented list-table marker: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"levelindent".as_slice(),
+        b"levelspace",
+        b"levelnfc",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level geometry content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn ordinal_list_markers_render_as_passive_pdf_text() {
     let input = rtf(&[
         "{",

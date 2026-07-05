@@ -507,6 +507,8 @@ struct ListLevelDefinition {
     format: ListNumberFormat,
     start_at: i32,
     text_template: String,
+    indent_twips: Option<i32>,
+    space_twips: Option<i32>,
 }
 
 impl Default for ListLevelDefinition {
@@ -515,6 +517,8 @@ impl Default for ListLevelDefinition {
             format: ListNumberFormat::Decimal,
             start_at: 1,
             text_template: String::new(),
+            indent_twips: None,
+            space_twips: None,
         }
     }
 }
@@ -1288,6 +1292,12 @@ impl Parser {
             }
             "levelstartat" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_start(control.parameter.unwrap_or(1));
+            }
+            "levelindent" if self.state.destination == Destination::ListTable => {
+                self.set_current_list_level_indent(control.parameter, offset);
+            }
+            "levelspace" if self.state.destination == Destination::ListTable => {
+                self.set_current_list_level_spacing(control.parameter, offset);
             }
             "listid" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_id(control.parameter.unwrap_or(0));
@@ -6361,7 +6371,7 @@ impl Parser {
         let Some(override_index) = self.state.list_override_index else {
             return Ok(None);
         };
-        Ok(self.synthesize_list_marker(override_index, self.state.list_level_index))
+        self.synthesize_list_marker(override_index, self.state.list_level_index, offset)
     }
 
     fn current_output_paragraph_is_empty(&self) -> bool {
@@ -6376,30 +6386,41 @@ impl Parser {
         &mut self,
         override_index: i32,
         level_index: usize,
-    ) -> Option<PendingListMarker> {
+        offset: usize,
+    ) -> Result<Option<PendingListMarker>, ParseError> {
         let list_override = self
             .list_overrides
             .iter()
             .find(|list_override| list_override.override_index == override_index)
-            .cloned()?;
+            .cloned();
+        let Some(list_override) = list_override else {
+            return Ok(None);
+        };
         let list = self
             .list_definitions
             .iter()
             .find(|list| list.list_id == list_override.list_id)
-            .cloned()?;
-        let level = list.levels.get(level_index).cloned()?;
+            .cloned();
+        let Some(list) = list else {
+            return Ok(None);
+        };
+        let level = list.levels.get(level_index).cloned();
+        let Some(level) = level else {
+            return Ok(None);
+        };
+        self.apply_list_level_layout(&level, offset)?;
 
-        match level.format {
+        let marker = match level.format {
             ListNumberFormat::Bullet => {
                 let bullet = if level.text_template.is_empty() {
                     "\u{2022}".to_string()
                 } else {
                     level.text_template.replace('\0', "")
                 };
-                Some(PendingListMarker {
+                PendingListMarker {
                     text: format!("{bullet}\t"),
                     character_style: None,
-                })
+                }
             }
             ListNumberFormat::Decimal
             | ListNumberFormat::UpperRoman
@@ -6413,7 +6434,7 @@ impl Parser {
                 let value = self.next_list_counter_value(override_index, level_index, start_at);
                 let marker = format_list_counter(value, level.format);
                 if has_list_level_placeholders(&level.text_template) {
-                    Some(PendingListMarker {
+                    PendingListMarker {
                         text: format!(
                             "{}\t",
                             self.render_list_level_template(
@@ -6426,15 +6447,40 @@ impl Parser {
                             )
                         ),
                         character_style: None,
-                    })
+                    }
                 } else {
-                    Some(PendingListMarker {
+                    PendingListMarker {
                         text: format!("{marker}.\t"),
                         character_style: None,
-                    })
+                    }
                 }
             }
+        };
+
+        Ok(Some(marker))
+    }
+
+    fn apply_list_level_layout(
+        &mut self,
+        level: &ListLevelDefinition,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let default = ParagraphStyle::default();
+        if let Some(indent_twips) = level.indent_twips
+            && self.state.paragraph.left_indent_twips == default.left_indent_twips
+        {
+            self.state.paragraph.left_indent_twips = indent_twips;
         }
+        if let Some(space_twips) = level.space_twips {
+            self.insert_paragraph_tab_stop(
+                Some(space_twips),
+                "list level spacing",
+                offset,
+                TabLeader::None,
+                TabAlignment::Left,
+            )?;
+        }
+        Ok(())
     }
 
     fn render_list_level_template(
@@ -6723,6 +6769,33 @@ impl Parser {
         if let Some(level) = self.current_list_level.as_mut() {
             level.start_at = start_at.max(0);
         }
+    }
+
+    fn set_current_list_level_indent(&mut self, indent_twips: Option<i32>, offset: usize) {
+        let indent_twips = self.clamp_paragraph_indent(indent_twips, "list level indent", offset);
+        if let Some(level) = self.current_list_level.as_mut() {
+            level.indent_twips = Some(indent_twips.max(0));
+        }
+    }
+
+    fn set_current_list_level_spacing(&mut self, space_twips: Option<i32>, offset: usize) {
+        let space_twips = self.clamp_list_level_spacing(space_twips, offset);
+        if let Some(level) = self.current_list_level.as_mut() {
+            level.space_twips = Some(space_twips);
+        }
+    }
+
+    fn clamp_list_level_spacing(&mut self, space_twips: Option<i32>, offset: usize) -> i32 {
+        let value = space_twips.unwrap_or(0).max(0);
+        let max = self.limits().max_tab_stop_twips.max(0);
+        let clamped = value.min(max);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("list level spacing clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        clamped
     }
 
     fn push_list_level_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
@@ -11984,6 +12057,52 @@ After\par}"#;
 
         assert_eq!(first.runs[0].text, "1.\tFirst");
         assert_eq!(second.runs[0].text, "2.\tSecond");
+    }
+
+    #[test]
+    fn applies_list_level_indent_and_spacing_as_safe_paragraph_metadata() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\levelindent720\levelspace1080{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Indented\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\tIndented");
+        assert_eq!(paragraph.style.left_indent_twips, 720);
+        assert_eq!(paragraph.style.tab_stops_twips, vec![1080]);
+        assert_eq!(paragraph.style.tab_stop_leaders, vec![TabLeader::None]);
+        assert_eq!(
+            paragraph.style.tab_stop_alignments,
+            vec![TabAlignment::Left]
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn list_level_spacing_obeys_tab_stop_limit() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_tab_stops: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        assert!(matches!(
+            parse_rtf_bytes_with_options(
+                br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelspace1080{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Blocked\par}",
+                &options
+            ),
+            Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "tab stops"
+        ));
     }
 
     #[test]
