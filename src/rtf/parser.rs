@@ -3098,7 +3098,7 @@ impl Parser {
                     self.clamp_character_scaling(control.parameter.unwrap_or(100), offset);
             }
             "plain" => self.state.character = self.default_character_style(),
-            "fs" => {
+            "fs" | "afs" => {
                 self.state.character.font_size_half_points =
                     self.clamp_font_size(control.parameter.unwrap_or(24), offset)
             }

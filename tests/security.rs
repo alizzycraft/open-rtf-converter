@@ -10031,12 +10031,23 @@ fn wingdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
 #[test]
 fn associated_font_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let input =
-        br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\loch\af1 \'a3 \'fe \'fc \'fb\par}"#
+        br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\loch\af1\afs72 \'a3 \'fe \'fc \'fb\par}"#
             .to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("\u{2610} \u{2611} \u{2713} \u{2717}"));
-    for forbidden in ["fonttbl", "Wingdings", "loch", "af1"] {
+    let paragraph = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .expect("paragraph");
+    assert_eq!(paragraph.runs[0].style.font_index, 1);
+    assert_eq!(paragraph.runs[0].style.font_size_half_points, 72);
+    for forbidden in ["fonttbl", "Wingdings", "loch", "af1", "afs72"] {
         assert!(
             !text.contains(forbidden),
             "forbidden associated font metadata leaked to text: {forbidden}"
@@ -10067,11 +10078,28 @@ fn associated_font_checkbox_glyphs_render_passively_without_font_payload_leakage
             .windows(b"/BaseFont /ZapfDingbats".len())
             .any(|window| window == b"/BaseFont /ZapfDingbats")
     );
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "Tf"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_name().ok())
+                    == Some(b"F14".as_slice())
+                && operation
+                    .operands
+                    .get(1)
+                    .and_then(pdf_operand_number)
+                    .is_some_and(|size| (size - 36.0).abs() < 0.01)
+        }),
+        "associated font size should emit 36pt passive ZapfDingbats text"
+    );
     for forbidden in [
         b"Wingdings".as_slice(),
         b"fonttbl",
         b"loch",
         b"af1",
+        b"afs72",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
