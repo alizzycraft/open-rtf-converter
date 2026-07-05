@@ -2230,6 +2230,84 @@ fn list_level_marker_double_strike_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn list_level_marker_underline_variants_render_passively_without_control_leakage() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\uldb{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\ulth{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\uld{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\uldash{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\ulwave{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\ulw{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Double marker\par\pard\ls2\ilvl0 Thick marker\par\pard\ls3\ilvl0 Dotted marker\par\pard\ls4\ilvl0 Dashed marker\par\pard\ls5\ilvl0 Wave marker\par\pard\ls6\ilvl0 Words marker\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+
+    for (index, (text, underline)) in [
+        ("Double marker", UnderlineStyle::Double),
+        ("Thick marker", UnderlineStyle::Thick),
+        ("Dotted marker", UnderlineStyle::Dotted),
+        ("Dashed marker", UnderlineStyle::Dashed),
+        ("Wave marker", UnderlineStyle::Wave),
+        ("Words marker", UnderlineStyle::Words),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let paragraph = match &parsed.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert_eq!(paragraph.runs[0].style.underline, underline);
+        assert_eq!(paragraph.runs[1].text, text);
+        assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for expected in [
+        "1.Double marker",
+        "1.Thick marker",
+        "1.Dotted marker",
+        "1.Dashed marker",
+        "1.Wave marker",
+        "1.Words marker",
+    ] {
+        assert!(
+            rendered_text.contains(expected),
+            "decoded PDF text did not contain underlined marker text {expected:?}: {rendered_text:?}"
+        );
+    }
+
+    for forbidden in [
+        b"uldb".as_slice(),
+        b"ulth",
+        b"uldash",
+        b"ulwave",
+        b"levelnfc",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level marker underline control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn list_level_legal_numbering_renders_passively_without_control_leakage() {
     let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc1\levelstartat4{\leveltext\'02\'00.;}{\levelnumbers\'01;}}{\listlevel\levelnfc0\levellegal1\levelstartat1{\leveltext\'04\'00.\'01.;}{\levelnumbers\'01\'03;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Parent\par\pard\ls1\ilvl1 Child\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

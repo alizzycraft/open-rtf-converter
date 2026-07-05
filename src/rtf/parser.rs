@@ -1339,13 +1339,50 @@ impl Parser {
             "ul" if self.state.destination == Destination::ListTable
                 && self.state.list_context == ListContext::ListLevel =>
             {
-                self.set_current_list_level_underline(control.parameter.unwrap_or(1) != 0);
+                self.set_current_list_level_underline(UnderlineStyle::Single, control);
             }
             "ulnone"
                 if self.state.destination == Destination::ListTable
                     && self.state.list_context == ListContext::ListLevel =>
             {
-                self.set_current_list_level_underline(false);
+                self.set_current_list_level_underline_style(UnderlineStyle::None);
+            }
+            "uldb"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline(UnderlineStyle::Double, control);
+            }
+            "ulth"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline(UnderlineStyle::Thick, control);
+            }
+            "uld" | "ulthd"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline(UnderlineStyle::Dotted, control);
+            }
+            "uldash" | "uldashd" | "uldashdd" | "ulldash" | "ulthdash" | "ulthdashd"
+            | "ulthdashdd" | "ulthldash"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline(UnderlineStyle::Dashed, control);
+            }
+            "ulwave" | "ulhwave" | "uldbwave" | "ululdbwave"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline(UnderlineStyle::Wave, control);
+            }
+            "ulw"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline(UnderlineStyle::Words, control);
             }
             "strike" | "striked"
                 if self.state.destination == Destination::ListTable
@@ -6957,13 +6994,18 @@ impl Parser {
         self.update_current_list_level_character_style(|style| style.italic = enabled);
     }
 
-    fn set_current_list_level_underline(&mut self, enabled: bool) {
+    fn set_current_list_level_underline(&mut self, style: UnderlineStyle, control: &Control) {
+        let style = if control.parameter.unwrap_or(1) == 0 {
+            UnderlineStyle::None
+        } else {
+            style
+        };
+        self.set_current_list_level_underline_style(style);
+    }
+
+    fn set_current_list_level_underline_style(&mut self, underline: UnderlineStyle) {
         self.update_current_list_level_character_style(|style| {
-            style.underline = if enabled {
-                UnderlineStyle::Single
-            } else {
-                UnderlineStyle::None
-            };
+            style.underline = underline;
         });
     }
 
@@ -12571,6 +12613,43 @@ After\par}"#;
         assert_eq!(paragraph.runs[1].text, "Double strike item");
         assert!(!paragraph.runs[1].style.strike);
         assert!(!paragraph.runs[1].style.double_strike);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn applies_list_level_marker_underline_variants_to_marker_runs_only() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\uldb{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\ulth{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\uld{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\uldash{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\ulwave{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\ulw{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Double marker\par\pard\ls2\ilvl0 Thick marker\par\pard\ls3\ilvl0 Dotted marker\par\pard\ls4\ilvl0 Dashed marker\par\pard\ls5\ilvl0 Wave marker\par\pard\ls6\ilvl0 Words marker\par}",
+        )
+        .unwrap();
+
+        for (index, (text, underline)) in [
+            ("Double marker", UnderlineStyle::Double),
+            ("Thick marker", UnderlineStyle::Thick),
+            ("Dotted marker", UnderlineStyle::Dotted),
+            ("Dashed marker", UnderlineStyle::Dashed),
+            ("Wave marker", UnderlineStyle::Wave),
+            ("Words marker", UnderlineStyle::Words),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let paragraph = match &output.document.blocks[index] {
+                Block::Paragraph(paragraph) => paragraph,
+                _ => panic!("expected paragraph"),
+            };
+
+            assert_eq!(paragraph.runs[0].text, "1.\t");
+            assert_eq!(paragraph.runs[0].style.underline, underline);
+            assert_eq!(paragraph.runs[1].text, text);
+            assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
+        }
+
         assert!(
             output
                 .diagnostics
