@@ -2249,6 +2249,9 @@ impl Parser {
                 self.state.paragraph.auto_space_before = control.parameter.unwrap_or(1) != 0
             }
             "saauto" => self.state.paragraph.auto_space_after = control.parameter.unwrap_or(1) != 0,
+            "contextualspace" => {
+                self.state.paragraph.contextual_spacing = control.parameter.unwrap_or(1) != 0
+            }
             "sl" => {
                 self.state.paragraph.line_spacing_twips =
                     self.clamp_line_spacing(control.parameter, offset)
@@ -7227,6 +7230,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.auto_space_after == default.auto_space_after {
         output.auto_space_after = base.auto_space_after;
+    }
+    if output.contextual_spacing == default.contextual_spacing {
+        output.contextual_spacing = base.contextual_spacing;
     }
     if output.line_spacing_twips == default.line_spacing_twips {
         output.line_spacing_twips = base.line_spacing_twips;
@@ -14830,6 +14836,24 @@ After\par}"#;
         assert!(first.style.auto_space_after);
         assert!(!second.style.auto_space_before);
         assert!(!second.style.auto_space_after);
+    }
+
+    #[test]
+    fn normalizes_contextual_paragraph_spacing_control() {
+        let output =
+            parse_rtf(r"{\rtf1\contextualspace Same style\par\contextualspace0 Normal\par}")
+                .unwrap();
+        let first = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected first paragraph"),
+        };
+        let second = match &output.document.blocks[1] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected second paragraph"),
+        };
+
+        assert!(first.style.contextual_spacing);
+        assert!(!second.style.contextual_spacing);
     }
 
     #[test]

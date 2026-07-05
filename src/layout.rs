@@ -770,6 +770,8 @@ impl LayoutEngine {
                         &mut pages,
                         &mut cursor_y,
                         &paragraph,
+                        false,
+                        false,
                         geometry.body_width(current_column),
                         geometry.margin_bottom,
                         &mut geometry,
@@ -820,6 +822,13 @@ impl LayoutEngine {
                 }
                 Block::Paragraph(paragraph) => {
                     let markers = current_marker_context(&pages, document_stats);
+                    let suppress_contextual_before =
+                        previous_paragraph_block(&document.blocks, block_idx).is_some_and(
+                            |previous| paragraph_spacing_is_contextual(previous, paragraph),
+                        );
+                    let suppress_contextual_after =
+                        next_paragraph_block(&document.blocks, block_idx)
+                            .is_some_and(|next| paragraph_spacing_is_contextual(paragraph, next));
                     if paragraph.style.keep_with_next
                         && let Some(next_paragraph) =
                             next_paragraph_block(&document.blocks, block_idx)
@@ -848,6 +857,8 @@ impl LayoutEngine {
                         &mut pages,
                         &mut cursor_y,
                         paragraph,
+                        suppress_contextual_before,
+                        suppress_contextual_after,
                         geometry.body_width(current_column),
                         geometry.margin_bottom,
                         &mut geometry,
@@ -993,6 +1004,8 @@ fn layout_footnotes(
             pages,
             cursor_y,
             &paragraph,
+            false,
+            false,
             content_width,
             margin_bottom,
             geometry,
@@ -1410,6 +1423,19 @@ fn next_paragraph_block(blocks: &[Block], idx: usize) -> Option<&Paragraph> {
         Block::Paragraph(paragraph) => Some(paragraph),
         _ => None,
     })
+}
+
+fn previous_paragraph_block(blocks: &[Block], idx: usize) -> Option<&Paragraph> {
+    idx.checked_sub(1)
+        .and_then(|previous_idx| blocks.get(previous_idx))
+        .and_then(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+}
+
+fn paragraph_spacing_is_contextual(first: &Paragraph, second: &Paragraph) -> bool {
+    first.style.contextual_spacing && second.style.contextual_spacing
 }
 
 fn apply_page_vertical_alignment(pages: &mut [LayoutPage]) {
@@ -2644,6 +2670,8 @@ fn layout_paragraph(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
     paragraph: &Paragraph,
+    suppress_contextual_space_before: bool,
+    suppress_contextual_space_after: bool,
     content_width: f32,
     margin_bottom: f32,
     geometry: &mut PageGeometry,
@@ -2687,7 +2715,11 @@ fn layout_paragraph(
     let mut margin_left = geometry.body_left(*current_column);
     markers = current_marker_context(pages, document_stats);
 
-    let paragraph_top = twips_to_points(effective_space_before_twips(&paragraph.style));
+    let paragraph_top = if suppress_contextual_space_before {
+        0.0
+    } else {
+        twips_to_points(effective_space_before_twips(&paragraph.style))
+    };
     *cursor_y -= paragraph_top;
     let mut lines = wrap_paragraph(paragraph, content_width, &markers, document);
     for line in &mut lines {
@@ -2774,7 +2806,9 @@ fn layout_paragraph(
         push_line(pages, &line, x, *cursor_y, document, word_spacing);
         *cursor_y -= line.height;
     }
-    *cursor_y -= twips_to_points(effective_space_after_twips(&paragraph.style));
+    if !suppress_contextual_space_after {
+        *cursor_y -= twips_to_points(effective_space_after_twips(&paragraph.style));
+    }
 }
 
 fn reset_line_numbers_for_page_restart(
@@ -8974,6 +9008,24 @@ mod tests {
         assert!(
             (auto_gap - manual_gap - 24.0).abs() < 0.01,
             "expected auto spacing to add bounded 24pt gap, manual={manual_gap}, auto={auto_gap}"
+        );
+    }
+
+    #[test]
+    fn collapses_contextual_spacing_between_adjacent_opt_in_paragraphs() {
+        let mut normal_first = ParagraphStyle::default();
+        normal_first.space_after_twips = 360;
+        let mut normal_second = ParagraphStyle::default();
+        normal_second.space_before_twips = 240;
+        let normal_gap = paragraph_baseline_gap(normal_first.clone(), normal_second.clone());
+
+        normal_first.contextual_spacing = true;
+        normal_second.contextual_spacing = true;
+        let contextual_gap = paragraph_baseline_gap(normal_first, normal_second);
+
+        assert!(
+            (normal_gap - contextual_gap - 30.0).abs() < 0.01,
+            "contextual spacing should suppress 18pt after + 12pt before, normal={normal_gap}, contextual={contextual_gap}"
         );
     }
 

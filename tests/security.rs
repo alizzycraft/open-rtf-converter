@@ -10970,6 +10970,65 @@ fn paragraph_auto_spacing_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn contextual_paragraph_spacing_renders_passively_without_control_leakage() {
+    let input =
+        br"{\rtf1\sb240\sa360\contextualspace First\par\sb240\sa360\contextualspace Second\par}"
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("First"));
+    assert!(text.contains("Second"));
+    assert_eq!(paragraphs.len(), 2);
+    assert!(paragraphs[0].style.contextual_spacing);
+    assert!(paragraphs[1].style.contextual_spacing);
+    assert!(!text.contains("contextualspace"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("First"));
+    assert!(rendered_text.contains("Second"));
+    for forbidden in [
+        b"contextualspace".as_slice(),
+        b"sb240",
+        b"sa360",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden contextual spacing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn extreme_paragraph_indents_are_bounded_before_pdf_rendering() {
     let input = rtf(&[
         "{",
