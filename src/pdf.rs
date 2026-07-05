@@ -884,7 +884,9 @@ fn draw_passive_polygon(
 }
 
 fn draw_passive_text_overlays(content: &mut Content, fragment: &TextFragment) {
-    if fragment.font_family != PdfFontFamily::ZapfDingbats || !fragment.text.contains('\u{2611}') {
+    if fragment.font_family != PdfFontFamily::ZapfDingbats
+        || (!fragment.text.contains('\u{2611}') && !fragment.text.contains('\u{2612}'))
+    {
         return;
     }
 
@@ -903,8 +905,12 @@ fn draw_passive_text_overlays(content: &mut Content, fragment: &TextFragment) {
     set_stroke_color(content, fragment.color);
     content.set_line_width((font_size * 0.075).clamp(0.5, 1.25));
     for ch in fragment.text.chars() {
-        if ch == '\u{2611}' {
-            draw_passive_checkbox_tick(content, cursor, fragment.baseline_y, font_size);
+        match ch {
+            '\u{2611}' => {
+                draw_passive_checkbox_tick(content, cursor, fragment.baseline_y, font_size)
+            }
+            '\u{2612}' => draw_passive_checkbox_x(content, cursor, fragment.baseline_y, font_size),
+            _ => {}
         }
         if !is_zero_width_pdf_char(ch) {
             visible_index += 1;
@@ -934,6 +940,18 @@ fn draw_passive_checkbox_tick(
     content.move_to(left + box_size * 0.22, bottom + box_size * 0.48);
     content.line_to(left + box_size * 0.42, bottom + box_size * 0.25);
     content.line_to(left + box_size * 0.82, bottom + box_size * 0.78);
+    content.stroke();
+}
+
+fn draw_passive_checkbox_x(content: &mut Content, glyph_x: f32, baseline_y: f32, font_size: f32) {
+    let box_size = font_size * 0.62;
+    let left = glyph_x + font_size * 0.04;
+    let bottom = baseline_y + font_size * 0.04;
+
+    content.move_to(left + box_size * 0.24, bottom + box_size * 0.24);
+    content.line_to(left + box_size * 0.76, bottom + box_size * 0.76);
+    content.move_to(left + box_size * 0.76, bottom + box_size * 0.24);
+    content.line_to(left + box_size * 0.24, bottom + box_size * 0.76);
     content.stroke();
 }
 
@@ -1232,7 +1250,7 @@ fn encode_symbol_char(ch: char) -> u8 {
 
 fn encode_zapf_dingbats_char(ch: char) -> u8 {
     match ch {
-        '\u{2610}' | '\u{2611}' | '\u{2751}' => b'q',
+        '\u{25a1}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{2751}' => b'q',
         '\u{2713}' | '\u{2714}' => b'3',
         '\u{2717}' => b'7',
         ' ' => b' ',
@@ -3201,7 +3219,7 @@ endobj
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
-                text: "\u{2610}\u{2611}\u{2713}\u{2717}".to_string(),
+                text: "\u{25a1}\u{2610}\u{2611}\u{2612}\u{2713}\u{2717}".to_string(),
                 style,
             }],
         })];
@@ -3216,14 +3234,14 @@ endobj
             pdf.windows(b"/BaseFont /ZapfDingbats".len())
                 .any(|window| window == b"/BaseFont /ZapfDingbats")
         );
-        assert_eq!(content_bytes(&content), b"qq37");
+        assert_eq!(content_bytes(&content), b"qqqq37");
         assert_eq!(
             content
                 .operations
                 .iter()
                 .filter(|operation| operation.operator == "m")
                 .count(),
-            1
+            3
         );
         assert_eq!(
             content
@@ -3231,7 +3249,7 @@ endobj
                 .iter()
                 .filter(|operation| operation.operator == "l")
                 .count(),
-            2
+            4
         );
         assert!(
             content

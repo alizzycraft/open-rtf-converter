@@ -6323,6 +6323,66 @@ fn wingdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
 }
 
 #[test]
+fn webdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
+    let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Webdings;}}\f1 \'3f \'61 \'63\par {\field{\*\fldinst SYMBOL 63 \\f "Webdings"}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("\u{2612} \u{2714} \u{25a1}"));
+    assert!(text.contains("\u{2612}"));
+    for forbidden in ["fonttbl", "Webdings", "fldinst", "SYMBOL"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden Webdings metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
+    assert!(
+        zapf_bytes
+            .windows(b"q 3 q".len())
+            .any(|window| window == b"q 3 q")
+            && zapf_bytes.contains(&b'q'),
+        "Webdings checkbox glyphs should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/BaseFont /ZapfDingbats".len())
+            .any(|window| window == b"/BaseFont /ZapfDingbats")
+    );
+    for forbidden in [
+        b"Webdings".as_slice(),
+        b"fonttbl",
+        b"fldinst",
+        b"SYMBOL",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Webdings content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unicode_checkbox_glyphs_use_passive_checkbox_font_without_embedding_source_font() {
     let input = rtf(&[
         "{",
@@ -6341,6 +6401,8 @@ fn unicode_checkbox_glyphs_use_passive_checkbox_font_without_embedding_source_fo
         "\\",
         "u9745?",
         "\\",
+        "u9746?",
+        "\\",
         "u10003?",
         "\\",
         "u10007?",
@@ -6349,7 +6411,7 @@ fn unicode_checkbox_glyphs_use_passive_checkbox_font_without_embedding_source_fo
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("\u{2610}\u{2611}\u{2713}\u{2717}"));
+    assert!(text.contains("\u{2610}\u{2611}\u{2612}\u{2713}\u{2717}"));
     for forbidden in ["fonttbl", "Segoe UI Symbol"] {
         assert!(
             !text.contains(forbidden),

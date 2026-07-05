@@ -3797,8 +3797,10 @@ impl Parser {
         let font_name = font.name.to_ascii_lowercase();
         let mapped = if font.charset == Some(2) || is_legacy_symbol_font_name(&font_name) {
             text.chars().map(map_symbol_char).collect::<String>()
-        } else if is_wingdings_like_font_name(&font_name) {
+        } else if is_wingdings_font_name(&font_name) {
             text.chars().map(map_wingdings_char).collect::<String>()
+        } else if is_webdings_font_name(&font_name) {
+            text.chars().map(map_webdings_char).collect::<String>()
         } else {
             return None;
         };
@@ -8489,8 +8491,7 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
     {
         map_symbol_char(value as u8 as char).to_string()
     } else if let Some(name) = font_name.as_deref()
-        && is_wingdings_like_font_name(&name.to_ascii_lowercase())
-        && let Some(mapped) = map_wingdings_codepoint(value)
+        && let Some(mapped) = map_dingbats_codepoint(&name.to_ascii_lowercase(), value)
     {
         passive_font_name = Some("ZapfDingbats".to_string());
         mapped.to_string()
@@ -9410,8 +9411,22 @@ fn map_symbol_char(ch: char) -> char {
     }
 }
 
-fn is_wingdings_like_font_name(name: &str) -> bool {
-    name.contains("wingdings") || name.contains("webdings")
+fn is_wingdings_font_name(name: &str) -> bool {
+    name.contains("wingdings")
+}
+
+fn is_webdings_font_name(name: &str) -> bool {
+    name.contains("webdings")
+}
+
+fn map_dingbats_codepoint(font_name: &str, codepoint: u32) -> Option<char> {
+    if is_wingdings_font_name(font_name) {
+        map_wingdings_codepoint(codepoint)
+    } else if is_webdings_font_name(font_name) {
+        map_webdings_codepoint(codepoint)
+    } else {
+        None
+    }
 }
 
 fn map_wingdings_char(ch: char) -> char {
@@ -9432,6 +9447,27 @@ fn map_wingdings_codepoint(codepoint: u32) -> Option<char> {
         0xfb => Some('\u{2717}'),
         0xfc => Some('\u{2713}'),
         0xfe => Some('\u{2611}'),
+        _ => None,
+    }
+}
+
+fn map_webdings_char(ch: char) -> char {
+    map_webdings_codepoint(ch as u32).unwrap_or(ch)
+}
+
+fn map_webdings_codepoint(codepoint: u32) -> Option<char> {
+    let code = if (0xf000..=0xf0ff).contains(&codepoint) {
+        (codepoint - 0xf000) as u8
+    } else if codepoint <= u8::MAX as u32 {
+        codepoint as u8
+    } else {
+        return None;
+    };
+
+    match code {
+        0x3f => Some('\u{2612}'),
+        0x61 => Some('\u{2714}'),
+        0x63 => Some('\u{25a1}'),
         _ => None,
     }
 }
@@ -10627,6 +10663,20 @@ mod tests {
             paragraph.runs[0].text,
             "\u{2610} \u{2611} \u{2713} \u{2717}"
         );
+        assert_eq!(paragraph.runs[0].style.font_index, 1);
+    }
+
+    #[test]
+    fn normalizes_webdings_checkbox_glyphs_to_safe_unicode() {
+        let output =
+            parse_rtf(r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Webdings;}}\f1 \'3f \'61 \'63\par}")
+                .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "\u{2612} \u{2714} \u{25a1}");
         assert_eq!(paragraph.runs[0].style.font_index, 1);
     }
 

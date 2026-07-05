@@ -4584,7 +4584,14 @@ fn is_passive_checkbox_text(text: &str) -> bool {
         }
         if matches!(
             ch,
-            '\u{2610}' | '\u{2611}' | '\u{2713}' | '\u{2714}' | '\u{2717}' | '\u{2751}'
+            '\u{25a1}'
+                | '\u{2610}'
+                | '\u{2611}'
+                | '\u{2612}'
+                | '\u{2713}'
+                | '\u{2714}'
+                | '\u{2717}'
+                | '\u{2751}'
         ) {
             has_checkbox = true;
         } else {
@@ -4628,7 +4635,14 @@ impl PassiveFontRunKind {
 fn is_passive_checkbox_char(ch: char) -> bool {
     matches!(
         ch,
-        '\u{2610}' | '\u{2611}' | '\u{2713}' | '\u{2714}' | '\u{2717}' | '\u{2751}'
+        '\u{25a1}'
+            | '\u{2610}'
+            | '\u{2611}'
+            | '\u{2612}'
+            | '\u{2713}'
+            | '\u{2714}'
+            | '\u{2717}'
+            | '\u{2751}'
     )
 }
 
@@ -9654,7 +9668,7 @@ mod tests {
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
-                text: "\u{2610} \u{2611} \u{2713} \u{2717}".to_string(),
+                text: "\u{25a1} \u{2610} \u{2611} \u{2612} \u{2713} \u{2717}".to_string(),
                 style,
             }],
         })];
