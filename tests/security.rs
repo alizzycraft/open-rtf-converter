@@ -6683,6 +6683,95 @@ visible after\par}"#
 }
 
 #[test]
+fn resultless_generated_reference_fields_do_not_build_or_leak_to_pdf() {
+    let input = br#"{\rtf1 Visible before
+{\field{\*\fldinst TOC \o "1-3" \h \z \u}}
+index {\field{\*\fldinst INDEX \c "2" \e "Hidden separator"}}
+citation {\field{\*\fldinst CITATION HiddenSource \l 1033}}
+bib {\field{\*\fldinst BIBLIOGRAPHY}}
+toa {\field{\*\fldinst TOA \c 1}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("visible after"));
+    assert!(text.contains("index [Field removed: no passive result]"));
+    assert!(text.contains("citation [Field removed: no passive result]"));
+    assert!(text.contains("bib [Field removed: no passive result]"));
+    assert!(text.contains("toa [Field removed: no passive result]"));
+    assert_eq!(
+        text.matches("[Field removed: no passive result]").count(),
+        5
+    );
+    for forbidden in [
+        "TOC",
+        "INDEX",
+        "CITATION",
+        "BIBLIOGRAPHY",
+        "TOA",
+        "HiddenSource",
+        "Hidden separator",
+        "fldinst",
+        "\\o",
+        "\\h",
+        "\\z",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden generated field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("visible after"));
+    assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for forbidden in [
+        b"TOC".as_slice(),
+        b"INDEX",
+        b"CITATION",
+        b"BIBLIOGRAPHY",
+        b"TOA",
+        b"HiddenSource",
+        b"Hidden separator",
+        b"fldinst",
+        b"\\o",
+        b"\\h",
+        b"\\z",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden generated field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_environment_fields_do_not_expose_host_state_to_pdf() {
     let input = br#"{\rtf1 Visible before
 {\field{\*\fldinst FILENAME \p}}

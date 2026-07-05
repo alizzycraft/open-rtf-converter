@@ -1305,6 +1305,20 @@ impl Parser {
                             "[Field removed: no passive result]".to_string(),
                             offset,
                         )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_generated_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "generated field {name} removed without building document index or bibliography"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
                     } else if let Some(result) = self.passive_field_result_for_instruction(
                         &field_instruction,
                         field_form_checkbox_checked,
@@ -1389,6 +1403,15 @@ impl Parser {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
                                 "mail-merge field {name} stripped without executing merge data source"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_generated_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "generated field {name} stripped without building document index or bibliography"
                             ),
                             Some(offset),
                         ));
@@ -9850,6 +9873,8 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "AUTONUM" => Some("AUTONUM"),
         "AUTONUMLGL" => Some("AUTONUMLGL"),
         "AUTONUMOUT" => Some("AUTONUMOUT"),
+        "BIBLIOGRAPHY" => Some("BIBLIOGRAPHY"),
+        "CITATION" => Some("CITATION"),
         "COMMENTS" => Some("COMMENTS"),
         "PAGE" => Some("PAGE"),
         "NUMPAGES" => Some("NUMPAGES"),
@@ -9883,6 +9908,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "DDEAUTO" => Some("DDEAUTO"),
         "HYPERLINK" => Some("HYPERLINK"),
         "IF" => Some("IF"),
+        "INDEX" => Some("INDEX"),
         "IMPORT" => Some("IMPORT"),
         "INCLUDEPICTURE" => Some("INCLUDEPICTURE"),
         "INCLUDETEXT" => Some("INCLUDETEXT"),
@@ -9909,6 +9935,8 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "TIME" => Some("TIME"),
         "TITLE" => Some("TITLE"),
         "TEMPLATE" => Some("TEMPLATE"),
+        "TOA" => Some("TOA"),
+        "TOC" => Some("TOC"),
         "USERADDRESS" => Some("USERADDRESS"),
         "USERINITIALS" => Some("USERINITIALS"),
         "USERNAME" => Some("USERNAME"),
@@ -10099,6 +10127,10 @@ fn is_prompt_resultless_field(name: &str) -> bool {
 
 fn is_mail_merge_data_resultless_field(name: &str) -> bool {
     matches!(name, "MERGEREC" | "MERGESEQ")
+}
+
+fn is_generated_resultless_field(name: &str) -> bool {
+    matches!(name, "BIBLIOGRAPHY" | "CITATION" | "INDEX" | "TOA" | "TOC")
 }
 
 fn is_builtin_passive_result_font(font_name: &str) -> bool {
@@ -14841,6 +14873,67 @@ After\par}"#;
                 "missing diagnostic for {name}"
             );
         }
+    }
+
+    #[test]
+    fn resultless_generated_reference_fields_placeholder_without_building_generated_content() {
+        let input = r#"{\rtf1 Before {\field{\*\fldinst TOC \o "1-3" \h \z}} index {\field{\*\fldinst INDEX \c "2"}} cites {\field{\*\fldinst CITATION HiddenSource \l 1033}} bib {\field{\*\fldinst BIBLIOGRAPHY}} auth {\field{\*\fldinst TOA \c 1}} After\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Before"));
+        assert!(text.contains("index"));
+        assert!(text.contains("cites"));
+        assert!(text.contains("bib"));
+        assert!(text.contains("auth"));
+        assert!(text.contains("After"));
+        assert_eq!(
+            text.matches("[Field removed: no passive result]").count(),
+            5
+        );
+        for forbidden in [
+            "TOC",
+            "INDEX",
+            "CITATION",
+            "BIBLIOGRAPHY",
+            "TOA",
+            "HiddenSource",
+            "fldinst",
+            "\\o",
+            "\\h",
+            "\\z",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "generated field leaked instruction or source text: {forbidden}"
+            );
+        }
+        for name in ["TOC", "INDEX", "CITATION", "BIBLIOGRAPHY", "TOA"] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("generated field {name} removed"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
+
+        let strip_options = RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Strip,
+            ..RtfParseOptions::default()
+        };
+        let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
+        let stripped_text = document_text(&stripped.document);
+        assert!(stripped_text.contains("Before"));
+        assert!(stripped_text.contains("After"));
+        assert!(!stripped_text.contains("[Field removed"));
+        assert!(
+            stripped
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("generated field TOC stripped") })
+        );
     }
 
     #[test]
