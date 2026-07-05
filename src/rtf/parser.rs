@@ -9430,6 +9430,8 @@ fn is_webdings_font_name(name: &str) -> bool {
 fn dingbats_mapper_for_font_name(name: &str) -> Option<fn(char) -> char> {
     if is_wingdings2_font_name(name) {
         Some(map_wingdings2_char)
+    } else if is_wingdings3_font_name(name) {
+        Some(map_wingdings3_char)
     } else if is_wingdings_font_name(name) {
         Some(map_wingdings_char)
     } else {
@@ -9440,6 +9442,8 @@ fn dingbats_mapper_for_font_name(name: &str) -> Option<fn(char) -> char> {
 fn map_dingbats_codepoint(font_name: &str, codepoint: u32) -> Option<char> {
     if is_wingdings2_font_name(font_name) {
         map_wingdings2_codepoint(codepoint)
+    } else if is_wingdings3_font_name(font_name) {
+        map_wingdings3_codepoint(codepoint)
     } else if is_wingdings_font_name(font_name) {
         map_wingdings_codepoint(codepoint)
     } else if is_webdings_font_name(font_name) {
@@ -9489,6 +9493,28 @@ fn map_wingdings2_codepoint(codepoint: u32) -> Option<char> {
         0x50 => Some('\u{2713}'),
         0x51 | 0x53 | 0x54 => Some('\u{2612}'),
         0x52 => Some('\u{2611}'),
+        _ => None,
+    }
+}
+
+fn map_wingdings3_char(ch: char) -> char {
+    map_wingdings3_codepoint(ch as u32).unwrap_or(ch)
+}
+
+fn map_wingdings3_codepoint(codepoint: u32) -> Option<char> {
+    let code = if (0xf000..=0xf0ff).contains(&codepoint) {
+        (codepoint - 0xf000) as u8
+    } else if codepoint <= u8::MAX as u32 {
+        codepoint as u8
+    } else {
+        return None;
+    };
+
+    match code {
+        b'f' => Some('\u{2190}'),
+        b'g' => Some('\u{2192}'),
+        b'h' => Some('\u{2191}'),
+        b'i' => Some('\u{2193}'),
         _ => None,
     }
 }
@@ -10721,6 +10747,22 @@ mod tests {
         assert_eq!(
             paragraph.runs[0].text,
             "\u{2717} \u{2713} \u{2612} \u{2611} \u{2612} \u{2612}"
+        );
+        assert_eq!(paragraph.runs[0].style.font_index, 1);
+    }
+
+    #[test]
+    fn normalizes_wingdings3_basic_arrows_to_safe_unicode() {
+        let output =
+            parse_rtf(r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings 3;}}\f1 f g h i\par}").unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(
+            paragraph.runs[0].text,
+            "\u{2190} \u{2192} \u{2191} \u{2193}"
         );
         assert_eq!(paragraph.runs[0].style.font_index, 1);
     }

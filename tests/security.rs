@@ -6383,6 +6383,67 @@ fn wingdings2_checkbox_glyphs_render_passively_without_font_payload_leakage() {
 }
 
 #[test]
+fn wingdings3_basic_arrows_render_passively_without_font_payload_leakage() {
+    let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings 3;}}\f1 f g h i\par {\field{\*\fldinst SYMBOL 102 \\f "Wingdings 3"}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("\u{2190} \u{2192} \u{2191} \u{2193}"));
+    assert!(text.contains("\u{2190}"));
+    for forbidden in ["fonttbl", "Wingdings 3", "fldinst", "SYMBOL"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden Wingdings 3 metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    let expected_arrows: &[u8] = &[0xac, 0xae, 0xad, 0xaf];
+    assert!(
+        symbol_bytes
+            .windows(expected_arrows.len())
+            .any(|window| window == expected_arrows)
+            && symbol_bytes.contains(&0xac),
+        "Wingdings 3 arrows should encode through passive Symbol bytes, got {symbol_bytes:?}"
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/BaseFont /Symbol".len())
+            .any(|window| window == b"/BaseFont /Symbol")
+    );
+    for forbidden in [
+        b"Wingdings 3".as_slice(),
+        b"fonttbl",
+        b"fldinst",
+        b"SYMBOL",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Wingdings 3 content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn webdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Webdings;}}\f1 \'3f \'61 \'63\par {\field{\*\fldinst SYMBOL 63 \\f "Webdings"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
