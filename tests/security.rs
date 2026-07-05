@@ -12754,6 +12754,120 @@ fn common_word_metadata_controls_do_not_warn_or_leak_to_pdf() {
 }
 
 #[test]
+fn word_session_and_layout_flags_are_classified_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "deff0",
+        "\\",
+        "deflang1033",
+        "\\",
+        "deflangfe1033",
+        "\\",
+        "nouicompat",
+        "\\",
+        "rsidroot123456{",
+        "\\",
+        "*",
+        "\\",
+        "rsidtbl ",
+        "\\",
+        "rsid123456{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}",
+        "\\",
+        "rsid123456",
+        "\\",
+        "insrsid123456",
+        "\\",
+        "delrsid789012",
+        "\\",
+        "vertdoc",
+        "\\",
+        "wraptrsp",
+        "\\",
+        "sprsspbf",
+        "\\",
+        "sprsbsp Visible body",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Visible body"));
+    for forbidden in [
+        "rsid", "rsidtbl", "insrsid", "delrsid", "vertdoc", "wraptrsp", "sprsspbf", "sprsbsp",
+        "objdata", "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Word session/layout control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported RTF control")
+            && !diagnostic.message.contains("unknown RTF destination")),
+        "Word session/layout flags should not be unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("vertical document layout approximated")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("Word typography compatibility option approximated")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(decoded_pdf_text(&content).contains("Visible body"));
+    for forbidden in [
+        b"rsid".as_slice(),
+        b"rsidtbl",
+        b"insrsid",
+        b"delrsid",
+        b"vertdoc",
+        b"wraptrsp",
+        b"sprsspbf",
+        b"sprsbsp",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Word session/layout payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
     let input = rtf(&[
         "{",
