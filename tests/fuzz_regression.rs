@@ -1089,6 +1089,7 @@ fn seed_corpus() -> Vec<Vec<u8>> {
             "\\",
             "sv calc.exe}}}} visible}",
         ]),
+        br#"{\rtf1{\shp{\shpinst\shpleft720\shptop720\shpright2160\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv calc.exe}}}{\shptxt Box {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt visible}}\par}}}"#.to_vec(),
         rtf(&[
             "{",
             "\\",

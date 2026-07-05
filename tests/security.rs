@@ -19979,6 +19979,105 @@ fn modern_shape_text_renders_passively_without_property_or_field_leakage() {
 }
 
 #[test]
+fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_leakage() {
+    let input = br#"{\rtf1{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn pFragments}{\sv hostile-shape-text-payload}}}{\shptxt Box text {\field{\*\fldinst HYPERLINK "https://example.com/shape-text"}{\fldrslt safe link}}\par}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("shape block");
+
+    assert_eq!(shape.text.len(), 1);
+    assert!(text.contains("Box text safe link"));
+    assert!(text.contains("After"));
+    assert!(
+        !parsed.document.blocks.iter().any(|block| {
+            matches!(block, Block::Paragraph(paragraph) if paragraph.runs.iter().any(|run| run.text.contains("Box text")))
+        }),
+        "shape text should stay attached to the shape instead of entering body flow"
+    );
+    for forbidden in [
+        "shpinst",
+        "shapeType",
+        "fillColor",
+        "pFragments",
+        "hostile-shape-text-payload",
+        "HYPERLINK",
+        "https://example.com/shape-text",
+        "fldinst",
+        "fldrslt",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden bounded shape-text content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let fill_index = content
+        .operations
+        .iter()
+        .position(|operation| operation.operator == "f")
+        .expect("shape fill should render");
+    let text_index = content
+        .operations
+        .iter()
+        .position(|operation| operation.operator == "Tj" || operation.operator == "TJ")
+        .expect("shape text should render");
+
+    assert!(rendered_text.contains("Box text safe link"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        fill_index < text_index,
+        "shape text should paint after shape fill"
+    );
+    for forbidden in [
+        b"shpinst".as_slice(),
+        b"shapeType",
+        b"fillColor",
+        b"pFragments",
+        b"hostile-shape-text-payload",
+        b"HYPERLINK",
+        b"https://example.com/shape-text",
+        b"fldinst",
+        b"fldrslt",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden bounded shape-text content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn ignored_destinations_consume_bounded_skip_budget() {
     let options = RtfParseOptions {
         limits: RtfLimits {
@@ -21989,8 +22088,12 @@ fn collect_text(document: &open_rtf_converter::model::Document) -> String {
                 }
             }
             open_rtf_converter::model::Block::Placeholder(value) => text.push_str(value),
-            open_rtf_converter::model::Block::Image(_)
-            | open_rtf_converter::model::Block::Shape(_) => {}
+            open_rtf_converter::model::Block::Shape(shape) => {
+                for paragraph in &shape.text {
+                    append_paragraph_text(&mut text, paragraph);
+                }
+            }
+            open_rtf_converter::model::Block::Image(_) => {}
             open_rtf_converter::model::Block::SectionSettings(settings) => {
                 for paragraph in &settings.header {
                     append_paragraph_text(&mut text, paragraph);

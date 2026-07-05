@@ -375,6 +375,7 @@ pub struct StaticShape {
     pub stroke_color: Color,
     pub stroke_style: BorderStyle,
     pub fill_color: Option<Color>,
+    pub text: Vec<Paragraph>,
     pub points: Vec<StaticShapePoint>,
 }
 

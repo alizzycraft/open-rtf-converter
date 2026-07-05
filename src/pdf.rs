@@ -1759,6 +1759,7 @@ endobj
                 green: 20,
                 blue: 30,
             }),
+            text: Vec::new(),
             points: Vec::new(),
         })];
 
@@ -1835,6 +1836,7 @@ endobj
                 green: 20,
                 blue: 30,
             }),
+            text: Vec::new(),
             points: Vec::new(),
         })];
 

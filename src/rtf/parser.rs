@@ -220,6 +220,7 @@ enum Destination {
     ListText,
     Picture,
     Shape,
+    ShapeText,
     Ignored,
     Metadata,
     ObjectData,
@@ -516,6 +517,8 @@ struct ShapeBuilder {
     stroke_color: Color,
     stroke_style: BorderStyle,
     fill_color: Option<Color>,
+    text: Vec<Paragraph>,
+    current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
     pending_point_x_twips: Option<i32>,
     right_twips: Option<i32>,
@@ -538,6 +541,8 @@ impl Default for ShapeBuilder {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            text: Vec::new(),
+            current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
             pending_point_x_twips: None,
             right_twips: None,
@@ -2228,7 +2233,7 @@ impl Parser {
             "shp" | "do" if destination_allows_visible_content(&self.state) => {
                 let owner_destination = self.state.destination;
                 self.finish_table(offset)?;
-                self.finish_paragraph();
+                self.finish_current_paragraph_for_destination(offset);
                 self.state.inside_shape = true;
                 self.state.shape_result_seen = false;
                 self.state.destination = Destination::Shape;
@@ -2249,13 +2254,8 @@ impl Parser {
             "shptxt" | "shprslt" | "dptxbx"
                 if self.state.inside_shape && destination_allows_visible_content(&self.state) =>
             {
-                self.finish_paragraph();
                 self.state.shape_result_seen = true;
-                self.state.destination = self
-                    .current_shape
-                    .as_ref()
-                    .map(|shape| shape.owner_destination)
-                    .unwrap_or(Destination::Body);
+                self.state.destination = Destination::ShapeText;
                 self.diagnostics.push(Diagnostic::warning(
                     "rendering safe passive shape text/result and stripping shape properties",
                     Some(offset),
@@ -2679,6 +2679,7 @@ impl Parser {
                     | Destination::Footer
                     | Destination::FirstPageFooter
                     | Destination::EvenPageFooter
+                    | Destination::ShapeText
                     | Destination::Footnote
                     | Destination::Endnote
             ) =>
@@ -3599,6 +3600,7 @@ impl Parser {
             | Destination::Footer
             | Destination::FirstPageFooter
             | Destination::EvenPageFooter
+            | Destination::ShapeText
             | Destination::Footnote
             | Destination::Endnote => {
                 if self.state.character.hidden {
@@ -3740,6 +3742,7 @@ impl Parser {
             | Destination::Footer
             | Destination::FirstPageFooter
             | Destination::EvenPageFooter
+            | Destination::ShapeText
             | Destination::Footnote
             | Destination::Endnote => {
                 if self.state.character.hidden {
@@ -4767,6 +4770,12 @@ impl Parser {
             &mut self.current_footnote_paragraph
         } else if self.state.destination == Destination::Endnote {
             &mut self.current_endnote_paragraph
+        } else if self.state.destination == Destination::ShapeText {
+            if let Some(shape) = self.current_shape.as_mut() {
+                &mut shape.current_text_paragraph
+            } else {
+                &mut self.current_paragraph
+            }
         } else if let Some(row) = self.current_table_row.as_mut() {
             row.cell_open = true;
             &mut row.current_cell_paragraph
@@ -6023,6 +6032,10 @@ impl Parser {
     fn finish_paragraph(&mut self) {
         let paragraph_style_index = self.state.paragraph_style_index;
         let mut pending_style_reference_text = None;
+        if self.state.destination == Destination::ShapeText {
+            self.finish_shape_text_paragraph();
+            return;
+        }
         if let Some(row) = self.current_table_row.as_mut() {
             if !row.current_cell_paragraph.runs.is_empty() {
                 let paragraph = std::mem::replace(
@@ -6103,6 +6116,10 @@ impl Parser {
             }
             Destination::Endnote => {
                 self.finish_endnote_paragraph();
+                true
+            }
+            Destination::ShapeText => {
+                self.finish_shape_text_paragraph();
                 true
             }
             Destination::ListText => false,
@@ -6212,6 +6229,23 @@ impl Parser {
             );
             self.document.endnotes.push(paragraph);
         }
+    }
+
+    fn finish_shape_text_paragraph(&mut self) {
+        let Some(shape) = self.current_shape.as_mut() else {
+            return;
+        };
+        if shape.current_text_paragraph.runs.is_empty() {
+            return;
+        }
+        let paragraph = std::mem::replace(
+            &mut shape.current_text_paragraph,
+            Paragraph {
+                style: self.state.paragraph.clone(),
+                runs: Vec::new(),
+            },
+        );
+        shape.text.push(paragraph);
     }
 
     fn push_placeholder(&mut self, text: String) {
@@ -7504,18 +7538,29 @@ impl Parser {
     }
 
     fn finish_shape(&mut self, offset: usize) -> Result<bool, ParseError> {
+        if self
+            .current_shape
+            .as_ref()
+            .is_some_and(|shape| !shape.current_text_paragraph.runs.is_empty())
+        {
+            self.finish_shape_text_paragraph();
+        }
         let Some(shape) = self.current_shape.take() else {
             return Ok(false);
         };
         let Some(mut kind) = shape.kind else {
-            return Ok(false);
+            return self.push_shape_text_fallback(shape.owner_destination, shape.text);
         };
         if kind == StaticShapeKind::Rectangle && shape.rounded_rectangle {
             kind = StaticShapeKind::RoundedRectangle;
         }
         match kind {
-            StaticShapeKind::Polyline if shape.points.len() < 2 => return Ok(false),
-            StaticShapeKind::Polygon if shape.points.len() < 3 => return Ok(false),
+            StaticShapeKind::Polyline if shape.points.len() < 2 => {
+                return self.push_shape_text_fallback(shape.owner_destination, shape.text);
+            }
+            StaticShapeKind::Polygon if shape.points.len() < 3 => {
+                return self.push_shape_text_fallback(shape.owner_destination, shape.text);
+            }
             _ => {}
         }
         let (left_twips, top_twips, width_twips, height_twips, points) =
@@ -7555,7 +7600,7 @@ impl Parser {
                 )
             };
         if width_twips <= 0 || height_twips <= 0 {
-            return Ok(false);
+            return self.push_shape_text_fallback(shape.owner_destination, shape.text);
         }
         if self.shape_count >= self.limits().max_shapes {
             return Err(ParseError::ResourceLimitExceeded {
@@ -7578,6 +7623,7 @@ impl Parser {
                 stroke_color: shape.stroke_color,
                 stroke_style: shape.stroke_style,
                 fill_color: shape.fill_color,
+                text: shape.text,
                 points,
             },
         );
@@ -7585,6 +7631,76 @@ impl Parser {
             "rendering bounded passive static drawing shape and stripping raw drawing properties",
             Some(offset),
         ));
+        Ok(true)
+    }
+
+    fn push_shape_text_fallback(
+        &mut self,
+        destination: Destination,
+        paragraphs: Vec<Paragraph>,
+    ) -> Result<bool, ParseError> {
+        if paragraphs.is_empty() {
+            return Ok(false);
+        }
+        if is_header_destination(destination) {
+            if self.has_started_visible_body() {
+                match destination {
+                    Destination::FirstPageHeader => self
+                        .current_section_page
+                        .first_page_header
+                        .extend(paragraphs),
+                    Destination::EvenPageHeader => self
+                        .current_section_page
+                        .even_page_header
+                        .extend(paragraphs),
+                    _ => self.current_section_page.header.extend(paragraphs),
+                }
+                self.upsert_current_section_settings();
+            } else {
+                match destination {
+                    Destination::FirstPageHeader => {
+                        self.document.first_page_header.extend(paragraphs)
+                    }
+                    Destination::EvenPageHeader => {
+                        self.document.even_page_header.extend(paragraphs)
+                    }
+                    _ => self.document.header.extend(paragraphs),
+                }
+            }
+        } else if is_footer_destination(destination) {
+            if self.has_started_visible_body() {
+                match destination {
+                    Destination::FirstPageFooter => self
+                        .current_section_page
+                        .first_page_footer
+                        .extend(paragraphs),
+                    Destination::EvenPageFooter => self
+                        .current_section_page
+                        .even_page_footer
+                        .extend(paragraphs),
+                    _ => self.current_section_page.footer.extend(paragraphs),
+                }
+                self.upsert_current_section_settings();
+            } else {
+                match destination {
+                    Destination::FirstPageFooter => {
+                        self.document.first_page_footer.extend(paragraphs)
+                    }
+                    Destination::EvenPageFooter => {
+                        self.document.even_page_footer.extend(paragraphs)
+                    }
+                    _ => self.document.footer.extend(paragraphs),
+                }
+            }
+        } else if destination == Destination::Footnote {
+            self.document.footnotes.extend(paragraphs);
+        } else if destination == Destination::Endnote {
+            self.document.endnotes.extend(paragraphs);
+        } else if destination != Destination::Background {
+            self.document
+                .blocks
+                .extend(paragraphs.into_iter().map(Block::Paragraph));
+        }
         Ok(true)
     }
 
@@ -18370,8 +18486,9 @@ After\par}"#;
             })
             .collect::<String>();
 
-        assert_eq!(output.document.header.len(), 1);
-        assert_eq!(output.document.header[0].runs[0].text, "Logo Box text");
+        assert_eq!(output.document.header.len(), 2);
+        assert_eq!(output.document.header[0].runs[0].text, "Logo ");
+        assert_eq!(output.document.header[1].runs[0].text, "Box text");
         assert_eq!(body_text, "Body");
         for forbidden in [
             "pFragments",

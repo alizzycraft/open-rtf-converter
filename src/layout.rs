@@ -822,6 +822,8 @@ impl LayoutEngine {
                         geometry.margin_bottom,
                         &mut geometry,
                         &mut current_column,
+                        document,
+                        document_stats,
                     );
                 }
                 Block::Paragraph(paragraph) => {
@@ -937,7 +939,7 @@ impl LayoutEngine {
             false,
             document_stats,
         );
-        layout_background_shapes(&mut pages, &header_footer_sets);
+        layout_background_shapes(&mut pages, &header_footer_sets, document, document_stats);
         resolve_bookmark_page_ref_markers(&mut pages);
         resolve_section_page_markers(&mut pages);
         resolve_total_page_markers(&mut pages);
@@ -1134,6 +1136,8 @@ fn layout_shape(
     margin_bottom: f32,
     geometry: &mut PageGeometry,
     current_column: &mut usize,
+    document: &Document,
+    document_stats: DocumentStats,
 ) {
     let left = twips_to_points(shape.left_twips.max(0));
     let top = twips_to_points(shape.top_twips.max(0));
@@ -1325,7 +1329,70 @@ fn layout_shape(
             }
         }
     }
+    layout_shape_text(
+        pages,
+        shape,
+        x,
+        top_y,
+        bottom_y,
+        width,
+        document,
+        document_stats,
+    );
     *cursor_y -= block_height + 6.0;
+}
+
+fn layout_shape_text(
+    pages: &mut Vec<LayoutPage>,
+    shape: &StaticShape,
+    x: f32,
+    top_y: f32,
+    bottom_y: f32,
+    width: f32,
+    document: &Document,
+    document_stats: DocumentStats,
+) {
+    if shape.text.is_empty() {
+        return;
+    }
+    let padding = 4.0;
+    let content_width = (width - padding * 2.0).max(1.0);
+    let mut cursor_y = top_y - padding;
+    let min_y = bottom_y + padding;
+    let markers = current_marker_context(pages, document_stats);
+
+    for paragraph in &shape.text {
+        cursor_y -= twips_to_points(effective_space_before_twips(&paragraph.style));
+        let mut lines = wrap_paragraph(paragraph, content_width, &markers, document);
+        for line in &mut lines {
+            line.height = apply_line_spacing(line.height, &paragraph.style);
+        }
+        let line_count = lines.len();
+        for (line_idx, line) in lines.iter().enumerate() {
+            if cursor_y - line.height < min_y {
+                return;
+            }
+            let text_x = aligned_x(
+                x + padding,
+                content_width,
+                line.width,
+                &paragraph.style,
+                line_idx == 0,
+            );
+            let word_spacing = justified_word_spacing(
+                line,
+                &paragraph.style,
+                paragraph_line_width(content_width, &paragraph.style, line_idx == 0),
+                line_idx + 1 == line_count,
+            );
+            push_line(pages, line, text_x, cursor_y, document, word_spacing);
+            cursor_y -= line.height;
+        }
+        cursor_y -= twips_to_points(effective_space_after_twips(&paragraph.style));
+        if cursor_y < min_y {
+            return;
+        }
+    }
 }
 
 fn start_new_page(
@@ -1714,7 +1781,12 @@ fn layout_page_borders(pages: &mut [LayoutPage], document: &Document) {
     }
 }
 
-fn layout_background_shapes(pages: &mut [LayoutPage], header_footer_sets: &[HeaderFooterSet]) {
+fn layout_background_shapes(
+    pages: &mut [LayoutPage],
+    header_footer_sets: &[HeaderFooterSet],
+    document: &Document,
+    document_stats: DocumentStats,
+) {
     for (page_idx, page) in pages.iter_mut().enumerate() {
         let shapes = background_shapes_for_page(header_footer_sets, page.geometry);
         if shapes.is_empty() {
@@ -1744,6 +1816,8 @@ fn layout_background_shapes(pages: &mut [LayoutPage], header_footer_sets: &[Head
                 -1_000_000.0,
                 &mut background_geometry,
                 &mut background_column,
+                document,
+                document_stats,
             );
         }
 
@@ -1910,6 +1984,8 @@ fn layout_repeating_header_footer(
                 -1_000_000.0,
                 &mut shape_geometry,
                 &mut shape_column,
+                document,
+                document_stats,
             );
         }
 
@@ -3486,8 +3562,13 @@ fn push_block_stats(builder: &mut DocumentStatsBuilder, block: &Block) {
                 push_paragraph_stats(builder, paragraph);
             }
         }
+        Block::Shape(shape) => {
+            for paragraph in &shape.text {
+                push_paragraph_stats(builder, paragraph);
+            }
+            builder.finish_text_boundary();
+        }
         Block::Image(_)
-        | Block::Shape(_)
         | Block::PageBreak
         | Block::ColumnBreak
         | Block::ContinuousSectionBreak
@@ -5526,6 +5607,7 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            text: Vec::new(),
             points: Vec::new(),
         })];
 
@@ -5580,6 +5662,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text: Vec::new(),
             points: Vec::new(),
         })];
 
@@ -5612,6 +5695,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dashed,
             fill_color: None,
+            text: Vec::new(),
             points: Vec::new(),
         })];
 
@@ -5642,6 +5726,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
             fill_color: None,
+            text: Vec::new(),
             points: vec![
                 StaticShapePoint {
                     x_twips: 0,
@@ -5707,6 +5792,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text: Vec::new(),
             points: vec![
                 StaticShapePoint {
                     x_twips: 0,
@@ -5768,6 +5854,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text: Vec::new(),
             points: Vec::new(),
         })];
 
@@ -5816,6 +5903,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text: Vec::new(),
             points: Vec::new(),
         })];
 
@@ -5882,6 +5970,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text: Vec::new(),
             points: Vec::new(),
         })];
 
@@ -10748,6 +10837,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text: Vec::new(),
             points: Vec::new(),
         }];
         document.blocks.clear();
