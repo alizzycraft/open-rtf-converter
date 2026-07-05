@@ -10029,6 +10029,66 @@ fn wingdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
 }
 
 #[test]
+fn associated_font_checkbox_glyphs_render_passively_without_font_payload_leakage() {
+    let input =
+        br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\loch\af1 \'a3 \'fe \'fc \'fb\par}"#
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("\u{2610} \u{2611} \u{2713} \u{2717}"));
+    for forbidden in ["fonttbl", "Wingdings", "loch", "af1"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden associated font metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
+    assert!(
+        zapf_bytes
+            .windows(b"q q 3 7".len())
+            .any(|window| window == b"q q 3 7"),
+        "associated font checkbox glyphs should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/BaseFont /ZapfDingbats".len())
+            .any(|window| window == b"/BaseFont /ZapfDingbats")
+    );
+    for forbidden in [
+        b"Wingdings".as_slice(),
+        b"fonttbl",
+        b"loch",
+        b"af1",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden associated font content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wingdings2_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings 2;}}\f1 O P Q R S T\par {\field{\*\fldinst SYMBOL 82 \\f "Wingdings 2"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

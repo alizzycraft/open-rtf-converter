@@ -3146,7 +3146,7 @@ impl Parser {
             "ilvl" => {
                 self.state.list_level_index = control.parameter.unwrap_or(0).clamp(0, 8) as usize;
             }
-            "f" => self.state.character.font_index = control.parameter.unwrap_or(0),
+            "f" | "af" => self.state.character.font_index = control.parameter.unwrap_or(0),
             "cf" => {
                 self.state.character.color_index = control.parameter.unwrap_or(0).max(0) as usize
             }
