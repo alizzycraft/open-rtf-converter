@@ -10078,6 +10078,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "LISTNUM" => Some("LISTNUM"),
         "MACROBUTTON" => Some("MACROBUTTON"),
         "MERGEFIELD" => Some("MERGEFIELD"),
+        "MERGEBARCODE" => Some("MERGEBARCODE"),
         "MERGEREC" => Some("MERGEREC"),
         "MERGESEQ" => Some("MERGESEQ"),
         "NEXT" => Some("NEXT"),
@@ -10326,7 +10327,15 @@ fn is_active_control_resultless_field(name: &str) -> bool {
 fn is_generated_resultless_field(name: &str) -> bool {
     matches!(
         name,
-        "BARCODE" | "BIBLIOGRAPHY" | "CITATION" | "DISPLAYBARCODE" | "EQ" | "INDEX" | "TOA" | "TOC"
+        "BARCODE"
+            | "BIBLIOGRAPHY"
+            | "CITATION"
+            | "DISPLAYBARCODE"
+            | "EQ"
+            | "INDEX"
+            | "MERGEBARCODE"
+            | "TOA"
+            | "TOC"
     )
 }
 
@@ -15316,7 +15325,7 @@ After\par}"#;
 
     #[test]
     fn resultless_template_barcode_equation_and_embed_fields_do_not_execute_or_leak() {
-        let input = r#"{\rtf1 Before {\field{\*\fldinst AUTOTEXT HiddenBlock}} list {\field{\*\fldinst AUTOTEXTLIST "Hidden menu" \s HiddenStyle}} barcode {\field{\*\fldinst BARCODE "Hidden address" QR \h 720}} display {\field{\*\fldinst DISPLAYBARCODE "Hidden code" QR}} eq {\field{\*\fldinst EQ \f(1,2)}} embed {\field{\*\fldinst EMBED Word.Document.8}} go {\field{\*\fldinst GOTOBUTTON HiddenBookmark "Visible jump"}} After\par}"#;
+        let input = r#"{\rtf1 Before {\field{\*\fldinst AUTOTEXT HiddenBlock}} list {\field{\*\fldinst AUTOTEXTLIST "Hidden menu" \s HiddenStyle}} barcode {\field{\*\fldinst BARCODE "Hidden address" QR \h 720}} display {\field{\*\fldinst DISPLAYBARCODE "Hidden code" QR}} mergebarcode {\field{\*\fldinst MERGEBARCODE "Hidden merge value" QR \h 720}} eq {\field{\*\fldinst EQ \f(1,2)}} embed {\field{\*\fldinst EMBED Word.Document.8}} go {\field{\*\fldinst GOTOBUTTON HiddenBookmark "Visible jump"}} After\par}"#;
         let output = parse_rtf(input).unwrap();
         let text = document_text(&output.document);
 
@@ -15324,19 +15333,21 @@ After\par}"#;
         assert!(text.contains("list"));
         assert!(text.contains("barcode"));
         assert!(text.contains("display"));
+        assert!(text.contains("mergebarcode"));
         assert!(text.contains("eq"));
         assert!(text.contains("embed"));
         assert!(text.contains("go Visible jump"));
         assert!(text.contains("After"));
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
-            6
+            7
         );
         for forbidden in [
             "AUTOTEXT",
             "AUTOTEXTLIST",
             "BARCODE",
             "DISPLAYBARCODE",
+            "MERGEBARCODE",
             "EMBED",
             "EQ",
             "GOTOBUTTON",
@@ -15345,6 +15356,7 @@ After\par}"#;
             "HiddenStyle",
             "Hidden address",
             "Hidden code",
+            "Hidden merge value",
             "HiddenBookmark",
             "Word.Document.8",
             "fldinst",
@@ -15364,7 +15376,7 @@ After\par}"#;
                 "missing diagnostic for {name}"
             );
         }
-        for name in ["BARCODE", "DISPLAYBARCODE", "EQ"] {
+        for name in ["BARCODE", "DISPLAYBARCODE", "MERGEBARCODE", "EQ"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
                     diagnostic

@@ -6876,6 +6876,7 @@ fn resultless_template_barcode_equation_embed_and_gotobutton_fields_stay_passive
 list {\field{\*\fldinst AUTOTEXTLIST "Hidden menu" \s HiddenStyle}}
 barcode {\field{\*\fldinst BARCODE "Hidden address" QR \h 720}}
 display {\field{\*\fldinst DISPLAYBARCODE "Hidden code" QR}}
+mergebarcode {\field{\*\fldinst MERGEBARCODE "Hidden merge value" QR \h 720}}
 eq {\field{\*\fldinst EQ \f(1,2)}}
 embed {\field{\*\fldinst EMBED Word.Document.8}}
 go {\field{\*\fldinst GOTOBUTTON HiddenBookmark "Visible jump"}}
@@ -6889,13 +6890,14 @@ visible after\par}"#
     assert!(text.contains("go Visible jump"));
     assert_eq!(
         text.matches("[Field removed: no passive result]").count(),
-        6
+        7
     );
     for forbidden in [
         "AUTOTEXT",
         "AUTOTEXTLIST",
         "BARCODE",
         "DISPLAYBARCODE",
+        "MERGEBARCODE",
         "EMBED",
         "EQ",
         "GOTOBUTTON",
@@ -6904,6 +6906,7 @@ visible after\par}"#
         "HiddenStyle",
         "Hidden address",
         "Hidden code",
+        "Hidden merge value",
         "HiddenBookmark",
         "Word.Document.8",
         "fldinst",
@@ -6936,6 +6939,7 @@ visible after\par}"#
         b"AUTOTEXTLIST",
         b"BARCODE",
         b"DISPLAYBARCODE",
+        b"MERGEBARCODE",
         b"EMBED",
         b"EQ",
         b"GOTOBUTTON",
@@ -6944,6 +6948,7 @@ visible after\par}"#
         b"HiddenStyle",
         b"Hidden address",
         b"Hidden code",
+        b"Hidden merge value",
         b"HiddenBookmark",
         b"Word.Document.8",
         b"fldinst",

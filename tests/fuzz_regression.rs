@@ -644,6 +644,12 @@ fn seed_corpus() -> Vec<Vec<u8>> {
             "\\",
             "*",
             "\\",
+            "fldinst MERGEBARCODE \"Hidden merge value\" QR}} {",
+            "\\",
+            "field{",
+            "\\",
+            "*",
+            "\\",
             "fldinst GOTOBUTTON HiddenBookmark \"Visible jump\"}}}",
         ]),
         rtf(&[
