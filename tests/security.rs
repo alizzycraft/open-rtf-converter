@@ -5863,6 +5863,68 @@ fn unicode_checkbox_glyphs_use_passive_checkbox_font_without_embedding_source_fo
 }
 
 #[test]
+fn segoe_ui_symbol_latin_text_stays_readable_while_checkboxes_use_passive_font() {
+    let input =
+        br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Segoe UI Symbol;}}\f1 Label \u9745?\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Label"));
+    assert!(text.contains("\u{2611}"));
+    for forbidden in ["fonttbl", "Segoe UI Symbol", "u9745"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden Segoe UI Symbol metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
+
+    assert!(
+        String::from_utf8_lossy(&helvetica_bytes).contains("Label "),
+        "Segoe UI Symbol Latin text should use passive Helvetica bytes, got {helvetica_bytes:?}"
+    );
+    assert!(
+        zapf_bytes.contains(&b'q'),
+        "Segoe UI Symbol checkbox should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
+    );
+    assert!(
+        symbol_bytes.is_empty(),
+        "Segoe UI Symbol Latin text should not be emitted through PDF Symbol, got {symbol_bytes:?}"
+    );
+    for forbidden in [
+        b"Segoe UI Symbol".as_slice(),
+        b"fonttbl",
+        b"u9745",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Segoe UI Symbol content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unicode_symbol_spans_use_passive_symbol_font_without_source_font_payload() {
     let input = rtf(&[
         "{",

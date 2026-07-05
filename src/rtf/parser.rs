@@ -3598,7 +3598,7 @@ impl Parser {
             .iter()
             .find(|font| font.index == self.state.character.font_index)?;
         let font_name = font.name.to_ascii_lowercase();
-        let mapped = if font.charset == Some(2) || font_name.contains("symbol") {
+        let mapped = if font.charset == Some(2) || is_legacy_symbol_font_name(&font_name) {
             text.chars().map(map_symbol_char).collect::<String>()
         } else if is_wingdings_like_font_name(&font_name) {
             text.chars().map(map_wingdings_char).collect::<String>()
@@ -7806,6 +7806,13 @@ fn is_external_resultless_field(name: &str) -> bool {
 fn is_builtin_passive_result_font(font_name: &str) -> bool {
     font_name.eq_ignore_ascii_case("ZapfDingbats")
         || font_name.eq_ignore_ascii_case("Zapf Dingbats")
+}
+
+fn is_legacy_symbol_font_name(name: &str) -> bool {
+    matches!(
+        name.trim(),
+        "symbol" | "symbol mt" | "symbolmt" | "standard symbols l"
+    )
 }
 
 fn passive_form_text_field_result(form_default_text: &str) -> Option<PassiveFieldResult> {

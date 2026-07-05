@@ -4748,7 +4748,7 @@ fn font_family_from_name(name: &str) -> Option<PdfFontFamily> {
         &["zapfdingbats", "zapf dingbats", "wingdings", "webdings"],
     ) {
         Some(PdfFontFamily::ZapfDingbats)
-    } else if name.contains("symbol") {
+    } else if is_pdf_symbol_font_name(&name) {
         Some(PdfFontFamily::Symbol)
     } else if font_name_contains_any(
         &name,
@@ -4787,6 +4787,13 @@ fn font_family_from_name(name: &str) -> Option<PdfFontFamily> {
 
 fn font_name_contains_any(name: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| name.contains(needle))
+}
+
+fn is_pdf_symbol_font_name(name: &str) -> bool {
+    matches!(
+        name.trim(),
+        "symbol" | "symbol mt" | "symbolmt" | "standard symbols l"
+    )
 }
 
 fn style_color(document: &Document, style: &CharacterStyle) -> PdfColor {
@@ -9468,6 +9475,55 @@ mod tests {
         assert!(layout.pages[0].items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::ZapfDingbats)
         ));
+    }
+
+    #[test]
+    fn resolves_segoe_ui_symbol_latin_text_to_passive_sans_fallback() {
+        let mut document = Document::default();
+        document.fonts = vec![
+            FontDef {
+                index: 0,
+                name: "Helvetica".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Default,
+            },
+            FontDef {
+                index: 1,
+                name: "Segoe UI Symbol".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Nil,
+                pitch: FontPitch::Default,
+            },
+        ];
+        let mut style = CharacterStyle::default();
+        style.font_index = 1;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Label \u{2611}".to_string(),
+                style,
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert!(layout.pages[0].items.iter().any(
+            |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "Label " && fragment.font_family == PdfFontFamily::Helvetica)
+        ));
+        assert!(layout.pages[0].items.iter().any(
+            |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "\u{2611}" && fragment.font_family == PdfFontFamily::ZapfDingbats)
+        ));
+        assert!(
+            !layout.pages[0]
+                .items
+                .iter()
+                .any(|item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::Symbol))
+        );
     }
 
     #[test]
