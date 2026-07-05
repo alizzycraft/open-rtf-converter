@@ -105,6 +105,10 @@ struct ParserState {
     metadata_timestamp_value: DocumentTimestamp,
     user_property_capture: Option<UserPropertyCapture>,
     user_property_capture_text: String,
+    inside_document_variables: bool,
+    document_variable_capture: Option<DocumentVariableCapture>,
+    document_variable_capture_text: String,
+    document_variable_child_index: usize,
     at_group_start: bool,
 }
 
@@ -166,6 +170,10 @@ impl Default for ParserState {
             metadata_timestamp_value: DocumentTimestamp::default(),
             user_property_capture: None,
             user_property_capture_text: String::new(),
+            inside_document_variables: false,
+            document_variable_capture: None,
+            document_variable_capture_text: String::new(),
+            document_variable_child_index: 0,
             at_group_start: false,
         }
     }
@@ -675,6 +683,12 @@ enum UserPropertyCapture {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum DocumentVariableCapture {
+    Name,
+    Value,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum DocumentTimestampKind {
     Created,
     Saved,
@@ -735,6 +749,8 @@ struct Parser {
     document_properties: Vec<(DocumentProperty, String)>,
     custom_document_properties: Vec<(String, String)>,
     pending_custom_property_name: Option<String>,
+    document_variables: Vec<(String, String)>,
+    pending_document_variable_name: Option<String>,
     document_timestamps: Vec<(DocumentTimestampKind, DocumentTimestamp)>,
     document_edit_minutes: Option<i32>,
     document_revision_number: Option<i32>,
@@ -841,6 +857,8 @@ impl Parser {
             document_properties: Vec::new(),
             custom_document_properties: Vec::new(),
             pending_custom_property_name: None,
+            document_variables: Vec::new(),
+            pending_document_variable_name: None,
             document_timestamps: Vec::new(),
             document_edit_minutes: None,
             document_revision_number: None,
@@ -971,6 +989,20 @@ impl Parser {
             child.user_property_capture_text.clear();
             child.inside_user_properties = false;
         }
+        if parent.document_variable_capture.is_some() {
+            child.document_variable_capture = None;
+            child.document_variable_capture_text.clear();
+            child.inside_document_variables = false;
+        } else if parent.inside_document_variables && parent.destination == Destination::Metadata {
+            parent.document_variable_child_index += 1;
+            child.document_variable_child_index = 0;
+            child.document_variable_capture = match parent.document_variable_child_index {
+                1 => Some(DocumentVariableCapture::Name),
+                2 => Some(DocumentVariableCapture::Value),
+                _ => None,
+            };
+            child.document_variable_capture_text.clear();
+        }
         if parent.unicode_alternate_branch == UnicodeAlternateBranch::Container {
             parent.unicode_alternate_child_count += 1;
             child.unicode_alternate_child_count = 0;
@@ -1040,6 +1072,24 @@ impl Parser {
                         if let Some(name) = name {
                             self.store_custom_document_property(&name, &text, offset)?;
                             self.pending_custom_property_name = None;
+                        }
+                    }
+                }
+            }
+            if let Some(capture) = self.state.document_variable_capture
+                && previous.document_variable_capture.is_none()
+            {
+                let text = self.state.document_variable_capture_text.clone();
+                match capture {
+                    DocumentVariableCapture::Name => {
+                        self.pending_document_variable_name =
+                            clean_document_property_text(&text, offset, self.limits())?;
+                    }
+                    DocumentVariableCapture::Value => {
+                        let name = self.pending_document_variable_name.clone();
+                        if let Some(name) = name {
+                            self.store_document_variable(&name, &text, offset)?;
+                            self.pending_document_variable_name = None;
                         }
                     }
                 }
@@ -1418,6 +1468,13 @@ impl Parser {
                 self.state.inside_metadata = true;
                 self.state.inside_user_properties = true;
                 self.pending_custom_property_name = None;
+            }
+            "docvar" if self.destination_allows_ignorable_metadata() => {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+                self.state.inside_document_variables = true;
+                self.state.document_variable_child_index = 0;
+                self.pending_document_variable_name = None;
             }
             name if control_starts_group
                 && self.state.inside_document_info
@@ -2265,6 +2322,9 @@ impl Parser {
             }
             "u" if self.state.user_property_capture.is_some() => {
                 self.push_user_property_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if self.state.document_variable_capture.is_some() => {
+                self.push_document_variable_unicode(control.parameter.unwrap_or(0), offset)?
             }
             "u" if self.state.metadata_property.is_some() => {
                 self.push_document_property_unicode(control.parameter.unwrap_or(0), offset)?
@@ -3115,6 +3175,9 @@ impl Parser {
         }
         if self.state.user_property_capture.is_some() {
             return self.push_user_property_text(text, offset);
+        }
+        if self.state.document_variable_capture.is_some() {
+            return self.push_document_variable_text(text, offset);
         }
         if self.state.metadata_property.is_some() {
             return self.push_document_property_text(text, offset);
@@ -4687,6 +4750,79 @@ impl Parser {
         Ok(())
     }
 
+    fn push_document_variable_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes(text.len(), offset)?;
+        if contains_internal_marker(text) {
+            return Ok(());
+        }
+
+        let safe_text = text
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .collect::<String>();
+        let new_len = self
+            .state
+            .document_variable_capture_text
+            .chars()
+            .count()
+            .checked_add(safe_text.chars().count())
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
+        if new_len > self.limits().max_text_run_len {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "document variable text".to_string(),
+                offset,
+            });
+        }
+        self.state
+            .document_variable_capture_text
+            .push_str(&safe_text);
+        Ok(())
+    }
+
+    fn push_document_variable_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_document_variable_text(&ch.to_string(), offset)?;
+        } else {
+            self.count_skipped_destination_bytes(1, offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn store_document_variable(
+        &mut self,
+        name: &str,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let Some(text) = clean_document_property_text(text, offset, self.limits())? else {
+            return Ok(());
+        };
+
+        if let Some((_, existing)) = self
+            .document_variables
+            .iter_mut()
+            .find(|(stored_name, _)| stored_name.eq_ignore_ascii_case(name))
+        {
+            *existing = text;
+        } else {
+            if self.document_variables.len() >= self.limits().max_styles {
+                return Err(ParseError::ResourceLimitExceeded {
+                    resource: "document variables".to_string(),
+                    offset,
+                });
+            }
+            self.document_variables.push((name.to_string(), text));
+        }
+        Ok(())
+    }
+
     fn store_custom_document_property(
         &mut self,
         name: &str,
@@ -4758,6 +4894,8 @@ impl Parser {
             self.passive_page_ref_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("DOCPROPERTY") {
             self.passive_doc_property_field_result(instruction)
+        } else if field_instruction_name(instruction) == Some("DOCVARIABLE") {
+            self.passive_doc_variable_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("INFO") {
             self.passive_info_field_result(instruction)
         } else if let Some(property) =
@@ -4796,6 +4934,21 @@ impl Parser {
                     stored_name.eq_ignore_ascii_case(&name).then(|| text)
                 })?
         };
+        Some(PassiveFieldResult {
+            text: text.clone(),
+            font_name: None,
+            form_field: false,
+        })
+    }
+
+    fn passive_doc_variable_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
+        let name = field_first_argument(instruction)?;
+        let text = self
+            .document_variables
+            .iter()
+            .find_map(|(stored_name, text)| {
+                stored_name.eq_ignore_ascii_case(&name).then(|| text)
+            })?;
         Some(PassiveFieldResult {
             text: text.clone(),
             font_name: None,
@@ -8921,6 +9074,7 @@ fn is_metadata_destination(name: &str) -> bool {
             | "aftnsepc"
             | "aftncn"
             | "userprops"
+            | "docvar"
             | "revtbl"
             | "rsidtbl"
             | "xmlnstbl"
@@ -9402,6 +9556,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "CREATEDATE" => Some("CREATEDATE"),
         "DATE" => Some("DATE"),
         "DOCPROPERTY" => Some("DOCPROPERTY"),
+        "DOCVARIABLE" => Some("DOCVARIABLE"),
         "EDITTIME" => Some("EDITTIME"),
         "FORMDROPDOWN" => Some("FORMDROPDOWN"),
         "FORMTEXT" => Some("FORMTEXT"),
@@ -15403,6 +15558,56 @@ After\par}"#;
                 "custom document property leaked unsafe text: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn resultless_docvariable_fields_render_safe_metadata_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\*\docvar {Client Name}{Contoso \u937? {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}}Client: {\field{\*\fldinst DOCVARIABLE "Client Name" \\* Upper}} missing {\field{\*\fldinst DOCVARIABLE Missing}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Client: CONTOSO \u{3a9}  TAIL"));
+        assert_eq!(
+            text.matches("[Field removed: no passive result]").count(),
+            1
+        );
+        for forbidden in [
+            "DOCVARIABLE",
+            "docvar",
+            "fldinst",
+            "HYPERLINK",
+            "https://example.com",
+            "Hidden link",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "document variable leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn document_variable_metadata_obeys_count_bounds() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let result =
+            parse_rtf_bytes_with_options(br"{\rtf1{\*\docvar {Key}{Value}}\par}", &options);
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ResourceLimitExceeded { ref resource, .. })
+                    if resource == "document variables"
+            ),
+            "unexpected result: {result:?}"
+        );
     }
 
     #[test]

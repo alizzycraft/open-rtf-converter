@@ -4109,6 +4109,43 @@ fn docproperty_fields_render_custom_properties_without_leaking_linked_or_active_
 }
 
 #[test]
+fn docvariable_fields_render_metadata_without_leaking_nested_active_content() {
+    let input = br#"{\rtf1{\*\docvar {Client Name}{Contoso {\field{\*\fldinst HYPERLINK "https://example.com/docvar"}{\fldrslt Hidden link}} tail}}Client {\field{\*\fldinst DOCVARIABLE "Client Name"}} missing {\field{\*\fldinst DOCVARIABLE Missing}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Client Contoso"));
+    assert!(rendered_text.contains("tail"));
+    assert!(rendered_text.contains("missing [Field removed: no passive result]"));
+    for forbidden in [
+        b"DOCVARIABLE".as_slice(),
+        b"docvar",
+        b"Client Name",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Hidden link",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "document variable field leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn date_fields_use_stored_results_and_never_update_or_leak_instructions() {
     let stored = parse_rtf_bytes(&rtf(&[
         "{",
