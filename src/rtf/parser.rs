@@ -4696,6 +4696,8 @@ impl Parser {
             self.passive_page_ref_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("DOCPROPERTY") {
             self.passive_doc_property_field_result(instruction)
+        } else if field_instruction_name(instruction) == Some("INFO") {
+            self.passive_info_field_result(instruction)
         } else if let Some(property) =
             field_instruction_name(instruction).and_then(document_shortcut_property_field_name)
         {
@@ -4730,6 +4732,16 @@ impl Parser {
         };
         Some(PassiveFieldResult {
             text: text.clone(),
+            font_name: None,
+            form_field: false,
+        })
+    }
+
+    fn passive_info_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
+        let name = field_first_argument(instruction)?;
+        let property = document_property_field_name(&name)?;
+        Some(PassiveFieldResult {
+            text: self.document_property_text(property)?.clone(),
             font_name: None,
             form_field: false,
         })
@@ -9318,6 +9330,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "IMPORT" => Some("IMPORT"),
         "INCLUDEPICTURE" => Some("INCLUDEPICTURE"),
         "INCLUDETEXT" => Some("INCLUDETEXT"),
+        "INFO" => Some("INFO"),
         "KEYWORDS" => Some("KEYWORDS"),
         "LASTSAVEDBY" => Some("LASTSAVEDBY"),
         "LINK" => Some("LINK"),
@@ -15180,6 +15193,27 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "shortcut document property field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_info_fields_render_safe_metadata_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\title Info Title}{\author Alice}{\doccomm Comment text}}Doc {\field{\*\fldinst INFO Title}} by {\field{\*\fldinst INFO Author \\* Upper}} note {\field{\*\fldinst INFO Comments}} file {\field{\*\fldinst INFO Filename}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Doc Info Title by ALICE note Comment text file"));
+        assert_eq!(
+            text.matches("[Field removed: no passive result]").count(),
+            1
+        );
+        for forbidden in ["fldinst", "Filename"] {
+            assert!(
+                !text.contains(forbidden),
+                "INFO field leaked unsafe text: {forbidden}"
             );
         }
     }

@@ -4036,6 +4036,43 @@ fn shortcut_document_property_fields_render_metadata_without_instruction_leakage
 }
 
 #[test]
+fn info_fields_render_metadata_without_instruction_or_active_payload_leakage() {
+    let input = br#"{\rtf1{\info{\title Safe title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\author Alice}{\doccomm Comment text}}Doc {\field{\*\fldinst INFO Title}} / {\field{\*\fldinst INFO Author \\* Upper}} / {\field{\*\fldinst INFO Comments}} / {\field{\*\fldinst INFO Filename}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Doc Safe title"));
+    assert!(rendered_text.contains("tail / ALICE / Comment text"));
+    assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for forbidden in [
+        b"INFO".as_slice(),
+        b"Filename",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Hidden link",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "INFO field leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn docproperty_fields_render_custom_properties_without_leaking_linked_or_active_content() {
     let input = br#"{\rtf1{\*\userprops{\propname Client Name}{\proptype30}{\staticval Contoso {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\linkval Hidden linked value}}Client {\field{\*\fldinst DOCPROPERTY "Client Name"}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
