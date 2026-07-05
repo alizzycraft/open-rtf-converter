@@ -3,10 +3,10 @@ use std::fs;
 use lopdf::Document as PdfDocument;
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER,
-    EndnotePlacement, FontFamilyHint, FontPitch, PAGE_NUMBER_MARKER, PageVerticalAlignment,
-    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, TOTAL_PAGES_MARKER, TabAlignment,
-    TextRelief, UnderlineStyle,
+    Block, BorderStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
+    DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint, FontPitch, PAGE_NUMBER_MARKER,
+    PageVerticalAlignment, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern,
+    TOTAL_PAGES_MARKER, TabAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
@@ -2527,6 +2527,67 @@ fn list_level_marker_script_and_spacing_render_passively_without_control_leakage
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden list-level marker script/spacing control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn list_level_marker_character_border_renders_passively_without_control_leakage() {
+    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\chbrdr\brdrdash\brdrw80\brdrcf1\brsp120{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Bordered marker\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+
+    assert_eq!(paragraph.runs[0].text, "1.\t");
+    assert!(paragraph.runs[0].style.border.visible);
+    assert_eq!(paragraph.runs[0].style.border.style, BorderStyle::Dashed);
+    assert_eq!(paragraph.runs[0].style.border.width_twips, 80);
+    assert_eq!(paragraph.runs[0].style.border.color_index, Some(1));
+    assert_eq!(paragraph.runs[0].style.border.spacing_twips, 120);
+    assert_eq!(paragraph.runs[1].text, "Bordered marker");
+    assert!(!paragraph.runs[1].style.border.visible);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("1.Bordered marker"),
+        "decoded PDF text did not contain bordered marker text: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"chbrdr".as_slice(),
+        b"brdrdash",
+        b"brdrw",
+        b"brdrcf",
+        b"brsp",
+        b"levelnfc",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level marker border control leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

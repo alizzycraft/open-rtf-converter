@@ -1553,6 +1553,76 @@ impl Parser {
                     offset,
                 );
             }
+            "chbrdr"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel => {}
+            "brdrnone" | "brdrnil"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_visible(false);
+            }
+            "brdrs"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_style(BorderStyle::Single);
+            }
+            "brdrth"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_style(BorderStyle::Thick);
+            }
+            "brdrhair"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_style(BorderStyle::Hairline);
+            }
+            "brdrdb"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_style(BorderStyle::Double);
+            }
+            "brdrdot"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_style(BorderStyle::Dotted);
+            }
+            "brdrdash" | "brdrdashsm" | "brdrdashd" | "brdrdashdd" | "brdrdashdot"
+            | "brdrdashdotstr" | "brdrdashdotdot"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_style(BorderStyle::Dashed);
+            }
+            "brdrwavy" | "brdrwavydb"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_style(BorderStyle::Wavy);
+            }
+            "brdrw"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_width(control.parameter, offset);
+            }
+            "brsp"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_spacing(control.parameter, offset);
+            }
+            "brdrcf"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_border_color(control.parameter);
+            }
             "listid" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_id(control.parameter.unwrap_or(0));
             }
@@ -5151,6 +5221,14 @@ impl Parser {
         match self.state.paragraph_border_selection {
             BorderSelection::None => false,
             BorderSelection::Character => {
+                if self.current_list_level.is_some()
+                    && self.state.list_context == ListContext::ListLevel
+                {
+                    self.update_current_list_level_character_style(|style| {
+                        update(&mut style.border);
+                    });
+                    return true;
+                }
                 update(&mut self.state.character.border);
                 true
             }
@@ -5232,6 +5310,14 @@ impl Parser {
     fn update_current_paragraph_or_character_border_spacing(&mut self, value: i32) -> bool {
         match self.state.paragraph_border_selection {
             BorderSelection::Character => {
+                if self.current_list_level.is_some()
+                    && self.state.list_context == ListContext::ListLevel
+                {
+                    self.update_current_list_level_character_style(|style| {
+                        style.border.spacing_twips = value;
+                    });
+                    return true;
+                }
                 self.state.character.border.spacing_twips = value;
                 true
             }
@@ -7263,6 +7349,62 @@ impl Parser {
         let basis_points = self.clamp_character_shading(basis_points, offset);
         self.update_current_list_level_character_style(|style| {
             style.highlight_shading_basis_points = basis_points
+        });
+    }
+
+    fn set_current_list_level_border_visible(&mut self, visible: bool) {
+        self.update_current_list_level_character_style(|style| {
+            style.border.visible = visible;
+        });
+    }
+
+    fn set_current_list_level_border_style(&mut self, border_style: BorderStyle) {
+        self.update_current_list_level_character_style(|style| {
+            style.border.visible = true;
+            style.border.style = border_style;
+        });
+    }
+
+    fn set_current_list_level_border_width(&mut self, value: Option<i32>, offset: usize) {
+        let value = value
+            .unwrap_or(TableCellBorder::default().width_twips)
+            .max(0);
+        let clamped = value.min(self.limits().max_table_border_width_twips);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("table border width clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        self.update_current_list_level_character_style(|style| {
+            style.border.width_twips = clamped;
+        });
+    }
+
+    fn set_current_list_level_border_spacing(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0).max(0);
+        let max = self.limits().max_page_border_spacing_twips.max(0);
+        let clamped = value.min(max);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("border spacing clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        self.update_current_list_level_character_style(|style| {
+            style.border.spacing_twips = clamped;
+        });
+    }
+
+    fn set_current_list_level_border_color(&mut self, value: Option<i32>) {
+        let color_index = value.unwrap_or(0).max(0) as usize;
+        let color_index = if color_index == 0 {
+            None
+        } else {
+            Some(color_index)
+        };
+        self.update_current_list_level_character_style(|style| {
+            style.border.color_index = color_index;
         });
     }
 
@@ -12935,6 +13077,33 @@ After\par}"#;
             marker_style(6, "Scaled marker").character_scaling_percent,
             150
         );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn applies_list_level_marker_character_border_to_marker_run_only() {
+        let output = parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\chbrdr\brdrdash\brdrw80\brdrcf1\brsp120{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Bordered marker\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert!(paragraph.runs[0].style.border.visible);
+        assert_eq!(paragraph.runs[0].style.border.style, BorderStyle::Dashed);
+        assert_eq!(paragraph.runs[0].style.border.width_twips, 80);
+        assert_eq!(paragraph.runs[0].style.border.color_index, Some(1));
+        assert_eq!(paragraph.runs[0].style.border.spacing_twips, 120);
+        assert_eq!(paragraph.runs[1].text, "Bordered marker");
+        assert!(!paragraph.runs[1].style.border.visible);
         assert!(
             output
                 .diagnostics
