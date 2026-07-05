@@ -3410,6 +3410,10 @@ impl Parser {
             "aftnnrlc" => self.document.endnote_number_format = PageNumberFormat::LowerRoman,
             "aftnnauc" => self.document.endnote_number_format = PageNumberFormat::UpperLetter,
             "aftnnalc" => self.document.endnote_number_format = PageNumberFormat::LowerLetter,
+            name if let Some(message) = word_layout_compatibility_control_message(name) => {
+                self.diagnostics
+                    .push(Diagnostic::warning(message, Some(offset)));
+            }
             name if is_known_ignored_control(name) => {}
             name if self.state.destination == Destination::Ignored => {
                 self.count_skipped_destination_bytes(name.len(), offset)?;
@@ -9122,6 +9126,12 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "dbch"
                 | "deflang"
                 | "deflangfe"
+                | "dghorigin"
+                | "dghshow"
+                | "dghspace"
+                | "dgvorigin"
+                | "dgvshow"
+                | "dgvspace"
                 | "doctype"
                 | "donotembedlingdata"
                 | "donotembedsysfont"
@@ -9203,8 +9213,12 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "saveinvalidxml"
                 | "showxmlerrors"
                 | "sprstsp"
+                | "rempersonalinfo"
                 | "trackformatting"
                 | "trackmoves"
+                | "themelang"
+                | "themelangcs"
+                | "themelangfe"
                 | "tsrsid"
                 | "trowd"
                 | "cellx"
@@ -9214,8 +9228,11 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "trwWidth"
                 | "usenormstyforlist"
                 | "validatexml"
+                | "viewbksp"
+                | "viewnobound"
                 | "viewscale"
                 | "viewzk"
+                | "formdisp"
                 | "taprtl"
                 | "rtlrow"
                 | "allprot"
@@ -9229,6 +9246,25 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "revprot"
                 | "rtlch"
         )
+}
+
+fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str> {
+    match name {
+        "jexpand" | "jcompress" | "jclisttab" => {
+            Some("Japanese text justification approximated by passive line layout")
+        }
+        "asianbrkrule" => {
+            Some("Asian line-breaking rule approximated by passive Unicode line layout")
+        }
+        "nogrowautofit" => {
+            Some("table autofit growth compatibility approximated by bounded table layout")
+        }
+        "lytexcttp" | "lytprtmet" | "noextrasprl" | "notcvasp" | "notvatxbx" | "expshrtn"
+        | "useltbaln" | "htmautsp" => {
+            Some("Word typography compatibility option approximated by passive layout")
+        }
+        _ => None,
+    }
 }
 
 fn is_stylesheet_metadata_control(name: &str) -> bool {

@@ -12258,6 +12258,183 @@ fn common_word_metadata_controls_do_not_warn_or_leak_to_pdf() {
 }
 
 #[test]
+fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "deff0",
+        "\\",
+        "themelang1033",
+        "\\",
+        "themelangfe2052",
+        "\\",
+        "themelangcs1025",
+        "\\",
+        "dghspace180",
+        "\\",
+        "dgvspace180",
+        "\\",
+        "dghorigin1701",
+        "\\",
+        "dgvorigin1984",
+        "\\",
+        "dghshow1",
+        "\\",
+        "dgvshow1",
+        "\\",
+        "viewbksp1",
+        "\\",
+        "viewnobound1",
+        "\\",
+        "formdisp",
+        "\\",
+        "rempersonalinfo",
+        "\\",
+        "jexpand",
+        "\\",
+        "jcompress",
+        "\\",
+        "jclisttab",
+        "\\",
+        "asianbrkrule",
+        "\\",
+        "nogrowautofit",
+        "\\",
+        "lytexcttp",
+        "\\",
+        "lytprtmet",
+        "\\",
+        "noextrasprl",
+        "\\",
+        "notcvasp",
+        "\\",
+        "notvatxbx",
+        "\\",
+        "expshrtn",
+        "\\",
+        "useltbaln",
+        "\\",
+        "htmautsp",
+        " Visible compatibility text",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Visible compatibility text"));
+    for forbidden in [
+        "themelang",
+        "dghspace",
+        "dgvspace",
+        "dghorigin",
+        "dgvorigin",
+        "dghshow",
+        "dgvshow",
+        "viewbksp",
+        "viewnobound",
+        "formdisp",
+        "rempersonalinfo",
+        "jexpand",
+        "jcompress",
+        "jclisttab",
+        "asianbrkrule",
+        "nogrowautofit",
+        "lytexcttp",
+        "lytprtmet",
+        "noextrasprl",
+        "notcvasp",
+        "notvatxbx",
+        "expshrtn",
+        "useltbaln",
+        "htmautsp",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Word compatibility control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "Word compatibility controls should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for expected in [
+        "Japanese text justification approximated by passive line layout",
+        "Asian line-breaking rule approximated by passive Unicode line layout",
+        "table autofit growth compatibility approximated by bounded table layout",
+        "Word typography compatibility option approximated by passive layout",
+    ] {
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing diagnostic: {expected}; diagnostics were {:?}",
+            parsed.diagnostics
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(decoded_pdf_text(&content).contains("Visible compatibility text"));
+    for forbidden in [
+        b"themelang".as_slice(),
+        b"dghspace",
+        b"dgvspace",
+        b"dghorigin",
+        b"dgvorigin",
+        b"dghshow",
+        b"dgvshow",
+        b"viewbksp",
+        b"viewnobound",
+        b"formdisp",
+        b"rempersonalinfo",
+        b"jexpand",
+        b"jcompress",
+        b"jclisttab",
+        b"asianbrkrule",
+        b"nogrowautofit",
+        b"lytexcttp",
+        b"lytprtmet",
+        b"noextrasprl",
+        b"notcvasp",
+        b"notvatxbx",
+        b"expshrtn",
+        b"useltbaln",
+        b"htmautsp",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Word compatibility content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn paragraph_hyphenation_renders_passive_soft_breaks_without_control_leakage() {
     let input = rtf(&[
         "{",
