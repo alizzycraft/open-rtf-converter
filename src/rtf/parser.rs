@@ -1236,6 +1236,15 @@ impl Parser {
                             Some(offset),
                         ));
                     } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_layout_positioning_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "layout field {name} stripped without applying cursor positioning"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_active_non_visible_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
@@ -1272,6 +1281,18 @@ impl Parser {
                             format!(
                                 "environment field {name} removed without exposing converter host state"
                             ),
+                            Some(offset),
+                        ));
+                        self.push_placeholder_for_destination(
+                            field_owner_destination,
+                            "[Field removed: no passive result]".to_string(),
+                            offset,
+                        )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_dynamic_clock_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!("dynamic field {name} removed without reading converter clock"),
                             Some(offset),
                         ));
                         self.push_placeholder_for_destination(
@@ -1392,6 +1413,15 @@ impl Parser {
                             Some(offset),
                         ));
                     } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_layout_positioning_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "layout field {name} stripped without applying cursor positioning"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_active_non_visible_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
@@ -1415,6 +1445,15 @@ impl Parser {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
                                 "environment field {name} stripped without exposing converter host state"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_dynamic_clock_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "dynamic field {name} stripped without reading converter clock"
                             ),
                             Some(offset),
                         ));
@@ -9915,6 +9954,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         .to_ascii_uppercase();
     match name.as_str() {
         "ADDIN" => Some("ADDIN"),
+        "ADVANCE" => Some("ADVANCE"),
         "ASK" => Some("ASK"),
         "AUTHOR" => Some("AUTHOR"),
         "AUTOTEXT" => Some("AUTOTEXT"),
@@ -10150,6 +10190,10 @@ fn is_non_visible_external_resultless_field(name: &str) -> bool {
     matches!(name, "RD")
 }
 
+fn is_layout_positioning_resultless_field(name: &str) -> bool {
+    matches!(name, "ADVANCE")
+}
+
 fn is_auto_number_field(name: &str) -> bool {
     matches!(name, "AUTONUM" | "AUTONUMLGL" | "AUTONUMOUT")
 }
@@ -10173,6 +10217,10 @@ fn is_environment_resultless_field(name: &str) -> bool {
         name,
         "FILENAME" | "FILESIZE" | "TEMPLATE" | "USERADDRESS" | "USERINITIALS" | "USERNAME"
     )
+}
+
+fn is_dynamic_clock_resultless_field(name: &str) -> bool {
+    matches!(name, "DATE" | "TIME")
 }
 
 fn is_prompt_resultless_field(name: &str) -> bool {
@@ -14866,6 +14914,74 @@ After\par}"#;
     }
 
     #[test]
+    fn resultless_layout_advance_fields_strip_without_visible_placeholder() {
+        let input = r#"{\rtf1 Before {\field{\*\fldinst ADVANCE \r 240 \d 120}} after\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Before  after"), "text was {text:?}");
+        assert!(!text.contains("[Field removed"));
+        for forbidden in ["ADVANCE", "\\r", "\\d", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "ADVANCE field leaked instruction text: {forbidden}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("layout field ADVANCE stripped without applying cursor positioning")
+        }));
+    }
+
+    #[test]
+    fn resultless_dynamic_clock_fields_do_not_read_converter_clock() {
+        let input = r#"{\rtf1 Before {\field{\*\fldinst DATE \\@ "yyyy-MM-dd host-sentinel"}} time {\field{\*\fldinst TIME \\@ "HH:mm host-sentinel"}} After\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Before [Field removed: no passive result] time [Field removed: no passive result] After"), "text was {text:?}");
+        for forbidden in [
+            "DATE",
+            "TIME",
+            "host-sentinel",
+            "yyyy-MM-dd",
+            "HH:mm",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "dynamic clock field leaked instruction text: {forbidden}"
+            );
+        }
+        for name in ["DATE", "TIME"] {
+            assert!(output.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains(&format!("dynamic field {name} removed"))
+            }));
+        }
+
+        let strip_options = RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Strip,
+            ..RtfParseOptions::default()
+        };
+        let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
+        let stripped_text = document_text(&stripped.document);
+        assert!(
+            stripped_text.contains("Before  time  After"),
+            "stripped text was {stripped_text:?}"
+        );
+        assert!(!stripped_text.contains("[Field removed"));
+        assert!(
+            stripped
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("dynamic field DATE stripped") })
+        );
+    }
+
+    #[test]
     fn resultless_prompt_fields_do_not_request_input_or_leak_prompt_text() {
         let input = r#"{\rtf1 Before {\field{\*\fldinst ASK Client "Hidden prompt" \d "Hidden default"}} ask-ref {\field{\*\fldinst REF Client}} fill {\field{\*\fldinst FILLIN "Secret prompt" \d "Secret default"}} After\par}"#;
         let output = parse_rtf(input).unwrap();
@@ -15422,7 +15538,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("field DATE has no stored result and was not evaluated dynamically")
+                .contains("dynamic field DATE removed without reading converter clock")
         }));
     }
 

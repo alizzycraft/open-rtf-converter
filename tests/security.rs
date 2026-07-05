@@ -4193,7 +4193,7 @@ fn date_fields_use_stored_results_and_never_update_or_leak_instructions() {
     assert!(resultless.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("field DATE has no stored result and was not evaluated dynamically")
+            .contains("dynamic field DATE removed without reading converter clock")
     }));
 
     let dir = tempdir().unwrap();
@@ -6945,6 +6945,83 @@ visible after\par}"#
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden environment field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn resultless_layout_and_clock_fields_do_not_leak_to_pdf() {
+    let input = br#"{\rtf1 Visible before
+{\field{\*\fldinst ADVANCE \r 240 \d 120}}
+after advance
+date {\field{\*\fldinst DATE \\@ "yyyy-MM-dd host-sentinel"}}
+time {\field{\*\fldinst TIME \\@ "HH:mm host-sentinel"}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("after advance"));
+    assert!(text.contains("date [Field removed: no passive result]"));
+    assert!(text.contains("time [Field removed: no passive result]"));
+    assert!(text.contains("visible after"));
+    for forbidden in [
+        "ADVANCE",
+        "DATE",
+        "TIME",
+        "host-sentinel",
+        "yyyy-MM-dd",
+        "HH:mm",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden layout/clock field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("after advance"));
+    assert!(rendered_text.contains("date [Field removed: no passive result]"));
+    assert!(rendered_text.contains("time [Field removed: no passive result]"));
+    assert!(rendered_text.contains("visible after"));
+    for forbidden in [
+        b"ADVANCE".as_slice(),
+        b"DATE",
+        b"TIME",
+        b"host-sentinel",
+        b"yyyy-MM-dd",
+        b"HH:mm",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden layout/clock field leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
