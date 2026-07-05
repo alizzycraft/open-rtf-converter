@@ -1222,6 +1222,24 @@ impl Parser {
                     && !field_hidden
                 {
                     if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_non_visible_external_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "external non-visible field {name} stripped without fetching external resource"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_active_non_visible_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "active non-visible field {name} stripped without executing or preserving field payload"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_non_visible_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
@@ -1318,6 +1336,24 @@ impl Parser {
                     && !field_hidden
                 {
                     if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_non_visible_external_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "external non-visible field {name} stripped without fetching external resource"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_active_non_visible_resultless_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "active non-visible field {name} stripped without executing or preserving field payload"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_external_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
@@ -9699,6 +9735,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         .collect::<String>()
         .to_ascii_uppercase();
     match name.as_str() {
+        "ADDIN" => Some("ADDIN"),
         "ASK" => Some("ASK"),
         "AUTHOR" => Some("AUTHOR"),
         "AUTONUM" => Some("AUTONUM"),
@@ -9752,6 +9789,9 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "NEXT" => Some("NEXT"),
         "NEXTIF" => Some("NEXTIF"),
         "PRINTDATE" => Some("PRINTDATE"),
+        "PRINT" => Some("PRINT"),
+        "PRIVATE" => Some("PRIVATE"),
+        "RD" => Some("RD"),
         "SAVEDATE" => Some("SAVEDATE"),
         "SUBJECT" => Some("SUBJECT"),
         "SYMBOL" => Some("SYMBOL"),
@@ -9889,6 +9929,14 @@ fn is_non_visible_resultless_field(name: &str) -> bool {
         name,
         "ASK" | "NEXT" | "NEXTIF" | "SKIPIF" | "XE" | "TC" | "TA"
     )
+}
+
+fn is_active_non_visible_resultless_field(name: &str) -> bool {
+    matches!(name, "ADDIN" | "PRINT" | "PRIVATE")
+}
+
+fn is_non_visible_external_resultless_field(name: &str) -> bool {
+    matches!(name, "RD")
 }
 
 fn is_auto_number_field(name: &str) -> bool {
@@ -14613,6 +14661,52 @@ After\par}"#;
                 "missing diagnostic for {name}"
             );
         }
+    }
+
+    #[test]
+    fn resultless_private_and_print_fields_are_stripped_without_payload_leakage() {
+        let input = r#"{\rtf1 Before {\field{\*\fldinst ADDIN "Hidden addin payload"}} addin {\field{\*\fldinst PRIVATE "414243 hidden private"}} private {\field{\*\fldinst PRINT "hidden printer command"}} print {\field{\*\fldinst RD "C:\\secret\\source.rtf"}} after\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before  addin  private  print  after"),
+            "text was {text:?}"
+        );
+        assert!(!text.contains("[Field removed"));
+        for forbidden in [
+            "ADDIN",
+            "PRIVATE",
+            "PRINT",
+            "RD",
+            "Hidden addin payload",
+            "414243",
+            "hidden private",
+            "hidden printer command",
+            "secret",
+            "source.rtf",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "hidden active/storage field leaked text: {forbidden}"
+            );
+        }
+        for name in ["ADDIN", "PRIVATE", "PRINT"] {
+            assert!(
+                output.diagnostics.iter().any(|diagnostic| {
+                    diagnostic
+                        .message
+                        .contains(&format!("active non-visible field {name} stripped"))
+                }),
+                "missing diagnostic for {name}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("external non-visible field RD stripped")
+        }));
     }
 
     #[test]

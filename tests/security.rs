@@ -6836,6 +6836,93 @@ visible after\par}"#
 }
 
 #[test]
+fn resultless_private_and_print_fields_are_stripped_without_pdf_leakage() {
+    let input = br#"{\rtf1 Visible before
+{\field{\*\fldinst ADDIN "Hidden addin payload"}}
+addin {\field{\*\fldinst PRIVATE "414243 hidden private"}}
+private {\field{\*\fldinst PRINT "hidden printer command"}}
+print {\field{\*\fldinst RD "C:\\secret\\source.rtf"}}
+visible after\par}"#
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("addin"));
+    assert!(text.contains("private"));
+    assert!(text.contains("print"));
+    assert!(text.contains("visible after"));
+    assert!(!text.contains("[Field removed"));
+    for forbidden in [
+        "ADDIN",
+        "PRIVATE",
+        "PRINT",
+        "RD",
+        "Hidden addin payload",
+        "414243",
+        "hidden private",
+        "hidden printer command",
+        "secret",
+        "source.rtf",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden hidden active/storage field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("addin"));
+    assert!(rendered_text.contains("private"));
+    assert!(rendered_text.contains("print"));
+    assert!(rendered_text.contains("visible after"));
+    assert!(!rendered_text.contains("[Field removed"));
+    for forbidden in [
+        b"ADDIN".as_slice(),
+        b"PRIVATE",
+        b"PRINT",
+        b"RD",
+        b"Hidden addin payload",
+        b"414243",
+        b"hidden private",
+        b"hidden printer command",
+        b"secret",
+        b"source.rtf",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden hidden active/storage field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn edit_time_field_uses_passive_metadata_without_pdf_leakage() {
     let input = br#"{\rtf1{\info{\edmins42}{\title Hidden title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}}}}Edit {\field{\*\fldinst EDITTIME \\# "0000"}} dynamic {\field{\*\fldinst TIME}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
