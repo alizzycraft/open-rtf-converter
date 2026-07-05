@@ -1847,7 +1847,7 @@ fn old_style_list_spacing_renders_passively_without_control_leakage() {
 #[test]
 fn old_style_list_marker_formatting_renders_passively_without_control_leakage() {
     let input =
-        br"{\rtf1{\pn\pndec\pnb\pni\pnul\pnstrike\pncaps\pnfs28}Formatted item\par}".to_vec();
+        br"{\rtf1{\colortbl;\red255\green0\blue0;}{\pn\pndec\pnb\pni\pnul\pnstrike\pncaps\pncf1\pnfs28}Formatted item\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -1860,12 +1860,14 @@ fn old_style_list_marker_formatting_renders_passively_without_control_leakage() 
     assert_eq!(paragraph.runs[0].style.underline, UnderlineStyle::Single);
     assert!(paragraph.runs[0].style.strike);
     assert!(paragraph.runs[0].style.all_caps);
+    assert_eq!(paragraph.runs[0].style.color_index, 1);
     assert_eq!(paragraph.runs[0].style.font_size_half_points, 28);
     assert_eq!(paragraph.runs[1].text, "Formatted item");
     assert!(!paragraph.runs[1].style.bold);
     assert!(!paragraph.runs[1].style.italic);
     assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
     assert!(!paragraph.runs[1].style.strike);
+    assert_eq!(paragraph.runs[1].style.color_index, 0);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -1890,6 +1892,7 @@ fn old_style_list_marker_formatting_renders_passively_without_control_leakage() 
         b"pnul",
         b"pnstrike",
         b"pncaps",
+        b"pncf",
         b"pnfs",
         b"pndec",
         b"/JavaScript",

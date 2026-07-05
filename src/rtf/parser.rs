@@ -1688,6 +1688,9 @@ impl Parser {
             "pncaps" if destination_allows_safe_structural_content(&self.state) => {
                 self.set_old_style_list_marker_caps(control.parameter.unwrap_or(1) != 0);
             }
+            "pncf" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_color(control.parameter.unwrap_or(0));
+            }
             "pnf" if destination_allows_safe_structural_content(&self.state) => {
                 self.set_old_style_list_marker_font(control.parameter.unwrap_or(0));
             }
@@ -6720,6 +6723,12 @@ impl Parser {
         self.update_old_style_list_marker_character_style(|style| style.all_caps = enabled);
     }
 
+    fn set_old_style_list_marker_color(&mut self, color_index: i32) {
+        self.update_old_style_list_marker_character_style(|style| {
+            style.color_index = color_index.max(0) as usize
+        });
+    }
+
     fn set_old_style_list_marker_font(&mut self, font_index: i32) {
         self.update_old_style_list_marker_character_style(|style| {
             style.font_index = font_index.max(0)
@@ -7481,6 +7490,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "pnb"
                 | "pncaps"
                 | "pncard"
+                | "pncf"
                 | "pndec"
                 | "pnf"
                 | "pnfs"
@@ -12227,7 +12237,7 @@ After\par}"#;
     #[test]
     fn applies_old_style_list_marker_character_format_controls_to_marker_run() {
         let output = parse_rtf(
-            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\pn\pndec\pnb\pni\pnul\pnstrike\pncaps\pnf1\pnfs28}Formatted item\par}",
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;}{\pn\pndec\pnb\pni\pnul\pnstrike\pncaps\pncf1\pnf1\pnfs28}Formatted item\par}",
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -12241,6 +12251,7 @@ After\par}"#;
         assert_eq!(paragraph.runs[0].style.underline, UnderlineStyle::Single);
         assert!(paragraph.runs[0].style.strike);
         assert!(paragraph.runs[0].style.all_caps);
+        assert_eq!(paragraph.runs[0].style.color_index, 1);
         assert_eq!(paragraph.runs[0].style.font_index, 1);
         assert_eq!(paragraph.runs[0].style.font_size_half_points, 28);
         assert_eq!(paragraph.runs[1].text, "Formatted item");
@@ -12248,6 +12259,7 @@ After\par}"#;
         assert!(!paragraph.runs[1].style.italic);
         assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
         assert!(!paragraph.runs[1].style.strike);
+        assert_eq!(paragraph.runs[1].style.color_index, 0);
         assert_eq!(paragraph.runs[1].style.font_index, 0);
         assert!(
             output
