@@ -4,7 +4,7 @@ use crate::config::{ActiveContentPolicy, RtfLimits, RtfParseOptions};
 use crate::diagnostics::Diagnostic;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
+    Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontDef,
     FontFamilyHint, FontPitch, FootnotePlacement, ImageCrop, ImageFormat, LineNumberRestart,
     PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
@@ -3034,6 +3034,9 @@ impl Parser {
                     TextRelief::Engrave
                 };
             }
+            "accdot" => self.state.character.emphasis_mark = CharacterEmphasisMark::Dot,
+            "acccomma" => self.state.character.emphasis_mark = CharacterEmphasisMark::Comma,
+            "accnone" => self.state.character.emphasis_mark = CharacterEmphasisMark::None,
             "caps" | "acaps" => self.state.character.all_caps = control.parameter.unwrap_or(1) != 0,
             "scaps" | "ascaps" => {
                 self.state.character.small_caps = control.parameter.unwrap_or(1) != 0
@@ -10149,6 +10152,9 @@ fn inherit_character_style(base: &CharacterStyle, derived: &CharacterStyle) -> C
     }
     if output.relief == default.relief {
         output.relief = base.relief;
+    }
+    if output.emphasis_mark == default.emphasis_mark {
+        output.emphasis_mark = base.emphasis_mark;
     }
     if output.all_caps == default.all_caps {
         output.all_caps = base.all_caps;

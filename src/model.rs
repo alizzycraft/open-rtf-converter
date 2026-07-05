@@ -700,6 +700,7 @@ pub struct CharacterStyle {
     pub outline: bool,
     pub shadow: bool,
     pub relief: TextRelief,
+    pub emphasis_mark: CharacterEmphasisMark,
     pub all_caps: bool,
     pub small_caps: bool,
     pub hidden: bool,
@@ -729,6 +730,7 @@ impl Default for CharacterStyle {
             outline: false,
             shadow: false,
             relief: TextRelief::None,
+            emphasis_mark: CharacterEmphasisMark::None,
             all_caps: false,
             small_caps: false,
             hidden: false,
@@ -760,6 +762,14 @@ pub enum TextRelief {
     None,
     Emboss,
     Engrave,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum CharacterEmphasisMark {
+    #[default]
+    None,
+    Dot,
+    Comma,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

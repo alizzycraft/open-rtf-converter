@@ -3,10 +3,11 @@ use std::fs;
 use lopdf::Document as PdfDocument;
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
-    DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint, FontPitch, PAGE_NUMBER_MARKER,
-    PageVerticalAlignment, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern,
-    TOTAL_PAGES_MARKER, TabAlignment, TextRelief, UnderlineStyle,
+    Block, BorderStyle, CharacterEmphasisMark, DOCUMENT_CHARS_MARKER,
+    DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint,
+    FontPitch, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, TOTAL_PAGES_MARKER, TabAlignment, TextRelief,
+    UnderlineStyle,
 };
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
@@ -10184,6 +10185,93 @@ fn associated_character_properties_render_passively_without_control_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden associated character content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emphasis_mark_controls_render_passive_overlays_without_control_leakage() {
+    let input = br"{\rtf1\accdot Dot text \acccomma Comma text \accnone Plain text{\object\objdata 414243}\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Dot text"));
+    assert!(text.contains("Comma text"));
+    assert!(text.contains("Plain text"));
+    let paragraph = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .expect("paragraph");
+    let style_for = |needle: &str| {
+        paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.contains(needle))
+            .unwrap_or_else(|| panic!("missing run containing {needle}"))
+            .style
+            .emphasis_mark
+    };
+    assert_eq!(style_for("Dot text"), CharacterEmphasisMark::Dot);
+    assert_eq!(style_for("Comma text"), CharacterEmphasisMark::Comma);
+    assert_eq!(style_for("Plain text"), CharacterEmphasisMark::None);
+    for forbidden in ["accdot", "acccomma", "accnone", "objdata", "414243"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden emphasis mark content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Dot text"));
+    assert!(rendered_text.contains("Comma text"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "dot emphasis should render as passive filled vector marks"
+    );
+    assert!(
+        content.operations.windows(3).any(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        }),
+        "comma emphasis should render as passive stroked vector marks"
+    );
+    for forbidden in [
+        b"accdot".as_slice(),
+        b"acccomma",
+        b"accnone",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden emphasis mark content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

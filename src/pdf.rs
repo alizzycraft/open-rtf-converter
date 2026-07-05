@@ -8,7 +8,9 @@ use crate::layout::{
     LayoutDocument, LayoutItem, LineStyle, PdfColor, PdfFontFamily, TextFragment,
     passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
 };
-use crate::model::{CharacterStyle, ImageFormat, TextRelief, UnderlineStyle};
+use crate::model::{
+    CharacterEmphasisMark, CharacterStyle, ImageFormat, TextRelief, UnderlineStyle,
+};
 
 const HELVETICA_REGULAR: &[u8] = b"F1";
 const HELVETICA_BOLD: &[u8] = b"F2";
@@ -884,6 +886,93 @@ fn draw_passive_polygon(
 }
 
 fn draw_passive_text_overlays(content: &mut Content, fragment: &TextFragment) {
+    draw_passive_emphasis_marks(content, fragment);
+    draw_passive_checkbox_overlays(content, fragment);
+}
+
+fn draw_passive_emphasis_marks(content: &mut Content, fragment: &TextFragment) {
+    if fragment.style.emphasis_mark == CharacterEmphasisMark::None {
+        return;
+    }
+
+    let font_size = fragment.style.font_size_points();
+    let horizontal_scale = fragment.style.horizontal_scale();
+    let character_spacing = twips_to_points(fragment.style.character_spacing_twips);
+    let visible_count = fragment
+        .text
+        .chars()
+        .filter(|ch| !is_zero_width_pdf_char(*ch))
+        .count();
+    if visible_count == 0 {
+        return;
+    }
+
+    let mut visible_index = 0usize;
+    let mut cursor = fragment.x;
+
+    content.save_state();
+    set_fill_color(content, fragment.color);
+    set_stroke_color(content, fragment.color);
+    content.set_line_width((font_size * 0.06).clamp(0.35, 1.0));
+    for ch in fragment.text.chars() {
+        if !is_zero_width_pdf_char(ch) {
+            visible_index += 1;
+        }
+        if !is_zero_width_pdf_char(ch) && !ch.is_whitespace() {
+            let advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            let center_x = cursor + (advance * horizontal_scale * 0.5);
+            draw_passive_emphasis_mark(
+                content,
+                fragment.style.emphasis_mark,
+                center_x,
+                fragment.baseline_y,
+                font_size,
+            );
+        }
+        if !is_zero_width_pdf_char(ch) {
+            let mut advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            if ch == ' ' || ch == '\u{00a0}' {
+                advance += fragment.word_spacing;
+            }
+            if visible_index < visible_count {
+                advance += character_spacing;
+            }
+            cursor += advance * horizontal_scale;
+        }
+    }
+    content.restore_state();
+}
+
+fn draw_passive_emphasis_mark(
+    content: &mut Content,
+    mark: CharacterEmphasisMark,
+    center_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+) {
+    let mark_y = baseline_y + font_size * 0.82;
+    match mark {
+        CharacterEmphasisMark::None => {}
+        CharacterEmphasisMark::Dot => {
+            let radius = (font_size * 0.065).clamp(0.45, 1.25);
+            content.rect(
+                center_x - radius,
+                mark_y - radius,
+                radius * 2.0,
+                radius * 2.0,
+            );
+            content.fill_nonzero();
+        }
+        CharacterEmphasisMark::Comma => {
+            let height = (font_size * 0.22).clamp(1.0, 4.0);
+            content.move_to(center_x, mark_y);
+            content.line_to(center_x - height * 0.25, mark_y - height);
+            content.stroke();
+        }
+    }
+}
+
+fn draw_passive_checkbox_overlays(content: &mut Content, fragment: &TextFragment) {
     if fragment.font_family != PdfFontFamily::ZapfDingbats
         || (!fragment.text.contains('\u{2611}') && !fragment.text.contains('\u{2612}'))
     {
