@@ -1446,6 +1446,14 @@ impl Parser {
             {
                 self.reset_current_list_level_character_style();
             }
+            "cs" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.apply_current_list_level_character_style(
+                    control.parameter.unwrap_or(0),
+                    offset,
+                );
+            }
             "super"
                 if self.state.destination == Destination::ListTable
                     && self.state.list_context == ListContext::ListLevel =>
@@ -7206,6 +7214,22 @@ impl Parser {
         self.update_current_list_level_character_style(|style| {
             *style = default_style;
         });
+    }
+
+    fn apply_current_list_level_character_style(&mut self, index: i32, offset: usize) -> bool {
+        let mut visited = Vec::new();
+        if let Some(style) = self.resolve_style(index, &mut visited) {
+            self.update_current_list_level_character_style(|current| {
+                *current = inherit_character_style(current, &style.character);
+            });
+            true
+        } else {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("unknown RTF style index {index}"),
+                Some(offset),
+            ));
+            false
+        }
     }
 
     fn set_current_list_level_underline(&mut self, style: UnderlineStyle, control: &Control) {
@@ -13147,6 +13171,35 @@ After\par}"#;
         assert!(!paragraph.runs[1].style.italic);
         assert_eq!(paragraph.runs[1].style.color_index, 0);
         assert!(!paragraph.runs[1].style.border.visible);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn list_level_marker_character_style_applies_to_marker_run_only() {
+        let output = parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\stylesheet{\cs5\b\ul\cf1 Marker emphasis;}}{\*\listtable{\list{\listlevel\levelnfc0\i\cs5{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled marker\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert!(paragraph.runs[0].style.bold);
+        assert!(paragraph.runs[0].style.italic);
+        assert_eq!(paragraph.runs[0].style.underline, UnderlineStyle::Single);
+        assert_eq!(paragraph.runs[0].style.color_index, 1);
+        assert_eq!(paragraph.runs[1].text, "Styled marker");
+        assert!(!paragraph.runs[1].style.bold);
+        assert!(!paragraph.runs[1].style.italic);
+        assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
+        assert_eq!(paragraph.runs[1].style.color_index, 0);
         assert!(
             output
                 .diagnostics
