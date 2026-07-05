@@ -629,6 +629,88 @@ fn table_row_keep_together_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn table_header_rows_repeat_passively_without_control_leakage() {
+    let mut input =
+        String::from("{\\rtf1\\trowd\\trhdr\\trrh720\\clcbpat1\\cellx3000 Header row\\cell\\row");
+    input.push_str("\\trowd\\trhdr0\\trrh720\\cellx3000 First body\\cell\\row");
+    for idx in 0..28 {
+        input.push_str(&format!(
+            "\\trowd\\trrh720\\cellx3000 Body row {idx}\\cell\\row"
+        ));
+    }
+    input.push('}');
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+
+    assert!(text.contains("Header row"));
+    assert!(text.contains("First body"));
+    assert!(table.rows[0].repeat_header);
+    assert!(!table.rows[1].repeat_header);
+    for forbidden in ["trhdr", "trhdr0", "trrh", "cellx", "trowd"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden table header control leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("table-header-repeat.rtf");
+    let output_path = dir.path().join("table-header-repeat.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let pages = parsed_pdf.get_pages();
+
+    assert!(pages.len() > 1, "test input should flow across pages");
+    for page_id in pages.values().skip(1) {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+        assert!(
+            rendered_text.contains("Header row"),
+            "repeated header missing from continued page text: {rendered_text:?}"
+        );
+    }
+    for forbidden in [
+        b"trhdr".as_slice(),
+        b"trhdr0",
+        b"trrh",
+        b"cellx",
+        b"trowd",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden table header content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn nested_table_content_flattens_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

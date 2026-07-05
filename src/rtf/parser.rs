@@ -1833,7 +1833,9 @@ impl Parser {
             "taprtl" | "rtlrow" => {
                 self.set_current_table_row_right_to_left(control.parameter.unwrap_or(1) != 0)
             }
-            "trhdr" => self.set_current_table_row_repeat_header(true),
+            "trhdr" => {
+                self.set_current_table_row_repeat_header(control.parameter.unwrap_or(1) != 0)
+            }
             "trkeep" => {
                 self.set_current_table_row_keep_together(control.parameter.unwrap_or(1) != 0)
             }
@@ -10442,7 +10444,7 @@ mod tests {
     #[test]
     fn normalizes_table_row_header_repeat_controls() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\trhdr\cellx2000 Header\cell\row\trowd\cellx2000 Body\cell\row}",
+            r"{\rtf1\trowd\trhdr\cellx2000 Header\cell\row\trowd\trhdr0\cellx2000 Body\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -10452,6 +10454,12 @@ mod tests {
 
         assert!(table.rows[0].repeat_header);
         assert!(!table.rows[1].repeat_header);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
