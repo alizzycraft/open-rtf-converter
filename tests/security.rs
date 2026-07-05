@@ -559,6 +559,184 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
 }
 
 #[test]
+fn table_padding_unit_and_spacing_controls_warn_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw7200",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "trowd",
+        "\\",
+        "trgaph108",
+        "\\",
+        "trpaddfl3",
+        "\\",
+        "trpaddl240",
+        "\\",
+        "trpaddfr3",
+        "\\",
+        "trpaddr240",
+        "\\",
+        "trpaddft3",
+        "\\",
+        "trpaddt120",
+        "\\",
+        "trpaddfb3",
+        "\\",
+        "trpaddb120",
+        "\\",
+        "trspdl120",
+        "\\",
+        "trspdfl3",
+        "\\",
+        "trspdr120",
+        "\\",
+        "trspdfr3",
+        "\\",
+        "trspdt60",
+        "\\",
+        "trspdft3",
+        "\\",
+        "trspdb60",
+        "\\",
+        "trspdfb3",
+        "\\",
+        "clpadfl3",
+        "\\",
+        "clpadl180",
+        "\\",
+        "clpadfr3",
+        "\\",
+        "clpadr180",
+        "\\",
+        "clpadft3",
+        "\\",
+        "clpadt90",
+        "\\",
+        "clpadfb3",
+        "\\",
+        "clpadb90",
+        "\\",
+        "clspdl60",
+        "\\",
+        "clspdfl3",
+        "\\",
+        "clspdr60",
+        "\\",
+        "clspdfr3",
+        "\\",
+        "clspdt30",
+        "\\",
+        "clspdft3",
+        "\\",
+        "clspdb30",
+        "\\",
+        "clspdfb3",
+        "\\",
+        "cellx1800 Unit left",
+        "\\",
+        "cell",
+        "\\",
+        "clpadfl3",
+        "\\",
+        "clpadl180",
+        "\\",
+        "cellx3600 Unit right",
+        "\\",
+        "cell",
+        "\\",
+        "row}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Unit left"));
+    assert!(text.contains("Unit right"));
+    for forbidden in [
+        "trpaddfl", "trpaddfr", "trpaddft", "trpaddfb", "trspdl", "trspdfl", "trspdr", "trspdfr",
+        "trspdt", "trspdft", "trspdb", "trspdfb", "clpadfl", "clpadfr", "clpadft", "clpadfb",
+        "clspdl", "clspdfl", "clspdr", "clspdfr", "clspdt", "clspdft", "clspdb", "clspdfb",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "table padding/spacing control leaked to normalized text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "table padding/spacing controls should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table padding and spacing units interpreted through bounded twip layout")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table cell spacing approximated by passive table padding")
+    }));
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Unit left"));
+    assert!(rendered_text.contains("Unit right"));
+    for forbidden in [
+        b"trpaddfl".as_slice(),
+        b"trpaddfr",
+        b"trpaddft",
+        b"trpaddfb",
+        b"trspdl",
+        b"trspdfl",
+        b"trspdr",
+        b"trspdfr",
+        b"trspdt",
+        b"trspdft",
+        b"trspdb",
+        b"trspdfb",
+        b"clpadfl",
+        b"clpadfr",
+        b"clpadft",
+        b"clpadfb",
+        b"clspdl",
+        b"clspdfl",
+        b"clspdr",
+        b"clspdfr",
+        b"clspdt",
+        b"clspdft",
+        b"clspdb",
+        b"clspdfb",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden table padding/spacing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shading_patterns_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

@@ -9284,6 +9284,14 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
 
 fn table_layout_compatibility_control_message(name: &str) -> Option<&'static str> {
     match name {
+        "trpaddfl" | "trpaddfr" | "trpaddft" | "trpaddfb" | "clpadfl" | "clpadfr" | "clpadft"
+        | "clpadfb" | "trspdfl" | "trspdfr" | "trspdft" | "trspdfb" | "clspdfl" | "clspdfr"
+        | "clspdft" | "clspdfb" => {
+            Some("table padding and spacing units interpreted through bounded twip layout")
+        }
+        "trspdl" | "trspdr" | "trspdt" | "trspdb" | "clspdl" | "clspdr" | "clspdt" | "clspdb" => {
+            Some("table cell spacing approximated by passive table padding")
+        }
         "tabsnoovrlp" | "tdfrmtxtLeft" | "tdfrmtxtRight" | "tdfrmtxtTop" | "tdfrmtxtBottom"
         | "tphcol" | "tphmrg" | "tphpg" | "tpvmrg" | "tpvpara" | "tpvpg" | "tposx" | "tposnegx"
         | "tposxc" | "tposxi" | "tposxl" | "tposxo" | "tposxr" | "tposy" | "tposnegy"
