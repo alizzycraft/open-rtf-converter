@@ -3962,6 +3962,42 @@ fn hyperlink_stored_results_render_as_inert_pdf_text_under_passive_link_policies
 }
 
 #[test]
+fn docproperty_fields_render_metadata_without_leaking_nested_active_content() {
+    let input = br#"{\rtf1{\info{\title Safe title {\title Nested overwrite}{\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\author Alice}{\doccomm Hidden comment}}Doc {\field{\*\fldinst DOCPROPERTY Title}} / {\field{\*\fldinst DOCPROPERTY Author}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Doc Safe title"));
+    assert!(rendered_text.contains("tail / Alice"));
+    for forbidden in [
+        b"DOCPROPERTY".as_slice(),
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Nested overwrite",
+        b"Hidden link",
+        b"Hidden comment",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "document property field leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn date_fields_use_stored_results_and_never_update_or_leak_instructions() {
     let stored = parse_rtf_bytes(&rtf(&[
         "{",

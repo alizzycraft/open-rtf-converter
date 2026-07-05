@@ -70,6 +70,7 @@ struct ParserState {
     skip_bytes: usize,
     destination: Destination,
     inside_metadata: bool,
+    inside_document_info: bool,
     inside_object: bool,
     object_owner_destination: Destination,
     object_result_seen: bool,
@@ -97,6 +98,8 @@ struct ParserState {
     unicode_alternate_branch: UnicodeAlternateBranch,
     unicode_alternate_child_count: usize,
     unicode_alternate_destination: Destination,
+    metadata_property: Option<DocumentProperty>,
+    metadata_property_text: String,
     at_group_start: bool,
 }
 
@@ -123,6 +126,7 @@ impl Default for ParserState {
             skip_bytes: 0,
             destination: Destination::Body,
             inside_metadata: false,
+            inside_document_info: false,
             inside_object: false,
             object_owner_destination: Destination::Body,
             object_result_seen: false,
@@ -150,6 +154,8 @@ impl Default for ParserState {
             unicode_alternate_branch: UnicodeAlternateBranch::None,
             unicode_alternate_child_count: 0,
             unicode_alternate_destination: Destination::Body,
+            metadata_property: None,
+            metadata_property_text: String::new(),
             at_group_start: false,
         }
     }
@@ -639,6 +645,19 @@ enum StyleKind {
     Character,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum DocumentProperty {
+    Title,
+    Subject,
+    Author,
+    Keywords,
+    Comments,
+    Operator,
+    Manager,
+    Company,
+    Category,
+}
+
 struct Parser {
     tokens: Vec<Token>,
     document: Document,
@@ -680,6 +699,7 @@ struct Parser {
     field_sequence_counters: Vec<FieldSequenceCounter>,
     field_auto_number_counter: i32,
     field_list_number_counters: Vec<FieldSequenceCounter>,
+    document_properties: Vec<(DocumentProperty, String)>,
     bookmark_captures: Vec<BookmarkCapture>,
     next_bookmark_marker_id: usize,
     styles: Vec<StyleDefinition>,
@@ -780,6 +800,7 @@ impl Parser {
             field_sequence_counters: Vec::new(),
             field_auto_number_counter: 0,
             field_list_number_counters: Vec::new(),
+            document_properties: Vec::new(),
             bookmark_captures: Vec::new(),
             next_bookmark_marker_id: 1,
             styles: Vec::new(),
@@ -883,6 +904,11 @@ impl Parser {
         let mut parent = self.state.clone();
         let mut child = self.state.clone();
         child.at_group_start = true;
+        if parent.metadata_property.is_some() {
+            child.metadata_property = None;
+            child.metadata_property_text.clear();
+            child.inside_document_info = false;
+        }
         if parent.unicode_alternate_branch == UnicodeAlternateBranch::Container {
             parent.unicode_alternate_child_count += 1;
             child.unicode_alternate_child_count = 0;
@@ -925,6 +951,12 @@ impl Parser {
             }
             if self.state.destination == Destination::StyleSheet {
                 self.finish_style_definition(offset)?;
+            }
+            if let Some(property) = self.state.metadata_property
+                && previous.metadata_property.is_none()
+            {
+                let text = self.state.metadata_property_text.clone();
+                self.store_document_property(property, &text, offset)?;
             }
             match self.state.list_context {
                 ListContext::ListLevelText => self.normalize_current_list_level_text(),
@@ -1289,6 +1321,21 @@ impl Parser {
             {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
+            }
+            "info" if destination_allows_visible_content(&self.state) => {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+                self.state.inside_document_info = true;
+            }
+            name if control_starts_group
+                && self.state.inside_document_info
+                && document_property_control(name).is_some()
+                && self.state.destination == Destination::Metadata =>
+            {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+                self.state.metadata_property = document_property_control(name);
+                self.state.metadata_property_text.clear();
             }
             name if is_metadata_destination(name)
                 && destination_allows_visible_content(&self.state) =>
@@ -2080,6 +2127,9 @@ impl Parser {
             ) =>
             {
                 self.push_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if self.state.metadata_property.is_some() => {
+                self.push_document_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
             "u" => {
                 self.state.skip_bytes = self.state.unicode_skip;
@@ -2925,6 +2975,9 @@ impl Parser {
         if self.state.capturing_form_dropdown_entry {
             return self.push_form_dropdown_text(text, offset);
         }
+        if self.state.metadata_property.is_some() {
+            return self.push_document_property_text(text, offset);
+        }
 
         match self.state.destination {
             Destination::Body => {
@@ -3046,6 +3099,10 @@ impl Parser {
         if self.state.capturing_form_dropdown_entry {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_form_dropdown_text(&ch.to_string(), offset);
+        }
+        if self.state.metadata_property.is_some() {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_document_property_text(&ch.to_string(), offset);
         }
 
         match self.state.destination {
@@ -4276,6 +4333,82 @@ impl Parser {
         Ok(())
     }
 
+    fn push_document_property_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes(text.len(), offset)?;
+        if contains_internal_marker(text) {
+            return Ok(());
+        }
+
+        let safe_text = text
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .collect::<String>();
+        let new_len = self
+            .state
+            .metadata_property_text
+            .chars()
+            .count()
+            .checked_add(safe_text.chars().count())
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
+        if new_len > self.limits().max_text_run_len {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "document property text".to_string(),
+                offset,
+            });
+        }
+        self.state.metadata_property_text.push_str(&safe_text);
+        Ok(())
+    }
+
+    fn push_document_property_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_document_property_text(&ch.to_string(), offset)?;
+        } else {
+            self.count_skipped_destination_bytes(1, offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn store_document_property(
+        &mut self,
+        property: DocumentProperty,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let text = text.trim().to_string();
+        if text.is_empty()
+            || text.chars().any(|ch| ch.is_control())
+            || contains_internal_marker(&text)
+        {
+            return Ok(());
+        }
+
+        if text.chars().count() > self.limits().max_text_run_len {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "document property text".to_string(),
+                offset,
+            });
+        }
+
+        if let Some((_, existing)) = self
+            .document_properties
+            .iter_mut()
+            .find(|(stored_property, _)| *stored_property == property)
+        {
+            *existing = text;
+        } else {
+            self.document_properties.push((property, text));
+        }
+        Ok(())
+    }
+
     fn push_passive_field_result(
         &mut self,
         result: PassiveFieldResult,
@@ -4316,6 +4449,8 @@ impl Parser {
             self.passive_ref_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("PAGEREF") {
             self.passive_page_ref_field_result(instruction, offset)?
+        } else if field_instruction_name(instruction) == Some("DOCPROPERTY") {
+            self.passive_doc_property_field_result(instruction)
         } else {
             passive_field_result(
                 instruction,
@@ -4327,6 +4462,20 @@ impl Parser {
         };
 
         Ok(result.and_then(|result| apply_field_format_switches(instruction, result)))
+    }
+
+    fn passive_doc_property_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
+        let name = field_first_argument(instruction)?;
+        let property = document_property_field_name(&name)?;
+        let text = self
+            .document_properties
+            .iter()
+            .find_map(|(stored_property, text)| (*stored_property == property).then(|| text))?;
+        Some(PassiveFieldResult {
+            text: text.clone(),
+            font_name: None,
+            form_field: false,
+        })
     }
 
     fn passive_sequence_field_result(
@@ -8427,6 +8576,21 @@ fn is_metadata_destination(name: &str) -> bool {
     )
 }
 
+fn document_property_control(name: &str) -> Option<DocumentProperty> {
+    match name {
+        "title" => Some(DocumentProperty::Title),
+        "subject" => Some(DocumentProperty::Subject),
+        "author" => Some(DocumentProperty::Author),
+        "keywords" => Some(DocumentProperty::Keywords),
+        "doccomm" | "comment" | "comments" => Some(DocumentProperty::Comments),
+        "operator" => Some(DocumentProperty::Operator),
+        "manager" => Some(DocumentProperty::Manager),
+        "company" => Some(DocumentProperty::Company),
+        "category" => Some(DocumentProperty::Category),
+        _ => None,
+    }
+}
+
 fn is_mail_merge_destination(name: &str) -> bool {
     matches!(
         name,
@@ -8835,6 +8999,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "TC" => Some("TC"),
         "CREATEDATE" => Some("CREATEDATE"),
         "DATE" => Some("DATE"),
+        "DOCPROPERTY" => Some("DOCPROPERTY"),
         "FORMDROPDOWN" => Some("FORMDROPDOWN"),
         "FORMTEXT" => Some("FORMTEXT"),
         "FORMCHECKBOX" => Some("FORMCHECKBOX"),
@@ -8855,6 +9020,21 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "SYMBOL" => Some("SYMBOL"),
         "TIME" => Some("TIME"),
         "XE" => Some("XE"),
+        _ => None,
+    }
+}
+
+fn document_property_field_name(name: &str) -> Option<DocumentProperty> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "title" => Some(DocumentProperty::Title),
+        "subject" => Some(DocumentProperty::Subject),
+        "author" => Some(DocumentProperty::Author),
+        "keywords" => Some(DocumentProperty::Keywords),
+        "comments" | "comment" => Some(DocumentProperty::Comments),
+        "lastsavedby" | "last saved by" | "operator" => Some(DocumentProperty::Operator),
+        "manager" => Some(DocumentProperty::Manager),
+        "company" => Some(DocumentProperty::Company),
+        "category" => Some(DocumentProperty::Category),
         _ => None,
     }
 }
@@ -14326,6 +14506,28 @@ After\par}"#;
         assert!(!text.contains("Hidden author"));
         assert!(!text.contains("Hidden comment"));
         assert!(!text.contains("template.dotm"));
+    }
+
+    #[test]
+    fn resultless_docproperty_fields_render_safe_metadata_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\title Visible \u937? Title}{\author Alice}{\operator Bob}{\doccomm Hidden comment}}Title: {\field{\*\fldinst DOCPROPERTY Title}} by {\field{\*\fldinst DOCPROPERTY Author \\* Upper}} saved by {\field{\*\fldinst DOCPROPERTY LastSavedBy}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Title: Visible \u{3a9} Title by ALICE saved by Bob"));
+        for forbidden in ["DOCPROPERTY", "fldinst", "Hidden comment"] {
+            assert!(
+                !text.contains(forbidden),
+                "document property field leaked unsafe text: {forbidden}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering passive field DOCPROPERTY without executing field instruction")
+        }));
     }
 
     #[test]
