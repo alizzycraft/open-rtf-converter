@@ -2951,17 +2951,17 @@ impl Parser {
             "sbkeven" => self.state.section_break_kind = SectionBreakKind::EvenPage,
             "sbkodd" => self.state.section_break_kind = SectionBreakKind::OddPage,
             "sbkcol" => self.state.section_break_kind = SectionBreakKind::Column,
-            "b" => self.state.character.bold = control.parameter.unwrap_or(1) != 0,
-            "i" => self.state.character.italic = control.parameter.unwrap_or(1) != 0,
-            "ul" => {
+            "b" | "ab" => self.state.character.bold = control.parameter.unwrap_or(1) != 0,
+            "i" | "ai" => self.state.character.italic = control.parameter.unwrap_or(1) != 0,
+            "ul" | "aul" => {
                 self.state.character.underline = if control.parameter.unwrap_or(1) == 0 {
                     UnderlineStyle::None
                 } else {
                     UnderlineStyle::Single
                 }
             }
-            "ulnone" => self.state.character.underline = UnderlineStyle::None,
-            "uldb" => {
+            "ulnone" | "aulnone" => self.state.character.underline = UnderlineStyle::None,
+            "uldb" | "auldb" => {
                 self.state.character.underline = if control.parameter.unwrap_or(1) == 0 {
                     UnderlineStyle::None
                 } else {
@@ -2975,7 +2975,7 @@ impl Parser {
                     UnderlineStyle::Thick
                 }
             }
-            "uld" | "ulthd" => {
+            "uld" | "ulthd" | "auld" => {
                 self.state.character.underline = if control.parameter.unwrap_or(1) == 0 {
                     UnderlineStyle::None
                 } else {
@@ -2997,7 +2997,7 @@ impl Parser {
                     UnderlineStyle::Wave
                 }
             }
-            "ulw" => {
+            "ulw" | "aulw" => {
                 self.state.character.underline = if control.parameter.unwrap_or(1) == 0 {
                     UnderlineStyle::None
                 } else {
@@ -3008,7 +3008,7 @@ impl Parser {
                 self.state.character.underline_color_index =
                     Some(control.parameter.unwrap_or(0).max(0) as usize)
             }
-            "strike" | "striked" => {
+            "strike" | "striked" | "astrike" => {
                 let enabled = control.parameter.unwrap_or(1) != 0;
                 self.state.character.strike = enabled;
                 self.state.character.double_strike = false;
@@ -3018,8 +3018,8 @@ impl Parser {
                 self.state.character.strike = enabled;
                 self.state.character.double_strike = enabled;
             }
-            "outl" => self.state.character.outline = control.parameter.unwrap_or(1) != 0,
-            "shad" => self.state.character.shadow = control.parameter.unwrap_or(1) != 0,
+            "outl" | "aoutl" => self.state.character.outline = control.parameter.unwrap_or(1) != 0,
+            "shad" | "ashad" => self.state.character.shadow = control.parameter.unwrap_or(1) != 0,
             "embo" => {
                 self.state.character.relief = if control.parameter.unwrap_or(1) == 0 {
                     TextRelief::None
@@ -3034,8 +3034,10 @@ impl Parser {
                     TextRelief::Engrave
                 };
             }
-            "caps" => self.state.character.all_caps = control.parameter.unwrap_or(1) != 0,
-            "scaps" => self.state.character.small_caps = control.parameter.unwrap_or(1) != 0,
+            "caps" | "acaps" => self.state.character.all_caps = control.parameter.unwrap_or(1) != 0,
+            "scaps" | "ascaps" => {
+                self.state.character.small_caps = control.parameter.unwrap_or(1) != 0
+            }
             "v" | "vanish" | "webhidden" => {
                 self.state.character.hidden = control.parameter.unwrap_or(1) != 0
             }
@@ -3068,10 +3070,26 @@ impl Parser {
                     .min(MAX_BASELINE_SHIFT_HALF_POINTS);
                 self.state.character.font_size_scale_percent = 100;
             }
+            "aup" => {
+                self.state.character.baseline_shift_half_points = control
+                    .parameter
+                    .unwrap_or(6)
+                    .max(0)
+                    .min(MAX_BASELINE_SHIFT_HALF_POINTS);
+                self.state.character.font_size_scale_percent = 100;
+            }
             "dn" => {
                 self.state.character.baseline_shift_half_points = -control
                     .parameter
                     .unwrap_or(0)
+                    .max(0)
+                    .min(MAX_BASELINE_SHIFT_HALF_POINTS);
+                self.state.character.font_size_scale_percent = 100;
+            }
+            "adn" => {
+                self.state.character.baseline_shift_half_points = -control
+                    .parameter
+                    .unwrap_or(6)
                     .max(0)
                     .min(MAX_BASELINE_SHIFT_HALF_POINTS);
                 self.state.character.font_size_scale_percent = 100;
@@ -3084,6 +3102,11 @@ impl Parser {
             "expndtw" => {
                 self.state.character.character_spacing_twips =
                     self.clamp_character_spacing(control.parameter.unwrap_or(0), offset);
+            }
+            "aexpnd" => {
+                let quarter_points = control.parameter.unwrap_or(0);
+                self.state.character.character_spacing_twips =
+                    self.clamp_character_spacing(quarter_points.saturating_mul(5), offset);
             }
             "kerning" => {
                 self.state.character.character_kerning_half_points =
@@ -3147,7 +3170,7 @@ impl Parser {
                 self.state.list_level_index = control.parameter.unwrap_or(0).clamp(0, 8) as usize;
             }
             "f" | "af" => self.state.character.font_index = control.parameter.unwrap_or(0),
-            "cf" => {
+            "cf" | "acf" => {
                 self.state.character.color_index = control.parameter.unwrap_or(0).max(0) as usize
             }
             "highlight" | "cb" | "chcbpat" => {

@@ -10117,6 +10117,79 @@ fn associated_font_checkbox_glyphs_render_passively_without_font_payload_leakage
 }
 
 #[test]
+fn associated_character_properties_render_passively_without_control_leakage() {
+    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}\loch\ab\ai\acf1\aul\aexpnd4\aup6 Associated styled{\object\objdata 414243}\par Plain\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Associated styled"));
+    assert!(text.contains("Plain"));
+    let paragraph = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .expect("paragraph");
+    let styled = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.contains("Associated styled"))
+        .expect("associated styled run");
+    assert!(styled.style.bold);
+    assert!(styled.style.italic);
+    assert_eq!(styled.style.color_index, 1);
+    assert_eq!(styled.style.underline, UnderlineStyle::Single);
+    assert_eq!(styled.style.character_spacing_twips, 20);
+    assert_eq!(styled.style.baseline_shift_half_points, 6);
+    for forbidden in ["acf1", "aul", "aexpnd4", "aup6", "objdata", "414243"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden associated character content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let bold_italic_bytes = pdf_text_bytes_for_font(&content, b"F4");
+    assert!(
+        String::from_utf8_lossy(&bold_italic_bytes).contains("Associated styled"),
+        "associated bold/italic text should use passive Helvetica-BoldOblique bytes, got {bold_italic_bytes:?}"
+    );
+    for forbidden in [
+        b"acf1".as_slice(),
+        b"aul",
+        b"aexpnd4",
+        b"aup6",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden associated character content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wingdings2_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings 2;}}\f1 O P Q R S T\par {\field{\*\fldinst SYMBOL 82 \\f "Wingdings 2"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
