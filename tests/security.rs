@@ -420,6 +420,145 @@ fn preferred_row_widths_fill_missing_table_geometry_without_control_leakage() {
 }
 
 #[test]
+fn floating_table_positioning_controls_warn_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw7200",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "trowd",
+        "\\",
+        "trleft360",
+        "\\",
+        "trgaph108",
+        "\\",
+        "trftsWidth3",
+        "\\",
+        "trwWidth3600",
+        "\\",
+        "tabsnoovrlp",
+        "\\",
+        "tdfrmtxtLeft180",
+        "\\",
+        "tdfrmtxtRight180",
+        "\\",
+        "tdfrmtxtTop120",
+        "\\",
+        "tdfrmtxtBottom120",
+        "\\",
+        "tphmrg",
+        "\\",
+        "tposx720",
+        "\\",
+        "tpvmrg",
+        "\\",
+        "tposy360",
+        "\\",
+        "clftsWidth3",
+        "\\",
+        "clwWidth1800 Positioned left",
+        "\\",
+        "cell",
+        "\\",
+        "clFitText",
+        "\\",
+        "clftsWidth3",
+        "\\",
+        "clwWidth1800 Positioned right",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "\\",
+        "pard After table",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Positioned left"));
+    assert!(text.contains("Positioned right"));
+    assert!(text.contains("After table"));
+    for forbidden in [
+        "tabsnoovrlp",
+        "tdfrmtxtLeft",
+        "tdfrmtxtRight",
+        "tdfrmtxtTop",
+        "tdfrmtxtBottom",
+        "tphmrg",
+        "tposx",
+        "tpvmrg",
+        "tposy",
+        "clFitText",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "floating table control leaked to normalized text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "floating table controls should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating table positioning approximated by passive table flow")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table cell fit-text approximated by passive cell text layout")
+    }));
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Positioned left"));
+    assert!(rendered_text.contains("Positioned right"));
+    assert!(rendered_text.contains("After table"));
+    for forbidden in [
+        b"tabsnoovrlp".as_slice(),
+        b"tdfrmtxtLeft",
+        b"tdfrmtxtRight",
+        b"tdfrmtxtTop",
+        b"tdfrmtxtBottom",
+        b"tphmrg",
+        b"tposx",
+        b"tpvmrg",
+        b"tposy",
+        b"clFitText",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden floating table content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shading_patterns_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

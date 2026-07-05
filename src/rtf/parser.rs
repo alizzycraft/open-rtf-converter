@@ -2705,6 +2705,10 @@ impl Parser {
             "trpaddr" => self.set_current_table_row_padding_right(control.parameter, offset),
             "trpaddt" => self.set_current_table_row_padding_top(control.parameter, offset),
             "trpaddb" => self.set_current_table_row_padding_bottom(control.parameter, offset),
+            name if let Some(message) = table_layout_compatibility_control_message(name) => {
+                self.diagnostics
+                    .push(Diagnostic::warning(message, Some(offset)));
+            }
             "trcbpat" | "trcfpat" => {
                 self.set_current_table_row_shading(control.parameter.unwrap_or(0).max(0) as usize)
             }
@@ -2731,6 +2735,10 @@ impl Parser {
             "clNoWrap" | "clnowrap" => {
                 self.set_current_cell_no_wrap(control.parameter.unwrap_or(1) != 0)
             }
+            "clFitText" | "clfittext" => self.diagnostics.push(Diagnostic::warning(
+                "table cell fit-text approximated by passive cell text layout",
+                Some(offset),
+            )),
             "cltxlrtb" => {
                 self.set_current_cell_text_direction(TableCellTextDirection::LeftToRightTopToBottom)
             }
@@ -9269,6 +9277,18 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
         "lytexcttp" | "lytprtmet" | "noextrasprl" | "notcvasp" | "notvatxbx" | "expshrtn"
         | "useltbaln" | "htmautsp" => {
             Some("Word typography compatibility option approximated by passive layout")
+        }
+        _ => None,
+    }
+}
+
+fn table_layout_compatibility_control_message(name: &str) -> Option<&'static str> {
+    match name {
+        "tabsnoovrlp" | "tdfrmtxtLeft" | "tdfrmtxtRight" | "tdfrmtxtTop" | "tdfrmtxtBottom"
+        | "tphcol" | "tphmrg" | "tphpg" | "tpvmrg" | "tpvpara" | "tpvpg" | "tposx" | "tposnegx"
+        | "tposxc" | "tposxi" | "tposxl" | "tposxo" | "tposxr" | "tposy" | "tposnegy"
+        | "tposyb" | "tposyc" | "tposyil" | "tposyin" | "tposyout" | "tposyt" => {
+            Some("floating table positioning approximated by passive table flow")
         }
         _ => None,
     }
