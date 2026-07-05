@@ -1369,6 +1369,32 @@ impl Parser {
             {
                 self.set_current_list_level_font_size(control.parameter.unwrap_or(24), offset);
             }
+            "ulc"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_underline_color(control.parameter.unwrap_or(0));
+            }
+            "cf" if self.state.destination == Destination::ListTable
+                && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_color(control.parameter.unwrap_or(0));
+            }
+            "highlight" | "cb" | "chcbpat"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_highlight(control.parameter.unwrap_or(0));
+            }
+            "chshdng"
+                if self.state.destination == Destination::ListTable
+                    && self.state.list_context == ListContext::ListLevel =>
+            {
+                self.set_current_list_level_highlight_shading(
+                    control.parameter.unwrap_or(10_000),
+                    offset,
+                );
+            }
             "listid" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_id(control.parameter.unwrap_or(0));
             }
@@ -6948,6 +6974,36 @@ impl Parser {
         });
     }
 
+    fn set_current_list_level_underline_color(&mut self, color_index: i32) {
+        self.update_current_list_level_character_style(|style| {
+            style.underline_color_index = Some(color_index.max(0) as usize)
+        });
+    }
+
+    fn set_current_list_level_color(&mut self, color_index: i32) {
+        self.update_current_list_level_character_style(|style| {
+            style.color_index = color_index.max(0) as usize
+        });
+    }
+
+    fn set_current_list_level_highlight(&mut self, color_index: i32) {
+        self.update_current_list_level_character_style(|style| {
+            let color_index = color_index.max(0) as usize;
+            style.highlight_index = if color_index == 0 {
+                None
+            } else {
+                Some(color_index)
+            };
+        });
+    }
+
+    fn set_current_list_level_highlight_shading(&mut self, basis_points: i32, offset: usize) {
+        let basis_points = self.clamp_character_shading(basis_points, offset);
+        self.update_current_list_level_character_style(|style| {
+            style.highlight_shading_basis_points = basis_points
+        });
+    }
+
     fn clamp_list_level_spacing(&mut self, space_twips: Option<i32>, offset: usize) -> i32 {
         let value = space_twips.unwrap_or(0).max(0);
         let max = self.limits().max_tab_stop_twips.max(0);
@@ -12282,7 +12338,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_marker_character_formatting_to_marker_run() {
         let output = parse_rtf(
-            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\*\listtable{\list{\listlevel\levelnfc0\f1\fs28\b\i\ul\strike\caps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}",
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;\red255\green255\blue0;\red0\green0\blue255;}{\*\listtable{\list{\listlevel\levelnfc0\f1\fs28\b\i\ul\ulc3\strike\caps\cf1\highlight2\chshdng5000{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}",
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -12298,12 +12354,22 @@ After\par}"#;
         assert!(paragraph.runs[0].style.all_caps);
         assert_eq!(paragraph.runs[0].style.font_index, 1);
         assert_eq!(paragraph.runs[0].style.font_size_half_points, 28);
+        assert_eq!(paragraph.runs[0].style.color_index, 1);
+        assert_eq!(paragraph.runs[0].style.highlight_index, Some(2));
+        assert_eq!(
+            paragraph.runs[0].style.highlight_shading_basis_points,
+            5_000
+        );
+        assert_eq!(paragraph.runs[0].style.underline_color_index, Some(3));
         assert_eq!(paragraph.runs[1].text, "Styled item");
         assert!(!paragraph.runs[1].style.bold);
         assert!(!paragraph.runs[1].style.italic);
         assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
         assert!(!paragraph.runs[1].style.strike);
         assert_eq!(paragraph.runs[1].style.font_index, 0);
+        assert_eq!(paragraph.runs[1].style.color_index, 0);
+        assert_eq!(paragraph.runs[1].style.highlight_index, None);
+        assert_eq!(paragraph.runs[1].style.underline_color_index, None);
         assert!(
             output
                 .diagnostics

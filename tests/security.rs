@@ -2101,7 +2101,7 @@ fn list_level_follow_controls_render_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_formatting_renders_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\f1\fs28\b\i\ul\strike\caps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}".to_vec();
+    let input = br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;\red255\green255\blue0;\red0\green0\blue255;}{\*\listtable{\list{\listlevel\levelnfc0\f1\fs28\b\i\ul\ulc3\strike\caps\cf1\chshdng5000\chcbpat2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -2116,9 +2116,19 @@ fn list_level_marker_formatting_renders_passively_without_control_leakage() {
     assert!(paragraph.runs[0].style.all_caps);
     assert_eq!(paragraph.runs[0].style.font_index, 1);
     assert_eq!(paragraph.runs[0].style.font_size_half_points, 28);
+    assert_eq!(paragraph.runs[0].style.color_index, 1);
+    assert_eq!(paragraph.runs[0].style.highlight_index, Some(2));
+    assert_eq!(
+        paragraph.runs[0].style.highlight_shading_basis_points,
+        5_000
+    );
+    assert_eq!(paragraph.runs[0].style.underline_color_index, Some(3));
     assert_eq!(paragraph.runs[1].text, "Styled item");
     assert!(!paragraph.runs[1].style.bold);
     assert!(!paragraph.runs[1].style.italic);
+    assert_eq!(paragraph.runs[1].style.color_index, 0);
+    assert_eq!(paragraph.runs[1].style.highlight_index, None);
+    assert_eq!(paragraph.runs[1].style.underline_color_index, None);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -2141,6 +2151,9 @@ fn list_level_marker_formatting_renders_passively_without_control_leakage() {
         b"levelnfc".as_slice(),
         b"leveltext",
         b"levelnumbers",
+        b"ulc",
+        b"chcbpat",
+        b"chshdng",
         b"listtable",
         b"listoverridetable",
         b"/JavaScript",
