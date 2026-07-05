@@ -5709,6 +5709,104 @@ fn resultless_if_fields_render_passive_branches_without_instruction_leakage() {
 }
 
 #[test]
+fn resultless_compare_fields_render_bounded_passive_values_without_instruction_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Compare {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst COMPARE 5 > 3}} and {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst COMPARE \"Alpha\" = \"Beta\"}} and {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst COMPARE 3 <= 3 \\\\* ROMAN}} and malformed {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst COMPARE 1 = 1 HIDDEN-TRAIL}}.",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Compare 1 and 0 and I and malformed [Field removed: no passive result]."),
+        "text was {text:?}"
+    );
+    for forbidden in [
+        "COMPARE",
+        "Alpha",
+        "Beta",
+        "HIDDEN-TRAIL",
+        "fldinst",
+        "ROMAN",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden COMPARE field content leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field COMPARE without executing field instruction")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text
+            .contains("Compare 1 and 0 and I and malformed [Field removed: no passive result]."),
+        "decoded PDF text did not contain passive COMPARE values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"COMPARE".as_slice(),
+        b"Alpha",
+        b"Beta",
+        b"HIDDEN-TRAIL",
+        b"fldinst",
+        b"ROMAN",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden COMPARE field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_field_case_switches_render_passively_without_instruction_leakage() {
     let input = rtf(&[
         "{",

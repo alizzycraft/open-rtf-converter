@@ -9932,6 +9932,7 @@ fn passive_field_result(
             form_field: true,
         }),
         "FORMULA" => passive_formula_field_result(instruction),
+        "COMPARE" => passive_compare_field_result(instruction),
         "IF" => passive_if_field_result(instruction),
         "GOTOBUTTON" => passive_gotobutton_field_result(instruction),
         "MACROBUTTON" => passive_macrobutton_field_result(instruction),
@@ -9967,6 +9968,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "BIBLIOGRAPHY" => Some("BIBLIOGRAPHY"),
         "CITATION" => Some("CITATION"),
         "COMMENTS" => Some("COMMENTS"),
+        "COMPARE" => Some("COMPARE"),
         "PAGE" => Some("PAGE"),
         "NUMPAGES" => Some("NUMPAGES"),
         "NUMWORDS" => Some("NUMWORDS"),
@@ -10328,6 +10330,27 @@ fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     }
     Some(PassiveFieldResult {
         text,
+        font_name: None,
+        form_field: false,
+    })
+}
+
+fn passive_compare_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    let rest = field_rest_after_name(instruction)?.trim_start();
+    let (left, rest) = field_if_operand(rest)?;
+    let (operator, rest) = field_if_operator(rest.trim_start())?;
+    let (right, rest) = field_if_operand(rest.trim_start())?;
+    if !field_remainder_contains_only_passive_format_switches(rest.trim_start()) {
+        return None;
+    }
+
+    Some(PassiveFieldResult {
+        text: if field_if_condition_matches(&left, operator, &right) {
+            "1"
+        } else {
+            "0"
+        }
+        .to_string(),
         font_name: None,
         form_field: false,
     })
@@ -15429,6 +15452,58 @@ After\par}"#;
                 .message
                 .contains("rendering passive field IF without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_compare_fields_render_passive_boolean_numbers() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\field{\*\fldinst COMPARE 5 > 3}} and {\field{\*\fldinst COMPARE "Alpha" = "Beta"}} and {\field{\*\fldinst COMPARE 3 <= 3 \\* ROMAN}} After\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before 1 and 0 and I After"),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "COMPARE",
+            "Alpha",
+            "Beta",
+            "fldinst",
+            "ROMAN",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "forbidden COMPARE field content leaked to text: {forbidden}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering passive field COMPARE without executing field instruction")
+        }));
+    }
+
+    #[test]
+    fn malformed_compare_fields_do_not_leak_instruction_tail() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\field{\*\fldinst COMPARE 1 = 1 HIDDEN-TRAIL}} After\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before [Field removed: no passive result] After"),
+            "text was {text:?}"
+        );
+        for forbidden in ["COMPARE", "HIDDEN-TRAIL", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed COMPARE field leaked instruction text: {forbidden}"
+            );
+        }
     }
 
     #[test]
