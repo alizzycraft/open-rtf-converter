@@ -6138,6 +6138,72 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
 }
 
 #[test]
+fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() {
+    let input = br"{\rtf1 Equation {\field{\*\fldinst EQ \f(1,2)}} and escaped {\field{\*\fldinst EQ \\f(alpha,beta)}}\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Equation 1/2 and escaped alpha/beta"),
+        "normalized EQ text was {text:?}"
+    );
+    for forbidden in [
+        "EQ",
+        "fldinst",
+        "\\f",
+        "(1,2)",
+        "(alpha,beta)",
+        "[Field removed",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden EQ field content leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field EQ without executing field instruction")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Equation 1/2 and escaped alpha/beta"),
+        "decoded PDF text did not contain passive EQ values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"EQ".as_slice(),
+        b"fldinst",
+        b"\\f",
+        b"(1,2)",
+        b"(alpha,beta)",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden EQ field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_if_fields_render_passive_branches_without_instruction_leakage() {
     let input = rtf(&[
         "{",
@@ -7514,10 +7580,11 @@ visible after\par}"#
 
     assert!(text.contains("Visible before"));
     assert!(text.contains("visible after"));
+    assert!(text.contains("eq 1/2"));
     assert!(text.contains("go Visible jump"));
     assert_eq!(
         text.matches("[Field removed: no passive result]").count(),
-        7
+        6
     );
     for forbidden in [
         "AUTOTEXT",
@@ -7559,6 +7626,7 @@ visible after\par}"#
 
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("visible after"));
+    assert!(rendered_text.contains("eq 1/2"));
     assert!(rendered_text.contains("go Visible jump"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
     for forbidden in [

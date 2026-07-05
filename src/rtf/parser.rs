@@ -10547,6 +10547,7 @@ fn passive_field_result(
         "FORMULA" => passive_formula_field_result(instruction),
         "COMPARE" => passive_compare_field_result(instruction),
         "IF" => passive_if_field_result(instruction),
+        "EQ" => passive_eq_field_result(instruction),
         "GOTOBUTTON" => passive_gotobutton_field_result(instruction),
         "MACROBUTTON" => passive_macrobutton_field_result(instruction),
         "MERGEFIELD" => passive_mergefield_result(instruction),
@@ -10898,7 +10899,6 @@ fn is_generated_resultless_field(name: &str) -> bool {
             | "BIBLIOGRAPHY"
             | "CITATION"
             | "DISPLAYBARCODE"
-            | "EQ"
             | "INDEX"
             | "MERGEBARCODE"
             | "TOA"
@@ -10962,6 +10962,25 @@ fn passive_formula_field_result(instruction: &str) -> Option<PassiveFieldResult>
     let value = FormulaParser::new(expression).parse()?;
     Some(PassiveFieldResult {
         text: value.to_string(),
+        font_name: None,
+        form_field: false,
+    })
+}
+
+fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    let mut rest = field_rest_after_name(instruction)?.trim_start();
+    if let Some(stripped) = rest.strip_prefix("\\f") {
+        rest = stripped.trim_start();
+    }
+    let (numerator, denominator, remainder) = field_parenthesized_pair(rest)?;
+    if !remainder.trim().is_empty() {
+        return None;
+    }
+    if !is_safe_passive_eq_component(&numerator) || !is_safe_passive_eq_component(&denominator) {
+        return None;
+    }
+    Some(PassiveFieldResult {
+        text: format!("{numerator}/{denominator}"),
         font_name: None,
         form_field: false,
     })
@@ -11176,6 +11195,38 @@ fn field_if_operand(input: &str) -> Option<(String, &str)> {
         return None;
     }
     Some((text, rest))
+}
+
+fn field_parenthesized_pair(input: &str) -> Option<(String, String, &str)> {
+    let input = input.trim_start();
+    let rest = input.strip_prefix('(')?;
+    let mut depth = 0usize;
+    let mut comma_index = None;
+    for (index, ch) in rest.char_indices() {
+        match ch {
+            '(' => depth = depth.checked_add(1)?,
+            ')' if depth == 0 => {
+                let comma_index = comma_index?;
+                let left = rest[..comma_index].trim().to_string();
+                let right = rest[comma_index + 1..index].trim().to_string();
+                return Some((left, right, &rest[index + ch.len_utf8()..]));
+            }
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 && comma_index.is_none() => comma_index = Some(index),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn is_safe_passive_eq_component(text: &str) -> bool {
+    !text.is_empty()
+        && text.chars().count() <= MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
+        && !text.chars().any(|ch| ch.is_control())
+        && !contains_internal_marker(text)
+        && !text.contains('\\')
+        && !text.contains('{')
+        && !text.contains('}')
 }
 
 fn field_if_operator(input: &str) -> Option<(FieldIfOperator, &str)> {
@@ -15925,13 +15976,13 @@ After\par}"#;
         assert!(text.contains("barcode"));
         assert!(text.contains("display"));
         assert!(text.contains("mergebarcode"));
-        assert!(text.contains("eq"));
+        assert!(text.contains("eq 1/2"));
         assert!(text.contains("embed"));
         assert!(text.contains("go Visible jump"));
         assert!(text.contains("After"));
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
-            7
+            6
         );
         for forbidden in [
             "AUTOTEXT",
@@ -15967,7 +16018,7 @@ After\par}"#;
                 "missing diagnostic for {name}"
             );
         }
-        for name in ["BARCODE", "DISPLAYBARCODE", "MERGEBARCODE", "EQ"] {
+        for name in ["BARCODE", "DISPLAYBARCODE", "MERGEBARCODE"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
                     diagnostic
@@ -15977,6 +16028,11 @@ After\par}"#;
                 "missing diagnostic for {name}"
             );
         }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering passive field EQ without executing field instruction")
+        }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
