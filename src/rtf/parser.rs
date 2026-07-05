@@ -754,6 +754,7 @@ struct Parser {
     document_timestamps: Vec<(DocumentTimestampKind, DocumentTimestamp)>,
     document_edit_minutes: Option<i32>,
     document_revision_number: Option<i32>,
+    field_bookmark_values: Vec<(String, String)>,
     bookmark_captures: Vec<BookmarkCapture>,
     next_bookmark_marker_id: usize,
     styles: Vec<StyleDefinition>,
@@ -862,6 +863,7 @@ impl Parser {
             document_timestamps: Vec::new(),
             document_edit_minutes: None,
             document_revision_number: None,
+            field_bookmark_values: Vec::new(),
             bookmark_captures: Vec::new(),
             next_bookmark_marker_id: 1,
             styles: Vec::new(),
@@ -4928,6 +4930,8 @@ impl Parser {
             self.passive_auto_number_field_result(offset)?
         } else if field_instruction_name(instruction) == Some("LISTNUM") {
             self.passive_list_number_field_result(instruction, offset)?
+        } else if field_instruction_name(instruction) == Some("SET") {
+            self.passive_set_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("REF") {
             self.passive_ref_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("NOTEREF") {
@@ -5060,6 +5064,21 @@ impl Parser {
             font_name: None,
             form_field: false,
         })
+    }
+
+    fn passive_set_field_result(
+        &mut self,
+        instruction: &str,
+        offset: usize,
+    ) -> Result<Option<PassiveFieldResult>, ParseError> {
+        if let Some((name, value)) = field_set_instruction(instruction, offset, self.limits())? {
+            self.set_field_bookmark_value(name, value, offset)?;
+        }
+        Ok(Some(PassiveFieldResult {
+            text: String::new(),
+            font_name: None,
+            form_field: false,
+        }))
     }
 
     fn passive_sequence_field_result(
@@ -5256,12 +5275,51 @@ impl Parser {
 
     fn passive_ref_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
-        let text = self.bookmark_text(&name)?;
+        let text = self
+            .bookmark_text(&name)
+            .or_else(|| self.field_bookmark_value(&name))?;
         Some(PassiveFieldResult {
             text,
             font_name: None,
             form_field: false,
         })
+    }
+
+    fn field_bookmark_value(&self, name: &str) -> Option<String> {
+        let name = clean_bookmark_name(name.to_string())?;
+        self.field_bookmark_values
+            .iter()
+            .rev()
+            .find_map(|(stored_name, text)| {
+                stored_name
+                    .eq_ignore_ascii_case(&name)
+                    .then(|| text.clone())
+            })
+    }
+
+    fn set_field_bookmark_value(
+        &mut self,
+        name: String,
+        value: String,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some((_, stored_value)) = self
+            .field_bookmark_values
+            .iter_mut()
+            .find(|(stored_name, _)| stored_name.eq_ignore_ascii_case(&name))
+        {
+            *stored_value = value;
+            return Ok(());
+        }
+
+        if self.field_bookmark_values.len() >= self.limits().max_styles {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "field bookmark values".to_string(),
+                offset,
+            });
+        }
+        self.field_bookmark_values.push((name, value));
+        Ok(())
     }
 
     fn passive_page_ref_field_result(
@@ -9594,6 +9652,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "SECTION" => Some("SECTION"),
         "SECTIONPAGES" => Some("SECTIONPAGES"),
         "SEQ" => Some("SEQ"),
+        "SET" => Some("SET"),
         "TA" => Some("TA"),
         "TC" => Some("TC"),
         "CREATEDATE" => Some("CREATEDATE"),
@@ -9679,6 +9738,25 @@ fn clean_document_property_text(
     if text.chars().count() > limits.max_text_run_len {
         return Err(ParseError::ResourceLimitExceeded {
             resource: "document property text".to_string(),
+            offset,
+        });
+    }
+    Ok(Some(text))
+}
+
+fn clean_field_bookmark_value(
+    text: &str,
+    offset: usize,
+    limits: &RtfLimits,
+) -> Result<Option<String>, ParseError> {
+    let text = text.trim().to_string();
+    if text.is_empty() || text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&text)
+    {
+        return Ok(None);
+    }
+    if text.chars().count() > limits.max_text_run_len {
+        return Err(ParseError::ResourceLimitExceeded {
+            resource: "field bookmark value".to_string(),
             offset,
         });
     }
@@ -10605,6 +10683,57 @@ fn field_first_argument(instruction: &str) -> Option<String> {
         .find_map(|(index, ch)| (ch.is_whitespace() || ch == '\\').then_some(index))
         .unwrap_or(rest.len());
     Some(rest[..end].trim().to_string())
+}
+
+fn field_set_instruction(
+    instruction: &str,
+    offset: usize,
+    limits: &RtfLimits,
+) -> Result<Option<(String, String)>, ParseError> {
+    let Some(rest) = field_rest_after_name(instruction) else {
+        return Ok(None);
+    };
+    let Some((name, rest)) = field_simple_argument_with_rest(rest) else {
+        return Ok(None);
+    };
+    let Some(name) = clean_bookmark_name(name) else {
+        return Ok(None);
+    };
+    if name.chars().count() > limits.max_text_run_len {
+        return Err(ParseError::ResourceLimitExceeded {
+            resource: "field bookmark name".to_string(),
+            offset,
+        });
+    }
+
+    let Some((value, rest)) = field_simple_argument_with_rest(rest) else {
+        return Ok(None);
+    };
+    if !field_remainder_contains_only_passive_format_switches(rest) {
+        return Ok(None);
+    }
+
+    let Some(value) = clean_field_bookmark_value(&value, offset, limits)? else {
+        return Ok(None);
+    };
+    Ok(Some((name, value)))
+}
+
+fn field_simple_argument_with_rest(input: &str) -> Option<(String, &str)> {
+    let input = input.trim_start();
+    if input.is_empty() || input.starts_with('\\') {
+        return None;
+    }
+
+    if input.starts_with('"') {
+        return Some((field_quoted_prefix(input)?, skip_field_argument(input)?));
+    }
+
+    let end = input
+        .char_indices()
+        .find_map(|(index, ch)| (ch.is_whitespace() || ch == '\\').then_some(index))
+        .unwrap_or(input.len());
+    (end > 0).then(|| (input[..end].trim().to_string(), &input[end..]))
 }
 
 fn clean_bookmark_name(name: String) -> Option<String> {
@@ -14033,6 +14162,84 @@ mod tests {
                 "NOTEREF field leaked unsafe text: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn resultless_set_fields_feed_passive_ref_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\field{\*\fldinst SET Client "Contoso value"}} copy {\field{\*\fldinst REF Client \\* Upper}} missing {\field{\*\fldinst REF Missing}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before  copy CONTOSO VALUE missing [Field removed: no passive result]"),
+            "text was {text:?}"
+        );
+        for forbidden in ["SET", "REF Client", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "SET/REF field leaked unsafe text: {forbidden}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering passive field SET without executing field instruction")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering passive field REF without executing field instruction")
+        }));
+    }
+
+    #[test]
+    fn resultless_set_fields_strip_complex_values_without_side_effects() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\field{\*\fldinst SET Unsafe "Hidden value" HYPERLINK "https://example.com/payload"}} after {\field{\*\fldinst REF Unsafe}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Before  after [Field removed: no passive result]"));
+        for forbidden in [
+            "Hidden value",
+            "HYPERLINK",
+            "https://example.com",
+            "SET",
+            "REF Unsafe",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "complex SET field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_set_fields_obey_value_count_bounds() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let result = parse_rtf_bytes_with_options(
+            br#"{\rtf1{\field{\*\fldinst SET Client "Contoso"}}\par}"#,
+            &options,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ResourceLimitExceeded { ref resource, .. })
+                    if resource == "field bookmark values"
+            ),
+            "unexpected result: {result:?}"
+        );
     }
 
     #[test]

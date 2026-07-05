@@ -5130,6 +5130,98 @@ fn resultless_ref_fields_render_closed_bookmark_text_without_instruction_leakage
 }
 
 #[test]
+fn resultless_set_fields_feed_refs_without_instruction_or_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Output {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst SET HiddenKey \"Contoso\"}}{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst REF HiddenKey}} reject {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst SET BadKey \"Hidden value\" HYPERLINK \"https://example.com/set\"}}{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst REF BadKey}}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Output Contoso reject [Field removed: no passive result]"));
+    for forbidden in [
+        "SET",
+        "HiddenKey",
+        "BadKey",
+        "Hidden value",
+        "HYPERLINK",
+        "https://example.com/set",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "SET field leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Output Contoso reject [Field removed: no passive result]"),
+        "decoded PDF text did not contain passive SET/REF value: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"SET".as_slice(),
+        b"REF",
+        b"HiddenKey",
+        b"BadKey",
+        b"Hidden value",
+        b"HYPERLINK",
+        b"https://example.com/set",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden SET-field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_noteref_fields_render_bookmarked_note_reference_without_instruction_leakage() {
     let input = rtf(&[
         "{",
