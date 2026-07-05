@@ -511,6 +511,7 @@ struct ListLevelDefinition {
     space_twips: Option<i32>,
     follow: ListLevelFollow,
     legal_numbering: bool,
+    no_restart: bool,
     character_style: CharacterStyle,
     has_character_style: bool,
 }
@@ -525,6 +526,7 @@ impl Default for ListLevelDefinition {
             space_twips: None,
             follow: ListLevelFollow::Tab,
             legal_numbering: false,
+            no_restart: false,
             character_style: CharacterStyle::default(),
             has_character_style: false,
         }
@@ -1320,6 +1322,9 @@ impl Parser {
             }
             "levellegal" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_legal_numbering(control.parameter.unwrap_or(1) != 0);
+            }
+            "levelnorestart" if self.state.destination == Destination::ListTable => {
+                self.set_current_list_level_no_restart(control.parameter.unwrap_or(1) != 0);
             }
             "b" if self.state.destination == Destination::ListTable
                 && self.state.list_context == ListContext::ListLevel =>
@@ -6500,7 +6505,8 @@ impl Parser {
             | ListNumberFormat::DecimalLeadingZero(_)
             | ListNumberFormat::Other => {
                 let start_at = list_level_start_at(&list_override, &level, level_index);
-                let value = self.next_list_counter_value(override_index, level_index, start_at);
+                let value =
+                    self.next_list_counter_value(override_index, level_index, start_at, &list);
                 let marker = format_list_counter(value, level.format);
                 if has_list_level_placeholders(&level.text_template) {
                     PendingListMarker {
@@ -6603,9 +6609,15 @@ impl Parser {
         override_index: i32,
         level_index: usize,
         start_at: i32,
+        list: &ListDefinition,
     ) -> i32 {
         self.list_counters.retain(|counter| {
-            counter.override_index != override_index || counter.level_index <= level_index
+            counter.override_index != override_index
+                || counter.level_index <= level_index
+                || list
+                    .levels
+                    .get(counter.level_index)
+                    .is_some_and(|level| level.no_restart)
         });
 
         if let Some(counter) = self.list_counters.iter_mut().find(|counter| {
@@ -6875,6 +6887,12 @@ impl Parser {
     fn set_current_list_level_legal_numbering(&mut self, enabled: bool) {
         if let Some(level) = self.current_list_level.as_mut() {
             level.legal_numbering = enabled;
+        }
+    }
+
+    fn set_current_list_level_no_restart(&mut self, enabled: bool) {
+        if let Some(level) = self.current_list_level.as_mut() {
+            level.no_restart = enabled;
         }
     }
 
@@ -12363,6 +12381,29 @@ After\par}"#;
 
         assert_eq!(paragraph_text(0), "IV.\tParent");
         assert_eq!(paragraph_text(1), "4.1.\tChild");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn list_level_no_restart_preserves_lower_level_counter_across_parent_items() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}{\listlevel\levelnfc0\levelnorestart1\levelstartat1{\leveltext\'04\'00.\'01.;}{\levelnumbers\'01\'03;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Top\par\pard\ls1\ilvl1 Child\par\pard\ls1\ilvl0 Next top\par\pard\ls1\ilvl1 Continued child\par}",
+        )
+        .unwrap();
+        let paragraph_text = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph.runs[0].text.as_str(),
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph_text(0), "1.\tTop");
+        assert_eq!(paragraph_text(1), "1.1.\tChild");
+        assert_eq!(paragraph_text(2), "2.\tNext top");
+        assert_eq!(paragraph_text(3), "2.2.\tContinued child");
         assert!(
             output
                 .diagnostics
