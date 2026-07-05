@@ -4024,6 +4024,7 @@ impl Parser {
             &self.state.paragraph,
             &style,
         );
+        self.capture_bookmark_text(PENDING_NOTE_REFERENCE_MARKER, offset)?;
         Ok(())
     }
 
@@ -4052,6 +4053,7 @@ impl Parser {
                 &replacement,
             )
         {
+            self.replace_last_pending_note_marker_in_bookmarks(replacement);
             return Ok(());
         }
 
@@ -4081,29 +4083,41 @@ impl Parser {
                 &replacement,
             )
         {
+            self.replace_last_pending_note_marker_in_bookmarks(replacement);
             return Ok(());
         }
 
         for block in self.document.blocks.iter_mut().rev() {
             if replace_last_pending_note_marker_in_block(block, &replacement) {
+                self.replace_last_pending_note_marker_in_bookmarks(replacement);
                 return Ok(());
             }
         }
-        for paragraphs in [
-            &mut self.document.header,
-            &mut self.document.first_page_header,
-            &mut self.document.even_page_header,
-            &mut self.document.footer,
-            &mut self.document.first_page_footer,
-            &mut self.document.even_page_footer,
-            &mut self.document.footnotes,
-            &mut self.document.endnotes,
-        ] {
-            if replace_last_pending_note_marker_in_paragraphs(paragraphs, &replacement) {
-                return Ok(());
+        let replaced_in_saved_paragraphs = {
+            let mut replaced = false;
+            for paragraphs in [
+                &mut self.document.header,
+                &mut self.document.first_page_header,
+                &mut self.document.even_page_header,
+                &mut self.document.footer,
+                &mut self.document.first_page_footer,
+                &mut self.document.even_page_footer,
+                &mut self.document.footnotes,
+                &mut self.document.endnotes,
+            ] {
+                if replace_last_pending_note_marker_in_paragraphs(paragraphs, &replacement) {
+                    replaced = true;
+                    break;
+                }
             }
+            replaced
+        };
+        if replaced_in_saved_paragraphs {
+            self.replace_last_pending_note_marker_in_bookmarks(replacement);
+            return Ok(());
         }
 
+        self.replace_last_pending_note_marker_in_bookmarks(replacement);
         Ok(())
     }
 
@@ -4147,6 +4161,7 @@ impl Parser {
         ] {
             replace_all_pending_note_markers_in_paragraphs(paragraphs, "*");
         }
+        self.replace_all_pending_note_markers_in_bookmarks("*");
     }
 
     fn push_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
@@ -4434,12 +4449,37 @@ impl Parser {
         Ok(())
     }
 
+    fn replace_last_pending_note_marker_in_bookmarks(&mut self, replacement: &str) {
+        for bookmark in self.bookmark_captures.iter_mut().rev() {
+            if bookmark.text.contains(PENDING_NOTE_REFERENCE_MARKER) {
+                bookmark.text =
+                    replace_last_marker(&bookmark.text, PENDING_NOTE_REFERENCE_MARKER, replacement);
+                return;
+            }
+        }
+    }
+
+    fn replace_all_pending_note_markers_in_bookmarks(&mut self, replacement: &str) {
+        for bookmark in &mut self.bookmark_captures {
+            if bookmark.text.contains(PENDING_NOTE_REFERENCE_MARKER) {
+                bookmark.text = bookmark
+                    .text
+                    .replace(PENDING_NOTE_REFERENCE_MARKER, replacement);
+            }
+        }
+    }
+
     fn bookmark_text(&self, name: &str) -> Option<String> {
         let name = clean_bookmark_name(name.to_string())?;
-        self.bookmark_captures
+        let text = self
+            .bookmark_captures
             .iter()
             .find(|bookmark| bookmark.name == name && !bookmark.active && !bookmark.text.is_empty())
-            .map(|bookmark| bookmark.text.clone())
+            .map(|bookmark| bookmark.text.clone())?;
+        if contains_internal_marker(&text) || text.chars().any(|ch| ch.is_control()) {
+            return None;
+        }
+        Some(text)
     }
 
     fn ensure_bookmark_marker_id(
@@ -4889,6 +4929,8 @@ impl Parser {
         } else if field_instruction_name(instruction) == Some("LISTNUM") {
             self.passive_list_number_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("REF") {
+            self.passive_ref_field_result(instruction)
+        } else if field_instruction_name(instruction) == Some("NOTEREF") {
             self.passive_ref_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("PAGEREF") {
             self.passive_page_ref_field_result(instruction, offset)?
@@ -9544,6 +9586,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "NUMWORDS" => Some("NUMWORDS"),
         "NUMCHARS" => Some("NUMCHARS"),
         "NUMCHARSWS" => Some("NUMCHARSWS"),
+        "NOTEREF" => Some("NOTEREF"),
         "PAGEREF" => Some("PAGEREF"),
         "QUOTE" => Some("QUOTE"),
         "REF" => Some("REF"),
@@ -13961,6 +14004,35 @@ mod tests {
         assert!(text.contains("After"));
         assert!(!text.contains("INCLUDEPICTURE"));
         assert!(!text.contains("https://example.com"));
+    }
+
+    #[test]
+    fn resultless_noteref_fields_render_bookmarked_note_reference() {
+        let output = parse_rtf(
+            r#"{\rtf1 Note {\*\bkmkstart NoteRef}\chftn{\*\bkmkend NoteRef}{\footnote Footnote text\par} again {\field{\*\fldinst NOTEREF NoteRef \\* ROMAN}} missing {\field{\*\fldinst NOTEREF Missing}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Note 1 again I missing [Field removed: no passive result]"),
+            "text was {text:?}"
+        );
+        assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
+        for forbidden in [
+            "NOTEREF",
+            "NoteRef",
+            "Missing}",
+            "bkmkstart",
+            "bkmkend",
+            "fldinst",
+            PENDING_NOTE_REFERENCE_MARKER,
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "NOTEREF field leaked unsafe text: {forbidden}"
+            );
+        }
     }
 
     #[test]

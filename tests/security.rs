@@ -5130,6 +5130,135 @@ fn resultless_ref_fields_render_closed_bookmark_text_without_instruction_leakage
 }
 
 #[test]
+fn resultless_noteref_fields_render_bookmarked_note_reference_without_instruction_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Note {",
+        "\\",
+        "*",
+        "\\",
+        "bkmkstart NoteRef}",
+        "\\",
+        "chftn{",
+        "\\",
+        "*",
+        "\\",
+        "bkmkend NoteRef}{",
+        "\\",
+        "footnote Footnote text {",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst HYPERLINK \"https://example.com/hidden\"}}",
+        "\\",
+        "par} again {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst NOTEREF NoteRef \\\\* ROMAN}}.",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst NOTEREF Missing}}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let visible_text = strip_bookmark_page_markers(&text);
+
+    assert!(visible_text.contains("Note 1"), "text was {text:?}");
+    assert!(visible_text.contains("again I."), "text was {text:?}");
+    assert_eq!(
+        text.matches("[Field removed: no passive result]").count(),
+        1
+    );
+    for forbidden in [
+        "NOTEREF",
+        "NoteRef",
+        "bkmkstart",
+        "bkmkend",
+        "fldinst",
+        "HYPERLINK",
+        "https://example.com",
+        "unknown",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden NOTEREF/bookmark content leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field NOTEREF without executing field instruction")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered_text.contains("Note 1"),
+        "decoded PDF text did not contain bookmarked note reference: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("again I."),
+        "decoded PDF text did not contain passive NOTEREF value: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"NOTEREF".as_slice(),
+        b"NoteRef",
+        b"bkmkstart",
+        b"bkmkend",
+        b"fldinst",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Hidden link",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden NOTEREF/bookmark content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_pageref_fields_resolve_bookmark_page_without_instruction_leakage() {
     let input = rtf(&[
         "{",
