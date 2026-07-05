@@ -20412,6 +20412,145 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
 }
 
 #[test]
+fn background_static_shape_renders_passively_without_body_flow_or_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "deff0{",
+        "\\",
+        "background Hidden background text {",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft0",
+        "\\",
+        "shptop0",
+        "\\",
+        "shpright3000",
+        "\\",
+        "shpbottom1200{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn fillColor}{",
+        "\\",
+        "sv 16776960}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-background-payload}}}}}",
+        "Body text",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(parsed.document.background_shapes.len(), 1);
+    assert!(
+        !parsed
+            .document
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Shape(_))),
+        "background shape should not enter body flow"
+    );
+    assert!(text.contains("Body text"));
+    for forbidden in [
+        "background",
+        "Hidden background text",
+        "shpinst",
+        "shapeType",
+        "fillColor",
+        "pFragments",
+        "hostile-background-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "background content leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "background controls should not be unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let fill_index = content
+        .operations
+        .iter()
+        .position(|operation| operation.operator == "f")
+        .expect("background fill should render as passive vector fill");
+    let text_index = content
+        .operations
+        .iter()
+        .position(|operation| operation.operator == "Tj" || operation.operator == "TJ")
+        .expect("body text should render");
+
+    assert!(rendered_text.contains("Body text"));
+    assert!(
+        fill_index < text_index,
+        "background fill should paint before body text"
+    );
+    for forbidden in [
+        b"background".as_slice(),
+        b"Hidden background text",
+        b"shpinst",
+        b"shapeType",
+        b"fillColor",
+        b"pFragments",
+        b"hostile-background-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "background payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn header_static_shape_renders_passively_without_body_flow_or_property_leakage() {
     let input = rtf(&[
         "{",

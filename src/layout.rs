@@ -564,6 +564,7 @@ struct HeaderFooterSet {
     footer_shapes: Vec<StaticShape>,
     first_page_footer_shapes: Vec<StaticShape>,
     even_page_footer_shapes: Vec<StaticShape>,
+    background_shapes: Vec<StaticShape>,
 }
 
 impl HeaderFooterSet {
@@ -587,6 +588,7 @@ impl HeaderFooterSet {
             footer_shapes: document.footer_shapes.clone(),
             first_page_footer_shapes: document.first_page_footer_shapes.clone(),
             even_page_footer_shapes: document.even_page_footer_shapes.clone(),
+            background_shapes: document.background_shapes.clone(),
         }
     }
 
@@ -610,6 +612,7 @@ impl HeaderFooterSet {
             footer_shapes: settings.footer_shapes.clone(),
             first_page_footer_shapes: settings.first_page_footer_shapes.clone(),
             even_page_footer_shapes: settings.even_page_footer_shapes.clone(),
+            background_shapes: settings.background_shapes.clone(),
         }
     }
 }
@@ -934,6 +937,7 @@ impl LayoutEngine {
             false,
             document_stats,
         );
+        layout_background_shapes(&mut pages, &header_footer_sets);
         resolve_bookmark_page_ref_markers(&mut pages);
         resolve_section_page_markers(&mut pages);
         resolve_total_page_markers(&mut pages);
@@ -1708,6 +1712,57 @@ fn layout_page_borders(pages: &mut [LayoutPage], document: &Document) {
             });
         }
     }
+}
+
+fn layout_background_shapes(pages: &mut [LayoutPage], header_footer_sets: &[HeaderFooterSet]) {
+    for (page_idx, page) in pages.iter_mut().enumerate() {
+        let shapes = background_shapes_for_page(header_footer_sets, page.geometry);
+        if shapes.is_empty() {
+            continue;
+        }
+
+        let mut scratch_pages = vec![new_layout_page(page.geometry, page_idx + 1)];
+        let mut cursor_y = page.height;
+        let mut background_geometry = page.geometry;
+        background_geometry.margin_left = 0.0;
+        background_geometry.margin_top = 0.0;
+        background_geometry.margin_bottom = -1_000_000.0;
+        background_geometry.content_width = page.width;
+        background_geometry.column_count = 1;
+        background_geometry.column_lefts = [0.0; MAX_LAYOUT_COLUMNS];
+        background_geometry.column_widths = [page.width; MAX_LAYOUT_COLUMNS];
+        background_geometry.column_gaps = [0.0; MAX_LAYOUT_COLUMNS];
+        let mut background_column = 0usize;
+
+        for shape in shapes {
+            layout_shape(
+                &mut scratch_pages,
+                &mut cursor_y,
+                shape,
+                page.width,
+                0.0,
+                -1_000_000.0,
+                &mut background_geometry,
+                &mut background_column,
+            );
+        }
+
+        let mut items = scratch_pages.remove(0).items;
+        items.append(&mut page.items);
+        page.items = items;
+    }
+}
+
+fn background_shapes_for_page<'a>(
+    header_footer_sets: &'a [HeaderFooterSet],
+    geometry: PageGeometry,
+) -> &'a [StaticShape] {
+    header_footer_sets
+        .get(geometry.header_footer_index)
+        .filter(|set| !set.background_shapes.is_empty())
+        .or_else(|| header_footer_sets.first())
+        .map(|set| set.background_shapes.as_slice())
+        .unwrap_or(&[])
 }
 
 #[allow(clippy::too_many_arguments)]

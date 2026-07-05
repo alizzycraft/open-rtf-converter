@@ -214,6 +214,7 @@ enum Destination {
     Footer,
     FirstPageFooter,
     EvenPageFooter,
+    Background,
     Footnote,
     Endnote,
     ListText,
@@ -1745,6 +1746,9 @@ impl Parser {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
+            "background" if destination_allows_safe_structural_content(&self.state) => {
+                self.state.destination = Destination::Background;
+            }
             "htmltag" | "htmlbase"
                 if control_starts_group
                     && destination_allows_safe_structural_content(&self.state) =>
@@ -2733,6 +2737,7 @@ impl Parser {
                     | Destination::FieldInstruction
                     | Destination::Picture
                     | Destination::Shape
+                    | Destination::Background
                     | Destination::Metadata
                     | Destination::FontTable
                     | Destination::ColorTable
@@ -3622,6 +3627,7 @@ impl Parser {
             Destination::ListTable
             | Destination::ListOverrideTable
             | Destination::Shape
+            | Destination::Background
             | Destination::Ignored
             | Destination::Metadata
             | Destination::ObjectData => {
@@ -3775,6 +3781,7 @@ impl Parser {
             | Destination::ListTable
             | Destination::ListOverrideTable
             | Destination::Shape
+            | Destination::Background
             | Destination::Ignored
             | Destination::Metadata
             | Destination::ObjectData => {
@@ -7633,6 +7640,13 @@ impl Parser {
                     }
                     _ => self.document.footer_shapes.push(shape),
                 }
+            }
+        } else if destination == Destination::Background {
+            if self.has_started_visible_body() {
+                self.current_section_page.background_shapes.push(shape);
+                self.upsert_current_section_settings();
+            } else {
+                self.document.background_shapes.push(shape);
             }
         } else {
             self.document.blocks.push(Block::Shape(shape));

@@ -39,6 +39,7 @@ pub struct Document {
     pub footer_shapes: Vec<StaticShape>,
     pub first_page_footer_shapes: Vec<StaticShape>,
     pub even_page_footer_shapes: Vec<StaticShape>,
+    pub background_shapes: Vec<StaticShape>,
     pub footnotes: Vec<Paragraph>,
     pub endnotes: Vec<Paragraph>,
     pub blocks: Vec<Block>,
@@ -83,6 +84,7 @@ impl Default for Document {
             footer_shapes: Vec::new(),
             first_page_footer_shapes: Vec::new(),
             even_page_footer_shapes: Vec::new(),
+            background_shapes: Vec::new(),
             footnotes: Vec::new(),
             endnotes: Vec::new(),
             blocks: vec![Block::Paragraph(Paragraph::default())],
@@ -137,6 +139,7 @@ pub struct PageSettings {
     pub footer_shapes: Vec<StaticShape>,
     pub first_page_footer_shapes: Vec<StaticShape>,
     pub even_page_footer_shapes: Vec<StaticShape>,
+    pub background_shapes: Vec<StaticShape>,
 }
 
 impl Default for PageSettings {
@@ -187,6 +190,7 @@ impl Default for PageSettings {
             footer_shapes: Vec::new(),
             first_page_footer_shapes: Vec::new(),
             even_page_footer_shapes: Vec::new(),
+            background_shapes: Vec::new(),
         }
     }
 }
