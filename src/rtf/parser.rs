@@ -3201,6 +3201,10 @@ impl Parser {
             "sftnbj" => self.set_footnote_placement(FootnotePlacement::BottomOfPage, offset),
             "aenddoc" => self.set_endnote_placement(EndnotePlacement::EndOfDocument, offset),
             "endnhere" => self.set_endnote_placement(EndnotePlacement::EndOfSection, offset),
+            name if let Some(message) = note_restart_control_message(name) => {
+                self.diagnostics
+                    .push(Diagnostic::warning(message, Some(offset)));
+            }
             "fet" => self.diagnostics.push(Diagnostic::warning(
                 "note placement control approximated by passive note layout",
                 Some(offset),
@@ -9297,6 +9301,18 @@ fn table_layout_compatibility_control_message(name: &str) -> Option<&'static str
         | "tposxc" | "tposxi" | "tposxl" | "tposxo" | "tposxr" | "tposy" | "tposnegy"
         | "tposyb" | "tposyc" | "tposyil" | "tposyin" | "tposyout" | "tposyt" => {
             Some("floating table positioning approximated by passive table flow")
+        }
+        _ => None,
+    }
+}
+
+fn note_restart_control_message(name: &str) -> Option<&'static str> {
+    match name {
+        "ftnrestart" | "ftnrstpg" | "ftnrstcont" => {
+            Some("footnote restart behavior approximated by passive sequential numbering")
+        }
+        "aftnrestart" | "aftnrstpg" | "aftnrstcont" => {
+            Some("endnote restart behavior approximated by passive sequential numbering")
         }
         _ => None,
     }

@@ -19084,6 +19084,160 @@ fn note_numbering_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn note_restart_controls_warn_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ftnrestart",
+        "\\",
+        "ftnrstpg",
+        "\\",
+        "ftnrstcont",
+        "\\",
+        "ftnstart4",
+        "\\",
+        "ftnnruc",
+        "\\",
+        "aenddoc",
+        "\\",
+        "aftnrestart",
+        "\\",
+        "aftnrstpg",
+        "\\",
+        "aftnrstcont",
+        "\\",
+        "aftnstart2",
+        "\\",
+        "aftnnalc Body",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn First footnote",
+        "\\",
+        "par} Middle",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn Second footnote",
+        "\\",
+        "par} End",
+        "\\",
+        "chftn{",
+        "\\",
+        "endnote ",
+        "\\",
+        "chftn Endnote text",
+        "\\",
+        "par}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("BodyIV MiddleV Endb"), "text: {text:?}");
+    assert!(text.contains("First footnote"));
+    assert!(text.contains("Second footnote"));
+    assert!(text.contains("Endnote text"));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "note restart controls should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("footnote restart behavior approximated by passive sequential numbering")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("endnote restart behavior approximated by passive sequential numbering")
+    }));
+    for forbidden in [
+        "ftnrestart",
+        "ftnrstpg",
+        "ftnrstcont",
+        "aftnrestart",
+        "aftnrstpg",
+        "aftnrstcont",
+        "ftnstart",
+        "aftnstart",
+        "chftn",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "note restart control leaked into text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered_text.contains("BodyIV MiddleV Endb"),
+        "rendered text: {rendered_text:?}"
+    );
+    assert!(rendered_text.contains("IV. First footnote"));
+    assert!(rendered_text.contains("V. Second footnote"));
+    assert!(
+        rendered_text.contains("b. Endnote text"),
+        "rendered text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"ftnrestart".as_slice(),
+        b"ftnrstpg",
+        b"ftnrstcont",
+        b"aftnrestart",
+        b"aftnrstpg",
+        b"aftnrstcont",
+        b"ftnstart",
+        b"aftnstart",
+        b"chftn",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "note restart content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unknown_ignorable_destinations_are_skipped_even_when_they_contain_objects() {
     let input = rtf(&[
         "{",
