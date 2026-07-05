@@ -11257,6 +11257,115 @@ fn word_stylesheet_metadata_controls_do_not_warn_or_leak_to_pdf() {
 }
 
 #[test]
+fn latent_styles_metadata_does_not_warn_or_leak_payloads() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "stylesheet{",
+        "\\",
+        "s0 Normal;}}{",
+        "\\",
+        "latentstyles",
+        "\\",
+        "lsdstimax376",
+        "\\",
+        "lsdlockeddef0",
+        "\\",
+        "lsdpriority99",
+        "\\",
+        "lsdqformat1",
+        "\\",
+        "lsdunhideused1{",
+        "\\",
+        "lsdsemihiddendef1 Hidden latent style metadata}{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}Visible",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible"));
+    for forbidden in [
+        "latentstyles",
+        "lsdstimax",
+        "lsdlockeddef",
+        "lsdpriority",
+        "lsdqformat",
+        "lsdunhideused",
+        "lsdsemihiddendef",
+        "Hidden latent style metadata",
+        "objdata",
+        "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "latent styles metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| {
+            !diagnostic.message.contains("unsupported RTF control")
+                && !diagnostic.message.contains("unknown RTF destination")
+        }),
+        "latent styles metadata should be classified, got {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible"));
+    for forbidden in [
+        b"latentstyles".as_slice(),
+        b"lsdstimax",
+        b"lsdlockeddef",
+        b"lsdpriority",
+        b"lsdqformat",
+        b"lsdunhideused",
+        b"lsdsemihiddendef",
+        b"Hidden latent style metadata",
+        b"objdata",
+        b"414243",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "latent styles metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_text_renders_passively_without_math_control_leakage() {
     let input = rtf(&[
         "{",

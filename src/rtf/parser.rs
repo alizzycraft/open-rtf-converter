@@ -1689,6 +1689,10 @@ impl Parser {
             "stylesheet" if destination_allows_safe_structural_content(&self.state) => {
                 self.state.destination = Destination::StyleSheet
             }
+            "latentstyles" if destination_allows_safe_structural_content(&self.state) => {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
             "htmltag" | "htmlbase"
                 if control_starts_group
                     && destination_allows_safe_structural_content(&self.state) =>
@@ -9228,6 +9232,13 @@ fn is_stylesheet_metadata_control(name: &str) -> bool {
             | "ssemihidden"
             | "sunhideused"
             | "styrsid"
+            | "lsdlockeddef"
+            | "lsdlockedexcept"
+            | "lsdpriority"
+            | "lsdqformat"
+            | "lsdsemihiddendef"
+            | "lsdstimax"
+            | "lsdunhideused"
     )
 }
 
@@ -9602,6 +9613,7 @@ fn is_metadata_destination(name: &str) -> bool {
             | "revtbl"
             | "rsidtbl"
             | "xmlnstbl"
+            | "latentstyles"
             | "themedata"
             | "colorschememapping"
             | "datastore"
