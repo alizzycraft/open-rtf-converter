@@ -553,12 +553,14 @@ struct ListCounter {
     value: i32,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 struct OldStyleListMarker {
     format: ListNumberFormat,
     start_at: i32,
     indent_twips: Option<i32>,
     hanging: bool,
+    character_style: CharacterStyle,
+    has_character_style: bool,
 }
 
 impl Default for OldStyleListMarker {
@@ -568,8 +570,16 @@ impl Default for OldStyleListMarker {
             start_at: 1,
             indent_twips: None,
             hanging: false,
+            character_style: CharacterStyle::default(),
+            has_character_style: false,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct PendingListMarker {
+    text: String,
+    character_style: Option<CharacterStyle>,
 }
 
 #[derive(Debug, Clone)]
@@ -1554,6 +1564,27 @@ impl Parser {
             }
             "pnstart" if destination_allows_safe_structural_content(&self.state) => {
                 self.set_old_style_list_marker_start(control.parameter.unwrap_or(1));
+            }
+            "pnb" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_bold(control.parameter.unwrap_or(1) != 0);
+            }
+            "pni" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_italic(control.parameter.unwrap_or(1) != 0);
+            }
+            "pnul" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_underline(control.parameter.unwrap_or(1) != 0);
+            }
+            "pnstrike" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_strike(control.parameter.unwrap_or(1) != 0);
+            }
+            "pncaps" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_caps(control.parameter.unwrap_or(1) != 0);
+            }
+            "pnf" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_font(control.parameter.unwrap_or(0));
+            }
+            "pnfs" if destination_allows_safe_structural_content(&self.state) => {
+                self.set_old_style_list_marker_font_size(control.parameter.unwrap_or(24), offset);
             }
             "pnindent" if destination_allows_safe_structural_content(&self.state) => {
                 self.set_old_style_list_marker_indent(control.parameter, offset);
@@ -3541,9 +3572,19 @@ impl Parser {
             self.count_skipped_destination_bytes(text.len(), offset)?;
             return Ok(());
         }
+        let pending_marker = self.take_pending_or_synthesized_list_marker();
+        let styled_marker = pending_marker.as_ref().and_then(|marker| {
+            marker
+                .character_style
+                .clone()
+                .map(|style| (marker.text.clone(), style))
+        });
         let synthesized_text;
-        let text = if let Some(marker) = self.take_pending_or_synthesized_list_marker() {
-            synthesized_text = format!("{marker}{text}");
+        let text = if let Some(marker) = pending_marker
+            .as_ref()
+            .filter(|marker| marker.character_style.is_none())
+        {
+            synthesized_text = format!("{}{text}", marker.text);
             synthesized_text.as_str()
         } else {
             text
@@ -3567,12 +3608,22 @@ impl Parser {
             text
         };
 
+        let styled_marker_chars = styled_marker
+            .as_ref()
+            .map(|(marker_text, _)| marker_text.chars().count())
+            .unwrap_or(0);
+        let output_text_chars = styled_marker_chars
+            .checked_add(text.chars().count())
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
         self.output_text_chars = self
             .output_text_chars
-            .checked_add(text.chars().count())
+            .checked_add(output_text_chars)
             .ok_or(ParseError::OutputTextTooLarge(offset))?;
         if self.output_text_chars > self.limits().max_output_text_chars {
             return Err(ParseError::OutputTextTooLarge(offset));
+        }
+        if let Some((marker_text, _)) = styled_marker.as_ref() {
+            self.capture_bookmark_text(marker_text, offset)?;
         }
         self.capture_bookmark_text(text, offset)?;
 
@@ -3599,6 +3650,9 @@ impl Parser {
             &mut self.current_paragraph
         };
 
+        if let Some((marker_text, marker_style)) = styled_marker.as_ref() {
+            push_text_to_paragraph(paragraph, marker_text, &self.state.paragraph, marker_style);
+        }
         push_text_to_paragraph(
             paragraph,
             text,
@@ -6266,7 +6320,7 @@ impl Parser {
         Ok(())
     }
 
-    fn take_pending_or_synthesized_list_marker(&mut self) -> Option<String> {
+    fn take_pending_or_synthesized_list_marker(&mut self) -> Option<PendingListMarker> {
         if self.state.destination != Destination::Body || !self.current_output_paragraph_is_empty()
         {
             return None;
@@ -6274,7 +6328,10 @@ impl Parser {
 
         if !self.pending_list_marker.is_empty() {
             self.pending_old_style_list_marker = None;
-            return Some(std::mem::take(&mut self.pending_list_marker));
+            return Some(PendingListMarker {
+                text: std::mem::take(&mut self.pending_list_marker),
+                character_style: None,
+            });
         }
 
         if let Some(marker) = self.take_old_style_list_marker() {
@@ -6297,7 +6354,7 @@ impl Parser {
         &mut self,
         override_index: i32,
         level_index: usize,
-    ) -> Option<String> {
+    ) -> Option<PendingListMarker> {
         let list_override = self
             .list_overrides
             .iter()
@@ -6317,7 +6374,10 @@ impl Parser {
                 } else {
                     level.text_template.replace('\0', "")
                 };
-                Some(format!("{bullet}\t"))
+                Some(PendingListMarker {
+                    text: format!("{bullet}\t"),
+                    character_style: None,
+                })
             }
             ListNumberFormat::Decimal
             | ListNumberFormat::UpperRoman
@@ -6331,19 +6391,25 @@ impl Parser {
                 let value = self.next_list_counter_value(override_index, level_index, start_at);
                 let marker = format_list_counter(value, level.format);
                 if has_list_level_placeholders(&level.text_template) {
-                    Some(format!(
-                        "{}\t",
-                        self.render_list_level_template(
-                            &list,
-                            &list_override,
-                            override_index,
-                            level_index,
-                            value,
-                            &marker
-                        )
-                    ))
+                    Some(PendingListMarker {
+                        text: format!(
+                            "{}\t",
+                            self.render_list_level_template(
+                                &list,
+                                &list_override,
+                                override_index,
+                                level_index,
+                                value,
+                                &marker
+                            )
+                        ),
+                        character_style: None,
+                    })
                 } else {
-                    Some(format!("{marker}.\t"))
+                    Some(PendingListMarker {
+                        text: format!("{marker}.\t"),
+                        character_style: None,
+                    })
                 }
             }
         }
@@ -6431,6 +6497,59 @@ impl Parser {
         marker.start_at = start_at.max(0);
     }
 
+    fn update_old_style_list_marker_character_style(
+        &mut self,
+        update: impl FnOnce(&mut CharacterStyle),
+    ) {
+        let marker = self
+            .pending_old_style_list_marker
+            .get_or_insert_with(OldStyleListMarker::default);
+        update(&mut marker.character_style);
+        marker.has_character_style = true;
+    }
+
+    fn set_old_style_list_marker_bold(&mut self, enabled: bool) {
+        self.update_old_style_list_marker_character_style(|style| style.bold = enabled);
+    }
+
+    fn set_old_style_list_marker_italic(&mut self, enabled: bool) {
+        self.update_old_style_list_marker_character_style(|style| style.italic = enabled);
+    }
+
+    fn set_old_style_list_marker_underline(&mut self, enabled: bool) {
+        self.update_old_style_list_marker_character_style(|style| {
+            style.underline = if enabled {
+                UnderlineStyle::Single
+            } else {
+                UnderlineStyle::None
+            };
+        });
+    }
+
+    fn set_old_style_list_marker_strike(&mut self, enabled: bool) {
+        self.update_old_style_list_marker_character_style(|style| {
+            style.strike = enabled;
+            style.double_strike = false;
+        });
+    }
+
+    fn set_old_style_list_marker_caps(&mut self, enabled: bool) {
+        self.update_old_style_list_marker_character_style(|style| style.all_caps = enabled);
+    }
+
+    fn set_old_style_list_marker_font(&mut self, font_index: i32) {
+        self.update_old_style_list_marker_character_style(|style| {
+            style.font_index = font_index.max(0)
+        });
+    }
+
+    fn set_old_style_list_marker_font_size(&mut self, font_size_half_points: i32, offset: usize) {
+        let font_size_half_points = self.clamp_font_size(font_size_half_points, offset);
+        self.update_old_style_list_marker_character_style(|style| {
+            style.font_size_half_points = font_size_half_points
+        });
+    }
+
     fn set_old_style_list_marker_indent(&mut self, indent_twips: Option<i32>, offset: usize) {
         let indent_twips =
             self.clamp_paragraph_indent(indent_twips, "old-style list indent", offset);
@@ -6447,19 +6566,23 @@ impl Parser {
         marker.hanging = hanging;
     }
 
-    fn take_old_style_list_marker(&mut self) -> Option<String> {
+    fn take_old_style_list_marker(&mut self) -> Option<PendingListMarker> {
         let marker = self.pending_old_style_list_marker.take()?;
-        self.apply_old_style_list_marker_indent(marker);
-        match marker.format {
-            ListNumberFormat::Bullet => Some("\u{2022}\t".to_string()),
-            _ => Some(format!(
-                "{}.\t",
-                format_list_counter(marker.start_at, marker.format)
-            )),
-        }
+        self.apply_old_style_list_marker_indent(&marker);
+        let text = match marker.format {
+            ListNumberFormat::Bullet => "\u{2022}\t".to_string(),
+            _ => format!("{}.\t", format_list_counter(marker.start_at, marker.format)),
+        };
+        let character_style = marker
+            .has_character_style
+            .then_some(marker.character_style.clone());
+        Some(PendingListMarker {
+            text,
+            character_style,
+        })
     }
 
-    fn apply_old_style_list_marker_indent(&mut self, marker: OldStyleListMarker) {
+    fn apply_old_style_list_marker_indent(&mut self, marker: &OldStyleListMarker) {
         let Some(indent_twips) = marker.indent_twips else {
             return;
         };
@@ -11685,6 +11808,39 @@ After\par}"#;
         assert_eq!(paragraph.runs[0].text, "2.\tIndented");
         assert_eq!(paragraph.style.left_indent_twips, 720);
         assert_eq!(paragraph.style.first_line_indent_twips, -360);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn applies_old_style_list_marker_character_format_controls_to_marker_run() {
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\pn\pndec\pnb\pni\pnul\pnstrike\pncaps\pnf1\pnfs28}Formatted item\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected old-style list paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert!(paragraph.runs[0].style.bold);
+        assert!(paragraph.runs[0].style.italic);
+        assert_eq!(paragraph.runs[0].style.underline, UnderlineStyle::Single);
+        assert!(paragraph.runs[0].style.strike);
+        assert!(paragraph.runs[0].style.all_caps);
+        assert_eq!(paragraph.runs[0].style.font_index, 1);
+        assert_eq!(paragraph.runs[0].style.font_size_half_points, 28);
+        assert_eq!(paragraph.runs[1].text, "Formatted item");
+        assert!(!paragraph.runs[1].style.bold);
+        assert!(!paragraph.runs[1].style.italic);
+        assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
+        assert!(!paragraph.runs[1].style.strike);
+        assert_eq!(paragraph.runs[1].style.font_index, 0);
         assert!(
             output
                 .diagnostics

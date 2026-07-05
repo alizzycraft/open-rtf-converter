@@ -1793,6 +1793,69 @@ fn old_style_list_indent_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn old_style_list_marker_formatting_renders_passively_without_control_leakage() {
+    let input =
+        br"{\rtf1{\pn\pndec\pnb\pni\pnul\pnstrike\pncaps\pnfs28}Formatted item\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected old-style list paragraph"),
+    };
+
+    assert_eq!(paragraph.runs[0].text, "1.\t");
+    assert!(paragraph.runs[0].style.bold);
+    assert!(paragraph.runs[0].style.italic);
+    assert_eq!(paragraph.runs[0].style.underline, UnderlineStyle::Single);
+    assert!(paragraph.runs[0].style.strike);
+    assert!(paragraph.runs[0].style.all_caps);
+    assert_eq!(paragraph.runs[0].style.font_size_half_points, 28);
+    assert_eq!(paragraph.runs[1].text, "Formatted item");
+    assert!(!paragraph.runs[1].style.bold);
+    assert!(!paragraph.runs[1].style.italic);
+    assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
+    assert!(!paragraph.runs[1].style.strike);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("1.Formatted item"),
+        "decoded PDF text did not contain formatted old-style list marker: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"pnb".as_slice(),
+        b"pni",
+        b"pnul",
+        b"pnstrike",
+        b"pncaps",
+        b"pnfs",
+        b"pndec",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden old-style list marker formatting leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn roman_and_alpha_list_markers_render_as_passive_pdf_text() {
     let input = rtf(&[
         "{",
