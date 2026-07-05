@@ -510,6 +510,7 @@ struct ListLevelDefinition {
     indent_twips: Option<i32>,
     space_twips: Option<i32>,
     follow: ListLevelFollow,
+    legal_numbering: bool,
     character_style: CharacterStyle,
     has_character_style: bool,
 }
@@ -523,6 +524,7 @@ impl Default for ListLevelDefinition {
             indent_twips: None,
             space_twips: None,
             follow: ListLevelFollow::Tab,
+            legal_numbering: false,
             character_style: CharacterStyle::default(),
             has_character_style: false,
         }
@@ -1315,6 +1317,9 @@ impl Parser {
             }
             "levelfollow" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_level_follow(control.parameter.unwrap_or(0));
+            }
+            "levellegal" if self.state.destination == Destination::ListTable => {
+                self.set_current_list_level_legal_numbering(control.parameter.unwrap_or(1) != 0);
             }
             "b" if self.state.destination == Destination::ListTable
                 && self.state.list_context == ListContext::ListLevel =>
@@ -6507,7 +6512,8 @@ impl Parser {
                                 override_index,
                                 level_index,
                                 value,
-                                &marker
+                                &marker,
+                                level.legal_numbering,
                             ),
                             follow
                         ),
@@ -6556,6 +6562,7 @@ impl Parser {
         current_level_index: usize,
         current_value: i32,
         current_marker: &str,
+        legal_numbering: bool,
     ) -> String {
         let mut output = String::new();
         for ch in list.levels[current_level_index].text_template.chars() {
@@ -6578,7 +6585,12 @@ impl Parser {
                             list_level_start_at(list_override, template_level, template_level_index)
                         })
                 };
-                output.push_str(&format_list_counter(value, template_level.format));
+                let format = if legal_numbering && template_level_index < current_level_index {
+                    ListNumberFormat::Decimal
+                } else {
+                    template_level.format
+                };
+                output.push_str(&format_list_counter(value, format));
             } else {
                 output.push(ch);
             }
@@ -6857,6 +6869,12 @@ impl Parser {
                 2 => ListLevelFollow::Nothing,
                 _ => ListLevelFollow::Tab,
             };
+        }
+    }
+
+    fn set_current_list_level_legal_numbering(&mut self, enabled: bool) {
+        if let Some(level) = self.current_list_level.as_mut() {
+            level.legal_numbering = enabled;
         }
     }
 
@@ -12330,6 +12348,27 @@ After\par}"#;
         assert_eq!(paragraph_text(2), "1.2.\tChild two");
         assert_eq!(paragraph_text(3), "2.\tNext top");
         assert_eq!(paragraph_text(4), "2.1.\tNext child");
+    }
+
+    #[test]
+    fn list_level_legal_numbering_renders_parent_placeholders_as_decimal() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc1\levelstartat4{\leveltext\'02\'00.;}{\levelnumbers\'01;}}{\listlevel\levelnfc0\levellegal1\levelstartat1{\leveltext\'04\'00.\'01.;}{\levelnumbers\'01\'03;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Parent\par\pard\ls1\ilvl1 Child\par}",
+        )
+        .unwrap();
+        let paragraph_text = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph.runs[0].text.as_str(),
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph_text(0), "IV.\tParent");
+        assert_eq!(paragraph_text(1), "4.1.\tChild");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
