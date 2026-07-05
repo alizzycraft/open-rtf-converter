@@ -5034,6 +5034,89 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
 }
 
 #[test]
+fn resultless_if_fields_render_passive_branches_without_instruction_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Status {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst IF 5 > 3 \"Greater\" \"Lower\"}} and {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst IF \"Alpha\" = \"Beta\" \"Match\" \"Different\"}}.",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Status Greater and Different."));
+    for forbidden in [
+        "IF",
+        "Alpha",
+        "Beta",
+        "fldinst",
+        "Greater\"",
+        "Lower\"",
+        "[Field removed",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden IF field content leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field IF without executing field instruction")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Status Greater and Different."),
+        "decoded PDF text did not contain passive IF values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"IF".as_slice(),
+        b"Alpha",
+        b"Beta",
+        b"fldinst",
+        b"Greater\"",
+        b"Lower\"",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden IF field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_quote_fields_render_without_executing_field_instruction() {
     let input = rtf(&[
         "{",

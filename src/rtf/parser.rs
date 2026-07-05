@@ -8729,6 +8729,7 @@ fn passive_field_result(
             form_field: true,
         }),
         "FORMULA" => passive_formula_field_result(instruction),
+        "IF" => passive_if_field_result(instruction),
         "MACROBUTTON" => passive_macrobutton_field_result(instruction),
         "MERGEFIELD" => passive_mergefield_result(instruction),
         "QUOTE" => passive_quote_field_result(instruction),
@@ -8773,6 +8774,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "DDE" => Some("DDE"),
         "DDEAUTO" => Some("DDEAUTO"),
         "HYPERLINK" => Some("HYPERLINK"),
+        "IF" => Some("IF"),
         "IMPORT" => Some("IMPORT"),
         "INCLUDEPICTURE" => Some("INCLUDEPICTURE"),
         "INCLUDETEXT" => Some("INCLUDETEXT"),
@@ -8859,6 +8861,35 @@ fn passive_formula_field_result(instruction: &str) -> Option<PassiveFieldResult>
     let value = FormulaParser::new(expression).parse()?;
     Some(PassiveFieldResult {
         text: value.to_string(),
+        font_name: None,
+        form_field: false,
+    })
+}
+
+fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    let rest = field_rest_after_name(instruction)?.trim_start();
+    let (left, rest) = field_if_operand(rest)?;
+    let (operator, rest) = field_if_operator(rest.trim_start())?;
+    let (right, rest) = field_if_operand(rest.trim_start())?;
+    let (true_text, rest) = field_if_result_text(rest.trim_start())?;
+    let (false_text, rest) = field_if_optional_result_text(rest.trim_start())?;
+    if !rest.trim().is_empty() {
+        return None;
+    }
+
+    let text = if field_if_condition_matches(&left, operator, &right) {
+        true_text
+    } else {
+        false_text
+    };
+    if text.chars().count() > 1024
+        || text.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(&text)
+    {
+        return None;
+    }
+    Some(PassiveFieldResult {
+        text,
         font_name: None,
         form_field: false,
     })
@@ -8963,6 +8994,94 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
         font_name: passive_font_name,
         form_field: false,
     })
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FieldIfOperator {
+    Equal,
+    NotEqual,
+    Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
+}
+
+fn field_if_operand(input: &str) -> Option<(String, &str)> {
+    let input = input.trim_start();
+    if input.is_empty() || input.starts_with('\\') {
+        return None;
+    }
+    let (text, rest) = if input.starts_with('"') {
+        (field_quoted_prefix(input)?, skip_field_argument(input)?)
+    } else {
+        let end = input
+            .char_indices()
+            .find_map(|(index, ch)| ch.is_whitespace().then_some(index))
+            .unwrap_or(input.len());
+        (input[..end].to_string(), &input[end..])
+    };
+    let text = text.trim().to_string();
+    if text.is_empty() || text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&text)
+    {
+        return None;
+    }
+    Some((text, rest))
+}
+
+fn field_if_operator(input: &str) -> Option<(FieldIfOperator, &str)> {
+    for (token, operator) in [
+        ("<>", FieldIfOperator::NotEqual),
+        ("<=", FieldIfOperator::LessOrEqual),
+        (">=", FieldIfOperator::GreaterOrEqual),
+        ("=", FieldIfOperator::Equal),
+        ("<", FieldIfOperator::Less),
+        (">", FieldIfOperator::Greater),
+    ] {
+        if let Some(rest) = input.strip_prefix(token) {
+            return Some((operator, rest));
+        }
+    }
+    None
+}
+
+fn field_if_result_text(input: &str) -> Option<(String, &str)> {
+    let input = input.trim_start();
+    if !input.starts_with('"') {
+        return None;
+    }
+    let text = field_quoted_prefix(input)?;
+    let rest = skip_field_argument(input)?;
+    Some((text, rest))
+}
+
+fn field_if_optional_result_text(input: &str) -> Option<(String, &str)> {
+    let input = input.trim_start();
+    if input.is_empty() {
+        return Some((String::new(), input));
+    }
+    field_if_result_text(input)
+}
+
+fn field_if_condition_matches(left: &str, operator: FieldIfOperator, right: &str) -> bool {
+    if let (Ok(left), Ok(right)) = (left.parse::<i64>(), right.parse::<i64>()) {
+        return match operator {
+            FieldIfOperator::Equal => left == right,
+            FieldIfOperator::NotEqual => left != right,
+            FieldIfOperator::Less => left < right,
+            FieldIfOperator::LessOrEqual => left <= right,
+            FieldIfOperator::Greater => left > right,
+            FieldIfOperator::GreaterOrEqual => left >= right,
+        };
+    }
+
+    match operator {
+        FieldIfOperator::Equal => left == right,
+        FieldIfOperator::NotEqual => left != right,
+        FieldIfOperator::Less => left < right,
+        FieldIfOperator::LessOrEqual => left <= right,
+        FieldIfOperator::Greater => left > right,
+        FieldIfOperator::GreaterOrEqual => left >= right,
+    }
 }
 
 fn field_first_quoted_argument(instruction: &str) -> Option<String> {
@@ -12551,6 +12670,28 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("rendering passive field QUOTE without executing field instruction")
+        }));
+    }
+
+    #[test]
+    fn resultless_if_fields_render_passive_literal_branch() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\field{\*\fldinst IF 5 > 3 "Greater" "Lower"}} and {\field{\*\fldinst IF "Alpha" = "Beta" "Match" "Different"}} After\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Before Greater and Different After"));
+        for forbidden in ["IF", "Alpha", "Beta", "fldinst", "[Field removed"] {
+            assert!(
+                !text.contains(forbidden),
+                "forbidden IF field content leaked to text: {forbidden}"
+            );
+        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering passive field IF without executing field instruction")
         }));
     }
 
