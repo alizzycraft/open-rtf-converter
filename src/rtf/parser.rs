@@ -116,6 +116,9 @@ struct ParserState {
     office_math_pending_end_delimiter: String,
     office_math_active_end_delimiter: String,
     office_math_consumed_delimiter: bool,
+    shape_property_capture: Option<ShapePropertyCapture>,
+    shape_property_name: String,
+    shape_property_value: String,
     at_group_start: bool,
 }
 
@@ -188,6 +191,9 @@ impl Default for ParserState {
             office_math_pending_end_delimiter: String::new(),
             office_math_active_end_delimiter: String::new(),
             office_math_consumed_delimiter: false,
+            shape_property_capture: None,
+            shape_property_name: String::new(),
+            shape_property_value: String::new(),
             at_group_start: false,
         }
     }
@@ -233,6 +239,12 @@ enum UnicodeAlternateBranch {
 enum OfficeMathDelimiterCapture {
     Begin,
     End,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum ShapePropertyCapture {
+    Name,
+    Value,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -505,6 +517,8 @@ struct ShapeBuilder {
     fill_color: Option<Color>,
     points: Vec<StaticShapePoint>,
     pending_point_x_twips: Option<i32>,
+    right_twips: Option<i32>,
+    bottom_twips: Option<i32>,
 }
 
 impl Default for ShapeBuilder {
@@ -525,6 +539,8 @@ impl Default for ShapeBuilder {
             fill_color: None,
             points: Vec::new(),
             pending_point_x_twips: None,
+            right_twips: None,
+            bottom_twips: None,
         }
     }
 }
@@ -1163,6 +1179,7 @@ impl Parser {
             if self.state.suppressing_nonshape_picture && !previous.suppressing_nonshape_picture {
                 previous.shape_picture_rendered = false;
             }
+            self.finish_shape_property_group(&mut previous, offset)?;
 
             if self.state.inside_field && previous.inside_field {
                 if self.state.capturing_form_dropdown_entry
@@ -2216,6 +2233,15 @@ impl Parser {
                     ..ShapeBuilder::default()
                 });
             }
+            "shpinst"
+                if self.state.inside_shape
+                    && matches!(
+                        self.state.destination,
+                        Destination::Ignored | Destination::Shape
+                    ) =>
+            {
+                self.state.destination = Destination::Shape;
+            }
             "shptxt" | "shprslt" | "dptxbx"
                 if self.state.inside_shape && destination_allows_visible_content(&self.state) =>
             {
@@ -2230,6 +2256,26 @@ impl Parser {
                     "rendering safe passive shape text/result and stripping shape properties",
                     Some(offset),
                 ));
+            }
+            "sn" if control_starts_group && self.state.destination == Destination::Shape => {
+                self.state.shape_property_capture = Some(ShapePropertyCapture::Name);
+                self.state.shape_property_name.clear();
+            }
+            "sv" if control_starts_group && self.state.destination == Destination::Shape => {
+                self.state.shape_property_capture = Some(ShapePropertyCapture::Value);
+                self.state.shape_property_value.clear();
+            }
+            "shpleft" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_left(control.parameter, offset);
+            }
+            "shptop" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_top(control.parameter, offset);
+            }
+            "shpright" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_right(control.parameter, offset);
+            }
+            "shpbottom" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_bottom(control.parameter, offset);
             }
             "dpline" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_kind(StaticShapeKind::Line);
@@ -2597,6 +2643,9 @@ impl Parser {
             }
             "u" if self.state.office_math_delimiter_capture.is_some() => {
                 self.push_office_math_delimiter_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if self.state.shape_property_capture.is_some() => {
+                self.push_shape_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
             "u" if self.state.capturing_form_default_text => {
                 self.push_form_default_unicode(control.parameter.unwrap_or(0), offset)?
@@ -3502,6 +3551,9 @@ impl Parser {
         if self.state.office_math_delimiter_capture.is_some() {
             return self.push_office_math_delimiter_text(text, offset);
         }
+        if self.state.shape_property_capture.is_some() {
+            return self.push_shape_property_text(text, offset);
+        }
         if self.state.capturing_form_default_text {
             return self.push_form_default_text(text, offset);
         }
@@ -3634,6 +3686,10 @@ impl Parser {
         if self.state.office_math_delimiter_capture.is_some() {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_delimiter_text(&ch.to_string(), offset);
+        }
+        if self.state.shape_property_capture.is_some() {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_shape_property_text(&ch.to_string(), offset);
         }
         if self.state.capturing_form_default_text {
             let ch = self.decode_text_hex_byte(byte);
@@ -4429,6 +4485,43 @@ impl Parser {
         Ok(())
     }
 
+    fn finish_shape_property_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        match self.state.shape_property_capture {
+            Some(capture) if previous.shape_property_capture == Some(capture) => {
+                let text = match capture {
+                    ShapePropertyCapture::Name => &mut previous.shape_property_name,
+                    ShapePropertyCapture::Value => &mut previous.shape_property_value,
+                };
+                let child = match capture {
+                    ShapePropertyCapture::Name => &self.state.shape_property_name,
+                    ShapePropertyCapture::Value => &self.state.shape_property_value,
+                };
+                append_shape_property_text(text, child, self.limits().max_text_run_len, offset)?;
+            }
+            Some(ShapePropertyCapture::Name) => {
+                previous.shape_property_name = self.state.shape_property_name.clone();
+            }
+            Some(ShapePropertyCapture::Value) => {
+                previous.shape_property_value = self.state.shape_property_value.clone();
+            }
+            None => {
+                if self.state.destination == Destination::Shape
+                    && previous.destination == Destination::Shape
+                    && !self.state.shape_property_name.trim().is_empty()
+                {
+                    let name = self.state.shape_property_name.clone();
+                    let value = self.state.shape_property_value.clone();
+                    self.apply_current_shape_property(&name, &value, offset);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn resolve_latest_pending_note_reference(
         &mut self,
         replacement: &str,
@@ -4774,6 +4867,26 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_delimiter_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_shape_property_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        let target = match self.state.shape_property_capture {
+            Some(ShapePropertyCapture::Name) => &mut self.state.shape_property_name,
+            Some(ShapePropertyCapture::Value) => &mut self.state.shape_property_value,
+            None => return Ok(()),
+        };
+        append_shape_property_text(target, text, limit, offset)
+    }
+
+    fn push_shape_property_unicode(&mut self, value: i32, offset: usize) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_shape_property_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
@@ -7556,6 +7669,9 @@ impl Parser {
         let value = self.clamp_shape_offset(value.unwrap_or(0), "shape left", offset);
         if let Some(shape) = self.current_shape.as_mut() {
             shape.left_twips = value;
+            if let Some(right_twips) = shape.right_twips {
+                shape.width_twips = right_twips.saturating_sub(value).max(0);
+            }
         }
     }
 
@@ -7563,6 +7679,25 @@ impl Parser {
         let value = self.clamp_shape_offset(value.unwrap_or(0), "shape top", offset);
         if let Some(shape) = self.current_shape.as_mut() {
             shape.top_twips = value;
+            if let Some(bottom_twips) = shape.bottom_twips {
+                shape.height_twips = bottom_twips.saturating_sub(value).max(0);
+            }
+        }
+    }
+
+    fn set_current_shape_right(&mut self, value: Option<i32>, offset: usize) {
+        let value = self.clamp_shape_offset(value.unwrap_or(0), "shape right", offset);
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.right_twips = Some(value);
+            shape.width_twips = value.saturating_sub(shape.left_twips).max(0);
+        }
+    }
+
+    fn set_current_shape_bottom(&mut self, value: Option<i32>, offset: usize) {
+        let value = self.clamp_shape_offset(value.unwrap_or(0), "shape bottom", offset);
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.bottom_twips = Some(value);
+            shape.height_twips = value.saturating_sub(shape.top_twips).max(0);
         }
     }
 
@@ -7685,6 +7820,67 @@ impl Parser {
                     blue: 255,
                 });
             }
+        }
+    }
+
+    fn apply_current_shape_property(&mut self, name: &str, value: &str, offset: usize) {
+        let name = name.trim();
+        let value = value.trim();
+        match name {
+            "shapeType" => self.apply_current_shape_type_property(value),
+            "fillColor" => {
+                if let Some(color) = parse_office_shape_color(value) {
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.fill_color = Some(color);
+                    }
+                }
+            }
+            "lineColor" => {
+                if let Some(color) = parse_office_shape_color(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.stroke_color = color;
+                }
+            }
+            "lineWidth" => {
+                if let Some(emu) = parse_shape_property_i64(value) {
+                    let twips = ((emu.max(0).saturating_add(317)) / 635).min(i32::MAX as i64);
+                    let width = self.clamp_shape_stroke_width(twips as i32, offset);
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.stroke_width_twips = width;
+                    }
+                }
+            }
+            "fLine" => {
+                if let Some(enabled) = parse_shape_property_i64(value)
+                    && enabled == 0
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.stroke_width_twips = 0;
+                }
+            }
+            "fFilled" => {
+                if let Some(enabled) = parse_shape_property_i64(value)
+                    && enabled == 0
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.fill_color = None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_current_shape_type_property(&mut self, value: &str) {
+        let Some(shape_type) = parse_shape_property_i64(value) else {
+            return;
+        };
+        match shape_type {
+            1 => self.set_current_shape_kind(StaticShapeKind::Rectangle),
+            2 => self.set_current_shape_rounded_rectangle(),
+            9 => self.set_current_shape_kind(StaticShapeKind::Ellipse),
+            20 => self.set_current_shape_kind(StaticShapeKind::Line),
+            _ => {}
         }
     }
 
@@ -10038,6 +10234,40 @@ fn append_office_math_delimiter_text(
     }
     target.push_str(text);
     Ok(())
+}
+
+fn append_shape_property_text(
+    target: &mut String,
+    text: &str,
+    limit: usize,
+    offset: usize,
+) -> Result<(), ParseError> {
+    let new_len = target
+        .chars()
+        .count()
+        .checked_add(text.chars().count())
+        .ok_or(ParseError::OutputTextTooLarge(offset))?;
+    if new_len > limit {
+        return Err(ParseError::ResourceLimitExceeded {
+            resource: "shape property text".to_string(),
+            offset,
+        });
+    }
+    target.push_str(text);
+    Ok(())
+}
+
+fn parse_shape_property_i64(value: &str) -> Option<i64> {
+    value.trim().parse::<i64>().ok()
+}
+
+fn parse_office_shape_color(value: &str) -> Option<Color> {
+    let value = parse_shape_property_i64(value)?.clamp(0, 0x00ff_ffff) as u32;
+    Some(Color {
+        red: (value & 0xff) as u8,
+        green: ((value >> 8) & 0xff) as u8,
+        blue: ((value >> 16) & 0xff) as u8,
+    })
 }
 
 fn merge_child_field_instruction(

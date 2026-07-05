@@ -20169,6 +20169,181 @@ fn old_drawing_static_shapes_render_passively_without_property_leakage() {
 }
 
 #[test]
+fn modern_static_shape_properties_render_passively_without_property_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop720",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1440",
+        "\\",
+        "shpbxpage",
+        "\\",
+        "shpbypage",
+        "\\",
+        "shpwr3",
+        "\\",
+        "shpfblwtxt1{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn fillColor}{",
+        "\\",
+        "sv 65280}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineColor}{",
+        "\\",
+        "sv 255}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineWidth}{",
+        "\\",
+        "sv 12700}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-shape-payload}}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("modern static shape");
+
+    assert_eq!(
+        shape.kind,
+        open_rtf_converter::model::StaticShapeKind::Rectangle
+    );
+    assert_eq!(shape.left_twips, 720);
+    assert_eq!(shape.top_twips, 720);
+    assert_eq!(shape.width_twips, 1440);
+    assert_eq!(shape.height_twips, 720);
+    assert_eq!(shape.stroke_width_twips, 20);
+    assert_eq!(
+        shape.stroke_color,
+        open_rtf_converter::model::Color {
+            red: 255,
+            green: 0,
+            blue: 0,
+        }
+    );
+    assert_eq!(
+        shape.fill_color,
+        Some(open_rtf_converter::model::Color {
+            red: 0,
+            green: 255,
+            blue: 0,
+        })
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "shpinst",
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "lineWidth",
+        "pFragments",
+        "hostile-shape-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden modern shape content leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("modern-static-shape.rtf");
+    let output_path = dir.path().join("modern-static-shape.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let stroke_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "S")
+        .count();
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(stroke_count >= 4);
+    assert!(fill_count >= 1);
+    for forbidden in [
+        b"shpinst".as_slice(),
+        b"shapeType",
+        b"fillColor",
+        b"lineColor",
+        b"lineWidth",
+        b"pFragments",
+        b"hostile-shape-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden modern shape content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn header_static_shape_renders_passively_without_body_flow_or_property_leakage() {
     let input = rtf(&[
         "{",
