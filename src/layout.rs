@@ -185,6 +185,7 @@ struct PageGeometry {
     page_border_includes_header: bool,
     page_border_includes_footer: bool,
     line_numbering: crate::model::LineNumbering,
+    text_line_grid_twips: Option<i32>,
     numbering: PageNumbering,
     section_number: usize,
     title_page: bool,
@@ -251,6 +252,7 @@ impl PageGeometry {
             page_border_includes_header: settings.page_border_includes_header,
             page_border_includes_footer: settings.page_border_includes_footer,
             line_numbering: settings.line_numbering,
+            text_line_grid_twips: settings.text_line_grid_twips,
             numbering,
             section_number: 1,
             title_page: settings.title_page,
@@ -3170,7 +3172,7 @@ fn layout_paragraph(
     *cursor_y -= paragraph_top;
     let mut lines = wrap_paragraph(paragraph, content_width, &markers, document);
     for line in &mut lines {
-        line.height = apply_line_spacing(line.height, &paragraph.style);
+        line.height = apply_line_spacing_with_grid(line.height, &paragraph.style, *geometry);
     }
     let line_count = lines.len();
     for (line_idx, line) in lines.iter().enumerate() {
@@ -4526,6 +4528,21 @@ fn apply_line_spacing(line_height: f32, style: &ParagraphStyle) -> f32 {
     } else {
         line_height.max(spacing_points)
     }
+}
+
+fn apply_line_spacing_with_grid(
+    line_height: f32,
+    style: &ParagraphStyle,
+    geometry: PageGeometry,
+) -> f32 {
+    let spaced = apply_line_spacing(line_height, style);
+    let Some(grid_twips) = geometry.text_line_grid_twips else {
+        return spaced;
+    };
+    if grid_twips <= 0 {
+        return spaced;
+    }
+    spaced.max(twips_to_points(grid_twips))
 }
 
 fn push_bar_tab_stops(
@@ -10914,6 +10931,25 @@ mod tests {
 
         assert_eq!(baselines.len(), 2);
         assert!((baselines[0] - baselines[1] - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn applies_section_line_grid_to_flowed_paragraph_lines() {
+        let mut document = Document::default();
+        document.page.text_line_grid_twips = Some(720);
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: ParagraphStyle::default(),
+            runs: vec![Run {
+                text: "First\nSecond".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let baselines = text_baselines(&layout.pages[0]);
+
+        assert_eq!(baselines.len(), 2);
+        assert!((baselines[0] - baselines[1] - 36.0).abs() < 0.01);
     }
 
     #[test]

@@ -3576,6 +3576,11 @@ impl Parser {
                     control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
+            "sectlinegrid" => self.set_section_line_grid(control.parameter, offset),
+            "sectdefaultcl" => {
+                self.current_section_page.text_line_grid_twips = None;
+                self.upsert_current_section_settings();
+            }
             "titlepg" => {
                 self.current_section_page.title_page = control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
@@ -4112,6 +4117,26 @@ impl Parser {
         self.enable_line_numbering(offset);
         self.current_section_page.line_numbering.restart = restart;
         self.upsert_current_section_settings();
+    }
+
+    fn set_section_line_grid(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0).max(0);
+        if value == 0 {
+            self.current_section_page.text_line_grid_twips = None;
+        } else {
+            self.current_section_page.text_line_grid_twips = Some(self.clamp_page_value(
+                value,
+                1,
+                self.limits().max_line_spacing_twips.max(1),
+                "section line grid",
+                offset,
+            ));
+        }
+        self.upsert_current_section_settings();
+        self.diagnostics.push(Diagnostic::warning(
+            "section line grid applied as bounded passive paragraph line pitch",
+            Some(offset),
+        ));
     }
 
     fn enable_line_numbering(&mut self, offset: usize) {
@@ -10086,7 +10111,7 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
         "pgnx" | "pgny" => {
             Some("page number position approximated by passive header/footer layout")
         }
-        "sectlinegrid" | "sectdefaultcl" | "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
+        "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
             Some("section text grid approximated by passive paragraph layout")
         }
         "lytexcttp" | "lytprtmet" | "noextrasprl" | "notcvasp" | "notvatxbx" | "expshrtn"
@@ -20171,6 +20196,31 @@ After\par}"#;
             vec![1440, 2880, 1440]
         );
         assert_eq!(output.document.page.column_gaps_twips, vec![240, 480]);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_section_line_grid_as_safe_metadata() {
+        let output = parse_rtf(r"{\rtf1\sectd\sectlinegrid480 Body\par}").unwrap();
+
+        assert_eq!(output.document.page.text_line_grid_twips, Some(480));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("section line grid applied as bounded passive paragraph line pitch")
+        }));
+    }
+
+    #[test]
+    fn default_section_text_grid_clears_passive_line_grid() {
+        let output = parse_rtf(r"{\rtf1\sectd\sectlinegrid480\sectdefaultcl Body\par}").unwrap();
+
+        assert_eq!(output.document.page.text_line_grid_twips, None);
         assert!(
             output
                 .diagnostics

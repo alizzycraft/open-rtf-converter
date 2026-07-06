@@ -7799,6 +7799,7 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
+    assert_eq!(parsed.document.page.text_line_grid_twips, None);
     assert!(text.contains("Visible section grid"));
     assert!(text.contains(PAGE_NUMBER_MARKER));
     for forbidden in [
@@ -7827,6 +7828,7 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
     );
     for expected in [
         "page number position approximated by passive header/footer layout",
+        "section line grid applied as bounded passive paragraph line pitch",
         "section text grid approximated by passive paragraph layout",
     ] {
         assert!(
