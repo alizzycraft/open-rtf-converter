@@ -4758,7 +4758,7 @@ fn is_passive_checkbox_text(text: &str) -> bool {
 fn is_passive_symbol_text(text: &str) -> bool {
     let mut has_symbol = false;
     for ch in text.chars() {
-        if is_passive_symbol_fallback_char(ch) {
+        if is_symbol_fallback_required_char(ch) {
             has_symbol = true;
         } else {
             return false;
@@ -4778,7 +4778,7 @@ impl PassiveFontRunKind {
     fn for_char(ch: char) -> Self {
         if is_passive_checkbox_char(ch) {
             Self::Checkbox
-        } else if is_passive_symbol_fallback_char(ch) {
+        } else if is_symbol_fallback_required_char(ch) {
             Self::Symbol
         } else {
             Self::Normal
@@ -4798,6 +4798,14 @@ fn is_passive_checkbox_char(ch: char) -> bool {
             | '\u{2717}'
             | '\u{2751}'
     )
+}
+
+fn is_symbol_fallback_required_char(ch: char) -> bool {
+    is_passive_symbol_fallback_char(ch) && !is_normal_text_preferred_symbol_overlap_char(ch)
+}
+
+fn is_normal_text_preferred_symbol_overlap_char(ch: char) -> bool {
+    matches!(ch, '\u{2026}')
 }
 
 fn is_passive_symbol_fallback_char(ch: char) -> bool {
@@ -9760,6 +9768,39 @@ mod tests {
         assert!(layout.pages[0].items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::Symbol)
         ));
+    }
+
+    #[test]
+    fn keeps_winansi_punctuation_in_normal_text_fonts() {
+        let mut document = Document::default();
+        document.fonts = vec![FontDef {
+            index: 0,
+            name: "Times New Roman".to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Roman,
+            pitch: FontPitch::Default,
+        }];
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "\u{2026}".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert!(layout.pages[0].items.iter().any(
+            |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "\u{2026}" && fragment.font_family == PdfFontFamily::Times)
+        ));
+        assert!(
+            !layout.pages[0]
+                .items
+                .iter()
+                .any(|item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::Symbol))
+        );
     }
 
     #[test]

@@ -10132,6 +10132,60 @@ fn symbol_font_charset_renders_passive_unicode_without_rtf_control_leakage() {
 }
 
 #[test]
+fn winansi_hex_ellipsis_renders_through_normal_text_font() {
+    let input = br"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\froman Times New Roman;}{\f1\fcharset2 Symbol;}}\f0 Normal \'85\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Normal \u{2026}"));
+    for forbidden in ["ansicpg", "fonttbl", "Symbol", "Times New Roman"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden font/codepage metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let times_bytes = pdf_text_bytes_for_font(&content, b"F9");
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+
+    assert!(
+        times_bytes.contains(&0x85),
+        "WinAnsi ellipsis should encode through passive Times byte 0x85, got {times_bytes:?}"
+    );
+    assert!(
+        !symbol_bytes.contains(&0xbc),
+        "normal WinAnsi ellipsis should not be rendered as Symbol byte 0xbc, got {symbol_bytes:?}"
+    );
+    for forbidden in [
+        b"ansicpg".as_slice(),
+        b"fonttbl",
+        b"Times New Roman",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden WinAnsi ellipsis metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn symbol_pntext_bullets_render_as_passive_winansi_without_font_payload_leakage() {
     let input = br"{\rtf1{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}{\pntext\pard\plain\f1 \'b7\tab}\pard\fi-360\li360 Item\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
