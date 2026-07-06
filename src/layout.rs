@@ -4671,6 +4671,9 @@ fn font_family_for_run_text(
     style: &CharacterStyle,
     text: &str,
 ) -> PdfFontFamily {
+    if is_passive_bullet_text(text) {
+        return PdfFontFamily::Helvetica;
+    }
     if is_passive_checkbox_text(text) {
         return PdfFontFamily::ZapfDingbats;
     }
@@ -4679,6 +4682,21 @@ fn font_family_for_run_text(
     }
 
     font_family_for_style(document, style)
+}
+
+fn is_passive_bullet_text(text: &str) -> bool {
+    let mut has_bullet = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        if ch == '\u{2022}' {
+            has_bullet = true;
+        } else {
+            return false;
+        }
+    }
+    has_bullet
 }
 
 fn font_family_for_style(document: &Document, style: &CharacterStyle) -> PdfFontFamily {
@@ -9742,6 +9760,53 @@ mod tests {
         assert!(layout.pages[0].items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::Symbol)
         ));
+    }
+
+    #[test]
+    fn resolves_symbol_bullet_runs_to_passive_sans_fallback() {
+        let mut document = Document::default();
+        document.fonts = vec![
+            FontDef {
+                index: 0,
+                name: "Helvetica".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Default,
+            },
+            FontDef {
+                index: 1,
+                name: "Symbol".to_string(),
+                alternate_name: None,
+                charset: Some(2),
+                code_page: None,
+                family: FontFamilyHint::Tech,
+                pitch: FontPitch::Default,
+            },
+        ];
+        let mut style = CharacterStyle::default();
+        style.font_index = 1;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "\u{2022}\t".to_string(),
+                style,
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert!(layout.pages[0].items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Text(fragment)
+                if fragment.text == "\u{2022}" && fragment.font_family == PdfFontFamily::Helvetica
+        )));
+        assert!(!layout.pages[0].items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Text(fragment)
+                if fragment.text == "\u{2022}" && fragment.font_family == PdfFontFamily::Symbol
+        )));
     }
 
     #[test]

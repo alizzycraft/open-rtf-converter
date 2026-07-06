@@ -3279,7 +3279,8 @@ endobj
             pdf.windows(b"/BaseFont /Symbol".len())
                 .any(|window| window == b"/BaseFont /Symbol")
         );
-        assert_eq!(content_bytes(&content), b"ab \xb7");
+        assert_eq!(content_bytes_for_font(&content, b"F13"), b"ab ");
+        assert_eq!(content_bytes_for_font(&content, b"F1"), b"\x95");
     }
 
     #[test]
@@ -3566,6 +3567,36 @@ endobj
                     }
                 }
             } else if operation.operator == "TJ" {
+                for operand in &operation.operands {
+                    if let Ok(items) = operand.as_array() {
+                        for item in items {
+                            if let Ok(bytes) = item.as_str() {
+                                text.extend_from_slice(bytes);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        text
+    }
+
+    fn content_bytes_for_font(content: &lopdf::content::Content, font_name: &[u8]) -> Vec<u8> {
+        let mut current_font: Option<Vec<u8>> = None;
+        let mut text = Vec::new();
+        for operation in &content.operations {
+            if operation.operator == "Tf" {
+                current_font = operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_name().ok().map(|name| name.to_vec()));
+            } else if operation.operator == "Tj" && current_font.as_deref() == Some(font_name) {
+                for operand in &operation.operands {
+                    if let Ok(bytes) = operand.as_str() {
+                        text.extend_from_slice(bytes);
+                    }
+                }
+            } else if operation.operator == "TJ" && current_font.as_deref() == Some(font_name) {
                 for operand in &operation.operands {
                     if let Ok(items) = operand.as_array() {
                         for item in items {

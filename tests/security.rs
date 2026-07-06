@@ -9969,6 +9969,60 @@ fn symbol_font_charset_renders_passive_unicode_without_rtf_control_leakage() {
 }
 
 #[test]
+fn symbol_pntext_bullets_render_as_passive_winansi_without_font_payload_leakage() {
+    let input = br"{\rtf1{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}{\pntext\pard\plain\f1 \'b7\tab}\pard\fi-360\li360 Item\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("\u{2022}\tItem"));
+    for forbidden in ["fonttbl", "fcharset", "Symbol", "pntext"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden Symbol bullet metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    assert!(
+        helvetica_bytes.contains(&0x95),
+        "Symbol pntext bullet should encode through passive WinAnsi bullet byte, got {helvetica_bytes:?}"
+    );
+    assert!(
+        !symbol_bytes.contains(&0xb7),
+        "Symbol pntext bullet should not require PDF Symbol display bytes, got {symbol_bytes:?}"
+    );
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"fcharset",
+        b"pntext",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Symbol bullet content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wingdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\f1 \'a3 \'fe \'fc \'fb\par {\field{\*\fldinst SYMBOL 254 \\f "Wingdings"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
