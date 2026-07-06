@@ -14463,6 +14463,80 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
 }
 
 #[test]
+fn zero_line_number_distance_does_not_enable_margin_numbers_or_leak_controls() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "sectd",
+        "\\",
+        "linex0 Body",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Body"));
+    assert_eq!(parsed.document.page.line_numbering.distance_twips, 0);
+    assert!(!parsed.document.page.line_numbering.enabled);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("line numbering approximated")),
+        "zero line-number distance should not enable numbering: {:?}",
+        parsed.diagnostics
+    );
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "zero line-number distance should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Body"),
+        "expected body text in PDF, got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("1Body"),
+        "zero line-number distance should not render margin number before body: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"linex".as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero line-number distance control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unicode_alternate_destinations_render_passively_without_fallback_leakage() {
     let input = rtf(&[
         "{",

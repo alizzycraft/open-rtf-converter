@@ -4024,8 +4024,10 @@ impl Parser {
     }
 
     fn set_line_number_distance(&mut self, value: Option<i32>, offset: usize) {
-        self.enable_line_numbering(offset);
         let value = value.unwrap_or(self.current_section_page.line_numbering.distance_twips);
+        if value > 0 || self.current_section_page.line_numbering.enabled {
+            self.enable_line_numbering(offset);
+        }
         self.current_section_page.line_numbering.distance_twips = self.clamp_page_value(
             value,
             0,
@@ -19891,6 +19893,21 @@ After\par}"#;
         assert!(output.document.page.landscape);
         assert_eq!(output.document.page.width_twips, 15_840);
         assert_eq!(output.document.page.height_twips, 12_240);
+    }
+
+    #[test]
+    fn zero_line_number_distance_does_not_enable_line_numbering() {
+        let output = parse_rtf(r"{\rtf1\sectd\linex0 Body\par}").unwrap();
+
+        assert!(!output.document.page.line_numbering.enabled);
+        assert_eq!(output.document.page.line_numbering.distance_twips, 0);
+        assert_eq!(document_text(&output.document), "Body");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("line numbering approximated"))
+        );
     }
 
     #[test]
