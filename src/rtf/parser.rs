@@ -4131,7 +4131,7 @@ impl Parser {
                 "footnote placement rendered beneath document text as passive note layout"
             }
             FootnotePlacement::BottomOfPage => {
-                "footnote bottom-of-page placement approximated by passive note layout"
+                "footnotes placed at passive page bottom without active note behavior"
             }
         };
         self.diagnostics

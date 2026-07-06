@@ -4,11 +4,12 @@ use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
     DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontFamilyHint, FontPitch,
-    LineNumberRestart, PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
-    Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER,
-    ShadingPattern, StaticImage, StaticShape, StaticShapeKind, TOTAL_PAGES_MARKER, TabAlignment,
-    TabLeader, Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, UnderlineStyle,
+    FootnotePlacement, LineNumberRestart, PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings,
+    PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticShape, StaticShapeKind,
+    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
+    TableCellHorizontalMerge, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
+    TableRowAlignment, UnderlineStyle,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -939,6 +940,7 @@ impl LayoutEngine {
             document.footnote_number_start,
             document.footnote_number_format,
             0,
+            document.footnote_placement,
             geometry.content_width,
             geometry.margin_left,
             geometry.margin_bottom,
@@ -1052,6 +1054,7 @@ fn layout_footnotes(
     number_start: i32,
     number_format: PageNumberFormat,
     number_offset: usize,
+    placement: FootnotePlacement,
     content_width: f32,
     mut margin_left: f32,
     margin_bottom: f32,
@@ -1061,6 +1064,23 @@ fn layout_footnotes(
 ) {
     if footnotes.is_empty() {
         return;
+    }
+
+    if placement == FootnotePlacement::BottomOfPage {
+        position_cursor_for_bottom_notes(
+            pages,
+            cursor_y,
+            footnotes,
+            number_start,
+            number_format,
+            number_offset,
+            content_width,
+            margin_bottom,
+            geometry,
+            document,
+            document_stats,
+        );
+        margin_left = geometry.body_left(0);
     }
 
     if *cursor_y - 18.0 < margin_bottom {
@@ -1085,15 +1105,12 @@ fn layout_footnotes(
     *cursor_y -= 9.0;
 
     for (idx, footnote) in footnotes.iter().enumerate() {
-        let mut paragraph = footnote.clone();
-        if let Some(first_run) = paragraph.runs.first_mut() {
-            let label = format_note_number(number_start, number_offset + idx + 1, number_format);
-            first_run.text = format!("{label}. {}", first_run.text);
-            first_run.style.font_size_half_points =
-                first_run.style.font_size_half_points.min(20).max(2);
-        }
-        paragraph.style.space_before_twips = paragraph.style.space_before_twips.min(60);
-        paragraph.style.space_after_twips = paragraph.style.space_after_twips.min(60);
+        let paragraph = note_display_paragraph(
+            footnote,
+            number_start,
+            number_offset + idx + 1,
+            number_format,
+        );
         let markers = current_marker_context(pages, document_stats);
         let mut footnote_column = 0;
         layout_paragraph(
@@ -1113,6 +1130,84 @@ fn layout_footnotes(
             &markers,
         );
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn position_cursor_for_bottom_notes(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    footnotes: &[Paragraph],
+    number_start: i32,
+    number_format: PageNumberFormat,
+    number_offset: usize,
+    content_width: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document: &Document,
+    document_stats: DocumentStats,
+) {
+    let note_height = note_block_height(
+        footnotes,
+        number_start,
+        number_format,
+        number_offset,
+        content_width,
+        document,
+        document_stats,
+    );
+    let body_top = geometry.height - geometry.margin_top;
+    let target_cursor_y = (margin_bottom + note_height).min(body_top);
+    if *cursor_y < target_cursor_y {
+        let mut column = 0;
+        start_new_page(pages, cursor_y, geometry, &mut column);
+    }
+    *cursor_y = target_cursor_y;
+}
+
+fn note_block_height(
+    footnotes: &[Paragraph],
+    number_start: i32,
+    number_format: PageNumberFormat,
+    number_offset: usize,
+    content_width: f32,
+    document: &Document,
+    document_stats: DocumentStats,
+) -> f32 {
+    let mut height = 9.0;
+    let markers = marker_context("1".to_string(), "1".to_string(), document_stats);
+    for (idx, footnote) in footnotes.iter().enumerate() {
+        let paragraph = note_display_paragraph(
+            footnote,
+            number_start,
+            number_offset + idx + 1,
+            number_format,
+        );
+        height += twips_to_points(effective_space_before_twips(&paragraph.style));
+        height += wrap_paragraph(&paragraph, content_width, &markers, document)
+            .into_iter()
+            .map(|line| apply_line_spacing(line.height, &paragraph.style))
+            .sum::<f32>();
+        height += twips_to_points(effective_space_after_twips(&paragraph.style));
+    }
+    height
+}
+
+fn note_display_paragraph(
+    footnote: &Paragraph,
+    number_start: i32,
+    sequence: usize,
+    number_format: PageNumberFormat,
+) -> Paragraph {
+    let mut paragraph = footnote.clone();
+    if let Some(first_run) = paragraph.runs.first_mut() {
+        let label = format_note_number(number_start, sequence, number_format);
+        first_run.text = format!("{label}. {}", first_run.text);
+        first_run.style.font_size_half_points =
+            first_run.style.font_size_half_points.min(20).max(2);
+    }
+    paragraph.style.space_before_twips = paragraph.style.space_before_twips.min(60);
+    paragraph.style.space_after_twips = paragraph.style.space_after_twips.min(60);
+    paragraph
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1137,6 +1232,7 @@ fn layout_endnotes(
         number_start,
         number_format,
         number_offset,
+        FootnotePlacement::BeneathText,
         content_width,
         margin_left,
         margin_bottom,
@@ -9133,6 +9229,64 @@ mod tests {
                     && (*x2 - 216.0).abs() < 0.01
                     && (*width - 0.5).abs() < 0.01
         )));
+    }
+
+    #[test]
+    fn lays_out_bottom_footnotes_at_page_bottom() {
+        let mut document = Document::default();
+        document.footnote_placement = FootnotePlacement::BottomOfPage;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Body".to_string(),
+                style: Default::default(),
+            }],
+        })];
+        document.footnotes = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Bottom footnote".to_string(),
+                style: Default::default(),
+            }],
+        }];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let body_y = text_baseline_for(page, "Body");
+        let note_y = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("Bottom") => {
+                    Some(fragment.baseline_y)
+                }
+                _ => None,
+            })
+            .expect("bottom footnote text");
+        let separator_y = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Line { x1, x2, y1, y2, .. }
+                    if (*x1 - 72.0).abs() < 0.01
+                        && (*x2 - 216.0).abs() < 0.01
+                        && (*y1 - *y2).abs() < 0.01 =>
+                {
+                    Some(*y1)
+                }
+                _ => None,
+            })
+            .expect("footnote separator");
+
+        assert!(body_y > 650.0);
+        assert!(
+            note_y < 90.0,
+            "bottom footnote baseline should stay near page bottom, got {note_y}"
+        );
+        assert!(
+            (separator_y - 95.0).abs() < 0.01,
+            "separator should sit above bottom footnote band, got {separator_y}"
+        );
     }
 
     #[test]

@@ -20409,6 +20409,83 @@ fn footnotes_strip_active_content_without_losing_safe_text() {
 }
 
 #[test]
+fn bottom_footnote_placement_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "sftnbj Body",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote Bottom footnote {",
+        "\\",
+        "object",
+        "\\",
+        "objdata ",
+        payload_hex(),
+        "} text",
+        "\\",
+        "par}}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Body1"));
+    assert!(text.contains("Bottom footnote"));
+    assert!(text.contains("text"));
+    for forbidden in ["sftnbj", "chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden bottom-footnote control leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("footnotes placed at passive page bottom")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Body1"));
+    assert!(rendered_text.contains("1. Bottom footnote"));
+    assert!(rendered_text.contains("text"));
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"sftnbj",
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden bottom-footnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn endnotes_strip_active_content_without_losing_safe_text_or_pdf_passivity() {
     let input = rtf(&[
         "{",
