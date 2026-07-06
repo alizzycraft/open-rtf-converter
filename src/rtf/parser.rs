@@ -87,6 +87,7 @@ struct ParserState {
     inside_field: bool,
     field_owner_destination: Destination,
     field_result_seen: bool,
+    field_result_has_visible_content: bool,
     field_instruction: String,
     field_form_result_value: Option<i32>,
     field_form_default_result_value: Option<i32>,
@@ -165,6 +166,7 @@ impl Default for ParserState {
             inside_field: false,
             field_owner_destination: Destination::Body,
             field_result_seen: false,
+            field_result_has_visible_content: false,
             field_instruction: String::new(),
             field_form_result_value: None,
             field_form_default_result_value: None,
@@ -1249,6 +1251,8 @@ impl Parser {
                     )?;
                 }
                 previous.field_result_seen |= self.state.field_result_seen;
+                previous.field_result_has_visible_content |=
+                    self.state.field_result_has_visible_content;
                 previous.field_form_result_value = self
                     .state
                     .field_form_result_value
@@ -1295,6 +1299,7 @@ impl Parser {
                     )?;
                 }
                 let field_result_seen = self.state.field_result_seen;
+                let field_result_has_visible_content = self.state.field_result_has_visible_content;
                 let field_owner_destination = self.state.field_owner_destination;
                 let field_instruction = self.state.field_instruction.clone();
                 let field_form_checkbox_checked = self
@@ -1309,7 +1314,9 @@ impl Parser {
                     .or(self.state.field_form_default_result_value);
                 let field_hidden = self.state.character.hidden;
                 self.state = previous;
-                if !field_result_seen
+                let has_visible_stored_result =
+                    field_result_seen && field_result_has_visible_content;
+                if !has_visible_stored_result
                     && self.options.active_content_policy == ActiveContentPolicy::Placeholder
                     && !field_hidden
                 {
@@ -1514,7 +1521,7 @@ impl Parser {
                             offset,
                         )?;
                     }
-                } else if !field_result_seen
+                } else if !has_visible_stored_result
                     && self.options.active_content_policy == ActiveContentPolicy::Strip
                     && !field_hidden
                 {
@@ -2621,6 +2628,7 @@ impl Parser {
                 self.state.inside_field = true;
                 self.state.field_owner_destination = owner_destination;
                 self.state.field_result_seen = false;
+                self.state.field_result_has_visible_content = false;
                 self.state.destination = Destination::FieldInstruction;
             }
             "fldinst"
@@ -4857,6 +4865,7 @@ impl Parser {
             self.count_skipped_destination_bytes(text.len(), offset)?;
             return Ok(());
         }
+        self.mark_field_result_visible_content();
         let pending_marker = self.take_pending_or_synthesized_list_marker(offset)?;
         let marker_run_chars = pending_marker
             .as_ref()
@@ -6442,6 +6451,12 @@ impl Parser {
         }
     }
 
+    fn mark_field_result_visible_content(&mut self) {
+        if self.state.inside_field && self.state.field_result_seen {
+            self.state.field_result_has_visible_content = true;
+        }
+    }
+
     fn push_placeholder(&mut self, text: String) {
         self.finish_paragraph();
         self.document.blocks.push(Block::Placeholder(text));
@@ -7764,6 +7779,7 @@ impl Parser {
     }
 
     fn push_static_image(&mut self, destination: Destination, image: StaticImage) {
+        self.mark_field_result_visible_content();
         if is_header_destination(destination) {
             self.finish_header_paragraph();
             if self.has_started_visible_body() {
@@ -8015,6 +8031,7 @@ impl Parser {
     }
 
     fn push_static_shape(&mut self, destination: Destination, shape: StaticShape) {
+        self.mark_field_result_visible_content();
         if is_header_destination(destination) {
             self.finish_header_paragraph();
             if self.has_started_visible_body() {

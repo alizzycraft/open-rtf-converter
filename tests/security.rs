@@ -7446,6 +7446,71 @@ fn resultless_symbol_fields_render_without_executing_field_instruction() {
 }
 
 #[test]
+fn empty_stored_symbol_result_falls_back_to_passive_symbol_rendering() {
+    let input =
+        br#"{\rtf1{\fonttbl{\f0 Arial;}{\f14 Wingdings;}}\f0 Before ({\field{\*\fldinst SYMBOL 74 \\f "Wingdings" \\s 12}{\fldrslt\f14\fs24}}) After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Before (J) After"),
+        "empty stored SYMBOL result should render a passive static result, got {text:?}"
+    );
+    for forbidden in ["fldinst", "fldrslt", "SYMBOL", "Wingdings"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden empty-result symbol metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field SYMBOL without executing field instruction")
+    }));
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("empty-symbol-result.rtf");
+    let output_path = dir.path().join("empty-symbol-result.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
+    assert!(
+        zapf_bytes.contains(&b'J'),
+        "empty-result Wingdings SYMBOL field should be emitted as passive ZapfDingbats text bytes, got {zapf_bytes:?}"
+    );
+
+    for forbidden in [
+        b"Wingdings".as_slice(),
+        b"fldinst",
+        b"fldrslt",
+        b"SYMBOL",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden empty-result symbol content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_number_start_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
