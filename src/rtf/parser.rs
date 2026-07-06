@@ -7599,10 +7599,16 @@ impl Parser {
             | PictureKind::Unsupported
             | PictureKind::Unknown => {
                 self.diagnostics.push(Diagnostic::warning(
-                    "unsupported picture format replaced with a placeholder",
+                    "unsupported picture format replaced with a passive geometry placeholder",
                     Some(offset),
                 ));
-                self.push_placeholder("[Image skipped: unsupported format]".to_string());
+                self.push_static_image(
+                    picture.owner_destination,
+                    passive_picture_placeholder_image(&picture),
+                );
+                if self.state.inside_shape_picture {
+                    self.state.shape_picture_rendered = true;
+                }
             }
         }
         Ok(())
@@ -13486,6 +13492,23 @@ fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
     }
 
     None
+}
+
+fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
+    StaticImage {
+        format: ImageFormat::Placeholder,
+        bytes: Vec::new(),
+        palette: Vec::new(),
+        width_px: picture.width_px_hint.unwrap_or(1).max(1),
+        height_px: picture.height_px_hint.unwrap_or(1).max(1),
+        natural_width_px_hint: picture.width_px_hint,
+        natural_height_px_hint: picture.height_px_hint,
+        display_width_twips: picture.display_width_twips,
+        display_height_twips: picture.display_height_twips,
+        scale_x_percent: picture.scale_x_percent,
+        scale_y_percent: picture.scale_y_percent,
+        crop: picture.crop,
+    }
 }
 
 #[derive(Debug)]
@@ -21831,13 +21854,22 @@ After\par}"#;
     #[test]
     fn unsupported_word_picture_formats_become_placeholders() {
         for control in ["wmetafile8", "emfblip", "macpict", "pmmetafile1", "wbitmap"] {
-            let input = format!(r"{{\rtf1{{\pict\{control} 41424344}}}}");
+            let input = format!(
+                r"{{\rtf1{{\pict\{control}\picw100\pich50\picwgoal720\pichgoal360 41424344}}}}"
+            );
             let output = parse_rtf(&input).unwrap();
 
-            assert!(matches!(
-                &output.document.blocks[0],
-                Block::Placeholder(text) if text.contains("unsupported format")
-            ));
+            let image = match &output.document.blocks[0] {
+                Block::Image(image) => image,
+                _ => panic!("expected passive image placeholder"),
+            };
+            assert_eq!(image.format, ImageFormat::Placeholder);
+            assert!(image.bytes.is_empty());
+            assert!(image.palette.is_empty());
+            assert_eq!(image.natural_width_px_hint, Some(100));
+            assert_eq!(image.natural_height_px_hint, Some(50));
+            assert_eq!(image.display_width_twips, Some(720));
+            assert_eq!(image.display_height_twips, Some(360));
             assert!(
                 output
                     .diagnostics

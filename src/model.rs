@@ -362,6 +362,7 @@ pub enum ImageFormat {
     PngGrayscale,
     PngIndexed,
     Rgb8,
+    Placeholder,
 }
 
 #[derive(Debug, Clone, PartialEq)]

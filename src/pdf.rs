@@ -368,6 +368,10 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                     );
                 }
                 LayoutItem::Image(fragment) => {
+                    if fragment.image.format == ImageFormat::Placeholder {
+                        draw_passive_image_placeholder(&mut content, fragment);
+                        continue;
+                    }
                     if let Some(image_ref) = image_refs.get(idx).and_then(|page_images| {
                         page_images
                             .iter()
@@ -470,6 +474,7 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                     image.color_space().device_rgb();
                     image.bits_per_component(8);
                 }
+                ImageFormat::Placeholder => {}
             }
         }
     }
@@ -537,7 +542,11 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, item)| {
-                    if matches!(item, LayoutItem::Image(_)) {
+                    if matches!(
+                        item,
+                        LayoutItem::Image(fragment)
+                            if fragment.image.format != ImageFormat::Placeholder
+                    ) {
                         let id = Ref::new(next_id);
                         let name = format!("Im{}", next_id - first_image_id + 1).into_bytes();
                         next_id += 1;
@@ -553,6 +562,77 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
                 .collect()
         })
         .collect()
+}
+
+fn draw_passive_image_placeholder(content: &mut Content, fragment: &crate::layout::ImageFragment) {
+    let width = fragment.width.max(1.0);
+    let height = fragment.height.max(1.0);
+    set_fill_color(
+        content,
+        PdfColor {
+            red: 0.96,
+            green: 0.96,
+            blue: 0.96,
+        },
+    );
+    content.rect(fragment.x, fragment.y, width, height);
+    content.fill_nonzero();
+    set_stroke_color(
+        content,
+        PdfColor {
+            red: 0.45,
+            green: 0.45,
+            blue: 0.45,
+        },
+    );
+    content.set_line_width(0.75);
+    content.rect(fragment.x, fragment.y, width, height);
+    content.stroke();
+    if width > 24.0 && height > 24.0 {
+        stroke_line(
+            content,
+            fragment.x,
+            fragment.y,
+            fragment.x + width,
+            fragment.y + height,
+            0.5,
+        );
+        stroke_line(
+            content,
+            fragment.x,
+            fragment.y + height,
+            fragment.x + width,
+            fragment.y,
+            0.5,
+        );
+    }
+    if width < 96.0 || height < 24.0 {
+        return;
+    }
+
+    let mut style = CharacterStyle::default();
+    style.font_size_half_points = 18;
+    let label = "Image skipped";
+    let encoded = encode_pdf_text_for_font(label, PdfFontFamily::Helvetica);
+    set_fill_color(
+        content,
+        PdfColor {
+            red: 0.25,
+            green: 0.25,
+            blue: 0.25,
+        },
+    );
+    write_text_fragment(
+        content,
+        label,
+        PdfFontFamily::Helvetica,
+        &style,
+        0.0,
+        fragment.x + 6.0,
+        fragment.y + (height / 2.0) - 3.0,
+        &encoded,
+        TextRenderingMode::Fill,
+    );
 }
 
 fn is_stream_marker_at(pdf: &[u8], offset: usize) -> bool {

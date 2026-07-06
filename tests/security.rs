@@ -5,7 +5,7 @@ use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint,
-    FontPitch, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
+    FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, TOTAL_PAGES_MARKER, TabAlignment, TextRelief,
     UnderlineStyle,
 };
@@ -16740,7 +16740,16 @@ fn unsupported_picture_formats_are_placeholdered_without_payload_leakage() {
 
     assert!(text.contains("before"));
     assert!(text.contains("after"));
-    assert!(text.contains("[Image skipped: unsupported format]"));
+    assert!(
+        parsed.document.blocks.iter().any(|block| matches!(
+            block,
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.palette.is_empty()
+        )),
+        "unsupported picture should become a passive image placeholder"
+    );
     assert!(!text.contains("ABC"));
     assert!(!text.contains("METAPAYLOAD"));
 
@@ -16788,14 +16797,26 @@ fn wmf_emf_picture_formats_are_passive_placeholders_without_payload_leakage() {
         ("pmmetafile1", b"pmmetafile".as_slice()),
         ("macpict", b"macpict".as_slice()),
     ] {
-        let input = format!("{{\\rtf1 before {{\\pict\\{control} {payload_hex}}} after\\par}}")
-            .into_bytes();
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\{control}\\picw100\\pich50\\picwgoal2160\\pichgoal720 {payload_hex}}} after\\par}}"
+        )
+        .into_bytes();
         let parsed = parse_rtf_bytes(&input).unwrap();
         let text = collect_text(&parsed.document);
 
         assert!(text.contains("before"));
-        assert!(text.contains("[Image skipped: unsupported format]"));
         assert!(text.contains("after"));
+        assert!(
+            parsed.document.blocks.iter().any(|block| matches!(
+                block,
+                Block::Image(image)
+                    if image.format == ImageFormat::Placeholder
+                        && image.bytes.is_empty()
+                        && image.display_width_twips == Some(2160)
+                        && image.display_height_twips == Some(720)
+            )),
+            "unsupported {control} should become a passive image placeholder"
+        );
         for forbidden in ["ABC", "JavaScript", "EmbeddedFile"] {
             assert!(
                 !text.contains(forbidden),
@@ -16817,7 +16838,7 @@ fn wmf_emf_picture_formats_are_passive_placeholders_without_payload_leakage() {
         let rendered_text = decoded_pdf_text(&content);
 
         assert!(rendered_text.contains("before"));
-        assert!(rendered_text.contains("[Image skipped: unsupported format]"));
+        assert!(rendered_text.contains("Image skipped"));
         assert!(rendered_text.contains("after"));
         for forbidden in [
             forbidden_control,
