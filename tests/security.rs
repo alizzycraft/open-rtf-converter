@@ -11877,6 +11877,69 @@ fn stylesheet_inheritance_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn missing_word_normal_style_zero_renders_without_control_leakage() {
+    let input = br"{\rtf1{\stylesheet{\s1\b Heading;}}\s1 Bold\par\s0 Normal\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Bold"));
+    assert!(text.contains("Normal"));
+    for forbidden in ["stylesheet", "Heading", "s0", "s1"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden style metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unknown RTF style index 0")),
+        "missing Normal style 0 should not warn: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Bold"),
+        "decoded PDF text missing styled text: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Normal"),
+        "decoded PDF text missing Normal style text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"stylesheet".as_slice(),
+        b"Heading",
+        b"s0",
+        b"s1",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden missing-style content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn stylesheet_next_style_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

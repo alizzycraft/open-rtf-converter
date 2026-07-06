@@ -9069,6 +9069,12 @@ impl Parser {
                 *current = inherit_character_style(current, &style.character);
             });
             true
+        } else if index == 0 {
+            let default_style = self.default_character_style();
+            self.update_current_list_level_character_style(|current| {
+                *current = inherit_character_style(current, &default_style);
+            });
+            true
         } else {
             self.diagnostics.push(Diagnostic::warning(
                 format!("unknown RTF style index {index}"),
@@ -9537,6 +9543,11 @@ impl Parser {
             self.state.character = style.character;
             self.state.paragraph_style_index = Some(index);
             true
+        } else if index == 0 {
+            self.state.paragraph = self.default_paragraph_style.clone();
+            self.state.character = self.default_character_style();
+            self.state.paragraph_style_index = Some(0);
+            true
         } else {
             self.diagnostics.push(Diagnostic::warning(
                 format!("unknown RTF style index {index}"),
@@ -9550,6 +9561,10 @@ impl Parser {
         let mut visited = Vec::new();
         if let Some(style) = self.resolve_style(index, &mut visited) {
             self.state.character = inherit_character_style(&self.state.character, &style.character);
+            true
+        } else if index == 0 {
+            let default_style = self.default_character_style();
+            self.state.character = inherit_character_style(&self.state.character, &default_style);
             true
         } else {
             self.diagnostics.push(Diagnostic::warning(
@@ -14540,6 +14555,44 @@ mod tests {
         assert_eq!(second.style.right_indent_twips, 360);
         assert!(!second.runs[0].style.bold);
         assert_eq!(second.runs[0].text, "Plain");
+    }
+
+    #[test]
+    fn missing_style_zero_uses_word_normal_defaults_without_warning() {
+        let output = parse_rtf(
+            r"{\rtf1{\stylesheet{\s1\b Heading;}}\s1 Bold\par\s0 Normal\par\s99 Unknown\par}",
+        )
+        .unwrap();
+        let first = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let second = match &output.document.blocks[1] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let third = match &output.document.blocks[2] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(document_text(&output.document), "BoldNormalUnknown");
+        assert!(first.runs[0].style.bold);
+        assert!(!second.runs[0].style.bold);
+        assert_eq!(second.style, ParagraphStyle::default());
+        assert_eq!(third.runs[0].text, "Unknown");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unknown RTF style index 0"))
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("unknown RTF style index 99") })
+        );
     }
 
     #[test]
