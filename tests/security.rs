@@ -7453,8 +7453,8 @@ fn empty_stored_symbol_result_falls_back_to_passive_symbol_rendering() {
     let text = collect_text(&parsed.document);
 
     assert!(
-        text.contains("Before (J) After"),
-        "empty stored SYMBOL result should render a passive static result, got {text:?}"
+        text.contains("Before (\u{263a}) After"),
+        "empty stored SYMBOL result should render a passive Unicode dingbat result, got {text:?}"
     );
     for forbidden in ["fldinst", "fldrslt", "SYMBOL", "Wingdings"] {
         assert!(
@@ -7489,6 +7489,13 @@ fn empty_stored_symbol_result_falls_back_to_passive_symbol_rendering() {
     assert!(
         zapf_bytes.contains(&b'J'),
         "empty-result Wingdings SYMBOL field should be emitted as passive ZapfDingbats text bytes, got {zapf_bytes:?}"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "empty-result Wingdings smiley should draw a passive vector overlay for viewer-stable output"
     );
 
     for forbidden in [

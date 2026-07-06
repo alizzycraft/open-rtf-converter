@@ -968,6 +968,7 @@ fn draw_passive_polygon(
 fn draw_passive_text_overlays(content: &mut Content, fragment: &TextFragment) {
     draw_passive_emphasis_marks(content, fragment);
     draw_passive_checkbox_overlays(content, fragment);
+    draw_passive_dingbat_overlays(content, fragment);
 }
 
 fn draw_passive_emphasis_marks(content: &mut Content, fragment: &TextFragment) {
@@ -1122,6 +1123,126 @@ fn draw_passive_checkbox_x(content: &mut Content, glyph_x: f32, baseline_y: f32,
     content.move_to(left + box_size * 0.76, bottom + box_size * 0.24);
     content.line_to(left + box_size * 0.24, bottom + box_size * 0.76);
     content.stroke();
+}
+
+fn draw_passive_dingbat_overlays(content: &mut Content, fragment: &TextFragment) {
+    if fragment.font_family != PdfFontFamily::ZapfDingbats || !fragment.text.contains('\u{263a}') {
+        return;
+    }
+
+    let font_size = fragment.style.font_size_points();
+    let horizontal_scale = fragment.style.horizontal_scale();
+    let character_spacing = twips_to_points(fragment.style.character_spacing_twips);
+    let visible_count = fragment
+        .text
+        .chars()
+        .filter(|ch| !is_zero_width_pdf_char(*ch))
+        .count();
+    let mut visible_index = 0usize;
+    let mut cursor = fragment.x;
+
+    content.save_state();
+    set_stroke_color(content, fragment.color);
+    set_fill_color(content, fragment.color);
+    content.set_line_width((font_size * 0.055).clamp(0.45, 1.0));
+    for ch in fragment.text.chars() {
+        if ch == '\u{263a}' {
+            draw_passive_smiley(content, cursor, fragment.baseline_y, font_size);
+        }
+        if !is_zero_width_pdf_char(ch) {
+            visible_index += 1;
+            let mut advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            if ch == ' ' || ch == '\u{00a0}' {
+                advance += fragment.word_spacing;
+            }
+            if visible_index < visible_count {
+                advance += character_spacing;
+            }
+            cursor += advance * horizontal_scale;
+        }
+    }
+    content.restore_state();
+}
+
+fn draw_passive_smiley(content: &mut Content, glyph_x: f32, baseline_y: f32, font_size: f32) {
+    let radius = font_size * 0.28;
+    let center_x = glyph_x + font_size * 0.27;
+    let center_y = baseline_y + font_size * 0.34;
+    draw_passive_circle(content, center_x, center_y, radius);
+
+    let eye_radius = (font_size * 0.035).clamp(0.25, 0.7);
+    draw_passive_filled_circle(
+        content,
+        center_x - radius * 0.35,
+        center_y + radius * 0.25,
+        eye_radius,
+    );
+    draw_passive_filled_circle(
+        content,
+        center_x + radius * 0.35,
+        center_y + radius * 0.25,
+        eye_radius,
+    );
+
+    content.move_to(center_x - radius * 0.48, center_y - radius * 0.12);
+    content.cubic_to(
+        center_x - radius * 0.26,
+        center_y - radius * 0.48,
+        center_x + radius * 0.26,
+        center_y - radius * 0.48,
+        center_x + radius * 0.48,
+        center_y - radius * 0.12,
+    );
+    content.stroke();
+}
+
+fn draw_passive_circle(content: &mut Content, cx: f32, cy: f32, radius: f32) {
+    add_passive_circle_path(content, cx, cy, radius);
+    content.stroke();
+}
+
+fn draw_passive_filled_circle(content: &mut Content, cx: f32, cy: f32, radius: f32) {
+    add_passive_circle_path(content, cx, cy, radius);
+    content.fill_nonzero();
+}
+
+fn add_passive_circle_path(content: &mut Content, cx: f32, cy: f32, radius: f32) {
+    const KAPPA: f32 = 0.552_284_8;
+    let control = radius * KAPPA;
+    content.move_to(cx + radius, cy);
+    content.cubic_to(
+        cx + radius,
+        cy + control,
+        cx + control,
+        cy + radius,
+        cx,
+        cy + radius,
+    );
+    content.cubic_to(
+        cx - control,
+        cy + radius,
+        cx - radius,
+        cy + control,
+        cx - radius,
+        cy,
+    );
+    content.cubic_to(
+        cx - radius,
+        cy - control,
+        cx - control,
+        cy - radius,
+        cx,
+        cy - radius,
+    );
+    content.cubic_to(
+        cx + control,
+        cy - radius,
+        cx + radius,
+        cy - control,
+        cx + radius,
+        cy,
+    );
+    content.close_path();
 }
 
 fn pdf_base_glyph_advance(ch: char, family: PdfFontFamily, style: &CharacterStyle) -> f32 {
@@ -1420,6 +1541,7 @@ fn encode_symbol_char(ch: char) -> u8 {
 fn encode_zapf_dingbats_char(ch: char) -> u8 {
     match ch {
         '\u{25a1}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{2751}' => b'q',
+        '\u{263a}' => b'J',
         '\u{2713}' | '\u{2714}' => b'3',
         '\u{2717}' => b'7',
         ' ' => b' ',

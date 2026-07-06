@@ -13428,6 +13428,7 @@ fn map_wingdings_codepoint(codepoint: u32) -> Option<char> {
     };
 
     match code {
+        0x4a => Some('\u{263a}'),
         0xa3 => Some('\u{2610}'),
         0xfb => Some('\u{2717}'),
         0xfc => Some('\u{2713}'),
