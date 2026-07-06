@@ -20652,6 +20652,93 @@ fn endnotes_at_end_of_section_render_before_next_section_without_control_leakage
 }
 
 #[test]
+fn fet1_legacy_footnote_groups_render_as_passive_endnotes_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "fet1",
+        "\\",
+        "aenddoc Body",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn Legacy endnote",
+        "\\",
+        "par}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(parsed.document.footnotes.is_empty());
+    assert_eq!(parsed.document.endnotes.len(), 1);
+    assert_eq!(parsed.document.endnote_section_indices, vec![1]);
+    assert!(text.contains("Body1"));
+    assert!(text.contains("Legacy endnote"));
+    for forbidden in ["fet1", "aenddoc", "chftn", "footnote"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden note-type control leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("passive endnote-only interpretation")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let pages = parsed_pdf.get_pages();
+    let page_texts = pages
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(page_texts.len(), 2);
+    assert!(page_texts[0].contains("Body1"));
+    assert!(!page_texts[0].contains("Legacy endnote"));
+    assert!(page_texts[1].contains("1. Legacy endnote"));
+    for forbidden in [
+        b"fet1".as_slice(),
+        b"aenddoc",
+        b"chftn",
+        b"footnote",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden note-type content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn note_separator_definitions_do_not_reach_text_or_pdf() {
     let input = rtf(&[
         "{",

@@ -757,6 +757,13 @@ enum DocumentTimestampKind {
     Printed,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum NoteTypeMode {
+    FootnotesOnly,
+    EndnotesOnly,
+    FootnotesAndEndnotes,
+}
+
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 struct DocumentTimestamp {
     year: Option<i32>,
@@ -825,6 +832,7 @@ struct Parser {
     current_section_page: PageSettings,
     current_section_index: usize,
     current_section_column_index: usize,
+    note_type_mode: NoteTypeMode,
     footnote_reference_count: usize,
     endnote_reference_count: usize,
     options: RtfParseOptions,
@@ -937,6 +945,7 @@ impl Parser {
             current_section_page: Document::default().page,
             current_section_index: 1,
             current_section_column_index: 0,
+            note_type_mode: NoteTypeMode::FootnotesOnly,
             footnote_reference_count: 0,
             endnote_reference_count: 0,
             options,
@@ -2215,7 +2224,7 @@ impl Parser {
                 self.state.destination = Destination::EvenPageFooter
             }
             "footnote" if destination_allows_visible_content(&self.state) => {
-                self.start_note_destination(Destination::Footnote, offset)?
+                self.start_note_destination(self.legacy_footnote_destination(), offset)?
             }
             "endnote" | "aendnote" | "ftnalt"
                 if destination_allows_visible_content(&self.state) =>
@@ -3413,10 +3422,7 @@ impl Parser {
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
             }
-            "fet" => self.diagnostics.push(Diagnostic::warning(
-                "note placement control approximated by passive note layout",
-                Some(offset),
-            )),
+            "fet" => self.set_note_type_mode(control.parameter, offset),
             "linex" => self.set_line_number_distance(control.parameter, offset),
             "linemod" => self.set_line_number_step(control.parameter, offset),
             "linestarts" => self.set_line_number_start(control.parameter, offset),
@@ -4142,6 +4148,42 @@ impl Parser {
                 "endnotes placed at passive section boundary without active note behavior"
             }
             EndnotePlacement::AfterBody => "endnote placement rendered after body text",
+        };
+        self.diagnostics
+            .push(Diagnostic::warning(message, Some(offset)));
+    }
+
+    fn legacy_footnote_destination(&self) -> Destination {
+        if self.note_type_mode == NoteTypeMode::EndnotesOnly {
+            Destination::Endnote
+        } else {
+            Destination::Footnote
+        }
+    }
+
+    fn set_note_type_mode(&mut self, parameter: Option<i32>, offset: usize) {
+        let Some(value) = parameter else {
+            self.note_type_mode = NoteTypeMode::FootnotesOnly;
+            self.diagnostics.push(Diagnostic::warning(
+                "note type set to passive footnote-only interpretation",
+                Some(offset),
+            ));
+            return;
+        };
+        let Some(mode) = note_type_mode_from_parameter(value) else {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("note type value {value} ignored outside supported passive range 0..2"),
+                Some(offset),
+            ));
+            return;
+        };
+        self.note_type_mode = mode;
+        let message = match mode {
+            NoteTypeMode::FootnotesOnly => "note type set to passive footnote-only interpretation",
+            NoteTypeMode::EndnotesOnly => "note type set to passive endnote-only interpretation",
+            NoteTypeMode::FootnotesAndEndnotes => {
+                "note type set to passive footnote/endnote interpretation"
+            }
         };
         self.diagnostics
             .push(Diagnostic::warning(message, Some(offset)));
@@ -7934,7 +7976,11 @@ impl Parser {
         } else if destination == Destination::Footnote {
             self.document.footnotes.extend(paragraphs);
         } else if destination == Destination::Endnote {
+            let count = paragraphs.len();
             self.document.endnotes.extend(paragraphs);
+            self.document
+                .endnote_section_indices
+                .extend(std::iter::repeat(self.current_section_index.max(1)).take(count));
         } else if destination != Destination::Background {
             self.document
                 .blocks
@@ -10080,6 +10126,15 @@ fn note_restart_control_message(name: &str) -> Option<&'static str> {
         "aftnrestart" | "aftnrstpg" | "aftnrstcont" => {
             Some("endnote restart behavior approximated by passive sequential numbering")
         }
+        _ => None,
+    }
+}
+
+fn note_type_mode_from_parameter(value: i32) -> Option<NoteTypeMode> {
+    match value {
+        0 => Some(NoteTypeMode::FootnotesOnly),
+        1 => Some(NoteTypeMode::EndnotesOnly),
+        2 => Some(NoteTypeMode::FootnotesAndEndnotes),
         _ => None,
     }
 }
@@ -15805,6 +15860,48 @@ mod tests {
         );
         assert_eq!(output.document.endnotes.len(), 1);
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
+    }
+
+    #[test]
+    fn fet1_normalizes_legacy_footnote_groups_as_endnotes() {
+        let output =
+            parse_rtf(r"{\rtf1\fet1 Body\chftn{\footnote \chftn Legacy endnote\par}\par}").unwrap();
+        let body = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected body paragraph"),
+        };
+
+        assert_eq!(
+            body.runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "Body1"
+        );
+        assert!(output.document.footnotes.is_empty());
+        assert_eq!(output.document.endnotes.len(), 1);
+        assert_eq!(output.document.endnote_section_indices, vec![1]);
+        assert_eq!(output.document.endnotes[0].runs[0].text, "Legacy endnote");
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("passive endnote-only interpretation")
+        }));
+    }
+
+    #[test]
+    fn invalid_fet_value_is_ignored_without_changing_note_type() {
+        let output =
+            parse_rtf(r"{\rtf1\fet99 Body\chftn{\footnote \chftn Footnote text\par}\par}").unwrap();
+
+        assert_eq!(output.document.footnotes.len(), 1);
+        assert!(output.document.endnotes.is_empty());
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("note type value 99 ignored"))
+        );
     }
 
     #[test]
