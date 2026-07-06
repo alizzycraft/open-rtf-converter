@@ -76,8 +76,11 @@ struct ParserState {
     inside_object: bool,
     object_owner_destination: Destination,
     object_result_seen: bool,
+    object_width_twips: Option<i32>,
+    object_height_twips: Option<i32>,
     inside_shape: bool,
     shape_result_seen: bool,
+    shape_visual_result_rendered: bool,
     inside_shape_picture: bool,
     shape_picture_rendered: bool,
     suppressing_nonshape_picture: bool,
@@ -151,8 +154,11 @@ impl Default for ParserState {
             inside_object: false,
             object_owner_destination: Destination::Body,
             object_result_seen: false,
+            object_width_twips: None,
+            object_height_twips: None,
             inside_shape: false,
             shape_result_seen: false,
+            shape_visual_result_rendered: false,
             inside_shape_picture: false,
             shape_picture_rendered: false,
             suppressing_nonshape_picture: false,
@@ -1169,21 +1175,33 @@ impl Parser {
 
             if self.state.inside_object && previous.inside_object {
                 previous.object_result_seen |= self.state.object_result_seen;
+                previous.object_width_twips = previous
+                    .object_width_twips
+                    .or(self.state.object_width_twips);
+                previous.object_height_twips = previous
+                    .object_height_twips
+                    .or(self.state.object_height_twips);
             } else if self.state.inside_object && !previous.inside_object {
                 if !self.state.object_result_seen
                     && self.options.active_content_policy == ActiveContentPolicy::Placeholder
                     && !self.state.character.hidden
                 {
-                    self.push_placeholder_for_destination(
-                        self.state.object_owner_destination,
-                        "[Embedded object removed]".to_string(),
-                        offset,
-                    )?;
+                    if let Some(image) = self.passive_object_placeholder_image() {
+                        self.push_static_image(self.state.object_owner_destination, image);
+                        self.mark_shape_visual_result_rendered();
+                    } else {
+                        self.push_placeholder_for_destination(
+                            self.state.object_owner_destination,
+                            "[Embedded object removed]".to_string(),
+                            offset,
+                        )?;
+                    }
                 }
             }
 
             if self.state.inside_shape && previous.inside_shape {
                 previous.shape_result_seen |= self.state.shape_result_seen;
+                previous.shape_visual_result_rendered |= self.state.shape_visual_result_rendered;
             } else if self.state.inside_shape && !previous.inside_shape {
                 self.finish_paragraph();
                 let rendered_shape = self.finish_shape(offset)?;
@@ -2250,6 +2268,7 @@ impl Parser {
                 self.finish_current_paragraph_for_destination(offset);
                 self.state.inside_shape = true;
                 self.state.shape_result_seen = false;
+                self.state.shape_visual_result_rendered = false;
                 self.state.destination = Destination::Shape;
                 self.current_shape = Some(ShapeBuilder {
                     owner_destination,
@@ -2265,7 +2284,7 @@ impl Parser {
             {
                 self.state.destination = Destination::Shape;
             }
-            "shptxt" | "shprslt" | "dptxbx"
+            "shptxt" | "dptxbx"
                 if self.state.inside_shape && destination_allows_visible_content(&self.state) =>
             {
                 self.state.shape_result_seen = true;
@@ -2274,6 +2293,24 @@ impl Parser {
                     "rendering safe passive shape text/result and stripping shape properties",
                     Some(offset),
                 ));
+            }
+            "shprslt"
+                if self.state.inside_shape && destination_allows_visible_content(&self.state) =>
+            {
+                self.state.shape_result_seen = true;
+                if self.state.shape_visual_result_rendered {
+                    self.state.destination = Destination::Ignored;
+                    self.diagnostics.push(Diagnostic::warning(
+                        "ignoring duplicate shape result fallback after passive primary shape result",
+                        Some(offset),
+                    ));
+                } else {
+                    self.state.destination = Destination::ShapeText;
+                    self.diagnostics.push(Diagnostic::warning(
+                        "rendering safe passive shape fallback result and stripping shape properties",
+                        Some(offset),
+                    ));
+                }
             }
             "sn" if control_starts_group && self.state.destination == Destination::Shape => {
                 self.state.shape_property_capture = Some(ShapePropertyCapture::Name);
@@ -2530,10 +2567,26 @@ impl Parser {
             "object" if destination_allows_visible_content(&self.state) => {
                 let owner_destination = self.state.destination;
                 self.handle_active_content("OLE object", offset)?;
-                self.state.inside_object = true;
-                self.state.object_owner_destination = owner_destination;
-                self.state.object_result_seen = false;
-                self.state.destination = Destination::ObjectData;
+                if self.state.inside_shape && self.state.shape_visual_result_rendered {
+                    self.state.destination = Destination::Ignored;
+                    self.diagnostics.push(Diagnostic::warning(
+                        "ignoring duplicate embedded object alternate after passive shape result",
+                        Some(offset),
+                    ));
+                } else {
+                    self.state.inside_object = true;
+                    self.state.object_owner_destination = owner_destination;
+                    self.state.object_result_seen = false;
+                    self.state.object_width_twips = None;
+                    self.state.object_height_twips = None;
+                    self.state.destination = Destination::ObjectData;
+                }
+            }
+            "objw" if self.state.inside_object => {
+                self.set_object_display_width(control.parameter, offset);
+            }
+            "objh" if self.state.inside_object => {
+                self.set_object_display_height(control.parameter, offset);
             }
             "objdata" | "objocx" | "objemb" | "objlink" | "objautlink" | "objupdate"
                 if destination_allows_visible_content(&self.state) =>
@@ -6302,6 +6355,16 @@ impl Parser {
             },
         );
         shape.text.push(paragraph);
+        self.mark_shape_visual_result_rendered();
+    }
+
+    fn mark_shape_visual_result_rendered(&mut self) {
+        if self.state.inside_shape {
+            self.state.shape_visual_result_rendered = true;
+        }
+        if self.state.inside_shape_picture {
+            self.state.shape_picture_rendered = true;
+        }
     }
 
     fn push_placeholder(&mut self, text: String) {
@@ -7475,23 +7538,25 @@ impl Parser {
         }
 
         if picture.bytes.is_empty() {
-            self.push_placeholder("[Image skipped: empty picture]".to_string());
+            if let Some(image) = passive_empty_picture_placeholder_image(
+                &picture,
+                self.state.object_width_twips,
+                self.state.object_height_twips,
+            ) {
+                self.reserve_image_slot(offset)?;
+                self.diagnostics.push(Diagnostic::warning(
+                    "empty picture with bounded geometry replaced with a passive placeholder",
+                    Some(offset),
+                ));
+                self.push_static_image(picture.owner_destination, image);
+                self.mark_shape_visual_result_rendered();
+            } else {
+                self.push_placeholder("[Image skipped: empty picture]".to_string());
+            }
             return Ok(());
         }
 
-        self.image_count =
-            self.image_count
-                .checked_add(1)
-                .ok_or(ParseError::ResourceLimitExceeded {
-                    resource: "images".to_string(),
-                    offset,
-                })?;
-        if self.image_count > self.limits().max_images {
-            return Err(ParseError::ResourceLimitExceeded {
-                resource: "images".to_string(),
-                offset,
-            });
-        }
+        self.reserve_image_slot(offset)?;
 
         match picture.kind {
             PictureKind::Jpeg => match parse_jpeg_image_data(&picture.bytes) {
@@ -7516,9 +7581,7 @@ impl Parser {
                             crop: picture.crop,
                         },
                     );
-                    if self.state.inside_shape_picture {
-                        self.state.shape_picture_rendered = true;
-                    }
+                    self.mark_shape_visual_result_rendered();
                 }
                 None => {
                     self.diagnostics.push(Diagnostic::warning(
@@ -7548,9 +7611,7 @@ impl Parser {
                             crop: picture.crop,
                         },
                     );
-                    if self.state.inside_shape_picture {
-                        self.state.shape_picture_rendered = true;
-                    }
+                    self.mark_shape_visual_result_rendered();
                 }
                 None => {
                     self.diagnostics.push(Diagnostic::warning(
@@ -7581,9 +7642,7 @@ impl Parser {
                                 crop: picture.crop,
                             },
                         );
-                        if self.state.inside_shape_picture {
-                            self.state.shape_picture_rendered = true;
-                        }
+                        self.mark_shape_visual_result_rendered();
                     }
                     None => {
                         self.diagnostics.push(Diagnostic::warning(
@@ -7606,10 +7665,25 @@ impl Parser {
                     picture.owner_destination,
                     passive_picture_placeholder_image(&picture),
                 );
-                if self.state.inside_shape_picture {
-                    self.state.shape_picture_rendered = true;
-                }
+                self.mark_shape_visual_result_rendered();
             }
+        }
+        Ok(())
+    }
+
+    fn reserve_image_slot(&mut self, offset: usize) -> Result<(), ParseError> {
+        self.image_count =
+            self.image_count
+                .checked_add(1)
+                .ok_or(ParseError::ResourceLimitExceeded {
+                    resource: "images".to_string(),
+                    offset,
+                })?;
+        if self.image_count > self.limits().max_images {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "images".to_string(),
+                offset,
+            });
         }
         Ok(())
     }
@@ -7670,6 +7744,28 @@ impl Parser {
         } else {
             self.document.blocks.push(Block::Image(image));
         }
+    }
+
+    fn passive_object_placeholder_image(&self) -> Option<StaticImage> {
+        let width_twips = self.state.object_width_twips?;
+        let height_twips = self.state.object_height_twips?;
+        if width_twips <= 0 || height_twips <= 0 {
+            return None;
+        }
+        Some(StaticImage {
+            format: ImageFormat::Placeholder,
+            bytes: Vec::new(),
+            palette: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(width_twips),
+            display_height_twips: Some(height_twips),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+        })
     }
 
     fn finish_shape(&mut self, offset: usize) -> Result<bool, ParseError> {
@@ -8250,6 +8346,16 @@ impl Parser {
         if let Some(picture) = self.current_picture.as_mut() {
             picture.display_height_twips = Some(normalized);
         }
+    }
+
+    fn set_object_display_width(&mut self, width: Option<i32>, offset: usize) {
+        let normalized = self.clamp_picture_display_dimension(width, "object width", offset);
+        self.state.object_width_twips = Some(normalized);
+    }
+
+    fn set_object_display_height(&mut self, height: Option<i32>, offset: usize) {
+        let normalized = self.clamp_picture_display_dimension(height, "object height", offset);
+        self.state.object_height_twips = Some(normalized);
     }
 
     fn clamp_picture_display_dimension(
@@ -13509,6 +13615,31 @@ fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
         scale_y_percent: picture.scale_y_percent,
         crop: picture.crop,
     }
+}
+
+fn passive_empty_picture_placeholder_image(
+    picture: &PictureBuilder,
+    fallback_width_twips: Option<i32>,
+    fallback_height_twips: Option<i32>,
+) -> Option<StaticImage> {
+    let fallback_dimensions = match (fallback_width_twips, fallback_height_twips) {
+        (Some(width), Some(height)) if width > 0 && height > 0 => Some((width, height)),
+        _ => None,
+    };
+    let has_picture_geometry = picture.display_width_twips.is_some()
+        || picture.display_height_twips.is_some()
+        || picture.width_px_hint.is_some()
+        || picture.height_px_hint.is_some();
+    if !has_picture_geometry && fallback_dimensions.is_none() {
+        return None;
+    }
+
+    let mut image = passive_picture_placeholder_image(picture);
+    if let Some((width, height)) = fallback_dimensions {
+        image.display_width_twips = image.display_width_twips.or(Some(width));
+        image.display_height_twips = image.display_height_twips.or(Some(height));
+    }
+    Some(image)
 }
 
 #[derive(Debug)]

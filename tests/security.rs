@@ -4203,6 +4203,289 @@ fn embedded_object_result_is_rendered_without_objdata() {
 }
 
 #[test]
+fn dimensioned_embedded_object_without_result_renders_passive_geometry_placeholder() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "object",
+        "\\",
+        "objw2160",
+        "\\",
+        "objh720",
+        "\\",
+        "objemb",
+        "\\",
+        "objdata 4142432f4a6176615363726970742f456d62656464656446696c65} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(!text.contains("[Embedded object removed]"));
+    assert!(
+        parsed.document.blocks.iter().any(|block| matches!(
+            block,
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.display_width_twips == Some(2160)
+                    && image.display_height_twips == Some(720)
+        )),
+        "dimensioned active object should become a passive geometry placeholder"
+    );
+    for forbidden in ["objdata", "objemb", "414243", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "object internals leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("Image skipped"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"objdata".as_slice(),
+        b"objemb",
+        b"414243",
+        b"JavaScript",
+        b"EmbeddedFile",
+        b"/Subtype /Image",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "dimensioned object leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn dimensioned_object_empty_picture_result_renders_passive_geometry_placeholder() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "object",
+        "\\",
+        "objw2160",
+        "\\",
+        "objh720",
+        "\\",
+        "objemb{",
+        "\\",
+        "objdata 4142432f4a6176615363726970742f456d62656464656446696c65}{",
+        "\\",
+        "result{",
+        "\\",
+        "pict",
+        "\\",
+        "wmetafile8}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(!text.contains("[Embedded object removed]"));
+    assert!(!text.contains("[Image skipped: empty picture]"));
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].format, ImageFormat::Placeholder);
+    assert!(images[0].bytes.is_empty());
+    assert_eq!(images[0].display_width_twips, Some(2160));
+    assert_eq!(images[0].display_height_twips, Some(720));
+    for forbidden in [
+        "objdata",
+        "objemb",
+        "wmetafile",
+        "414243",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "object result internals leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("Image skipped"));
+    assert!(rendered_text.contains("After"));
+    assert!(!rendered_text.contains("[Image skipped: empty picture]"));
+    for forbidden in [
+        b"objdata".as_slice(),
+        b"objemb",
+        b"wmetafile",
+        b"414243",
+        b"JavaScript",
+        b"EmbeddedFile",
+        b"/Subtype /Image",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "empty object picture result leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn shape_result_fallback_is_ignored_after_primary_passive_visual_result() {
+    let input = concat!(
+        r"{\rtf1 Before {\shp{\*\shpinst",
+        r"{\pict\picwgoal2160\pichgoal720\wmetafile8 01020304}",
+        r"{\shptxt{\object\objw2160\objh720\objemb",
+        r"{\objdata 4142432f4a617661536372697074}",
+        r"{\result{\pict\wmetafile8}}}}",
+        r"{\shprslt{\pict\picwgoal2160\pichgoal720\wmetafile8 05060708}}",
+        r"}} After\par}",
+    )
+    .as_bytes()
+    .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(!text.contains("[Image skipped: empty picture]"));
+    assert_eq!(
+        images.len(),
+        1,
+        "shape fallback result should not duplicate an already-rendered primary visual"
+    );
+    assert_eq!(images[0].format, ImageFormat::Placeholder);
+    assert_eq!(images[0].display_width_twips, Some(2160));
+    assert_eq!(images[0].display_height_twips, Some(720));
+    for forbidden in ["objdata", "shprslt", "wmetafile", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "shape alternate internals leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert_eq!(
+        rendered_text.matches("Image skipped").count(),
+        1,
+        "PDF should contain one passive image placeholder label"
+    );
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"objdata".as_slice(),
+        b"shprslt",
+        b"wmetafile",
+        b"01020304",
+        b"05060708",
+        b"/Subtype /Image",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "duplicate shape fallback leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn embedded_object_picture_result_renders_as_sanitized_static_image() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
