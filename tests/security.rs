@@ -1630,6 +1630,107 @@ fn table_row_borders_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn table_row_inner_borders_render_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "trowd",
+        "\\",
+        "trbrdrh",
+        "\\",
+        "brdrdb",
+        "\\",
+        "brdrw80",
+        "\\",
+        "trbrdrv",
+        "\\",
+        "brdrdot",
+        "\\",
+        "brdrw60",
+        "\\",
+        "cellx1440 A",
+        "\\",
+        "cell",
+        "\\",
+        "cellx2880 B",
+        "\\",
+        "cell",
+        "\\",
+        "cellx4320 C",
+        "\\",
+        "cell",
+        "\\",
+        "row}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    for expected in ["A", "B", "C"] {
+        assert!(text.contains(expected));
+    }
+    for forbidden in ["trbrdrh", "trbrdrv", "brdrdb", "brdrdot", "brdrw"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden table row inner border control leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("table-row-inner-borders.rtf");
+    let output_path = dir.path().join("table-row-inner-borders.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = parsed_pdf.get_pages().into_values().next().unwrap();
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let stroke_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "S")
+        .count();
+
+    for expected in ["A", "B", "C"] {
+        assert!(
+            rendered_text.contains(expected),
+            "decoded PDF text did not contain table cell text {expected:?}: {rendered_text:?}"
+        );
+    }
+    assert!(
+        stroke_count >= 3,
+        "expected passive table inner border strokes, saw {stroke_count}"
+    );
+    for forbidden in [
+        b"trbrdrh".as_slice(),
+        b"trbrdrv",
+        b"brdrdb",
+        b"brdrdot",
+        b"brdrw",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden table row inner border content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn table_cell_diagonal_borders_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

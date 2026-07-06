@@ -377,6 +377,8 @@ struct TableRowBuilder {
     current_cell_no_wrap: bool,
     current_cell_text_direction: TableCellTextDirection,
     row_borders: TableCellBorders,
+    row_inner_horizontal_border: TableCellBorder,
+    row_inner_vertical_border: TableCellBorder,
     row_border_flags: TableCellBorderFlags,
     current_row_border_side: Option<TableCellBorderSide>,
     current_cell_vertical_align: TableCellVerticalAlign,
@@ -433,6 +435,8 @@ enum TableCellBorderSide {
     Bottom,
     DiagonalDown,
     DiagonalUp,
+    RowHorizontal,
+    RowVertical,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -443,6 +447,8 @@ struct TableCellBorderFlags {
     bottom: bool,
     diagonal_down: bool,
     diagonal_up: bool,
+    row_horizontal: bool,
+    row_vertical: bool,
 }
 
 impl TableCellBorderFlags {
@@ -454,6 +460,8 @@ impl TableCellBorderFlags {
             TableCellBorderSide::Bottom => self.bottom,
             TableCellBorderSide::DiagonalDown => self.diagonal_down,
             TableCellBorderSide::DiagonalUp => self.diagonal_up,
+            TableCellBorderSide::RowHorizontal => self.row_horizontal,
+            TableCellBorderSide::RowVertical => self.row_vertical,
         }
     }
 
@@ -465,6 +473,8 @@ impl TableCellBorderFlags {
             TableCellBorderSide::Bottom => self.bottom = true,
             TableCellBorderSide::DiagonalDown => self.diagonal_down = true,
             TableCellBorderSide::DiagonalUp => self.diagonal_up = true,
+            TableCellBorderSide::RowHorizontal => self.row_horizontal = true,
+            TableCellBorderSide::RowVertical => self.row_vertical = true,
         }
     }
 }
@@ -2864,6 +2874,8 @@ impl Parser {
             "trbrdrr" => self.select_current_table_row_border(TableCellBorderSide::Right),
             "trbrdrt" => self.select_current_table_row_border(TableCellBorderSide::Top),
             "trbrdrb" => self.select_current_table_row_border(TableCellBorderSide::Bottom),
+            "trbrdrh" => self.select_current_table_row_border(TableCellBorderSide::RowHorizontal),
+            "trbrdrv" => self.select_current_table_row_border(TableCellBorderSide::RowVertical),
             "brdrl" => self.select_current_paragraph_border(TableCellBorderSide::Left),
             "brdrr" => self.select_current_paragraph_border(TableCellBorderSide::Right),
             "brdrt" => self.select_current_paragraph_border(TableCellBorderSide::Top),
@@ -6361,6 +6373,8 @@ impl Parser {
             current_cell_no_wrap: false,
             current_cell_text_direction: TableCellTextDirection::LeftToRightTopToBottom,
             row_borders: TableCellBorders::default(),
+            row_inner_horizontal_border: TableCellBorder::default(),
+            row_inner_vertical_border: TableCellBorder::default(),
             row_border_flags: TableCellBorderFlags::default(),
             current_row_border_side: None,
             current_cell_vertical_align: TableCellVerticalAlign::Top,
@@ -6746,6 +6760,7 @@ impl Parser {
             TableCellBorderSide::Bottom => &mut row.current_cell_borders.bottom,
             TableCellBorderSide::DiagonalDown => &mut row.current_cell_borders.diagonal_down,
             TableCellBorderSide::DiagonalUp => &mut row.current_cell_borders.diagonal_up,
+            TableCellBorderSide::RowHorizontal | TableCellBorderSide::RowVertical => return false,
         };
         row.current_cell_border_flags.set(side);
         update(border);
@@ -6774,6 +6789,8 @@ impl Parser {
             TableCellBorderSide::Right => &mut row.row_borders.right,
             TableCellBorderSide::Top => &mut row.row_borders.top,
             TableCellBorderSide::Bottom => &mut row.row_borders.bottom,
+            TableCellBorderSide::RowHorizontal => &mut row.row_inner_horizontal_border,
+            TableCellBorderSide::RowVertical => &mut row.row_inner_vertical_border,
             TableCellBorderSide::DiagonalDown | TableCellBorderSide::DiagonalUp => unreachable!(),
         };
         row.row_border_flags.set(side);
@@ -6805,9 +6822,10 @@ impl Parser {
                     TableCellBorderSide::Right => &mut self.state.paragraph.borders.right,
                     TableCellBorderSide::Top => &mut self.state.paragraph.borders.top,
                     TableCellBorderSide::Bottom => &mut self.state.paragraph.borders.bottom,
-                    TableCellBorderSide::DiagonalDown | TableCellBorderSide::DiagonalUp => {
-                        return false;
-                    }
+                    TableCellBorderSide::DiagonalDown
+                    | TableCellBorderSide::DiagonalUp
+                    | TableCellBorderSide::RowHorizontal
+                    | TableCellBorderSide::RowVertical => return false,
                 };
                 update(border);
                 true
@@ -6836,7 +6854,10 @@ impl Parser {
             TableCellBorderSide::Right => &mut self.current_section_page.page_borders.right,
             TableCellBorderSide::Top => &mut self.current_section_page.page_borders.top,
             TableCellBorderSide::Bottom => &mut self.current_section_page.page_borders.bottom,
-            TableCellBorderSide::DiagonalDown | TableCellBorderSide::DiagonalUp => return false,
+            TableCellBorderSide::DiagonalDown
+            | TableCellBorderSide::DiagonalUp
+            | TableCellBorderSide::RowHorizontal
+            | TableCellBorderSide::RowVertical => return false,
         };
         update(border);
         self.upsert_current_section_settings();
@@ -6868,7 +6889,10 @@ impl Parser {
                     .page_border_spacing_twips
                     .bottom_twips = value
             }
-            TableCellBorderSide::DiagonalDown | TableCellBorderSide::DiagonalUp => return false,
+            TableCellBorderSide::DiagonalDown
+            | TableCellBorderSide::DiagonalUp
+            | TableCellBorderSide::RowHorizontal
+            | TableCellBorderSide::RowVertical => return false,
         }
         self.upsert_current_section_settings();
         true
@@ -6894,9 +6918,10 @@ impl Parser {
                     TableCellBorderSide::Right => &mut self.state.paragraph.borders.right,
                     TableCellBorderSide::Top => &mut self.state.paragraph.borders.top,
                     TableCellBorderSide::Bottom => &mut self.state.paragraph.borders.bottom,
-                    TableCellBorderSide::DiagonalDown | TableCellBorderSide::DiagonalUp => {
-                        return false;
-                    }
+                    TableCellBorderSide::DiagonalDown
+                    | TableCellBorderSide::DiagonalUp
+                    | TableCellBorderSide::RowHorizontal
+                    | TableCellBorderSide::RowVertical => return false,
                 };
                 border.spacing_twips = value;
                 true
@@ -7372,11 +7397,26 @@ impl Parser {
             {
                 cell.borders.bottom = row.row_borders.bottom;
             }
+            if row
+                .row_border_flags
+                .is_set(TableCellBorderSide::RowHorizontal)
+                && !cell_flags.is_set(TableCellBorderSide::Bottom)
+            {
+                cell.borders.bottom = row.row_inner_horizontal_border;
+            }
             if idx == 0
                 && row.row_border_flags.is_set(TableCellBorderSide::Left)
                 && !cell_flags.is_set(TableCellBorderSide::Left)
             {
                 cell.borders.left = row.row_borders.left;
+            }
+            if idx + 1 < cell_count
+                && row
+                    .row_border_flags
+                    .is_set(TableCellBorderSide::RowVertical)
+                && !cell_flags.is_set(TableCellBorderSide::Right)
+            {
+                cell.borders.right = row.row_inner_vertical_border;
             }
             if idx + 1 == cell_count
                 && row.row_border_flags.is_set(TableCellBorderSide::Right)
@@ -20748,6 +20788,40 @@ After\par}"#;
         assert_eq!(first.borders.right.style, BorderStyle::Single);
         assert_eq!(second.borders.right.style, BorderStyle::Dotted);
         assert_eq!(second.borders.right.width_twips, 60);
+    }
+
+    #[test]
+    fn normalizes_table_row_inner_border_controls_as_safe_cell_borders() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\trbrdrh\brdrdb\brdrw80\trbrdrv\brdrdot\brdrw60\cellx1000 A\cell\cellx2000 B\cell\cellx3000 C\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table"),
+        };
+        let first = &table.rows[0].cells[0];
+        let second = &table.rows[0].cells[1];
+        let third = &table.rows[0].cells[2];
+
+        assert_eq!(first.borders.bottom.style, BorderStyle::Double);
+        assert_eq!(first.borders.bottom.width_twips, 80);
+        assert_eq!(second.borders.bottom.style, BorderStyle::Double);
+        assert_eq!(second.borders.bottom.width_twips, 80);
+        assert_eq!(third.borders.bottom.style, BorderStyle::Double);
+        assert_eq!(third.borders.bottom.width_twips, 80);
+        assert_eq!(first.borders.right.style, BorderStyle::Dotted);
+        assert_eq!(first.borders.right.width_twips, 60);
+        assert_eq!(second.borders.right.style, BorderStyle::Dotted);
+        assert_eq!(second.borders.right.width_twips, 60);
+        assert_eq!(third.borders.right.style, BorderStyle::Single);
+        assert_ne!(third.borders.right.width_twips, 60);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
