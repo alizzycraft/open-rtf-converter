@@ -5372,46 +5372,284 @@ pub fn measure_text(text: &str, style: &CharacterStyle) -> f32 {
 
 fn measure_text_with_family(text: &str, style: &CharacterStyle, family: PdfFontFamily) -> f32 {
     let size = style.font_size_points();
-    let base_width = if family == PdfFontFamily::Courier {
-        text.chars()
-            .filter(|ch| !is_zero_width_format_char(*ch))
-            .count() as f32
-            * size
-            * 0.6
-    } else {
-        let weight = match family {
-            PdfFontFamily::Helvetica if style.bold => 0.56,
-            PdfFontFamily::Helvetica => 0.52,
-            PdfFontFamily::Times if style.bold => 0.54,
-            PdfFontFamily::Times => 0.48,
-            PdfFontFamily::Symbol => 0.54,
-            PdfFontFamily::ZapfDingbats => 0.54,
-            PdfFontFamily::Courier => unreachable!("handled above"),
-        };
-        text.chars()
-            .map(|ch| match ch {
-                'i' | 'l' | '!' | '.' | ',' | ':' | ';' | '\'' => {
-                    size * if family == PdfFontFamily::Times {
-                        0.22
-                    } else {
-                        0.25
-                    }
-                }
-                'm' | 'w' | 'M' | 'W' => {
-                    size * if family == PdfFontFamily::Times {
-                        0.72
-                    } else {
-                        0.78
-                    }
-                }
-                ' ' | '\u{00a0}' => size * 0.28,
-                ch if is_zero_width_format_char(ch) => 0.0,
-                _ => size * weight,
-            })
-            .sum::<f32>()
-    };
+    let base_width = text
+        .chars()
+        .map(|ch| base14_char_width_points(ch, size, family, style))
+        .sum::<f32>();
     (base_width + character_spacing_width(text, style) + passive_kerning_width(text, style, family))
         * style.horizontal_scale()
+}
+
+fn base14_char_width_points(
+    ch: char,
+    size: f32,
+    family: PdfFontFamily,
+    style: &CharacterStyle,
+) -> f32 {
+    if is_zero_width_format_char(ch) {
+        return 0.0;
+    }
+
+    let units = match family {
+        PdfFontFamily::Courier => 600,
+        PdfFontFamily::Helvetica if style.bold => helvetica_bold_width_units(ch),
+        PdfFontFamily::Helvetica => helvetica_width_units(ch),
+        PdfFontFamily::Times if style.bold => times_bold_width_units(ch),
+        PdfFontFamily::Times if style.italic => times_italic_width_units(ch),
+        PdfFontFamily::Times => times_width_units(ch),
+        PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats => symbol_width_units(ch),
+    };
+    size * units as f32 / 1000.0
+}
+
+fn helvetica_width_units(ch: char) -> u16 {
+    match ch {
+        ' ' | '\u{00a0}' | '!' | ',' | '.' | ':' | ';' | '[' | '\\' | ']' => 278,
+        '"' => 355,
+        '#' | '$' | '0'..='9' | '<' | '=' | '>' | '_' | '?' => 556,
+        '%' => 889,
+        '&' | 'A' | 'B' | 'K' | 'R' | 'S' | 'X' | 'Y' => 667,
+        '\'' => 191,
+        '(' | ')' | '`' | '-' => 333,
+        '*' => 389,
+        '+' | '~' => 584,
+        '/' | 'I' | 'f' | 't' => 278,
+        '@' => 1015,
+        'C' | 'H' | 'N' | 'U' | 'w' => 722,
+        'D' | 'G' | 'O' => 778,
+        'E' | 'P' | 'V' => 667,
+        'F' | 'Z' => 611,
+        'J' | 'a' | 'b' | 'd' | 'e' | 'g' | 'n' | 'o' | 'p' | 'q' => 556,
+        'L' => 556,
+        'M' | 'm' => 833,
+        'Q' => 778,
+        'T' => 611,
+        'W' => 944,
+        '^' => 469,
+        'c' | 'k' | 's' | 'v' | 'x' | 'y' | 'z' => 500,
+        'h' | 'u' => 556,
+        'i' | 'l' => 222,
+        'j' => 222,
+        'r' | '{' | '}' => 333,
+        '|' => 260,
+        '\u{2013}' => 556,
+        '\u{2014}' => 1000,
+        '\u{2018}' | '\u{2019}' => 222,
+        '\u{201c}' | '\u{201d}' => 333,
+        '\u{2022}' => 350,
+        '\u{2026}' => 1000,
+        _ if ch.is_whitespace() => 278,
+        _ => 556,
+    }
+}
+
+fn helvetica_bold_width_units(ch: char) -> u16 {
+    match ch {
+        ' ' | '\u{00a0}' | ',' | '.' | 'I' | 'i' | 'j' | 'l' | '\\' => 278,
+        '!' | ':' | ';' | '(' | ')' | '[' | ']' | '`' | '-' | 'f' | 't' => 333,
+        '"' => 474,
+        '#'
+        | '$'
+        | '0'..='9'
+        | '<'
+        | '='
+        | '>'
+        | '_'
+        | 'J'
+        | 'c'
+        | 'e'
+        | 'k'
+        | 's'
+        | 'u'
+        | 'v'
+        | 'x' => 556,
+        '%' => 889,
+        '&' | 'A' | 'B' | 'C' | 'D' | 'H' | 'K' | 'N' | 'R' | 'S' | 'X' | 'Y' => 722,
+        '\'' => 238,
+        '*' => 389,
+        '+' | '^' | '~' => 584,
+        '/' => 278,
+        '?' | 'F' | 'L' | 'P' | 'Z' | 'b' | 'd' | 'g' | 'h' | 'n' | 'o' | 'p' | 'q' => 611,
+        '@' => 975,
+        'E' | 'T' => 667,
+        'G' | 'O' | 'Q' | 'w' => 778,
+        'M' | 'm' => 833,
+        'U' => 722,
+        'V' => 667,
+        'W' => 944,
+        'a' => 556,
+        'r' | '{' | '}' => 389,
+        'y' => 556,
+        'z' => 500,
+        '|' => 280,
+        '\u{2013}' => 556,
+        '\u{2014}' => 1000,
+        '\u{2018}' | '\u{2019}' => 278,
+        '\u{201c}' | '\u{201d}' => 500,
+        '\u{2022}' => 350,
+        '\u{2026}' => 1000,
+        _ if ch.is_whitespace() => 278,
+        _ => 556,
+    }
+}
+
+fn times_width_units(ch: char) -> u16 {
+    match ch {
+        ' ' | '\u{00a0}' | ',' | '.' => 250,
+        '!' | '(' | ')' | '[' | ']' | '`' | 'f' | 'r' => 333,
+        '"' => 408,
+        '#'
+        | '$'
+        | '*'
+        | '0'..='9'
+        | '_'
+        | 'b'
+        | 'd'
+        | 'g'
+        | 'h'
+        | 'k'
+        | 'n'
+        | 'o'
+        | 'p'
+        | 'q'
+        | 'u'
+        | 'v' => 500,
+        '%' => 833,
+        '&' => 778,
+        '\'' => 180,
+        '+' | '<' | '=' | '>' => 564,
+        '-' => 333,
+        '/' | ':' | ';' | 'i' | 'j' | 'l' => 278,
+        '?' | 'a' | 'c' | 'e' | 'z' => 444,
+        '@' => 921,
+        'A' | 'D' | 'G' | 'H' | 'K' | 'O' | 'Q' | 'V' | 'X' | 'Y' | 'w' => 722,
+        'B' | 'C' | 'R' => 667,
+        'E' | 'L' | 'Z' | 'T' => 611,
+        'F' | 'P' | 'S' => 556,
+        'I' => 333,
+        'J' | 's' => 389,
+        'M' => 889,
+        'N' => 722,
+        'U' => 722,
+        'W' => 944,
+        '\\' => 278,
+        '^' => 469,
+        'm' => 778,
+        't' => 278,
+        'x' => 500,
+        'y' => 500,
+        '{' | '}' => 480,
+        '|' => 200,
+        '~' => 541,
+        '\u{2013}' => 500,
+        '\u{2014}' => 1000,
+        '\u{2018}' | '\u{2019}' => 333,
+        '\u{201c}' | '\u{201d}' => 444,
+        '\u{2022}' => 350,
+        '\u{2026}' => 1000,
+        _ if ch.is_whitespace() => 250,
+        _ => 500,
+    }
+}
+
+fn times_bold_width_units(ch: char) -> u16 {
+    match ch {
+        ' ' | '\u{00a0}' | ',' | '.' => 250,
+        '!' | '(' | ')' | '-' | '[' | ']' | '`' | 'f' | ':' | ';' => 333,
+        '"' | 'J' | '?' | '#' | '$' | '*' | '0'..='9' | '_' | 'a' | 'o' | 'v' | 'x' | 'y' => 500,
+        '%' => 1000,
+        '&' | 'm' => 833,
+        '\'' | 'i' | 'l' | '\\' => 278,
+        '+' | '<' | '=' | '>' => 570,
+        '/' => 278,
+        '@' => 930,
+        'A' | 'D' | 'N' | 'R' | 'U' | 'V' | 'X' => 722,
+        'B' | 'E' | 'L' | 'T' | 'Z' => 667,
+        'C' | 'G' | 'H' | 'K' | 'O' | 'Q' | 'Y' => 778,
+        'F' | 'P' | 'S' | 'b' | 'd' | 'h' | 'k' | 'n' | 'p' | 'q' | 'u' => 556,
+        'I' | 's' | '{' | '}' => 389,
+        'M' => 944,
+        'W' => 1000,
+        '^' => 581,
+        'c' | 'e' | 'z' => 444,
+        'g' => 500,
+        'j' | 't' => 333,
+        'r' => 444,
+        'w' => 722,
+        '|' => 220,
+        '~' => 520,
+        '\u{2013}' => 500,
+        '\u{2014}' => 1000,
+        '\u{2018}' | '\u{2019}' => 333,
+        '\u{201c}' | '\u{201d}' => 500,
+        '\u{2022}' => 350,
+        '\u{2026}' => 1000,
+        _ if ch.is_whitespace() => 250,
+        _ => 500,
+    }
+}
+
+fn times_italic_width_units(ch: char) -> u16 {
+    match ch {
+        ' ' | '\u{00a0}' | ',' | '.' => 250,
+        '!' | '(' | ')' | '`' | ':' | ';' => 333,
+        '"' => 420,
+        '#'
+        | '$'
+        | '*'
+        | '0'..='9'
+        | '?'
+        | '_'
+        | 'a'
+        | 'b'
+        | 'd'
+        | 'g'
+        | 'h'
+        | 'n'
+        | 'o'
+        | 'p'
+        | 'q'
+        | 'u' => 500,
+        '%' | 'M' | 'w' => 833,
+        '&' => 778,
+        '\'' => 214,
+        '+' | '<' | '=' | '>' => 675,
+        '-' => 333,
+        '/' | 'f' | 'i' | 'j' | 'l' | 't' | '\\' => 278,
+        '@' => 920,
+        'A' | 'B' | 'E' | 'F' | 'P' | 'R' | 'V' | 'X' => 611,
+        'C' | 'K' | 'W' => 667,
+        'D' | 'H' | 'O' | 'Q' | 'U' | 'm' => 722,
+        'G' => 722,
+        'I' => 333,
+        'J' | 'c' | 'e' | 'x' | 'y' => 444,
+        'L' | 'T' | 'Y' | 'Z' => 556,
+        'N' => 667,
+        'S' => 500,
+        '[' | ']' | 'r' | 's' | 'z' => 389,
+        '^' => 422,
+        'k' => 444,
+        'v' => 444,
+        '{' | '}' => 400,
+        '|' => 275,
+        '~' => 541,
+        '\u{2013}' => 500,
+        '\u{2014}' => 889,
+        '\u{2018}' | '\u{2019}' => 333,
+        '\u{201c}' | '\u{201d}' => 556,
+        '\u{2022}' => 350,
+        '\u{2026}' => 889,
+        _ if ch.is_whitespace() => 250,
+        _ => 500,
+    }
+}
+
+fn symbol_width_units(ch: char) -> u16 {
+    match ch {
+        ' ' | '\u{00a0}' => 250,
+        _ if ch.is_whitespace() => 250,
+        _ => 600,
+    }
 }
 
 fn character_spacing_width(text: &str, style: &CharacterStyle) -> f32 {
@@ -9799,7 +10037,44 @@ mod tests {
             !layout.pages[0]
                 .items
                 .iter()
-                .any(|item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::Symbol))
+            .any(|item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::Symbol))
+        );
+    }
+
+    #[test]
+    fn times_run_fragments_use_base14_widths_for_word_spacing() {
+        let mut document = Document::default();
+        document.fonts = vec![FontDef {
+            index: 0,
+            name: "Times New Roman".to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Roman,
+            pitch: FontPitch::Default,
+        }];
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Here is a brief Times New Roman text.".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let times = text_x(&layout.pages[0], "Times ").expect("Times fragment");
+        let new = text_x(&layout.pages[0], "New ").expect("New fragment");
+        let roman = text_x(&layout.pages[0], "Roman ").expect("Roman fragment");
+
+        assert!(
+            (new - times - 33.0).abs() < 0.1,
+            "Times fragment advanced by {}",
+            new - times
+        );
+        assert!(
+            (roman - new - 25.66).abs() < 0.1,
+            "New fragment advanced by {}",
+            roman - new
         );
     }
 
