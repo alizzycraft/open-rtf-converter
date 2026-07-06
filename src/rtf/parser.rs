@@ -9828,8 +9828,10 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "pnucltr"
                 | "pnucrm"
                 | "charrsid"
+                | "cgrid"
                 | "delrsid"
                 | "insrsid"
+                | "outlinelevel"
                 | "pararsid"
                 | "revauth"
                 | "revdttm"
@@ -14131,6 +14133,25 @@ mod tests {
                 Block::PageBreak | Block::ColumnBreak | Block::SectionBreak
             )
         }));
+    }
+
+    #[test]
+    fn normalizes_word_grid_and_outline_metadata_without_visible_output() {
+        let output = parse_rtf(
+            r"{\rtf1{\stylesheet{\s1\outlinelevel2\cgrid Heading;}}\pard\outlinelevel1\cgrid Visible\par}",
+        )
+        .unwrap();
+
+        assert_eq!(document_text(&output.document), "Visible");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+        for forbidden in ["outlinelevel", "cgrid", "stylesheet"] {
+            assert!(!document_text(&output.document).contains(forbidden));
+        }
     }
 
     #[test]

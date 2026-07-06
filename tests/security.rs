@@ -17448,6 +17448,61 @@ fn extreme_character_scaling_is_bounded_before_pdf_rendering() {
 }
 
 #[test]
+fn word_grid_and_outline_metadata_do_not_leak_to_pdf() {
+    let input = br"{\rtf1{\stylesheet{\s1\outlinelevel2\cgrid Heading;}}\pard\outlinelevel1\cgrid Visible metadata\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Visible metadata"));
+    for forbidden in ["outlinelevel", "cgrid", "stylesheet"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden Word metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Visible metadata"),
+        "decoded PDF text did not contain visible metadata text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"outlinelevel".as_slice(),
+        b"cgrid",
+        b"stylesheet",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Word metadata content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn justified_word_spacing_stays_passive_pdf_text_state() {
     let input = rtf(&[
         "{",
