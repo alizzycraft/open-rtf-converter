@@ -14782,7 +14782,7 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("note placement control approximated")
+            .contains("endnotes placed at passive section boundary")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -20563,6 +20563,89 @@ fn endnotes_at_end_of_document_render_on_passive_final_page_without_control_leak
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden endnote placement content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn endnotes_at_end_of_section_render_before_next_section_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "endnhere First section",
+        "\\",
+        "chftn{",
+        "\\",
+        "endnote Section note",
+        "\\",
+        "par}",
+        "\\",
+        "sect Second section",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(
+        parsed.document.endnote_placement,
+        EndnotePlacement::EndOfSection
+    );
+    assert_eq!(parsed.document.endnotes.len(), 1);
+    assert_eq!(parsed.document.endnote_section_indices, vec![1]);
+    assert!(text.contains("First section1"));
+    assert!(text.contains("Second section"));
+    assert!(text.contains("Section note"));
+    for forbidden in ["endnhere", "chftn"] {
+        assert!(
+            !text.contains(forbidden),
+            "endnote section control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let pages = parsed_pdf.get_pages();
+    let page_texts = pages
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(page_texts.len(), 2);
+    assert!(page_texts[0].contains("First section1"));
+    assert!(page_texts[0].contains("1. Section note"));
+    assert!(page_texts[1].contains("Second section"));
+    assert!(!page_texts[1].contains("Section note"));
+    for forbidden in [
+        b"endnhere".as_slice(),
+        b"chftn",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden endnote section content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

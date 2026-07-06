@@ -823,6 +823,7 @@ struct Parser {
     next_bookmark_marker_id: usize,
     styles: Vec<StyleDefinition>,
     current_section_page: PageSettings,
+    current_section_index: usize,
     current_section_column_index: usize,
     footnote_reference_count: usize,
     endnote_reference_count: usize,
@@ -934,6 +935,7 @@ impl Parser {
             next_bookmark_marker_id: 1,
             styles: Vec::new(),
             current_section_page: Document::default().page,
+            current_section_index: 1,
             current_section_column_index: 0,
             footnote_reference_count: 0,
             endnote_reference_count: 0,
@@ -3013,6 +3015,9 @@ impl Parser {
                     }
                     SectionBreakKind::Column => self.document.blocks.push(Block::ColumnBreak),
                 }
+                if self.state.section_break_kind != SectionBreakKind::Column {
+                    self.current_section_index = self.current_section_index.saturating_add(1);
+                }
             }
             "sectd" => {
                 self.state.section_break_kind = SectionBreakKind::Page;
@@ -4134,7 +4139,7 @@ impl Parser {
                 "endnotes placed on passive final page without active note behavior"
             }
             EndnotePlacement::EndOfSection => {
-                "endnote section placement approximated by passive note layout"
+                "endnotes placed at passive section boundary without active note behavior"
             }
             EndnotePlacement::AfterBody => "endnote placement rendered after body text",
         };
@@ -6337,6 +6342,9 @@ impl Parser {
                 },
             );
             self.document.endnotes.push(paragraph);
+            self.document
+                .endnote_section_indices
+                .push(self.current_section_index.max(1));
         }
     }
 

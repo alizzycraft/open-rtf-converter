@@ -42,6 +42,7 @@ pub struct Document {
     pub background_shapes: Vec<StaticShape>,
     pub footnotes: Vec<Paragraph>,
     pub endnotes: Vec<Paragraph>,
+    pub endnote_section_indices: Vec<usize>,
     pub blocks: Vec<Block>,
 }
 
@@ -87,6 +88,7 @@ impl Default for Document {
             background_shapes: Vec::new(),
             footnotes: Vec::new(),
             endnotes: Vec::new(),
+            endnote_section_indices: Vec::new(),
             blocks: vec![Block::Paragraph(Paragraph::default())],
         }
     }
