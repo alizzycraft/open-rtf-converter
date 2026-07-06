@@ -338,6 +338,7 @@ pub struct StaticImage {
     pub format: ImageFormat,
     pub bytes: Vec<u8>,
     pub palette: Vec<u8>,
+    pub vector_commands: Vec<StaticImageVectorCommand>,
     pub width_px: u32,
     pub height_px: u32,
     pub natural_width_px_hint: Option<u32>,
@@ -366,7 +367,28 @@ pub enum ImageFormat {
     PngGrayscale,
     PngIndexed,
     Rgb8,
+    WmfVector,
     Placeholder,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StaticImageVectorCommand {
+    Rectangle {
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+        stroke_color: Option<Color>,
+        fill_color: Option<Color>,
+    },
+    Ellipse {
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+        stroke_color: Option<Color>,
+        fill_color: Option<Color>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -9,7 +9,8 @@ use crate::layout::{
     passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
-    CharacterEmphasisMark, CharacterStyle, ImageFormat, TextRelief, UnderlineStyle,
+    CharacterEmphasisMark, CharacterStyle, ImageFormat, StaticImageVectorCommand, TextRelief,
+    UnderlineStyle,
 };
 
 const HELVETICA_REGULAR: &[u8] = b"F1";
@@ -372,6 +373,10 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                         draw_passive_image_placeholder(&mut content, fragment);
                         continue;
                     }
+                    if fragment.image.format == ImageFormat::WmfVector {
+                        draw_passive_wmf_vector_image(&mut content, fragment);
+                        continue;
+                    }
                     if let Some(image_ref) = image_refs.get(idx).and_then(|page_images| {
                         page_images
                             .iter()
@@ -474,7 +479,7 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                     image.color_space().device_rgb();
                     image.bits_per_component(8);
                 }
-                ImageFormat::Placeholder => {}
+                ImageFormat::WmfVector | ImageFormat::Placeholder => {}
             }
         }
     }
@@ -542,11 +547,8 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, item)| {
-                    if matches!(
-                        item,
-                        LayoutItem::Image(fragment)
-                            if fragment.image.format != ImageFormat::Placeholder
-                    ) {
+                    if matches!(item, LayoutItem::Image(fragment) if image_format_uses_xobject(fragment.image.format))
+                    {
                         let id = Ref::new(next_id);
                         let name = format!("Im{}", next_id - first_image_id + 1).into_bytes();
                         next_id += 1;
@@ -562,6 +564,164 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
                 .collect()
         })
         .collect()
+}
+
+fn image_format_uses_xobject(format: ImageFormat) -> bool {
+    matches!(
+        format,
+        ImageFormat::Jpeg
+            | ImageFormat::JpegGrayscale
+            | ImageFormat::JpegCmyk
+            | ImageFormat::Png
+            | ImageFormat::PngGrayscale
+            | ImageFormat::PngIndexed
+            | ImageFormat::Rgb8
+    )
+}
+
+fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout::ImageFragment) {
+    let draw = image_draw_rect(fragment);
+    let source_width = fragment.image.width_px.max(1) as f32;
+    let source_height = fragment.image.height_px.max(1) as f32;
+
+    content.save_state();
+    content.rect(fragment.x, fragment.y, fragment.width, fragment.height);
+    content.clip_nonzero();
+    content.end_path();
+    for command in &fragment.image.vector_commands {
+        match command {
+            StaticImageVectorCommand::Rectangle {
+                left,
+                top,
+                right,
+                bottom,
+                stroke_color,
+                fill_color,
+            } => {
+                let rect = vector_command_rect(
+                    draw,
+                    source_width,
+                    source_height,
+                    *left,
+                    *top,
+                    *right,
+                    *bottom,
+                );
+                draw_passive_vector_rectangle(content, rect, *stroke_color, *fill_color);
+            }
+            StaticImageVectorCommand::Ellipse {
+                left,
+                top,
+                right,
+                bottom,
+                stroke_color,
+                fill_color,
+            } => {
+                let rect = vector_command_rect(
+                    draw,
+                    source_width,
+                    source_height,
+                    *left,
+                    *top,
+                    *right,
+                    *bottom,
+                );
+                draw_passive_vector_ellipse(content, rect, *stroke_color, *fill_color);
+            }
+        }
+    }
+    content.restore_state();
+}
+
+#[derive(Debug, Copy, Clone)]
+struct VectorDrawRect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+fn vector_command_rect(
+    draw: ImageDrawRect,
+    source_width: f32,
+    source_height: f32,
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+) -> VectorDrawRect {
+    let x = draw.x + (left / source_width) * draw.width;
+    let width = ((right - left) / source_width * draw.width).max(0.1);
+    let y = draw.y + draw.height - (bottom / source_height) * draw.height;
+    let height = ((bottom - top) / source_height * draw.height).max(0.1);
+    VectorDrawRect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+fn draw_passive_vector_rectangle(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    stroke_color: Option<crate::model::Color>,
+    fill_color: Option<crate::model::Color>,
+) {
+    if fill_color.is_none() && stroke_color.is_none() {
+        return;
+    }
+    if let Some(color) = fill_color {
+        set_fill_color(content, pdf_color_from_model(color));
+    }
+    if let Some(color) = stroke_color {
+        set_stroke_color(content, pdf_color_from_model(color));
+        content.set_line_width(0.75);
+    }
+    content.rect(rect.x, rect.y, rect.width, rect.height);
+    match (fill_color, stroke_color) {
+        (Some(_), Some(_)) => {
+            content.fill_nonzero_and_stroke();
+        }
+        (Some(_), None) => {
+            content.fill_nonzero();
+        }
+        (None, Some(_)) => {
+            content.stroke();
+        }
+        (None, None) => {}
+    }
+}
+
+fn draw_passive_vector_ellipse(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    stroke_color: Option<crate::model::Color>,
+    fill_color: Option<crate::model::Color>,
+) {
+    draw_passive_ellipse(
+        content,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        stroke_color.map(|_| 0.75).unwrap_or(0.0),
+        stroke_color.map(pdf_color_from_model).unwrap_or(PdfColor {
+            red: 0.0,
+            green: 0.0,
+            blue: 0.0,
+        }),
+        LineStyle::Solid,
+        fill_color.map(pdf_color_from_model),
+    );
+}
+
+fn pdf_color_from_model(color: crate::model::Color) -> PdfColor {
+    PdfColor {
+        red: color.red as f32 / 255.0,
+        green: color.green as f32 / 255.0,
+        blue: color.blue as f32 / 255.0,
+    }
 }
 
 fn draw_passive_image_placeholder(content: &mut Content, fragment: &crate::layout::ImageFragment) {
@@ -2293,6 +2453,7 @@ endobj
             format: ImageFormat::Jpeg,
             bytes: minimal_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
+            vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
             natural_width_px_hint: None,
@@ -2334,6 +2495,7 @@ endobj
             format: ImageFormat::JpegGrayscale,
             bytes: minimal_grayscale_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
+            vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
             natural_width_px_hint: None,
@@ -2375,6 +2537,7 @@ endobj
             format: ImageFormat::JpegCmyk,
             bytes: minimal_cmyk_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
+            vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
             natural_width_px_hint: None,
@@ -2416,6 +2579,7 @@ endobj
             format: ImageFormat::Png,
             bytes: minimal_png_idat_for_1x1_rgb(),
             palette: Vec::new(),
+            vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
             natural_width_px_hint: None,
@@ -2461,6 +2625,7 @@ endobj
             format: ImageFormat::PngIndexed,
             bytes: minimal_png_idat_for_1x1_indexed(),
             palette: vec![255, 0, 0, 0, 255, 0],
+            vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
             natural_width_px_hint: None,
@@ -2510,6 +2675,7 @@ endobj
             format: ImageFormat::Rgb8,
             bytes: vec![255, 0, 0, 0, 255, 0],
             palette: Vec::new(),
+            vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
             natural_width_px_hint: None,
@@ -2555,6 +2721,7 @@ endobj
             format: ImageFormat::Jpeg,
             bytes: minimal_jpeg_with_dimensions(100, 100),
             palette: Vec::new(),
+            vector_commands: Vec::new(),
             width_px: 100,
             height_px: 100,
             natural_width_px_hint: None,

@@ -9,10 +9,10 @@ use crate::model::{
     FontFamilyHint, FontPitch, FootnotePlacement, ImageCrop, ImageFormat, LineNumberRestart,
     PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
-    StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
-    TableCellPadding, TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TextRelief, UnderlineStyle,
+    StaticImageVectorCommand, StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER,
+    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellBorders,
+    TableCellHorizontalMerge, TableCellPadding, TableCellVerticalAlign, TableCellVerticalMerge,
+    TableRow, TableRowAlignment, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -3688,6 +3688,9 @@ impl Parser {
         if self.state.office_math_delimiter_capture.is_some() {
             return self.push_office_math_delimiter_text(text, offset);
         }
+        if self.state.destination == Destination::Picture {
+            return self.push_picture_hex_text(text, offset);
+        }
         if self.state.shape_property_capture.is_some() {
             return self.push_shape_property_text(text, offset);
         }
@@ -3825,6 +3828,9 @@ impl Parser {
         if self.state.office_math_delimiter_capture.is_some() {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_delimiter_text(&ch.to_string(), offset);
+        }
+        if self.state.destination == Destination::Picture {
+            return self.push_picture_bytes(&[byte], offset);
         }
         if self.state.shape_property_capture.is_some() {
             let ch = self.decode_text_hex_byte(byte);
@@ -7660,6 +7666,7 @@ impl Parser {
                             format: jpeg.format,
                             bytes: picture.bytes,
                             palette: Vec::new(),
+                            vector_commands: Vec::new(),
                             width_px,
                             height_px,
                             natural_width_px_hint: picture.width_px_hint,
@@ -7690,6 +7697,7 @@ impl Parser {
                             format: png.format,
                             bytes: png.idat,
                             palette: png.palette,
+                            vector_commands: Vec::new(),
                             width_px: png.width_px,
                             height_px: png.height_px,
                             natural_width_px_hint: picture.width_px_hint,
@@ -7721,6 +7729,7 @@ impl Parser {
                                 format: ImageFormat::Rgb8,
                                 bytes: dib.rgb,
                                 palette: Vec::new(),
+                                vector_commands: Vec::new(),
                                 width_px: dib.width_px,
                                 height_px: dib.height_px,
                                 natural_width_px_hint: picture.width_px_hint,
@@ -7743,10 +7752,45 @@ impl Parser {
                     }
                 }
             }
-            PictureKind::Wmf
-            | PictureKind::Emf
-            | PictureKind::Unsupported
-            | PictureKind::Unknown => {
+            PictureKind::Wmf => {
+                if let Some(wmf) = parse_wmf_vector_image_data(&picture.bytes) {
+                    self.ensure_image_pixels(wmf.width_px, wmf.height_px, offset)?;
+                    self.diagnostics.push(Diagnostic::warning(
+                        "WMF picture rendered as bounded passive vector preview",
+                        Some(offset),
+                    ));
+                    self.push_static_image(
+                        picture.owner_destination,
+                        StaticImage {
+                            format: ImageFormat::WmfVector,
+                            bytes: Vec::new(),
+                            palette: Vec::new(),
+                            vector_commands: wmf.commands,
+                            width_px: wmf.width_px,
+                            height_px: wmf.height_px,
+                            natural_width_px_hint: picture.width_px_hint,
+                            natural_height_px_hint: picture.height_px_hint,
+                            display_width_twips: picture.display_width_twips,
+                            display_height_twips: picture.display_height_twips,
+                            scale_x_percent: picture.scale_x_percent,
+                            scale_y_percent: picture.scale_y_percent,
+                            crop: picture.crop,
+                        },
+                    );
+                    self.mark_shape_visual_result_rendered();
+                } else {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "unsupported picture format replaced with a passive geometry placeholder",
+                        Some(offset),
+                    ));
+                    self.push_static_image(
+                        picture.owner_destination,
+                        passive_picture_placeholder_image(&picture),
+                    );
+                    self.mark_shape_visual_result_rendered();
+                }
+            }
+            PictureKind::Emf | PictureKind::Unsupported | PictureKind::Unknown => {
                 self.diagnostics.push(Diagnostic::warning(
                     "unsupported picture format replaced with a passive geometry placeholder",
                     Some(offset),
@@ -7847,6 +7891,7 @@ impl Parser {
             format: ImageFormat::Placeholder,
             bytes: Vec::new(),
             palette: Vec::new(),
+            vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
             natural_width_px_hint: None,
@@ -13711,6 +13756,7 @@ fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
         format: ImageFormat::Placeholder,
         bytes: Vec::new(),
         palette: Vec::new(),
+        vector_commands: Vec::new(),
         width_px: picture.width_px_hint.unwrap_or(1).max(1),
         height_px: picture.height_px_hint.unwrap_or(1).max(1),
         natural_width_px_hint: picture.width_px_hint,
@@ -13763,6 +13809,38 @@ struct ParsedDib {
     height_px: u32,
     rgb: Vec<u8>,
 }
+
+#[derive(Debug)]
+struct ParsedWmfVector {
+    width_px: u32,
+    height_px: u32,
+    commands: Vec<StaticImageVectorCommand>,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum WmfObject {
+    Pen(Option<Color>),
+    Brush(Option<Color>),
+    Other,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct WmfDrawingState {
+    stroke_color: Option<Color>,
+    fill_color: Option<Color>,
+}
+
+impl Default for WmfDrawingState {
+    fn default() -> Self {
+        Self {
+            stroke_color: Some(Color::default()),
+            fill_color: None,
+        }
+    }
+}
+
+const MAX_PASSIVE_WMF_RECORDS: usize = 512;
+const MAX_PASSIVE_WMF_COMMANDS: usize = 256;
 
 fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     const BITMAPINFOHEADER_SIZE: usize = 40;
@@ -13938,6 +14016,11 @@ fn read_le_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     Some(u16::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
 }
 
+fn read_le_i16(bytes: &[u8], offset: usize) -> Option<i16> {
+    let end = offset.checked_add(2)?;
+    Some(i16::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
+}
+
 fn read_le_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     let end = offset.checked_add(4)?;
     Some(u32::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
@@ -13946,6 +14029,173 @@ fn read_le_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 fn read_le_i32(bytes: &[u8], offset: usize) -> Option<i32> {
     let end = offset.checked_add(4)?;
     Some(i32::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
+}
+
+fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
+    if bytes.len() < 18 {
+        return None;
+    }
+    let file_type = read_le_u16(bytes, 0)?;
+    let header_size_words = read_le_u16(bytes, 2)?;
+    let version = read_le_u16(bytes, 4)?;
+    let file_size_words = read_le_u32(bytes, 6)? as usize;
+    if file_type != 1 || header_size_words != 9 || version != 0x0300 {
+        return None;
+    }
+    if file_size_words.checked_mul(2)? > bytes.len() {
+        return None;
+    }
+
+    let mut pos = usize::from(header_size_words).checked_mul(2)?;
+    let mut record_count = 0usize;
+    let mut window_width = 1i32;
+    let mut window_height = 1i32;
+    let mut objects = Vec::new();
+    let mut state = WmfDrawingState::default();
+    let mut commands = Vec::new();
+
+    while pos + 6 <= bytes.len() {
+        record_count = record_count.checked_add(1)?;
+        if record_count > MAX_PASSIVE_WMF_RECORDS {
+            return None;
+        }
+        let record_size_words = read_le_u32(bytes, pos)? as usize;
+        let function = read_le_u16(bytes, pos + 4)?;
+        if record_size_words < 3 {
+            return None;
+        }
+        let record_size_bytes = record_size_words.checked_mul(2)?;
+        let record_end = pos.checked_add(record_size_bytes)?;
+        if record_end > bytes.len() {
+            return None;
+        }
+        let data = &bytes[pos + 6..record_end];
+
+        match function {
+            0x0000 => break,
+            0x020c => {
+                let height = read_le_i16(data, 0)?;
+                let width = read_le_i16(data, 2)?;
+                window_width = i32::from(width.unsigned_abs().max(1));
+                window_height = i32::from(height.unsigned_abs().max(1));
+            }
+            0x02fa => objects.push(parse_wmf_pen_object(data).unwrap_or(WmfObject::Other)),
+            0x02fc => objects.push(parse_wmf_brush_object(data).unwrap_or(WmfObject::Other)),
+            0x02fb | 0x02fd => objects.push(WmfObject::Other),
+            0x012d => {
+                let handle = usize::from(read_le_u16(data, 0)?);
+                if let Some(object) = objects.get(handle).copied() {
+                    match object {
+                        WmfObject::Pen(color) => state.stroke_color = color,
+                        WmfObject::Brush(color) => state.fill_color = color,
+                        WmfObject::Other => {}
+                    }
+                }
+            }
+            0x041b | 0x0418 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let bounds = parse_wmf_bounds(data, window_width, window_height)?;
+                if bounds_is_visible(bounds) {
+                    let (left, top, right, bottom) = bounds;
+                    let command = if function == 0x041b {
+                        StaticImageVectorCommand::Rectangle {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color: state.stroke_color,
+                            fill_color: state.fill_color,
+                        }
+                    } else {
+                        StaticImageVectorCommand::Ellipse {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color: state.stroke_color,
+                            fill_color: state.fill_color,
+                        }
+                    };
+                    commands.push(command);
+                }
+            }
+            _ => {}
+        }
+
+        pos = record_end;
+    }
+
+    if commands.is_empty() {
+        return None;
+    }
+
+    Some(ParsedWmfVector {
+        width_px: u32::try_from(window_width.max(1)).ok()?,
+        height_px: u32::try_from(window_height.max(1)).ok()?,
+        commands,
+    })
+}
+
+fn parse_wmf_pen_object(data: &[u8]) -> Option<WmfObject> {
+    if data.len() < 10 {
+        return None;
+    }
+    let style = read_le_u16(data, 0)?;
+    let color = color_from_colorref(data, 6)?;
+    Some(WmfObject::Pen(if style == 5 { None } else { Some(color) }))
+}
+
+fn parse_wmf_brush_object(data: &[u8]) -> Option<WmfObject> {
+    if data.len() < 8 {
+        return None;
+    }
+    let style = read_le_u16(data, 0)?;
+    let color = color_from_colorref(data, 2)?;
+    Some(WmfObject::Brush(if style == 1 {
+        None
+    } else {
+        Some(color)
+    }))
+}
+
+fn parse_wmf_bounds(
+    data: &[u8],
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32, f32, f32)> {
+    if data.len() < 8 {
+        return None;
+    }
+    let bottom = i32::from(read_le_i16(data, 0)?);
+    let right = i32::from(read_le_i16(data, 2)?);
+    let top = i32::from(read_le_i16(data, 4)?);
+    let left = i32::from(read_le_i16(data, 6)?);
+    let max_x = window_width.max(1);
+    let max_y = window_height.max(1);
+    let left = left.clamp(0, max_x) as f32;
+    let right = right.clamp(0, max_x) as f32;
+    let top = top.clamp(0, max_y) as f32;
+    let bottom = bottom.clamp(0, max_y) as f32;
+    Some((
+        left.min(right),
+        top.min(bottom),
+        left.max(right),
+        top.max(bottom),
+    ))
+}
+
+fn bounds_is_visible((left, top, right, bottom): (f32, f32, f32, f32)) -> bool {
+    right - left >= 0.5 && bottom - top >= 0.5
+}
+
+fn color_from_colorref(data: &[u8], offset: usize) -> Option<Color> {
+    Some(Color {
+        red: *data.get(offset)?,
+        green: *data.get(offset + 1)?,
+        blue: *data.get(offset + 2)?,
+    })
 }
 
 fn parse_png_image_data(bytes: &[u8]) -> Option<ParsedPng> {

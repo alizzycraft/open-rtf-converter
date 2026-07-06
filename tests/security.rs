@@ -6,8 +6,8 @@ use open_rtf_converter::model::{
     Block, BorderStyle, CharacterEmphasisMark, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint,
     FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, TOTAL_PAGES_MARKER, TabAlignment, TextRelief,
-    UnderlineStyle,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImageVectorCommand, TOTAL_PAGES_MARKER,
+    TabAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
@@ -17145,11 +17145,233 @@ fn unsupported_picture_formats_are_placeholdered_without_payload_leakage() {
 }
 
 #[test]
-fn wmf_emf_picture_formats_are_passive_placeholders_without_payload_leakage() {
+fn simple_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000032a0000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "070000001b045000b4000a001400",
+        "0700000018045a00be0014006400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF vector preview image");
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Rectangle { .. }) })
+    );
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Ellipse { .. }) })
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in [
+        "wmetafile",
+        "010009",
+        "dcdcdc",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF parser internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "WMF rectangle should render as passive PDF path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "WMF ellipse should render as passive PDF Bezier path"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF vector preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn shape_pib_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000032a0000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "070000001b045000b4000a001400",
+        "0700000018045a00be0014006400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\shp{{\\shpinst{{\\sp{{\\sn pib}}{{\\sv {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}}}}}}}}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("shape PIB WMF vector preview image");
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Rectangle { .. }) })
+    );
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Ellipse { .. }) })
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    assert!(
+        !parsed
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("empty picture")),
+        "shape PIB WMF bytes must not be stolen by shape-property capture"
+    );
+    for forbidden in [
+        "pib",
+        "wmetafile",
+        "010009",
+        "dcdcdc",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "shape PIB WMF internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "shape PIB WMF rectangle should render as passive PDF path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "shape PIB WMF ellipse should render as passive PDF Bezier path"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"pib",
+        b"wmetafile",
+        b"010009",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape PIB WMF vector preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emf_and_other_metafile_picture_formats_are_passive_placeholders_without_payload_leakage() {
     let payload_hex = "4142432f4a6176615363726970742f456d62656464656446696c65";
 
     for (control, forbidden_control) in [
-        ("wmetafile8", b"wmetafile".as_slice()),
         ("emfblip", b"emfblip".as_slice()),
         ("pmmetafile1", b"pmmetafile".as_slice()),
         ("macpict", b"macpict".as_slice()),
