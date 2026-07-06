@@ -345,7 +345,7 @@ impl TableBuilder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TableRowBuilder {
     cells: Vec<TableCell>,
     cell_right_edges_twips: Vec<i32>,
@@ -779,6 +779,7 @@ struct Parser {
     pending_list_marker_runs: Vec<Run>,
     current_picture: Option<PictureBuilder>,
     current_shape: Option<ShapeBuilder>,
+    last_table_row_template: Option<TableRowBuilder>,
     image_count: usize,
     shape_count: usize,
     list_definitions: Vec<ListDefinition>,
@@ -889,6 +890,7 @@ impl Parser {
             pending_list_marker_runs: Vec::new(),
             current_picture: None,
             current_shape: None,
+            last_table_row_template: None,
             image_count: 0,
             shape_count: 0,
             list_definitions: Vec::new(),
@@ -2786,6 +2788,7 @@ impl Parser {
                 self.push_list_marker_text("\t", offset)?
             }
             "tab" => self.push_text("\t", offset)?,
+            "intbl" if control.parameter.unwrap_or(1) != 0 => self.ensure_carried_table_row(),
             "trowd" => self.start_table_row(),
             "trrh" => self.set_current_table_row_height(control.parameter, offset),
             "trleft" => self.set_current_table_row_left_offset(control.parameter, offset),
@@ -3361,9 +3364,6 @@ impl Parser {
                     self.clamp_default_tab_width(control.parameter, offset)
             }
             "pard" => {
-                if self.current_table.is_some() && self.current_table_row.is_none() {
-                    self.finish_table(offset)?;
-                }
                 self.state.paragraph = self.default_paragraph_style.clone();
                 self.state.current_tab_leader = TabLeader::None;
                 self.state.current_tab_alignment = TabAlignment::Left;
@@ -6326,7 +6326,11 @@ impl Parser {
         if self.current_table.is_none() {
             self.current_table = Some(TableBuilder::default());
         }
-        self.current_table_row = Some(TableRowBuilder {
+        self.current_table_row = Some(self.new_table_row_builder());
+    }
+
+    fn new_table_row_builder(&self) -> TableRowBuilder {
+        TableRowBuilder {
             cells: Vec::new(),
             cell_right_edges_twips: Vec::new(),
             cell_shading_color_indices: Vec::new(),
@@ -6375,7 +6379,41 @@ impl Parser {
                 runs: Vec::new(),
             },
             cell_open: true,
-        });
+        }
+    }
+
+    fn ensure_carried_table_row(&mut self) {
+        if self.current_table_row.is_some() || self.current_table.is_none() {
+            return;
+        }
+
+        let Some(template) = self.last_table_row_template.as_ref() else {
+            return;
+        };
+        let mut row = template.clone();
+        row.cells.clear();
+        row.current_cell_paragraphs.clear();
+        row.current_cell_paragraph = Paragraph {
+            style: self.state.paragraph.clone(),
+            runs: Vec::new(),
+        };
+        row.cell_open = true;
+        self.current_table_row = Some(row);
+    }
+
+    fn table_row_template_from(
+        row: &TableRowBuilder,
+        paragraph_style: &ParagraphStyle,
+    ) -> TableRowBuilder {
+        let mut template = row.clone();
+        template.cells.clear();
+        template.current_cell_paragraphs.clear();
+        template.current_cell_paragraph = Paragraph {
+            style: paragraph_style.clone(),
+            runs: Vec::new(),
+        };
+        template.cell_open = true;
+        template
     }
 
     fn handle_nested_table_control(
@@ -7070,6 +7108,7 @@ impl Parser {
         let max_table_cells = self.limits().max_table_cells;
         let page_content_width_twips = self.current_page_content_width_twips();
         let max_width_twips = self.limits().max_page_dimension_twips;
+        self.ensure_carried_table_row();
         let Some(row) = self.current_table_row.as_mut() else {
             return self.push_text("\t", offset);
         };
@@ -7193,6 +7232,7 @@ impl Parser {
     }
 
     fn finish_table_row(&mut self, offset: usize) -> Result<(), ParseError> {
+        self.ensure_carried_table_row();
         let Some(mut row) = self.current_table_row.take() else {
             self.finish_paragraph();
             return Ok(());
@@ -7213,6 +7253,8 @@ impl Parser {
             Self::normalize_right_to_left_table_row(&mut row);
         }
         Self::apply_table_row_borders(&mut row);
+        self.last_table_row_template =
+            Some(Self::table_row_template_from(&row, &self.state.paragraph));
 
         let table = self.current_table.get_or_insert_with(TableBuilder::default);
         table.merge_cell_right_edges(&row.cell_right_edges_twips);
@@ -7351,10 +7393,12 @@ impl Parser {
         }
 
         let Some(table) = self.current_table.take() else {
+            self.last_table_row_template = None;
             return Ok(());
         };
 
         if table.rows.is_empty() {
+            self.last_table_row_template = None;
             return Ok(());
         }
 
@@ -7364,6 +7408,7 @@ impl Parser {
             column_widths_twips,
             borders_visible: table.borders_visible,
         }));
+        self.last_table_row_template = None;
         Ok(())
     }
 
@@ -14579,6 +14624,42 @@ mod tests {
             _ => panic!("expected following paragraph"),
         };
         assert_eq!(second.runs[0].text, "After");
+    }
+
+    #[test]
+    fn carries_previous_table_row_definition_for_omitted_trowd_rows() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\trgaph108\trbrdrb\brdrs\brdrw20\clbrdrl\brdrs\brdrw30\clbrdrt\brdrs\brdrw30\clbrdrb\brdrs\brdrw30\clbrdrr\brdrs\brdrw30\cellx1200\clbrdrr\brdrs\brdrw30\cellx2400 A\cell B\cell\row\pard\intbl C\cell D\cell\row After\par}",
+        )
+        .unwrap();
+
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        assert_eq!(table.column_widths_twips, vec![1200, 1200]);
+        assert_eq!(table.rows.len(), 2);
+        assert_eq!(table.rows[1].cells.len(), 2);
+        assert_eq!(table.rows[1].cell_gap_twips, 108);
+        assert_eq!(table.rows[1].cells[0].paragraphs[0].runs[0].text, "C");
+        assert_eq!(table.rows[1].cells[1].paragraphs[0].runs[0].text, "D");
+        assert_eq!(table.rows[1].cells[0].borders.left.width_twips, 30);
+        assert_eq!(table.rows[1].cells[0].borders.top.width_twips, 30);
+        assert_eq!(table.rows[1].cells[0].borders.bottom.width_twips, 30);
+        assert_eq!(table.rows[1].cells[1].borders.bottom.width_twips, 20);
+        assert_eq!(table.rows[1].cells[1].borders.right.width_twips, 30);
+
+        let second = match &output.document.blocks[1] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected following paragraph"),
+        };
+        assert_eq!(second.runs[0].text, "After");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]

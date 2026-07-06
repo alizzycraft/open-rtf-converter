@@ -3912,6 +3912,68 @@ fn multilevel_list_markers_render_as_passive_pdf_text() {
 }
 
 #[test]
+fn carried_table_row_definitions_render_passively_without_control_leakage() {
+    let input = br"{\rtf1\trowd\trgaph108\trbrdrb\brdrs\brdrw20\clbrdrl\brdrs\brdrw30\clbrdrt\brdrs\brdrw30\clbrdrb\brdrs\brdrw30\clbrdrr\brdrs\brdrw30\cellx1200\clbrdrr\brdrs\brdrw30\cellx2400 A\cell B\cell\row\pard\intbl C\cell D\cell\row After\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("A"));
+    assert!(text.contains("B"));
+    assert!(text.contains("C"));
+    assert!(text.contains("D"));
+    assert!(text.contains("After"));
+    for forbidden in ["trowd", "trgaph", "cellx", "intbl", "brdrw"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden carried-table control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("A"));
+    assert!(rendered_text.contains("B"));
+    assert!(rendered_text.contains("C"));
+    assert!(rendered_text.contains("D"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "carried table borders should render as passive stroked lines"
+    );
+    for forbidden in [
+        b"trowd".as_slice(),
+        b"trgaph",
+        b"cellx",
+        b"intbl",
+        b"brdrw",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden carried-table content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn active_object_data_is_placeholdered_or_rejected_and_never_normalized() {
     let parsed = parse_rtf_bytes(&object_with_payload(false)).unwrap();
     let text = collect_text(&parsed.document);
