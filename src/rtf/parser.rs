@@ -9809,6 +9809,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "langfe"
                 | "langfenp"
                 | "langnp"
+                | "jclisttab"
                 | "loch"
                 | "ltrch"
                 | "ltrpar"
@@ -9899,7 +9900,7 @@ fn is_known_ignored_control(name: &str) -> bool {
 
 fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str> {
     match name {
-        "jexpand" | "jcompress" | "jclisttab" => {
+        "jexpand" | "jcompress" => {
             Some("Japanese text justification approximated by passive line layout")
         }
         "asianbrkrule" => {
@@ -17128,6 +17129,29 @@ After\par}"#;
             _ => panic!("expected list paragraph"),
         };
         assert_eq!(paragraph.runs[0].text, "1.\tFirst item");
+    }
+
+    #[test]
+    fn word_list_tab_metadata_does_not_emit_justification_warning() {
+        let output = parse_rtf(r"{\rtf1\pard\fi-360\li360\jclisttab\tx360 Item\par}").unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "Item");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("Japanese text justification"))
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]

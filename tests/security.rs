@@ -13814,6 +13814,80 @@ fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
 }
 
 #[test]
+fn word_list_tab_metadata_renders_without_justification_warning_or_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "pard",
+        "\\",
+        "fi-360",
+        "\\",
+        "li360",
+        "\\",
+        "jclisttab",
+        "\\",
+        "tx360 List item",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("List item"));
+    assert!(!text.contains("jclisttab"));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("Japanese text justification")),
+        "list tab metadata should not be reported as Japanese justification: {:?}",
+        parsed.diagnostics
+    );
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "list tab metadata should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("List item"),
+        "expected visible list text in PDF, got {rendered_text:?}"
+    );
+    for forbidden in [
+        b"jclisttab".as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "list tab metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn paragraph_hyphenation_renders_passive_soft_breaks_without_control_leakage() {
     let input = rtf(&[
         "{",
