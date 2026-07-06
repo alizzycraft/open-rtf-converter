@@ -2304,6 +2304,102 @@ fn mixed_formatted_explicit_listtext_marker_renders_passively_without_control_le
 }
 
 #[test]
+fn ignored_pn_metadata_after_explicit_markers_does_not_leak_or_override_visible_marker() {
+    let input = br"{\rtf1{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}{\*\pnseclvl1\pnucrm\pnstart1{\pntxta .}}Title text\par{\pntext\pard\plain\f1 \'b7\tab}{\*\pn\pnlvlblt\pnf1{\pntxtb \'b7}}\pard\fi-360\li360\tx360 Bullet item\par{\pntext I.\tab}{\*\pn\pnucrm{\pntxta .}}\pard\fi-720\li720\tx720 Roman item\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Title text"));
+    assert!(text.contains("\u{2022}\tBullet item"));
+    assert!(text.contains("I.\tRoman item"));
+    assert!(!text.contains(".Title"));
+    assert!(!text.contains("\u{2022}\u{2022}"));
+    assert!(!text.contains("I.\t.Roman"));
+    for forbidden in [
+        "pntext", "pntxtb", "pntxta", "pnlvlblt", "pnseclvl", "pnucrm", "fonttbl",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "ignored list metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "ignored list metadata should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    assert!(
+        helvetica_bytes.contains(&0x95),
+        "explicit Symbol bullet should encode through passive WinAnsi bullet byte, got {helvetica_bytes:?}"
+    );
+    assert!(
+        !symbol_bytes.contains(&0xb7),
+        "ignored Symbol list metadata should not render through PDF Symbol bytes, got {symbol_bytes:?}"
+    );
+    assert!(
+        rendered_text.contains("Title text"),
+        "decoded PDF text did not contain title text: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Bullet item"),
+        "decoded PDF text did not contain bullet item text: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("I.Roman item"),
+        "decoded PDF text did not contain explicit roman marker: {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("I..Roman"),
+        "ignored pn suffix metadata should not become visible punctuation: {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains(".Title"),
+        "ignored pn section-level metadata should not prefix body text: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"pntext".as_slice(),
+        b"pntxtb",
+        b"pntxta",
+        b"pnlvlblt",
+        b"pnseclvl",
+        b"pnucrm",
+        b"fonttbl",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "ignored list metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_style_list_format_controls_synthesize_passive_markers_without_leakage() {
     let input = br"{\rtf1{\pn\pnucrm\pnstart4}Fourth item\par{\pn\pnlcltr\pnstart28}Lower alpha\par{\pn\pnord\pnstart13}Ordinal\par{\pn\pnbul}Bullet\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

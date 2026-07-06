@@ -2439,73 +2439,79 @@ impl Parser {
                 self.pending_old_style_list_marker = None;
                 self.state.destination = Destination::ListText;
             }
-            "pn" if destination_allows_safe_structural_content(&self.state) => {
+            "pn" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.start_old_style_list_marker();
             }
-            "pncard" | "pndec" if destination_allows_safe_structural_content(&self.state) => {
+            "pncard" | "pndec" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::Decimal);
             }
-            "pnucrm" if destination_allows_safe_structural_content(&self.state) => {
+            "pnucrm" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::UpperRoman);
             }
-            "pnlcrm" if destination_allows_safe_structural_content(&self.state) => {
+            "pnlcrm" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::LowerRoman);
             }
-            "pnucltr" if destination_allows_safe_structural_content(&self.state) => {
+            "pnucltr" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::UpperLetter);
             }
-            "pnlcltr" if destination_allows_safe_structural_content(&self.state) => {
+            "pnlcltr" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::LowerLetter);
             }
-            "pnord" if destination_allows_safe_structural_content(&self.state) => {
+            "pnord" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::Ordinal);
             }
-            "pnbul" | "pnlvlblt" if destination_allows_safe_structural_content(&self.state) => {
+            "pnbul" | "pnlvlblt"
+                if destination_allows_visible_old_style_list_marker(&self.state) =>
+            {
                 self.set_old_style_list_marker_format(ListNumberFormat::Bullet);
             }
-            "pnstart" if destination_allows_safe_structural_content(&self.state) => {
+            "pnstart" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_start(control.parameter.unwrap_or(1));
             }
-            "pnb" if destination_allows_safe_structural_content(&self.state) => {
+            "pnb" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_bold(control.parameter.unwrap_or(1) != 0);
             }
-            "pni" if destination_allows_safe_structural_content(&self.state) => {
+            "pni" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_italic(control.parameter.unwrap_or(1) != 0);
             }
-            "pnul" if destination_allows_safe_structural_content(&self.state) => {
+            "pnul" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_underline(control.parameter.unwrap_or(1) != 0);
             }
-            "pnstrike" if destination_allows_safe_structural_content(&self.state) => {
+            "pnstrike" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_strike(control.parameter.unwrap_or(1) != 0);
             }
-            "pncaps" if destination_allows_safe_structural_content(&self.state) => {
+            "pncaps" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_caps(control.parameter.unwrap_or(1) != 0);
             }
-            "pncf" if destination_allows_safe_structural_content(&self.state) => {
+            "pncf" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_color(control.parameter.unwrap_or(0));
             }
-            "pnf" if destination_allows_safe_structural_content(&self.state) => {
+            "pnf" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_font(control.parameter.unwrap_or(0));
             }
-            "pnfs" if destination_allows_safe_structural_content(&self.state) => {
+            "pnfs" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_font_size(control.parameter.unwrap_or(24), offset);
             }
-            "pnindent" if destination_allows_safe_structural_content(&self.state) => {
+            "pnindent" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_indent(control.parameter, offset);
             }
-            "pnhang" if destination_allows_safe_structural_content(&self.state) => {
+            "pnhang" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_hanging(control.parameter.unwrap_or(1) != 0);
             }
-            "pnsp" if destination_allows_safe_structural_content(&self.state) => {
+            "pnsp" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_spacing(control.parameter, offset);
             }
             "pntxtb" if destination_allows_safe_structural_content(&self.state) => {
-                self.pending_list_marker.clear();
-                self.pending_old_style_list_marker = None;
-                self.state.destination = Destination::ListText;
+                if self.state.destination != Destination::Ignored {
+                    self.pending_list_marker.clear();
+                    self.pending_old_style_list_marker = None;
+                    self.state.destination = Destination::ListText;
+                }
             }
             "pntxta" if destination_allows_safe_structural_content(&self.state) => {
-                self.state.destination = Destination::ListText;
+                if self.state.destination != Destination::Ignored {
+                    self.state.destination = Destination::ListText;
+                }
             }
             "bkmkstart"
                 if self.state.destination == Destination::Ignored
@@ -10488,6 +10494,10 @@ fn destination_allows_safe_structural_content(state: &ParserState) -> bool {
     !state.inside_metadata
 }
 
+fn destination_allows_visible_old_style_list_marker(state: &ParserState) -> bool {
+    destination_allows_safe_structural_content(state) && state.destination != Destination::Ignored
+}
+
 fn is_header_destination(destination: Destination) -> bool {
     matches!(
         destination,
@@ -17131,6 +17141,49 @@ After\par}"#;
             _ => panic!("expected list paragraph"),
         };
         assert_eq!(paragraph.runs[0].text, "1.\tFirst item");
+    }
+
+    #[test]
+    fn ignored_pn_metadata_does_not_override_explicit_pntext_marker() {
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}{\pntext\pard\plain\f1 \'b7\tab}{\*\pn\pnlvlblt\pnf1{\pntxtb \'b7}}\pard\fi-360\li360\tx360 Bullet item\par{\pntext I.\tab}{\*\pn\pnucrm{\pntxta .}}\pard\fi-720\li720\tx720 Roman item\par}",
+        )
+        .unwrap();
+        let paragraph_text = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            _ => panic!("expected list paragraph"),
+        };
+
+        assert_eq!(paragraph_text(0), "\u{2022}\tBullet item");
+        assert_eq!(paragraph_text(1), "I.\tRoman item");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn ignored_pn_section_level_marker_text_does_not_prefix_body_text() {
+        let output =
+            parse_rtf(r"{\rtf1{\*\pnseclvl1\pnucrm\pnstart1{\pntxta .}}Title text\par}").unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "Title text");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
