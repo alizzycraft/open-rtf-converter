@@ -13860,6 +13860,7 @@ const MAX_PASSIVE_WMF_RECORDS: usize = 512;
 const MAX_PASSIVE_WMF_COMMANDS: usize = 256;
 const MAX_PASSIVE_WMF_POINTS_PER_RECORD: usize = 128;
 const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
+const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
 const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
 
@@ -14221,6 +14222,29 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     commands.push(command);
                 }
             }
+            0x061d => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some((left, top, right, bottom)) = parse_wmf_patblt_bounds(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                ) && bounds_is_visible((left, top, right, bottom))
+                    && state.fill_color.is_some()
+                {
+                    commands.push(StaticImageVectorCommand::Rectangle {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        stroke_color: None,
+                        fill_color: state.fill_color,
+                    });
+                }
+            }
             _ => {}
         }
 
@@ -14357,6 +14381,44 @@ fn parse_wmf_bounds(
         top.min(bottom),
         left.max(right),
         top.max(bottom),
+    ))
+}
+
+fn parse_wmf_patblt_bounds(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32, f32, f32)> {
+    if data.len() < 12 || read_le_u32(data, 0)? != WMF_PATCOPY_RASTER_OP {
+        return None;
+    }
+    let y = i32::from(read_le_i16(data, 4)?);
+    let x = i32::from(read_le_i16(data, 6)?);
+    let height = i32::from(read_le_i16(data, 8)?.unsigned_abs().max(1));
+    let width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
+    let left_top = normalize_wmf_point(
+        x,
+        y,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    let right_bottom = normalize_wmf_point(
+        x.saturating_add(width),
+        y.saturating_add(height),
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    Some((
+        left_top.0.min(right_bottom.0),
+        left_top.1.min(right_bottom.1),
+        left_top.0.max(right_bottom.0),
+        left_top.1.max(right_bottom.1),
     ))
 }
 
