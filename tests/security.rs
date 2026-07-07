@@ -14870,6 +14870,8 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
         "\\",
         "fet0",
         "\\",
+        "ftntj",
+        "\\",
         "ftnbj",
         "\\",
         "aenddoc",
@@ -14903,6 +14905,7 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
         "viewscale",
         "nouicompat",
         "horzdoc",
+        "ftntj",
         "ftnbj",
         "aenddoc",
         "endnhere",
@@ -14929,6 +14932,11 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
         diagnostic
             .message
             .contains("endnotes placed at passive section boundary")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("footnotes placed at passive page bottom")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -14963,6 +14971,7 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
         b"viewscale",
         b"nouicompat",
         b"horzdoc",
+        b"ftntj",
         b"ftnbj",
         b"aenddoc",
         b"endnhere",
@@ -21278,7 +21287,7 @@ fn bottom_footnote_placement_renders_passively_without_control_leakage() {
         "\\",
         "rtf1",
         "\\",
-        "sftnbj Body",
+        "ftnbj Body",
         "\\",
         "chftn{",
         "\\",
@@ -21298,7 +21307,7 @@ fn bottom_footnote_placement_renders_passively_without_control_leakage() {
     assert!(text.contains("Body1"));
     assert!(text.contains("Bottom footnote"));
     assert!(text.contains("text"));
-    for forbidden in ["sftnbj", "chftn", "objdata"] {
+    for forbidden in ["ftnbj", "chftn", "objdata"] {
         assert!(
             !text.contains(forbidden),
             "forbidden bottom-footnote control leaked to text: {forbidden}"
@@ -21328,7 +21337,7 @@ fn bottom_footnote_placement_renders_passively_without_control_leakage() {
     assert!(rendered_text.contains("text"));
     for forbidden in [
         payload_hex().as_bytes(),
-        b"sftnbj",
+        b"ftnbj",
         b"chftn",
         b"objdata",
         b"/JavaScript",

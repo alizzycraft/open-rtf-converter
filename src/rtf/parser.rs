@@ -3422,7 +3422,8 @@ impl Parser {
                     Some(offset),
                 ));
             }
-            "ftnbj" => self.set_footnote_placement(FootnotePlacement::BeneathText, offset),
+            "ftntj" => self.set_footnote_placement(FootnotePlacement::BeneathText, offset),
+            "ftnbj" => self.set_footnote_placement(FootnotePlacement::BottomOfPage, offset),
             "sftnbj" => self.set_footnote_placement(FootnotePlacement::BottomOfPage, offset),
             "aenddoc" => self.set_endnote_placement(EndnotePlacement::EndOfDocument, offset),
             "endnhere" => self.set_endnote_placement(EndnotePlacement::EndOfSection, offset),
@@ -16526,7 +16527,7 @@ mod tests {
     #[test]
     fn normalizes_note_placement_controls_as_safe_metadata() {
         let output = parse_rtf(
-            r"{\rtf1\ftnbj\aenddoc Body\chftn{\footnote Footnote text\par} End\chftn{\endnote Endnote text\par}\par}",
+            r"{\rtf1\ftntj\aenddoc Body\chftn{\footnote Footnote text\par} End\chftn{\endnote Endnote text\par}\par}",
         )
         .unwrap();
 
@@ -16544,6 +16545,24 @@ mod tests {
             diagnostic
                 .message
                 .contains("endnotes placed on passive final page")
+        }));
+    }
+
+    #[test]
+    fn normalizes_bottom_footnote_placement_control_as_safe_metadata() {
+        let output =
+            parse_rtf(r"{\rtf1\ftnbj Body\chftn{\footnote Bottom footnote text\par}\par}").unwrap();
+
+        assert_eq!(
+            output.document.footnote_placement,
+            FootnotePlacement::BottomOfPage
+        );
+        assert!(document_text(&output.document).contains("Body1"));
+        assert!(!document_text(&output.document).contains("ftnbj"));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("footnotes placed at passive page bottom")
         }));
     }
 
