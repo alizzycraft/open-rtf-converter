@@ -11711,6 +11711,78 @@ fn font_family_hints_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn narrow_font_aliases_render_as_passive_scaled_base14_without_font_payload_leakage() {
+    let input =
+        br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Arial Narrow;}}\f1 Narrow visible text\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Narrow visible text"));
+    assert_eq!(
+        parsed
+            .document
+            .fonts
+            .iter()
+            .find(|font| font.index == 1)
+            .map(|font| font.name.as_str()),
+        Some("Arial Narrow")
+    );
+    for forbidden in ["fonttbl", "Arial Narrow"] {
+        assert!(
+            !text.contains(forbidden),
+            "font metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let font_names = pdf_text_font_names(&content);
+
+    assert!(
+        font_names.iter().any(|name| name.as_slice() == b"F1"),
+        "narrow sans text should use passive Helvetica resource; got {font_names:?}"
+    );
+    assert!(content.operations.iter().any(|operation| {
+        operation.operator == "Tz"
+            && operation
+                .operands
+                .first()
+                .and_then(pdf_operand_number)
+                .is_some_and(|value| (value - 82.0).abs() < 0.01)
+    }));
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"Arial Narrow",
+        b"ArialNarrow",
+        b"HelveticaNarrow",
+        b"/FontFile",
+        b"/FontFile2",
+        b"/FontFile3",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden narrow font content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn theme_font_hints_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

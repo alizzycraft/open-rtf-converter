@@ -17,6 +17,7 @@ const SMALL_CAPS_FONT_SCALE: f32 = 0.7;
 const MAX_SYNTHETIC_DROP_CAP_FONT_SIZE_HALF_POINTS: i32 = 400;
 const AUTO_PARAGRAPH_SPACING_TWIPS: i32 = 240;
 const MAX_LAYOUT_COLUMNS: usize = 16;
+const PASSIVE_NARROW_FONT_SCALE_PERCENT: i32 = 82;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -4385,15 +4386,16 @@ fn adjust_pending_aligned_tab(line: &mut Line, following: &FlowRun, document: &D
 }
 
 fn decimal_tab_start(target: f32, following: &FlowRun, document: &Document) -> Option<f32> {
-    let text = display_text(&following.text, &following.style);
+    let style = passive_pdf_style_for_run(document, &following.style);
+    let text = display_text(&following.text, &style);
     let decimal_idx = text.find(['.', ','])?;
     let prefix = &text[..decimal_idx];
     Some(
         target
             - measure_text_with_family(
                 prefix,
-                &following.style,
-                font_family_for_run_text(document, &following.style, prefix),
+                &style,
+                font_family_for_run_text(document, &style, prefix),
             ),
     )
 }
@@ -4412,11 +4414,9 @@ fn materialize_line_end_soft_hyphen(line: &mut Line, document: &Document) {
     }
     last.text.push('-');
     last.soft_hyphen_after = false;
-    let added_width = measure_text_with_family(
-        "-",
-        &last.style,
-        font_family_for_style(document, &last.style),
-    );
+    let style = passive_pdf_style_for_run(document, &last.style);
+    let added_width =
+        measure_text_with_family("-", &style, font_family_for_style(document, &style));
     last.width += added_width;
     line.width += added_width;
     line.height = line
@@ -4439,9 +4439,10 @@ fn measure_flow_run(
         return next_tab_position(current_line_width, paragraph_style, document)
             - current_line_width;
     }
-    let text = display_text(&run.text, &run.style);
-    let font_family = font_family_for_run_text(document, &run.style, &text);
-    measure_text_with_family(&text, &run.style, font_family)
+    let style = passive_pdf_style_for_run(document, &run.style);
+    let text = display_text(&run.text, &style);
+    let font_family = font_family_for_run_text(document, &style, &text);
+    measure_text_with_family(&text, &style, font_family)
 }
 
 fn next_tab_position(
@@ -4612,24 +4613,25 @@ fn push_line(
             cursor_x += width;
             continue;
         }
-        let text = display_text(&run.text, &run.style);
-        let font_family = font_family_for_run_text(document, &run.style, &text);
-        let run_baseline_y = baseline_y + run.style.baseline_shift_points();
-        let color = style_color(document, &run.style);
-        if let Some(highlight_index) = run.style.highlight_index
+        let style = passive_pdf_style_for_run(document, &run.style);
+        let text = display_text(&run.text, &style);
+        let font_family = font_family_for_run_text(document, &style, &text);
+        let run_baseline_y = baseline_y + style.baseline_shift_points();
+        let color = style_color(document, &style);
+        if let Some(highlight_index) = style.highlight_index
             && highlight_index > 0
         {
-            let font_size = run.style.font_size_points();
+            let font_size = style.font_size_points();
             page.items.push(LayoutItem::Highlight {
                 x: cursor_x,
                 y: run_baseline_y - (font_size * 0.28),
                 width,
                 height: font_size * 1.12,
-                color: character_shading_color(document, highlight_index, &run.style),
+                color: character_shading_color(document, highlight_index, &style),
             });
         }
-        if run.style.form_field_shading {
-            let font_size = run.style.font_size_points();
+        if style.form_field_shading {
+            let font_size = style.font_size_points();
             page.items.push(LayoutItem::Highlight {
                 x: cursor_x,
                 y: run_baseline_y - (font_size * 0.28),
@@ -4638,13 +4640,13 @@ fn push_line(
                 color: passive_form_field_shading_color(),
             });
         }
-        if run.style.border.visible {
+        if style.border.visible {
             push_character_border(
                 page,
                 cursor_x,
                 run_baseline_y,
                 width,
-                &run.style,
+                &style,
                 color,
                 document,
             );
@@ -4656,12 +4658,11 @@ fn push_line(
             color,
             font_family,
             word_spacing,
-            style: run.style.clone(),
+            style: style.clone(),
         }));
 
-        if run.style.underline != UnderlineStyle::None {
-            let underline_color = run
-                .style
+        if style.underline != UnderlineStyle::None {
+            let underline_color = style
                 .underline_color_index
                 .filter(|index| *index > 0)
                 .map(|index| color_for_index(document, index))
@@ -4672,17 +4673,17 @@ fn push_line(
                 run_baseline_y - 2.0,
                 width,
                 &text,
-                run,
+                &style,
                 font_family,
                 underline_color,
                 word_spacing,
             );
         }
 
-        if run.style.strike {
-            let y = run_baseline_y + (run.style.font_size_points() * 0.32);
-            if run.style.double_strike {
-                let gap = (run.style.font_size_points() * 0.1).clamp(1.0, 3.0);
+        if style.strike {
+            let y = run_baseline_y + (style.font_size_points() * 0.32);
+            if style.double_strike {
+                let gap = (style.font_size_points() * 0.1).clamp(1.0, 3.0);
                 page.items.push(LayoutItem::Line {
                     x1: cursor_x,
                     y1: y + gap,
@@ -4725,23 +4726,23 @@ fn push_underline_items(
     y: f32,
     width: f32,
     text: &str,
-    run: &FlowRun,
+    style: &CharacterStyle,
     font_family: PdfFontFamily,
     color: PdfColor,
     word_spacing: f32,
 ) {
-    if run.style.underline != UnderlineStyle::Words {
+    if style.underline != UnderlineStyle::Words {
         page.items.push(LayoutItem::Underline {
             x,
             y,
             width,
             color,
-            style: run.style.underline,
+            style: style.underline,
         });
         return;
     }
 
-    for (offset, span_width) in word_underline_spans(text, &run.style, font_family, word_spacing) {
+    for (offset, span_width) in word_underline_spans(text, style, font_family, word_spacing) {
         page.items.push(LayoutItem::Underline {
             x: x + offset,
             y,
@@ -4810,7 +4811,8 @@ fn push_tab_leader(
     if width <= 1.0 || run.tab_leader == TabLeader::None {
         return;
     }
-    let color = style_color(document, &run.style);
+    let style = passive_pdf_style_for_run(document, &run.style);
+    let color = style_color(document, &style);
     match run.tab_leader {
         TabLeader::None => {}
         TabLeader::Underline => {
@@ -4832,17 +4834,17 @@ fn push_tab_leader(
                 TabLeader::Equals => "=",
                 TabLeader::None | TabLeader::Underline => unreachable!("handled above"),
             };
-            let family = font_family_for_style(document, &run.style);
-            let leader_width = measure_text_with_family(leader, &run.style, family).max(1.0);
+            let family = font_family_for_style(document, &style);
+            let leader_width = measure_text_with_family(leader, &style, family).max(1.0);
             let count = (width / leader_width).floor().max(1.0) as usize;
             page.items.push(LayoutItem::Text(TextFragment {
                 text: leader.repeat(count.min(512)),
                 x: cursor_x,
-                baseline_y: baseline_y + run.style.baseline_shift_points(),
+                baseline_y: baseline_y + style.baseline_shift_points(),
                 color,
                 font_family: family,
                 word_spacing: 0.0,
-                style: run.style.clone(),
+                style,
             }));
         }
     }
@@ -5032,6 +5034,44 @@ fn font_family_for_style(document: &Document, style: &CharacterStyle) -> PdfFont
     } else {
         PdfFontFamily::Helvetica
     }
+}
+
+fn passive_pdf_style_for_run(document: &Document, style: &CharacterStyle) -> CharacterStyle {
+    let scale_percent = passive_source_font_width_scale_percent(document, style);
+    if scale_percent == 100 {
+        return style.clone();
+    }
+    let mut output = style.clone();
+    let scaled = i64::from(output.character_scaling_percent.max(1))
+        .saturating_mul(i64::from(scale_percent))
+        / 100;
+    output.character_scaling_percent = scaled.clamp(1, 600) as i32;
+    output
+}
+
+fn passive_source_font_width_scale_percent(document: &Document, style: &CharacterStyle) -> i32 {
+    let Some(font) = document
+        .fonts
+        .iter()
+        .find(|font| font.index == style.font_index)
+    else {
+        return 100;
+    };
+    if is_passive_narrow_font_name(&font.name)
+        || font
+            .alternate_name
+            .as_deref()
+            .is_some_and(is_passive_narrow_font_name)
+    {
+        PASSIVE_NARROW_FONT_SCALE_PERCENT
+    } else {
+        100
+    }
+}
+
+fn is_passive_narrow_font_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    font_name_contains_any(&lower, &["narrow", "condensed", "compressed"])
 }
 
 fn is_passive_checkbox_text(text: &str) -> bool {
@@ -10790,6 +10830,79 @@ mod tests {
         assert!(layout.pages[0].items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "Mono" && fragment.font_family == PdfFontFamily::Courier)
         ));
+    }
+
+    #[test]
+    fn renders_narrow_font_aliases_with_passive_horizontal_scaling() {
+        let mut document = Document::default();
+        document.fonts = vec![
+            FontDef {
+                index: 0,
+                name: "Arial".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Default,
+            },
+            FontDef {
+                index: 1,
+                name: "Arial Narrow".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Default,
+            },
+        ];
+        let normal_style = CharacterStyle {
+            font_index: 0,
+            ..Default::default()
+        };
+        let narrow_style = CharacterStyle {
+            font_index: 1,
+            ..Default::default()
+        };
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![
+                Run {
+                    text: "Normal".to_string(),
+                    style: normal_style,
+                },
+                Run {
+                    text: "\n".to_string(),
+                    style: CharacterStyle::default(),
+                },
+                Run {
+                    text: "Normal".to_string(),
+                    style: narrow_style,
+                },
+            ],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "Normal" => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(fragments.len(), 2);
+        assert_eq!(fragments[0].font_family, PdfFontFamily::Helvetica);
+        assert_eq!(fragments[0].style.character_scaling_percent, 100);
+        assert_eq!(fragments[1].font_family, PdfFontFamily::Helvetica);
+        assert_eq!(
+            fragments[1].style.character_scaling_percent,
+            PASSIVE_NARROW_FONT_SCALE_PERCENT
+        );
+        assert!(
+            fragments[1].x < fragments[0].x + 0.01,
+            "narrow font scaling should not shift the left edge"
+        );
     }
 
     #[test]
