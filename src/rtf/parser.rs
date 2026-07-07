@@ -6428,6 +6428,9 @@ impl Parser {
             self.document
                 .endnote_section_indices
                 .push(self.current_section_index.max(1));
+            self.document
+                .endnote_placements
+                .push(self.document.endnote_placement);
         }
     }
 
@@ -8068,6 +8071,9 @@ impl Parser {
             self.document
                 .endnote_section_indices
                 .extend(std::iter::repeat(self.current_section_index.max(1)).take(count));
+            self.document
+                .endnote_placements
+                .extend(std::iter::repeat(self.document.endnote_placement).take(count));
         } else if destination != Destination::Background {
             self.document
                 .blocks
@@ -16539,6 +16545,10 @@ mod tests {
             output.document.endnote_placement,
             EndnotePlacement::EndOfDocument
         );
+        assert_eq!(
+            output.document.endnote_placements,
+            vec![EndnotePlacement::EndOfDocument]
+        );
         assert!(document_text(&output.document).contains("Body1 End1"));
         assert!(!document_text(&output.document).contains("aenddoc"));
         assert!(output.diagnostics.iter().any(|diagnostic| {
@@ -16564,6 +16574,32 @@ mod tests {
                 .message
                 .contains("footnotes placed at passive page bottom")
         }));
+    }
+
+    #[test]
+    fn endnotes_capture_effective_passive_placement_per_note() {
+        let output = parse_rtf(
+            r"{\rtf1\aenddoc First\chftn{\endnote Final note\par}\sect\sectd\endnhere Second\chftn{\endnote Section note\par}\par}",
+        )
+        .unwrap();
+
+        assert_eq!(output.document.endnotes.len(), 2);
+        assert_eq!(output.document.endnote_section_indices, vec![1, 2]);
+        assert_eq!(
+            output.document.endnote_placements,
+            vec![
+                EndnotePlacement::EndOfDocument,
+                EndnotePlacement::EndOfSection
+            ]
+        );
+        assert!(document_text(&output.document).contains("First1"));
+        assert!(document_text(&output.document).contains("Second2"));
+        for forbidden in ["aenddoc", "endnhere", "chftn"] {
+            assert!(
+                !document_text(&output.document).contains(forbidden),
+                "endnote placement control leaked to text: {forbidden}"
+            );
+        }
     }
 
     #[test]

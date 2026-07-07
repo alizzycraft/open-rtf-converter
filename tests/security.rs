@@ -21601,6 +21601,115 @@ fn endnotes_at_end_of_section_render_before_next_section_without_control_leakage
 }
 
 #[test]
+fn mixed_endnote_placements_render_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "aenddoc First section",
+        "\\",
+        "chftn{",
+        "\\",
+        "endnote Final note",
+        "\\",
+        "par}",
+        "\\",
+        "sect",
+        "\\",
+        "sectd",
+        "\\",
+        "endnhere Second section",
+        "\\",
+        "chftn{",
+        "\\",
+        "endnote Section note text",
+        "\\",
+        "par}",
+        "\\",
+        "sect Third section",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(parsed.document.endnotes.len(), 2);
+    assert_eq!(parsed.document.endnote_section_indices, vec![1, 2]);
+    assert_eq!(
+        parsed.document.endnote_placements,
+        vec![
+            EndnotePlacement::EndOfDocument,
+            EndnotePlacement::EndOfSection
+        ]
+    );
+    assert!(text.contains("First section1"), "text: {text:?}");
+    assert!(text.contains("Second section2"), "text: {text:?}");
+    assert!(text.contains("Third section"), "text: {text:?}");
+    assert!(text.contains("Final note"));
+    assert!(text.contains("Section note"));
+    for forbidden in ["aenddoc", "endnhere", "chftn"] {
+        assert!(
+            !text.contains(forbidden),
+            "mixed endnote placement control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let pages = parsed_pdf.get_pages();
+    let page_texts = pages
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        page_texts
+            .iter()
+            .any(|text| text.contains("Second section2") && text.contains("2. Section note")),
+        "section endnote should render at its passive section boundary: {page_texts:?}"
+    );
+    assert!(
+        page_texts
+            .last()
+            .is_some_and(|text| text.contains("1. Final note") && !text.contains("Section note")),
+        "final-page endnote should remain on the passive final page: {page_texts:?}"
+    );
+    for forbidden in [
+        b"aenddoc".as_slice(),
+        b"endnhere",
+        b"chftn",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden mixed endnote placement content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn fet1_legacy_footnote_groups_render_as_passive_endnotes_without_control_leakage() {
     let input = rtf(&[
         "{",
