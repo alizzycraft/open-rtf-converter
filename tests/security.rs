@@ -17668,6 +17668,89 @@ fn wmf_line_polyline_and_polygon_render_as_passive_paths_without_payload_leakage
 }
 
 #[test]
+fn wmf_deleted_object_handles_are_reused_for_passive_style_selection() {
+    let wmf_hex = concat!(
+        "0100090000032e00000001000c0000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "04000000f0010000",
+        "07000000fc0200000000ff000000",
+        "040000002d010000",
+        "070000001b045000b4000a001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF reused object handle vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Rectangle {
+                fill_color: Some(color),
+                ..
+            } if color.red == 0 && color.green == 0 && color.blue == 255
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "WMF reused brush rectangle should render as passive PDF path"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"dcdcdc",
+        b"0000ff",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF reused object handle leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn excessive_wmf_polyline_points_become_placeholder_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003150000000100050000000000",

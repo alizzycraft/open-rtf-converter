@@ -13852,6 +13852,7 @@ impl Default for WmfDrawingState {
 const MAX_PASSIVE_WMF_RECORDS: usize = 512;
 const MAX_PASSIVE_WMF_COMMANDS: usize = 256;
 const MAX_PASSIVE_WMF_POINTS_PER_RECORD: usize = 128;
+const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
 const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
 
@@ -14055,7 +14056,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut window_origin_y = header.window_origin_y;
     let mut window_width = header.window_width;
     let mut window_height = header.window_height;
-    let mut objects = Vec::new();
+    let mut objects: Vec<Option<WmfObject>> = Vec::new();
     let mut state = WmfDrawingState::default();
     let mut commands = Vec::new();
     let mut current_point = (0.0f32, 0.0f32);
@@ -14091,12 +14092,24 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 window_width = i32::from(width.unsigned_abs().max(1));
                 window_height = i32::from(height.unsigned_abs().max(1));
             }
-            0x02fa => objects.push(parse_wmf_pen_object(data).unwrap_or(WmfObject::Other)),
-            0x02fc => objects.push(parse_wmf_brush_object(data).unwrap_or(WmfObject::Other)),
-            0x02fb | 0x02fd => objects.push(WmfObject::Other),
+            0x01f0 => {
+                let handle = usize::from(read_le_u16(data, 0)?);
+                if let Some(object) = objects.get_mut(handle) {
+                    *object = None;
+                }
+            }
+            0x02fa => store_wmf_object(
+                &mut objects,
+                parse_wmf_pen_object(data).unwrap_or(WmfObject::Other),
+            )?,
+            0x02fc => store_wmf_object(
+                &mut objects,
+                parse_wmf_brush_object(data).unwrap_or(WmfObject::Other),
+            )?,
+            0x02fb | 0x02fd => store_wmf_object(&mut objects, WmfObject::Other)?,
             0x012d => {
                 let handle = usize::from(read_le_u16(data, 0)?);
-                if let Some(object) = objects.get(handle).copied() {
+                if let Some(object) = objects.get(handle).and_then(|object| *object) {
                     match object {
                         WmfObject::Pen(color) => state.stroke_color = color,
                         WmfObject::Brush(color) => state.fill_color = color,
@@ -14216,6 +14229,18 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
         height_px: u32::try_from(window_height.max(1)).ok()?,
         commands,
     })
+}
+
+fn store_wmf_object(objects: &mut Vec<Option<WmfObject>>, object: WmfObject) -> Option<()> {
+    if let Some(slot) = objects.iter_mut().find(|slot| slot.is_none()) {
+        *slot = Some(object);
+        return Some(());
+    }
+    if objects.len() >= MAX_PASSIVE_WMF_OBJECTS {
+        return None;
+    }
+    objects.push(Some(object));
+    Some(())
 }
 
 fn parse_wmf_header_info(bytes: &[u8]) -> Option<WmfHeaderInfo> {
