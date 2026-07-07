@@ -17557,6 +17557,185 @@ fn wmf_window_origin_offsets_are_normalized_before_passive_vector_rendering() {
 }
 
 #[test]
+fn wmf_line_polyline_and_polygon_render_as_passive_paths_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000033c00000001000c0000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "05000000140214001400",
+        "0500000013021400b400",
+        "0a0000002403030014002800b400280064005a00",
+        "0c00000025030400140046003c005a008c004600b4005a00",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("line/polyline/polygon WMF vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Line { .. }) })
+    );
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(command, StaticImageVectorCommand::Polyline { points, .. } if points.len() == 4)
+    }));
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(command, StaticImageVectorCommand::Polygon { points, .. } if points.len() == 3)
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in [
+        "wmetafile",
+        "010009",
+        "0324",
+        "0325",
+        "dcdcdc",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF line/polyline/polygon internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "m"),
+        "WMF line/polyline/polygon should emit passive PDF move path operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "l"),
+        "WMF line/polyline/polygon should emit passive PDF line path operations"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"0324",
+        b"0325",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF line/polyline/polygon leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn excessive_wmf_polyline_points_become_placeholder_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "010009000003150000000100050000000000",
+        "050000000c026400c800",
+        "0400000025038100",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("excessive-point WMF placeholder image");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.is_empty());
+    assert!(!parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in ["wmetafile", "010009", "0325", "8100"] {
+        assert!(
+            !text.contains(forbidden),
+            "excessive-point WMF internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        b"010009",
+        b"0325",
+        b"8100",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "excessive-point WMF leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shape_pib_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032a0000000100070000000000",

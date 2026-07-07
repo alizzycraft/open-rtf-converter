@@ -590,6 +590,35 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
     content.end_path();
     for command in &fragment.image.vector_commands {
         match command {
+            StaticImageVectorCommand::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                stroke_color,
+            } => {
+                draw_passive_vector_line(
+                    content,
+                    vector_command_point(draw, source_width, source_height, *x1, *y1),
+                    vector_command_point(draw, source_width, source_height, *x2, *y2),
+                    *stroke_color,
+                );
+            }
+            StaticImageVectorCommand::Polyline {
+                points,
+                stroke_color,
+            } => {
+                let points = vector_command_points(draw, source_width, source_height, points);
+                draw_passive_vector_polyline(content, &points, *stroke_color);
+            }
+            StaticImageVectorCommand::Polygon {
+                points,
+                stroke_color,
+                fill_color,
+            } => {
+                let points = vector_command_points(draw, source_width, source_height, points);
+                draw_passive_vector_polygon(content, &points, *stroke_color, *fill_color);
+            }
             StaticImageVectorCommand::Rectangle {
                 left,
                 top,
@@ -633,6 +662,31 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
     content.restore_state();
 }
 
+fn vector_command_points(
+    draw: ImageDrawRect,
+    source_width: f32,
+    source_height: f32,
+    points: &[(f32, f32)],
+) -> Vec<crate::layout::LayoutPoint> {
+    points
+        .iter()
+        .map(|(x, y)| vector_command_point(draw, source_width, source_height, *x, *y))
+        .collect()
+}
+
+fn vector_command_point(
+    draw: ImageDrawRect,
+    source_width: f32,
+    source_height: f32,
+    x: f32,
+    y: f32,
+) -> crate::layout::LayoutPoint {
+    crate::layout::LayoutPoint {
+        x: draw.x + (x / source_width) * draw.width,
+        y: draw.y + draw.height - (y / source_height) * draw.height,
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 struct VectorDrawRect {
     x: f32,
@@ -660,6 +714,63 @@ fn vector_command_rect(
         width,
         height,
     }
+}
+
+fn draw_passive_vector_line(
+    content: &mut Content,
+    from: crate::layout::LayoutPoint,
+    to: crate::layout::LayoutPoint,
+    stroke_color: Option<crate::model::Color>,
+) {
+    let Some(color) = stroke_color else {
+        return;
+    };
+    draw_passive_line(
+        content,
+        from.x,
+        from.y,
+        to.x,
+        to.y,
+        0.75,
+        pdf_color_from_model(color),
+        LineStyle::Solid,
+    );
+}
+
+fn draw_passive_vector_polyline(
+    content: &mut Content,
+    points: &[crate::layout::LayoutPoint],
+    stroke_color: Option<crate::model::Color>,
+) {
+    if points.len() < 2 {
+        return;
+    }
+    for pair in points.windows(2) {
+        draw_passive_vector_line(content, pair[0], pair[1], stroke_color);
+    }
+}
+
+fn draw_passive_vector_polygon(
+    content: &mut Content,
+    points: &[crate::layout::LayoutPoint],
+    stroke_color: Option<crate::model::Color>,
+    fill_color: Option<crate::model::Color>,
+) {
+    if points.len() < 3 {
+        return;
+    }
+    draw_passive_polygon(
+        content,
+        points,
+        stroke_color.map(|_| 0.75).unwrap_or(0.0),
+        stroke_color.map(pdf_color_from_model).unwrap_or(PdfColor {
+            red: 0.0,
+            green: 0.0,
+            blue: 0.0,
+        }),
+        LineStyle::Solid,
+        fill_color.map(pdf_color_from_model),
+    );
 }
 
 fn draw_passive_vector_rectangle(

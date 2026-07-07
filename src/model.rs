@@ -373,6 +373,22 @@ pub enum ImageFormat {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StaticImageVectorCommand {
+    Line {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        stroke_color: Option<Color>,
+    },
+    Polyline {
+        points: Vec<(f32, f32)>,
+        stroke_color: Option<Color>,
+    },
+    Polygon {
+        points: Vec<(f32, f32)>,
+        stroke_color: Option<Color>,
+        fill_color: Option<Color>,
+    },
     Rectangle {
         left: f32,
         top: f32,

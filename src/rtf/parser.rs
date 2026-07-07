@@ -13851,6 +13851,7 @@ impl Default for WmfDrawingState {
 
 const MAX_PASSIVE_WMF_RECORDS: usize = 512;
 const MAX_PASSIVE_WMF_COMMANDS: usize = 256;
+const MAX_PASSIVE_WMF_POINTS_PER_RECORD: usize = 128;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
 const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
 
@@ -14057,6 +14058,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut objects = Vec::new();
     let mut state = WmfDrawingState::default();
     let mut commands = Vec::new();
+    let mut current_point = (0.0f32, 0.0f32);
 
     while pos + 6 <= header.file_end {
         record_count = record_count.checked_add(1)?;
@@ -14100,6 +14102,68 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         WmfObject::Brush(color) => state.fill_color = color,
                         WmfObject::Other => {}
                     }
+                }
+            }
+            0x0214 => {
+                current_point = parse_wmf_yx_point(
+                    data,
+                    0,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                )?;
+            }
+            0x0213 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let end = parse_wmf_yx_point(
+                    data,
+                    0,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                )?;
+                if segment_is_visible(current_point, end) {
+                    commands.push(StaticImageVectorCommand::Line {
+                        x1: current_point.0,
+                        y1: current_point.1,
+                        x2: end.0,
+                        y2: end.1,
+                        stroke_color: state.stroke_color,
+                    });
+                }
+                current_point = end;
+            }
+            0x0324 | 0x0325 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let points = parse_wmf_point_list(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                )?;
+                if function == 0x0324 {
+                    if points.len() >= 3 && point_bounds_are_visible(&points) {
+                        commands.push(StaticImageVectorCommand::Polygon {
+                            points,
+                            stroke_color: state.stroke_color,
+                            fill_color: state.fill_color,
+                        });
+                    }
+                } else if points
+                    .windows(2)
+                    .any(|pair| segment_is_visible(pair[0], pair[1]))
+                {
+                    commands.push(StaticImageVectorCommand::Polyline {
+                        points,
+                        stroke_color: state.stroke_color,
+                    });
                 }
             }
             0x041b | 0x0418 => {
@@ -14264,8 +14328,113 @@ fn parse_wmf_bounds(
     ))
 }
 
+fn parse_wmf_yx_point(
+    data: &[u8],
+    offset: usize,
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32)> {
+    let y = i32::from(read_le_i16(data, offset)?);
+    let x = i32::from(read_le_i16(data, offset.checked_add(2)?)?);
+    Some(normalize_wmf_point(
+        x,
+        y,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    ))
+}
+
+fn parse_wmf_xy_point(
+    data: &[u8],
+    offset: usize,
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32)> {
+    let x = i32::from(read_le_i16(data, offset)?);
+    let y = i32::from(read_le_i16(data, offset.checked_add(2)?)?);
+    Some(normalize_wmf_point(
+        x,
+        y,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    ))
+}
+
+fn normalize_wmf_point(
+    x: i32,
+    y: i32,
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> (f32, f32) {
+    let max_x = window_width.max(1);
+    let max_y = window_height.max(1);
+    (
+        x.saturating_sub(window_origin_x).clamp(0, max_x) as f32,
+        y.saturating_sub(window_origin_y).clamp(0, max_y) as f32,
+    )
+}
+
+fn parse_wmf_point_list(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<Vec<(f32, f32)>> {
+    let count = usize::from(read_le_u16(data, 0)?);
+    if count == 0 || count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+        return None;
+    }
+    let points_bytes = count.checked_mul(4)?;
+    let required_len = 2usize.checked_add(points_bytes)?;
+    if data.len() < required_len {
+        return None;
+    }
+    let mut points = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = 2usize.checked_add(index.checked_mul(4)?)?;
+        points.push(parse_wmf_xy_point(
+            data,
+            offset,
+            window_origin_x,
+            window_origin_y,
+            window_width,
+            window_height,
+        )?);
+    }
+    Some(points)
+}
+
 fn bounds_is_visible((left, top, right, bottom): (f32, f32, f32, f32)) -> bool {
     right - left >= 0.5 && bottom - top >= 0.5
+}
+
+fn segment_is_visible((x1, y1): (f32, f32), (x2, y2): (f32, f32)) -> bool {
+    (x2 - x1).abs() >= 0.5 || (y2 - y1).abs() >= 0.5
+}
+
+fn point_bounds_are_visible(points: &[(f32, f32)]) -> bool {
+    let Some((first_x, first_y)) = points.first().copied() else {
+        return false;
+    };
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (first_x, first_y, first_x, first_y);
+    for (x, y) in points.iter().copied().skip(1) {
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    bounds_is_visible((min_x, min_y, max_x, max_y))
 }
 
 fn color_from_colorref(data: &[u8], offset: usize) -> Option<Color> {
