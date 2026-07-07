@@ -14187,17 +14187,28 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
-            0x041b | 0x0418 => {
+            0x041b | 0x0418 | 0x061c => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let bounds = parse_wmf_bounds(
-                    data,
-                    window_origin_x,
-                    window_origin_y,
-                    window_width,
-                    window_height,
-                )?;
+                let bounds = if function == 0x061c {
+                    parse_wmf_bounds_at(
+                        data,
+                        4,
+                        window_origin_x,
+                        window_origin_y,
+                        window_width,
+                        window_height,
+                    )?
+                } else {
+                    parse_wmf_bounds(
+                        data,
+                        window_origin_x,
+                        window_origin_y,
+                        window_width,
+                        window_height,
+                    )?
+                };
                 if bounds_is_visible(bounds) {
                     let (left, top, right, bottom) = bounds;
                     let command = if function == 0x041b {
@@ -14209,12 +14220,25 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             stroke_color: state.stroke_color,
                             fill_color: state.fill_color,
                         }
-                    } else {
+                    } else if function == 0x0418 {
                         StaticImageVectorCommand::Ellipse {
                             left,
                             top,
                             right,
                             bottom,
+                            stroke_color: state.stroke_color,
+                            fill_color: state.fill_color,
+                        }
+                    } else {
+                        let corner_width = normalized_wmf_size(data, 2, window_width)?;
+                        let corner_height = normalized_wmf_size(data, 0, window_height)?;
+                        StaticImageVectorCommand::RoundedRectangle {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            corner_width,
+                            corner_height,
                             stroke_color: state.stroke_color,
                             fill_color: state.fill_color,
                         }
@@ -14363,13 +14387,31 @@ fn parse_wmf_bounds(
     window_width: i32,
     window_height: i32,
 ) -> Option<(f32, f32, f32, f32)> {
-    if data.len() < 8 {
+    parse_wmf_bounds_at(
+        data,
+        0,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    )
+}
+
+fn parse_wmf_bounds_at(
+    data: &[u8],
+    offset: usize,
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32, f32, f32)> {
+    if data.len() < offset.checked_add(8)? {
         return None;
     }
-    let bottom = i32::from(read_le_i16(data, 0)?);
-    let right = i32::from(read_le_i16(data, 2)?);
-    let top = i32::from(read_le_i16(data, 4)?);
-    let left = i32::from(read_le_i16(data, 6)?);
+    let bottom = i32::from(read_le_i16(data, offset)?);
+    let right = i32::from(read_le_i16(data, offset.checked_add(2)?)?);
+    let top = i32::from(read_le_i16(data, offset.checked_add(4)?)?);
+    let left = i32::from(read_le_i16(data, offset.checked_add(6)?)?);
     let max_x = window_width.max(1);
     let max_y = window_height.max(1);
     let left = left.saturating_sub(window_origin_x).clamp(0, max_x) as f32;
@@ -14382,6 +14424,11 @@ fn parse_wmf_bounds(
         left.max(right),
         top.max(bottom),
     ))
+}
+
+fn normalized_wmf_size(data: &[u8], offset: usize, extent: i32) -> Option<f32> {
+    let value = i32::from(read_le_i16(data, offset)?.unsigned_abs());
+    Some(value.clamp(0, extent.max(1)) as f32)
 }
 
 fn parse_wmf_patblt_bounds(

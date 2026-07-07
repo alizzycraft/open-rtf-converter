@@ -17858,6 +17858,109 @@ fn wmf_patblt_patcopy_renders_passive_brush_rectangle_without_payload_leakage() 
 }
 
 #[test]
+fn wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "010009000003250000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc02000000ff00000000",
+        "040000002d010000",
+        "090000001c06140028005000b4000a001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF ROUNDRECT vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::RoundedRectangle {
+                left,
+                top,
+                right,
+                bottom,
+                corner_width,
+                corner_height,
+                fill_color: Some(color),
+                ..
+            } if (*left - 20.0).abs() < 0.01
+                && (*top - 10.0).abs() < 0.01
+                && (*right - 180.0).abs() < 0.01
+                && (*bottom - 80.0).abs() < 0.01
+                && (*corner_width - 40.0).abs() < 0.01
+                && (*corner_height - 20.0).abs() < 0.01
+                && color.red == 0
+                && color.green == 255
+                && color.blue == 0
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in ["wmetafile", "061c", "00ff00", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF ROUNDRECT internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "c")
+            .count()
+            >= 4,
+        "WMF ROUNDRECT should render passive rounded-corner Bezier curves"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"061c",
+        b"00ff00",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF ROUNDRECT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn excessive_wmf_polyline_points_become_placeholder_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003150000000100050000000000",

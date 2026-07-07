@@ -399,6 +399,16 @@ pub enum StaticImageVectorCommand {
         stroke_color: Option<Color>,
         fill_color: Option<Color>,
     },
+    RoundedRectangle {
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+        corner_width: f32,
+        corner_height: f32,
+        stroke_color: Option<Color>,
+        fill_color: Option<Color>,
+    },
     Ellipse {
         left: f32,
         top: f32,

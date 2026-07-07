@@ -638,6 +638,36 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 );
                 draw_passive_vector_rectangle(content, rect, *stroke_color, *fill_color);
             }
+            StaticImageVectorCommand::RoundedRectangle {
+                left,
+                top,
+                right,
+                bottom,
+                corner_width,
+                corner_height,
+                stroke_color,
+                fill_color,
+            } => {
+                let rect = vector_command_rect(
+                    draw,
+                    source_width,
+                    source_height,
+                    *left,
+                    *top,
+                    *right,
+                    *bottom,
+                );
+                let corner_width = (*corner_width / source_width) * draw.width;
+                let corner_height = (*corner_height / source_height) * draw.height;
+                draw_passive_vector_rounded_rectangle(
+                    content,
+                    rect,
+                    corner_width,
+                    corner_height,
+                    *stroke_color,
+                    *fill_color,
+                );
+            }
             StaticImageVectorCommand::Ellipse {
                 left,
                 top,
@@ -802,6 +832,33 @@ fn draw_passive_vector_rectangle(
         }
         (None, None) => {}
     }
+}
+
+fn draw_passive_vector_rounded_rectangle(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    corner_width: f32,
+    corner_height: f32,
+    stroke_color: Option<crate::model::Color>,
+    fill_color: Option<crate::model::Color>,
+) {
+    let radius = (corner_width.min(corner_height) * 0.5).max(0.1);
+    draw_passive_rounded_rectangle(
+        content,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        radius,
+        stroke_color.map(|_| 0.75).unwrap_or(0.0),
+        stroke_color.map(pdf_color_from_model).unwrap_or(PdfColor {
+            red: 0.0,
+            green: 0.0,
+            blue: 0.0,
+        }),
+        LineStyle::Solid,
+        fill_color.map(pdf_color_from_model),
+    );
 }
 
 fn draw_passive_vector_ellipse(
