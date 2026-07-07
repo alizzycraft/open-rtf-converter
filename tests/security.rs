@@ -17324,6 +17324,239 @@ fn simple_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
 }
 
 #[test]
+fn placeable_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "d7cdc69a000000000000c8006400a005000000001d52",
+        "0100090000032a0000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "070000001b045000b4000a001400",
+        "0700000018045a00be0014006400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("placeable WMF vector preview image");
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert_eq!(image.width_px, 200);
+    assert_eq!(image.height_px, 100);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Rectangle { .. }) })
+    );
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Ellipse { .. }) })
+    );
+    for forbidden in [
+        "wmetafile",
+        "d7cdc69a",
+        "9ac6cdd7",
+        "010009",
+        "dcdcdc",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "placeable WMF internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "placeable WMF rectangle should render as passive PDF path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "placeable WMF ellipse should render as passive PDF Bezier path"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"d7cdc69a",
+        b"9ac6cdd7",
+        b"010009",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "placeable WMF vector preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_placeable_wmf_checksum_becomes_placeholder_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "d7cdc69a000000000000c8006400a005000000000000",
+        "0100090000032a0000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "070000001b045000b4000a001400",
+        "0700000018045a00be0014006400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("invalid placeable WMF placeholder image");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.is_empty());
+    assert!(!parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in ["d7cdc69a", "9ac6cdd7", "010009", "dcdcdc"] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid placeable WMF internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    for forbidden in [
+        b"d7cdc69a".as_slice(),
+        b"9ac6cdd7",
+        b"010009",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid placeable WMF leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn wmf_window_origin_offsets_are_normalized_before_passive_vector_rendering() {
+    let wmf_hex = concat!(
+        "010009000003280000000100070000000000",
+        "050000000b0214000a00",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "070000001b045a00b4001e001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("origin-offset WMF vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Rectangle {
+                left,
+                top,
+                right,
+                bottom,
+                ..
+            } if (*left - 10.0).abs() < 0.01
+                && (*top - 10.0).abs() < 0.01
+                && (*right - 170.0).abs() < 0.01
+                && (*bottom - 70.0).abs() < 0.01
+        )
+    }));
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("WMF picture rendered as bounded passive vector preview")
+        }),
+        "origin-offset WMF should stay on passive vector path"
+    );
+}
+
+#[test]
 fn shape_pib_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032a0000000100070000000000",

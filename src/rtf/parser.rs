@@ -13818,6 +13818,16 @@ struct ParsedWmfVector {
 }
 
 #[derive(Debug, Copy, Clone)]
+struct WmfHeaderInfo {
+    header_start: usize,
+    file_end: usize,
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+}
+
+#[derive(Debug, Copy, Clone)]
 enum WmfObject {
     Pen(Option<Color>),
     Brush(Option<Color>),
@@ -13841,6 +13851,8 @@ impl Default for WmfDrawingState {
 
 const MAX_PASSIVE_WMF_RECORDS: usize = 512;
 const MAX_PASSIVE_WMF_COMMANDS: usize = 256;
+const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
+const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
 
 fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     const BITMAPINFOHEADER_SIZE: usize = 40;
@@ -14032,29 +14044,21 @@ fn read_le_i32(bytes: &[u8], offset: usize) -> Option<i32> {
 }
 
 fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
-    if bytes.len() < 18 {
-        return None;
-    }
-    let file_type = read_le_u16(bytes, 0)?;
-    let header_size_words = read_le_u16(bytes, 2)?;
-    let version = read_le_u16(bytes, 4)?;
-    let file_size_words = read_le_u32(bytes, 6)? as usize;
-    if file_type != 1 || header_size_words != 9 || version != 0x0300 {
-        return None;
-    }
-    if file_size_words.checked_mul(2)? > bytes.len() {
-        return None;
-    }
-
-    let mut pos = usize::from(header_size_words).checked_mul(2)?;
+    let header = parse_wmf_header_info(bytes)?;
+    let header_size_words = read_le_u16(bytes, header.header_start + 2)?;
+    let mut pos = header
+        .header_start
+        .checked_add(usize::from(header_size_words).checked_mul(2)?)?;
     let mut record_count = 0usize;
-    let mut window_width = 1i32;
-    let mut window_height = 1i32;
+    let mut window_origin_x = header.window_origin_x;
+    let mut window_origin_y = header.window_origin_y;
+    let mut window_width = header.window_width;
+    let mut window_height = header.window_height;
     let mut objects = Vec::new();
     let mut state = WmfDrawingState::default();
     let mut commands = Vec::new();
 
-    while pos + 6 <= bytes.len() {
+    while pos + 6 <= header.file_end {
         record_count = record_count.checked_add(1)?;
         if record_count > MAX_PASSIVE_WMF_RECORDS {
             return None;
@@ -14066,13 +14070,19 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
         }
         let record_size_bytes = record_size_words.checked_mul(2)?;
         let record_end = pos.checked_add(record_size_bytes)?;
-        if record_end > bytes.len() {
+        if record_end > header.file_end {
             return None;
         }
         let data = &bytes[pos + 6..record_end];
 
         match function {
             0x0000 => break,
+            0x020b => {
+                let y = read_le_i16(data, 0)?;
+                let x = read_le_i16(data, 2)?;
+                window_origin_x = i32::from(x);
+                window_origin_y = i32::from(y);
+            }
             0x020c => {
                 let height = read_le_i16(data, 0)?;
                 let width = read_le_i16(data, 2)?;
@@ -14096,7 +14106,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let bounds = parse_wmf_bounds(data, window_width, window_height)?;
+                let bounds = parse_wmf_bounds(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                )?;
                 if bounds_is_visible(bounds) {
                     let (left, top, right, bottom) = bounds;
                     let command = if function == 0x041b {
@@ -14138,6 +14154,66 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     })
 }
 
+fn parse_wmf_header_info(bytes: &[u8]) -> Option<WmfHeaderInfo> {
+    let mut header_start = 0usize;
+    let mut window_origin_x = 0i32;
+    let mut window_origin_y = 0i32;
+    let mut window_width = 1i32;
+    let mut window_height = 1i32;
+
+    if bytes.len() >= PLACEABLE_WMF_HEADER_BYTES + 18 && read_le_u32(bytes, 0)? == PLACEABLE_WMF_KEY
+    {
+        if !placeable_wmf_checksum_is_valid(bytes)? {
+            return None;
+        }
+        let left = i32::from(read_le_i16(bytes, 6)?);
+        let top = i32::from(read_le_i16(bytes, 8)?);
+        let right = i32::from(read_le_i16(bytes, 10)?);
+        let bottom = i32::from(read_le_i16(bytes, 12)?);
+        let width = right.checked_sub(left)?.unsigned_abs().max(1);
+        let height = bottom.checked_sub(top)?.unsigned_abs().max(1);
+        window_origin_x = left.min(right);
+        window_origin_y = top.min(bottom);
+        window_width = i32::try_from(width).ok()?;
+        window_height = i32::try_from(height).ok()?;
+        header_start = PLACEABLE_WMF_HEADER_BYTES;
+    }
+
+    if bytes.len().checked_sub(header_start)? < 18 {
+        return None;
+    }
+    let file_type = read_le_u16(bytes, header_start)?;
+    let header_size_words = read_le_u16(bytes, header_start + 2)?;
+    let version = read_le_u16(bytes, header_start + 4)?;
+    let file_size_words = read_le_u32(bytes, header_start + 6)? as usize;
+    if file_type != 1 || header_size_words != 9 || version != 0x0300 {
+        return None;
+    }
+    let file_end = header_start.checked_add(file_size_words.checked_mul(2)?)?;
+    if file_end > bytes.len() {
+        return None;
+    }
+    Some(WmfHeaderInfo {
+        header_start,
+        file_end,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    })
+}
+
+fn placeable_wmf_checksum_is_valid(bytes: &[u8]) -> Option<bool> {
+    if bytes.len() < PLACEABLE_WMF_HEADER_BYTES {
+        return None;
+    }
+    let mut checksum = 0u16;
+    for offset in (0..20).step_by(2) {
+        checksum ^= read_le_u16(bytes, offset)?;
+    }
+    Some(checksum == read_le_u16(bytes, 20)?)
+}
+
 fn parse_wmf_pen_object(data: &[u8]) -> Option<WmfObject> {
     if data.len() < 10 {
         return None;
@@ -14162,6 +14238,8 @@ fn parse_wmf_brush_object(data: &[u8]) -> Option<WmfObject> {
 
 fn parse_wmf_bounds(
     data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
     window_width: i32,
     window_height: i32,
 ) -> Option<(f32, f32, f32, f32)> {
@@ -14174,10 +14252,10 @@ fn parse_wmf_bounds(
     let left = i32::from(read_le_i16(data, 6)?);
     let max_x = window_width.max(1);
     let max_y = window_height.max(1);
-    let left = left.clamp(0, max_x) as f32;
-    let right = right.clamp(0, max_x) as f32;
-    let top = top.clamp(0, max_y) as f32;
-    let bottom = bottom.clamp(0, max_y) as f32;
+    let left = left.saturating_sub(window_origin_x).clamp(0, max_x) as f32;
+    let right = right.saturating_sub(window_origin_x).clamp(0, max_x) as f32;
+    let top = top.saturating_sub(window_origin_y).clamp(0, max_y) as f32;
+    let bottom = bottom.saturating_sub(window_origin_y).clamp(0, max_y) as f32;
     Some((
         left.min(right),
         top.min(bottom),
