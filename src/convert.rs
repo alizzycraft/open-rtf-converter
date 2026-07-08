@@ -83,6 +83,7 @@ pub fn convert_rtf_to_pdf(
     if options.diagnostics {
         diagnostics.extend(passive_font_substitution_diagnostics(
             &parsed.document.fonts,
+            &options.font_provider,
         ));
         diagnostics.extend(unsupported_passive_glyph_diagnostics(
             &parsed.document,
@@ -109,12 +110,18 @@ pub fn convert_rtf_to_pdf(
     })
 }
 
-fn passive_font_substitution_diagnostics(fonts: &[FontDef]) -> Vec<Diagnostic> {
+fn passive_font_substitution_diagnostics(
+    fonts: &[FontDef],
+    font_provider: &FontProvider,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = Vec::<(String, PdfFontFamily)>::new();
     for font in fonts {
         let family = passive_pdf_font_family_for_font(font);
         if font_name_matches_pdf_family(&font.name, family) {
+            continue;
+        }
+        if font_provider.has_asset_for_family(&font.name) {
             continue;
         }
         let key = (font.name.to_ascii_lowercase(), family);
@@ -347,7 +354,7 @@ fn collect_unsupported_glyph_diagnostic_from_run(
             script, font_name
         ),
         FontCoverage::Covered => format!(
-            "{} characters for font '{}' have a parsed caller-provided passive font asset, but embedded font rendering is not implemented yet; current PDF base-font fallback may render replacement glyphs",
+            "{} characters for font '{}' have a caller-provided passive font asset; covered glyphs can render through embedded passive Type0 fonts",
             script, font_name
         ),
         FontCoverage::MissingGlyph => format!(
