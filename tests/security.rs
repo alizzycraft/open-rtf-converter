@@ -9565,10 +9565,10 @@ fn formshade_renders_passive_form_field_background_without_pdf_form() {
 
     assert!(text.contains("Before Default value After"));
     assert!(form_run.style.form_field_shading);
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
-            .contains("form-field shading approximated by passive highlight rectangles")
+            .contains("form-field shading approximated")
     }));
     for forbidden in [
         "FORMTEXT",
@@ -15239,10 +15239,10 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
             .message
             .contains("footnotes placed at passive page bottom")
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
-            .contains("form-field shading approximated by passive highlight rectangles")
+            .contains("form-field shading approximated")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
