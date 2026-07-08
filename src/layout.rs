@@ -3747,6 +3747,9 @@ fn split_run_for_wrapping(run: &Run, markers: &MarkerContext) -> Vec<FlowRun> {
             opportunity,
             BreakOpportunity::Allowed | BreakOpportunity::Mandatory
         ) {
+            if run.style.form_field_shading && matches!(opportunity, BreakOpportunity::Allowed) {
+                continue;
+            }
             let segment_text = &text[start..idx];
             if !segment_text.is_empty() {
                 let soft_hyphen_after = segment_text.ends_with('\u{00ad}');
@@ -4692,11 +4695,13 @@ fn push_line(
         }
         if style.form_field_shading {
             let font_size = style.font_size_points();
+            let (shade_x, shade_width) =
+                passive_form_field_shading_horizontal_bounds(cursor_x, width, font_size);
             page.items.push(LayoutItem::Highlight {
-                x: cursor_x,
-                y: run_baseline_y - (font_size * 0.28),
-                width,
-                height: font_size * 1.12,
+                x: shade_x,
+                y: run_baseline_y - (font_size * 0.32),
+                width: shade_width,
+                height: font_size * 1.2,
                 color: passive_form_field_shading_color(),
             });
         }
@@ -5468,6 +5473,13 @@ fn passive_form_field_shading_color() -> PdfColor {
         green: 0.82,
         blue: 0.82,
     }
+}
+
+fn passive_form_field_shading_horizontal_bounds(x: f32, width: f32, font_size: f32) -> (f32, f32) {
+    let padding = (font_size * 0.16).clamp(1.0, 3.0);
+    let shaded_x = (x - padding).max(0.0);
+    let left_padding = x - shaded_x;
+    (shaded_x, width.max(0.0) + left_padding + padding)
 }
 
 fn shading_color(document: &Document, index: usize, basis_points: i32) -> PdfColor {
@@ -9162,13 +9174,50 @@ mod tests {
         let layout = LayoutEngine::layout(&document);
         let page = &layout.pages[0];
 
-        assert!(page.items.iter().any(|item| {
-            matches!(
-                item,
-                LayoutItem::Highlight { color, .. }
-                    if *color == PdfColor { red: 0.82, green: 0.82, blue: 0.82 }
-            )
-        }));
+        let form_shading = page
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Highlight {
+                    x, width, color, ..
+                } if *color
+                    == (PdfColor {
+                        red: 0.82,
+                        green: 0.82,
+                        blue: 0.82,
+                    }) =>
+                {
+                    Some((*x, *x + *width))
+                }
+                _ => None,
+            })
+            .reduce(|acc, bounds| (acc.0.min(bounds.0), acc.1.max(bounds.1)))
+            .expect("form shading");
+        let text_bounds = page
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => {
+                    let width = measure_text_with_family(
+                        &fragment.text,
+                        &fragment.style,
+                        fragment.font_family,
+                    );
+                    Some((fragment.x, fragment.x + width))
+                }
+                _ => None,
+            })
+            .reduce(|acc, bounds| (acc.0.min(bounds.0), acc.1.max(bounds.1)))
+            .expect("form text");
+
+        assert!(
+            form_shading.0 < text_bounds.0,
+            "form shading should start before text: shading={form_shading:?}, text={text_bounds:?}"
+        );
+        assert!(
+            form_shading.1 > text_bounds.1,
+            "form shading should end after text: shading={form_shading:?}, text={text_bounds:?}"
+        );
         assert!(layout_text(page).contains("Form value"));
     }
 
