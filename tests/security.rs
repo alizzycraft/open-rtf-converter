@@ -122,6 +122,77 @@ fn hex_escapes_inside_object_data_do_not_become_text() {
 }
 
 #[test]
+fn cyrillic_charset_text_is_decoded_but_unrenderable_font_gap_is_reported() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "ansicpg1252{",
+        "\\",
+        "fonttbl{",
+        "\\",
+        "f0 Times New Roman;}{",
+        "\\",
+        "f38",
+        "\\",
+        "fcharset204 Times New Roman Cyr;}}",
+        "\\",
+        "f38 ",
+        "\\",
+        "'cf",
+        "\\",
+        "'f0",
+        "\\",
+        "'e8",
+        "\\",
+        "'e2",
+        "\\",
+        "'e5",
+        "\\",
+        "'f2",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("\u{041f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}"));
+    assert!(!text.contains("fcharset204"));
+    assert!(!text.contains("Times New Roman Cyr"));
+
+    let mut options = ConvertOptions::browser_safe_defaults();
+    options.diagnostics = true;
+    let output = convert_rtf_to_pdf(&input, &options).unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("Cyrillic characters")
+            && diagnostic.message.contains("passive font asset support")
+            && diagnostic.message.contains("Times New Roman Cyr")
+    }));
+
+    for forbidden in [
+        b"Times New Roman Cyr".as_slice(),
+        b"fcharset204".as_slice(),
+        b"ansicpg1251".as_slice(),
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile".as_slice(),
+        b"/Launch".as_slice(),
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Cyrillic/source content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn oversized_controls_parameters_and_deep_groups_are_rejected() {
     let options = RtfParseOptions {
         limits: RtfLimits {

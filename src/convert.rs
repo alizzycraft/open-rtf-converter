@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::config::RtfParseOptions;
 use crate::diagnostics::Diagnostic;
 use crate::layout::{LayoutEngine, PdfFontFamily, passive_pdf_font_family_for_font};
-use crate::model::FontDef;
+use crate::model::{Block, Document, FontDef, Paragraph, Run, StaticShape, Table};
 use crate::pdf::{PassivePdfError, audit_passive_pdf_bytes, render_pdf};
 use crate::rtf::{ParseError, parse_rtf_bytes_with_options};
 
@@ -77,6 +77,7 @@ pub fn convert_rtf_to_pdf(
         diagnostics.extend(passive_font_substitution_diagnostics(
             &parsed.document.fonts,
         ));
+        diagnostics.extend(unsupported_passive_glyph_diagnostics(&parsed.document));
     }
     let layout = LayoutEngine::layout(&parsed.document);
     let page_count = layout.pages.len();
@@ -120,6 +121,195 @@ fn passive_font_substitution_diagnostics(fonts: &[FontDef]) -> Vec<Diagnostic> {
         ));
     }
     diagnostics
+}
+
+fn unsupported_passive_glyph_diagnostics(document: &Document) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut seen = Vec::<(i32, &'static str)>::new();
+
+    collect_unsupported_glyph_diagnostics_from_blocks(
+        &document.blocks,
+        document,
+        &mut seen,
+        &mut diagnostics,
+    );
+    for paragraphs in [
+        &document.header,
+        &document.first_page_header,
+        &document.even_page_header,
+        &document.footer,
+        &document.first_page_footer,
+        &document.even_page_footer,
+        &document.footnotes,
+        &document.endnotes,
+    ] {
+        collect_unsupported_glyph_diagnostics_from_paragraphs(
+            paragraphs,
+            document,
+            &mut seen,
+            &mut diagnostics,
+        );
+    }
+    for shapes in [
+        &document.header_shapes,
+        &document.first_page_header_shapes,
+        &document.even_page_header_shapes,
+        &document.footer_shapes,
+        &document.first_page_footer_shapes,
+        &document.even_page_footer_shapes,
+        &document.background_shapes,
+    ] {
+        collect_unsupported_glyph_diagnostics_from_shapes(
+            shapes,
+            document,
+            &mut seen,
+            &mut diagnostics,
+        );
+    }
+
+    diagnostics
+}
+
+fn collect_unsupported_glyph_diagnostics_from_blocks(
+    blocks: &[Block],
+    document: &Document,
+    seen: &mut Vec<(i32, &'static str)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(paragraph) => collect_unsupported_glyph_diagnostics_from_paragraph(
+                paragraph,
+                document,
+                seen,
+                diagnostics,
+            ),
+            Block::Table(table) => {
+                collect_unsupported_glyph_diagnostics_from_table(table, document, seen, diagnostics)
+            }
+            Block::Shape(shape) => {
+                collect_unsupported_glyph_diagnostics_from_shape(shape, document, seen, diagnostics)
+            }
+            Block::Image(_)
+            | Block::Placeholder(_)
+            | Block::PageBreak
+            | Block::ColumnBreak
+            | Block::ContinuousSectionBreak
+            | Block::SectionBreak
+            | Block::EvenPageSectionBreak
+            | Block::OddPageSectionBreak
+            | Block::SectionSettings(_) => {}
+        }
+    }
+}
+
+fn collect_unsupported_glyph_diagnostics_from_table(
+    table: &Table,
+    document: &Document,
+    seen: &mut Vec<(i32, &'static str)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for row in &table.rows {
+        for cell in &row.cells {
+            collect_unsupported_glyph_diagnostics_from_paragraphs(
+                &cell.paragraphs,
+                document,
+                seen,
+                diagnostics,
+            );
+        }
+    }
+}
+
+fn collect_unsupported_glyph_diagnostics_from_shapes(
+    shapes: &[StaticShape],
+    document: &Document,
+    seen: &mut Vec<(i32, &'static str)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for shape in shapes {
+        collect_unsupported_glyph_diagnostics_from_shape(shape, document, seen, diagnostics);
+    }
+}
+
+fn collect_unsupported_glyph_diagnostics_from_shape(
+    shape: &StaticShape,
+    document: &Document,
+    seen: &mut Vec<(i32, &'static str)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    collect_unsupported_glyph_diagnostics_from_paragraphs(&shape.text, document, seen, diagnostics);
+}
+
+fn collect_unsupported_glyph_diagnostics_from_paragraphs(
+    paragraphs: &[Paragraph],
+    document: &Document,
+    seen: &mut Vec<(i32, &'static str)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for paragraph in paragraphs {
+        collect_unsupported_glyph_diagnostics_from_paragraph(
+            paragraph,
+            document,
+            seen,
+            diagnostics,
+        );
+    }
+}
+
+fn collect_unsupported_glyph_diagnostics_from_paragraph(
+    paragraph: &Paragraph,
+    document: &Document,
+    seen: &mut Vec<(i32, &'static str)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for run in &paragraph.runs {
+        collect_unsupported_glyph_diagnostic_from_run(run, document, seen, diagnostics);
+    }
+}
+
+fn collect_unsupported_glyph_diagnostic_from_run(
+    run: &Run,
+    document: &Document,
+    seen: &mut Vec<(i32, &'static str)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(script) = unsupported_passive_glyph_script(&run.text) else {
+        return;
+    };
+    let key = (run.style.font_index, script);
+    if seen.contains(&key) {
+        return;
+    }
+    seen.push(key);
+    let font_name = document
+        .fonts
+        .iter()
+        .find(|font| font.index == run.style.font_index)
+        .map(|font| font.name.as_str())
+        .unwrap_or("unknown");
+    diagnostics.push(Diagnostic::warning(
+        format!(
+            "{} characters for font '{}' need passive font asset support; current PDF base-font fallback may render replacement glyphs",
+            script, font_name
+        ),
+        None,
+    ));
+}
+
+fn unsupported_passive_glyph_script(text: &str) -> Option<&'static str> {
+    if text.chars().any(is_cyrillic_char) {
+        Some("Cyrillic")
+    } else {
+        None
+    }
+}
+
+fn is_cyrillic_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{0400}'..='\u{04ff}' | '\u{0500}'..='\u{052f}' | '\u{2de0}'..='\u{2dff}' | '\u{a640}'..='\u{a69f}'
+    )
 }
 
 fn font_name_matches_pdf_family(name: &str, family: PdfFontFamily) -> bool {

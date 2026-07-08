@@ -260,6 +260,7 @@ enum ShapePropertyCapture {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum CodePage {
     Windows1250,
+    Windows1251,
     Windows1252,
     Windows1253,
     Windows1254,
@@ -274,6 +275,7 @@ impl CodePage {
     fn from_rtf_code_page(code_page: i32) -> Option<Self> {
         match code_page {
             1250 => Some(Self::Windows1250),
+            1251 => Some(Self::Windows1251),
             1252 => Some(Self::Windows1252),
             1253 => Some(Self::Windows1253),
             1254 => Some(Self::Windows1254),
@@ -290,6 +292,7 @@ impl CodePage {
             0 => Some(Self::Windows1252),
             161 => Some(Self::Windows1253),
             162 => Some(Self::Windows1254),
+            204 => Some(Self::Windows1251),
             186 => Some(Self::Windows1257),
             238 => Some(Self::Windows1250),
             77 => Some(Self::MacRoman),
@@ -13338,6 +13341,7 @@ fn take_rtf_unicode_char(pending_high_surrogate: &mut Option<u16>, value: i32) -
 fn decode_hex_byte(byte: u8, code_page: CodePage) -> char {
     match code_page {
         CodePage::Windows1250 => decode_high_byte(byte, &WINDOWS_1250_HIGH),
+        CodePage::Windows1251 => decode_high_byte(byte, &WINDOWS_1251_HIGH),
         CodePage::Windows1252 => decode_windows_1252(byte),
         CodePage::Windows1253 => decode_high_byte(byte, &WINDOWS_1253_HIGH),
         CodePage::Windows1254 => decode_high_byte(byte, &WINDOWS_1254_HIGH),
@@ -13720,6 +13724,25 @@ const WINDOWS_1250_HIGH: [char; 128] = [
     '\u{010d}', '\u{00e9}', '\u{0119}', '\u{00eb}', '\u{011b}', '\u{00ed}', '\u{00ee}', '\u{010f}',
     '\u{0111}', '\u{0144}', '\u{0148}', '\u{00f3}', '\u{00f4}', '\u{0151}', '\u{00f6}', '\u{00f7}',
     '\u{0159}', '\u{016f}', '\u{00fa}', '\u{0171}', '\u{00fc}', '\u{00fd}', '\u{0163}', '\u{02d9}',
+];
+
+const WINDOWS_1251_HIGH: [char; 128] = [
+    '\u{0402}', '\u{0403}', '\u{201a}', '\u{0453}', '\u{201e}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{20ac}', '\u{2030}', '\u{0409}', '\u{2039}', '\u{040a}', '\u{040c}', '\u{040b}', '\u{040f}',
+    '\u{0452}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}', '\u{2014}',
+    '\u{fffd}', '\u{2122}', '\u{0459}', '\u{203a}', '\u{045a}', '\u{045c}', '\u{045b}', '\u{045f}',
+    '\u{00a0}', '\u{040e}', '\u{045e}', '\u{0408}', '\u{00a4}', '\u{0490}', '\u{00a6}', '\u{00a7}',
+    '\u{0401}', '\u{00a9}', '\u{0404}', '\u{00ab}', '\u{00ac}', '\u{00ad}', '\u{00ae}', '\u{0407}',
+    '\u{00b0}', '\u{00b1}', '\u{0406}', '\u{0456}', '\u{0491}', '\u{00b5}', '\u{00b6}', '\u{00b7}',
+    '\u{0451}', '\u{2116}', '\u{0454}', '\u{00bb}', '\u{0458}', '\u{0405}', '\u{0455}', '\u{0457}',
+    '\u{0410}', '\u{0411}', '\u{0412}', '\u{0413}', '\u{0414}', '\u{0415}', '\u{0416}', '\u{0417}',
+    '\u{0418}', '\u{0419}', '\u{041a}', '\u{041b}', '\u{041c}', '\u{041d}', '\u{041e}', '\u{041f}',
+    '\u{0420}', '\u{0421}', '\u{0422}', '\u{0423}', '\u{0424}', '\u{0425}', '\u{0426}', '\u{0427}',
+    '\u{0428}', '\u{0429}', '\u{042a}', '\u{042b}', '\u{042c}', '\u{042d}', '\u{042e}', '\u{042f}',
+    '\u{0430}', '\u{0431}', '\u{0432}', '\u{0433}', '\u{0434}', '\u{0435}', '\u{0436}', '\u{0437}',
+    '\u{0438}', '\u{0439}', '\u{043a}', '\u{043b}', '\u{043c}', '\u{043d}', '\u{043e}', '\u{043f}',
+    '\u{0440}', '\u{0441}', '\u{0442}', '\u{0443}', '\u{0444}', '\u{0445}', '\u{0446}', '\u{0447}',
+    '\u{0448}', '\u{0449}', '\u{044a}', '\u{044b}', '\u{044c}', '\u{044d}', '\u{044e}', '\u{044f}',
 ];
 
 const WINDOWS_1253_HIGH: [char; 128] = [
@@ -15294,6 +15317,34 @@ mod tests {
         assert_eq!(
             text,
             "Central \u{0160}\u{0161} \u{015a}\u{015b} \u{017d}\u{017e}"
+        );
+    }
+
+    #[test]
+    fn cyrillic_font_charset_guides_hex_escape_decoding() {
+        let output = parse_rtf(
+            r"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0 Times New Roman;}{\f38\fcharset204 Times New Roman Cyr;}}\f38 Cyrillic \'cf\'f0\'e8\'e2\'e5\'f2\par}",
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(
+            text,
+            "Cyrillic \u{041f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}"
+        );
+        assert!(!text.contains("fcharset"));
+        assert!(!text.contains("Times New Roman Cyr"));
+    }
+
+    #[test]
+    fn decodes_hex_escapes_with_windows_1251_semantics() {
+        let output =
+            parse_rtf(r"{\rtf1\ansi\ansicpg1251 Cyrillic \'c0\'df \'e0\'ff \'a8\'b8\par}").unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(
+            text,
+            "Cyrillic \u{0410}\u{042f} \u{0430}\u{044f} \u{0401}\u{0451}"
         );
     }
 
