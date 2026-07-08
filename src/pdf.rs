@@ -255,6 +255,7 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/XRef", "/XRef"),
     (b"/XFA", "/XFA"),
 ];
+const MAX_AUDITED_PDF_NAME_BYTES: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PassivePdfIssue {
@@ -369,14 +370,27 @@ pub fn audit_passive_pdf_bytes(pdf: &[u8]) -> Result<(), PassivePdfError> {
         }
 
         if pdf[offset] == b'/' {
-            for (token, label) in ACTIVE_PDF_NAME_TOKENS {
-                if pdf[offset..].starts_with(token)
-                    && is_pdf_name_boundary(pdf.get(offset + token.len()).copied())
-                {
-                    issues.push(PassivePdfIssue {
-                        token: label,
-                        offset,
-                    });
+            if let Some((name, name_end)) = parse_pdf_name_token(pdf, offset) {
+                for (token, label) in ACTIVE_PDF_NAME_TOKENS {
+                    if name == *token {
+                        issues.push(PassivePdfIssue {
+                            token: label,
+                            offset,
+                        });
+                    }
+                }
+                offset = name_end;
+                continue;
+            } else {
+                for (token, label) in ACTIVE_PDF_NAME_TOKENS {
+                    if pdf[offset..].starts_with(token)
+                        && is_pdf_name_boundary(pdf.get(offset + token.len()).copied())
+                    {
+                        issues.push(PassivePdfIssue {
+                            token: label,
+                            offset,
+                        });
+                    }
                 }
             }
         }
@@ -388,6 +402,47 @@ pub fn audit_passive_pdf_bytes(pdf: &[u8]) -> Result<(), PassivePdfError> {
         Ok(())
     } else {
         Err(PassivePdfError { issues })
+    }
+}
+
+fn parse_pdf_name_token(pdf: &[u8], offset: usize) -> Option<(Vec<u8>, usize)> {
+    if pdf.get(offset).copied()? != b'/' {
+        return None;
+    }
+
+    let mut name = Vec::new();
+    name.push(b'/');
+    let mut pos = offset + 1;
+    while pos < pdf.len() && !is_pdf_name_boundary(Some(pdf[pos])) {
+        if pdf[pos] == b'#' {
+            if pos + 2 < pdf.len()
+                && let (Some(high), Some(low)) = (hex_value(pdf[pos + 1]), hex_value(pdf[pos + 2]))
+            {
+                push_audited_pdf_name_byte(&mut name, (high << 4) | low);
+                pos += 3;
+                continue;
+            }
+        }
+
+        push_audited_pdf_name_byte(&mut name, pdf[pos]);
+        pos += 1;
+    }
+
+    Some((name, pos))
+}
+
+fn push_audited_pdf_name_byte(name: &mut Vec<u8>, byte: u8) {
+    if name.len() < MAX_AUDITED_PDF_NAME_BYTES {
+        name.push(byte);
+    }
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -3143,12 +3198,60 @@ endobj
     }
 
     #[test]
+    fn passive_pdf_audit_decodes_escaped_active_names_outside_streams() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Open#41ction << /S /Java#53cript /J#53 (app.alert) >> >>
+endobj
+2 0 obj
+<< /Names << /Embedded#46iles [(payload.bin) 3 0 R] >> /#45F << /F 3 0 R >> >>
+endobj
+3 0 obj
+<< /Type /Embedded#46ile /AF#52elationship /Data >>
+endobj
+%%EOF";
+
+        let error =
+            audit_passive_pdf_bytes(pdf).expect_err("escaped active PDF names must be rejected");
+
+        for expected in [
+            "/OpenAction",
+            "/JavaScript",
+            "/JS",
+            "/EmbeddedFiles",
+            "/EF",
+            "/EmbeddedFile",
+            "/AFRelationship",
+        ] {
+            assert!(
+                error.issues.iter().any(|issue| issue.token == expected),
+                "missing decoded active PDF name {expected}: {:?}",
+                error.issues
+            );
+        }
+    }
+
+    #[test]
     fn passive_pdf_audit_ignores_visible_words_inside_content_streams() {
         let pdf = b"%PDF-1.7
 1 0 obj
 << /Length 54 >>
 stream
 BT (/JavaScript /Launch /URI /Annots /Widget /ObjStm /XRef) Tj ET
+endstream
+endobj
+%%EOF";
+
+        audit_passive_pdf_bytes(pdf).unwrap();
+    }
+
+    #[test]
+    fn passive_pdf_audit_ignores_escaped_visible_words_inside_content_streams() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< /Length 54 >>
+stream
+BT (/Java#53cript /Launch /Embedded#46iles /Open#41ction) Tj ET
 endstream
 endobj
 %%EOF";
