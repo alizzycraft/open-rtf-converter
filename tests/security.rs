@@ -18675,7 +18675,7 @@ fn wmf_exttextout_uses_selected_font_charset_and_stays_passive() {
 
     assert!(text.contains("before"));
     assert!(text.contains("after"));
-    assert!(!text.contains("Ś"));
+    assert!(!text.contains('\u{015a}'));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
     assert!(image.palette.is_empty());
@@ -18691,7 +18691,7 @@ fn wmf_exttextout_uses_selected_font_charset_and_stays_passive() {
             } if (*x - 40.0).abs() < 0.01
                 && (*y - 20.0).abs() < 0.01
                 && (*height - 12.0).abs() < 0.01
-                && text == "Ś"
+                && text == "\u{015a}"
                 && color.red == 0
                 && color.green == 0
                 && color.blue == 255
@@ -18740,6 +18740,121 @@ fn wmf_exttextout_uses_selected_font_charset_and_stays_passive() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "WMF EXTTEXTOUT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn wmf_exttextout_opaque_background_renders_as_passive_fill() {
+    let wmf_hex = concat!(
+        "0100090000032200000000000c0000000000",
+        "050000000c026400c800",
+        "05000000010200ff0000",
+        "0c000000320a14002800020002001e005a000a001e004869",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF opaque EXTTEXTOUT vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("Hi"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    let rectangle_index = image
+        .vector_commands
+        .iter()
+        .position(|command| {
+            matches!(
+                command,
+                StaticImageVectorCommand::Rectangle {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    stroke_color: None,
+                    fill_color: Some(color),
+                } if (*left - 30.0).abs() < 0.01
+                    && (*top - 10.0).abs() < 0.01
+                    && (*right - 90.0).abs() < 0.01
+                    && (*bottom - 30.0).abs() < 0.01
+                    && color.red == 0
+                    && color.green == 255
+                    && color.blue == 0
+            )
+        })
+        .expect("opaque EXTTEXTOUT should emit passive background rectangle");
+    let text_index = image
+        .vector_commands
+        .iter()
+        .position(|command| {
+            matches!(
+                command,
+                StaticImageVectorCommand::Text {
+                    x,
+                    y,
+                    text,
+                    ..
+                } if (*x - 40.0).abs() < 0.01 && (*y - 20.0).abs() < 0.01 && text == "Hi"
+            )
+        })
+        .expect("opaque EXTTEXTOUT should emit passive text");
+    assert!(
+        rectangle_index < text_index,
+        "opaque background should paint before text"
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "opaque EXTTEXTOUT should render passive PDF rectangle path"
+    );
+    assert!(
+        decoded_pdf_text(&content).contains("Hi"),
+        "opaque EXTTEXTOUT should render passive PDF text"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0a32",
+        b"0102",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "opaque EXTTEXTOUT leaked forbidden PDF content: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

@@ -14353,6 +14353,14 @@ struct ParsedWmfVector {
     commands: Vec<StaticImageVectorCommand>,
 }
 
+#[derive(Debug)]
+struct ParsedWmfExtTextOut {
+    x: f32,
+    y: f32,
+    text: String,
+    opaque_bounds: Option<(f32, f32, f32, f32)>,
+}
+
 #[derive(Debug, Copy, Clone)]
 struct WmfHeaderInfo {
     header_start: usize,
@@ -14376,6 +14384,7 @@ struct WmfDrawingState {
     stroke_color: Option<Color>,
     fill_color: Option<Color>,
     text_color: Option<Color>,
+    background_color: Option<Color>,
     font_height: Option<i32>,
     font_charset: Option<i32>,
 }
@@ -14386,6 +14395,11 @@ impl Default for WmfDrawingState {
             stroke_color: Some(Color::default()),
             fill_color: None,
             text_color: Some(Color::default()),
+            background_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255,
+            }),
             font_height: None,
             font_charset: None,
         }
@@ -14786,6 +14800,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     state.text_color = Some(color);
                 }
             }
+            0x0201 => {
+                if let Some(color) = color_from_colorref(data, 0) {
+                    state.background_color = Some(color);
+                }
+            }
             0x0214 => {
                 current_point = parse_wmf_yx_point(
                     data,
@@ -14953,7 +14972,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some((x, y, text)) = parse_wmf_exttextout(
+                if let Some(ext_text) = parse_wmf_exttextout(
                     data,
                     window_origin_x,
                     window_origin_y,
@@ -14961,11 +14980,33 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_height,
                     state.font_charset,
                 ) {
+                    let extra_command_count = usize::from(
+                        ext_text
+                            .opaque_bounds
+                            .is_some_and(|bounds| bounds_is_visible(bounds)),
+                    );
+                    if commands.len().saturating_add(extra_command_count + 1)
+                        > MAX_PASSIVE_WMF_COMMANDS
+                    {
+                        return None;
+                    }
+                    if let Some((left, top, right, bottom)) = ext_text.opaque_bounds
+                        && bounds_is_visible((left, top, right, bottom))
+                    {
+                        commands.push(StaticImageVectorCommand::Rectangle {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color: None,
+                            fill_color: state.background_color,
+                        });
+                    }
                     commands.push(StaticImageVectorCommand::Text {
-                        x,
-                        y,
+                        x: ext_text.x,
+                        y: ext_text.y,
                         height: normalized_wmf_text_height(state.font_height, window_height),
-                        text,
+                        text: ext_text.text,
                         color: state.text_color,
                     });
                 }
@@ -15292,7 +15333,7 @@ fn parse_wmf_exttextout(
     window_width: i32,
     window_height: i32,
     font_charset: Option<i32>,
-) -> Option<(f32, f32, String)> {
+) -> Option<ParsedWmfExtTextOut> {
     if data.len() < 8 {
         return None;
     }
@@ -15306,6 +15347,18 @@ fn parse_wmf_exttextout(
     if flags & WMF_ETO_GLYPH_INDEX != 0 {
         return None;
     }
+    let opaque_bounds = if flags & WMF_ETO_OPAQUE != 0 {
+        Some(parse_wmf_bounds_at(
+            data,
+            8,
+            window_origin_x,
+            window_origin_y,
+            window_width,
+            window_height,
+        )?)
+    } else {
+        None
+    };
     let text_start = if flags & (WMF_ETO_OPAQUE | WMF_ETO_CLIPPED) != 0 {
         16usize
     } else {
@@ -15324,7 +15377,12 @@ fn parse_wmf_exttextout(
         window_width,
         window_height,
     );
-    Some((x, y, text))
+    Some(ParsedWmfExtTextOut {
+        x,
+        y,
+        text,
+        opaque_bounds,
+    })
 }
 
 fn sanitize_wmf_text_bytes(bytes: &[u8], font_charset: Option<i32>) -> Option<String> {
