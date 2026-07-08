@@ -23675,6 +23675,82 @@ fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_
 }
 
 #[test]
+fn duplicate_object_alternate_after_shape_result_is_ignored_without_generic_ole_warning() {
+    let input = br#"{\rtf1 Before\par{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}}{\shptxt Box text\par}{\object\objdata 4142432f4a6176615363726970742f456d62656464656446696c65}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("Box text"));
+    assert!(text.contains("After"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("ignoring duplicate embedded object alternate")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("active content removed: OLE object")
+    }));
+    for forbidden in ["object", "objdata", "414243", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "duplicate shape object alternate leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("Box text"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"object".as_slice(),
+        b"objdata",
+        b"414243",
+        b"JavaScript",
+        b"EmbeddedFile",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "duplicate object alternate leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+    assert!(matches!(
+        parse_rtf_bytes_with_options(&input, &reject_options),
+        Err(ParseError::ActiveContentRejected { feature, .. }) if feature == "OLE object"
+    ));
+}
+
+#[test]
 fn ignored_destinations_consume_bounded_skip_budget() {
     let options = RtfParseOptions {
         limits: RtfLimits {

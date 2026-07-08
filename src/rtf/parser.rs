@@ -2612,14 +2612,11 @@ impl Parser {
             }
             "object" if destination_allows_visible_content(&self.state) => {
                 let owner_destination = self.state.destination;
-                self.handle_active_content("OLE object", offset)?;
                 if self.state.inside_shape && self.state.shape_visual_result_rendered {
+                    self.handle_duplicate_shape_object_alternate(offset)?;
                     self.state.destination = Destination::Ignored;
-                    self.diagnostics.push(Diagnostic::warning(
-                        "ignoring duplicate embedded object alternate after passive shape result",
-                        Some(offset),
-                    ));
                 } else {
+                    self.handle_active_content("OLE object", offset)?;
                     self.state.inside_object = true;
                     self.state.object_owner_destination = owner_destination;
                     self.state.object_result_seen = false;
@@ -9955,6 +9952,20 @@ impl Parser {
                 offset,
             });
         }
+        Ok(())
+    }
+
+    fn handle_duplicate_shape_object_alternate(&mut self, offset: usize) -> Result<(), ParseError> {
+        if self.options.active_content_policy == ActiveContentPolicy::Reject {
+            return Err(ParseError::ActiveContentRejected {
+                feature: "OLE object".to_string(),
+                offset,
+            });
+        }
+        self.diagnostics.push(Diagnostic::warning(
+            "ignoring duplicate embedded object alternate after passive shape result",
+            Some(offset),
+        ));
         Ok(())
     }
 
