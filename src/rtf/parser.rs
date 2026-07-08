@@ -261,6 +261,7 @@ enum ShapePropertyCapture {
 enum CodePage {
     Windows1250,
     Windows1252,
+    Windows1253,
     MacRoman,
     Ibm437,
     Ibm850,
@@ -272,6 +273,7 @@ impl CodePage {
         match code_page {
             1250 => Some(Self::Windows1250),
             1252 => Some(Self::Windows1252),
+            1253 => Some(Self::Windows1253),
             437 => Some(Self::Ibm437),
             850 => Some(Self::Ibm850),
             10000 => Some(Self::MacRoman),
@@ -282,6 +284,7 @@ impl CodePage {
     fn from_font_charset(charset: i32) -> Option<Self> {
         match charset {
             0 => Some(Self::Windows1252),
+            161 => Some(Self::Windows1253),
             238 => Some(Self::Windows1250),
             77 => Some(Self::MacRoman),
             255 => Some(Self::Ibm437),
@@ -13330,6 +13333,7 @@ fn decode_hex_byte(byte: u8, code_page: CodePage) -> char {
     match code_page {
         CodePage::Windows1250 => decode_high_byte(byte, &WINDOWS_1250_HIGH),
         CodePage::Windows1252 => decode_windows_1252(byte),
+        CodePage::Windows1253 => decode_high_byte(byte, &WINDOWS_1253_HIGH),
         CodePage::MacRoman => decode_high_byte(byte, &MAC_ROMAN_HIGH),
         CodePage::Ibm437 => decode_high_byte(byte, &CP437_HIGH),
         CodePage::Ibm850 => decode_high_byte(byte, &CP850_HIGH),
@@ -13708,6 +13712,25 @@ const WINDOWS_1250_HIGH: [char; 128] = [
     '\u{010d}', '\u{00e9}', '\u{0119}', '\u{00eb}', '\u{011b}', '\u{00ed}', '\u{00ee}', '\u{010f}',
     '\u{0111}', '\u{0144}', '\u{0148}', '\u{00f3}', '\u{00f4}', '\u{0151}', '\u{00f6}', '\u{00f7}',
     '\u{0159}', '\u{016f}', '\u{00fa}', '\u{0171}', '\u{00fc}', '\u{00fd}', '\u{0163}', '\u{02d9}',
+];
+
+const WINDOWS_1253_HIGH: [char; 128] = [
+    '\u{20ac}', '\u{fffd}', '\u{201a}', '\u{0192}', '\u{201e}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{fffd}', '\u{2030}', '\u{fffd}', '\u{2039}', '\u{fffd}', '\u{fffd}', '\u{fffd}', '\u{fffd}',
+    '\u{fffd}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}', '\u{2014}',
+    '\u{fffd}', '\u{2122}', '\u{fffd}', '\u{203a}', '\u{fffd}', '\u{fffd}', '\u{fffd}', '\u{fffd}',
+    '\u{00a0}', '\u{0385}', '\u{0386}', '\u{00a3}', '\u{00a4}', '\u{00a5}', '\u{00a6}', '\u{00a7}',
+    '\u{00a8}', '\u{00a9}', '\u{fffd}', '\u{00ab}', '\u{00ac}', '\u{00ad}', '\u{00ae}', '\u{2015}',
+    '\u{00b0}', '\u{00b1}', '\u{00b2}', '\u{00b3}', '\u{0384}', '\u{00b5}', '\u{00b6}', '\u{00b7}',
+    '\u{0388}', '\u{0389}', '\u{038a}', '\u{00bb}', '\u{038c}', '\u{00bd}', '\u{038e}', '\u{038f}',
+    '\u{0390}', '\u{0391}', '\u{0392}', '\u{0393}', '\u{0394}', '\u{0395}', '\u{0396}', '\u{0397}',
+    '\u{0398}', '\u{0399}', '\u{039a}', '\u{039b}', '\u{039c}', '\u{039d}', '\u{039e}', '\u{039f}',
+    '\u{03a0}', '\u{03a1}', '\u{fffd}', '\u{03a3}', '\u{03a4}', '\u{03a5}', '\u{03a6}', '\u{03a7}',
+    '\u{03a8}', '\u{03a9}', '\u{03aa}', '\u{03ab}', '\u{03ac}', '\u{03ad}', '\u{03ae}', '\u{03af}',
+    '\u{03b0}', '\u{03b1}', '\u{03b2}', '\u{03b3}', '\u{03b4}', '\u{03b5}', '\u{03b6}', '\u{03b7}',
+    '\u{03b8}', '\u{03b9}', '\u{03ba}', '\u{03bb}', '\u{03bc}', '\u{03bd}', '\u{03be}', '\u{03bf}',
+    '\u{03c0}', '\u{03c1}', '\u{03c2}', '\u{03c3}', '\u{03c4}', '\u{03c5}', '\u{03c6}', '\u{03c7}',
+    '\u{03c8}', '\u{03c9}', '\u{03ca}', '\u{03cb}', '\u{03cc}', '\u{03cd}', '\u{03ce}', '\u{fffd}',
 ];
 
 const MAC_ROMAN_HIGH: [char; 128] = [
@@ -15225,6 +15248,34 @@ mod tests {
         assert_eq!(
             text,
             "Central \u{0160}\u{0161} \u{015a}\u{015b} \u{017d}\u{017e}"
+        );
+    }
+
+    #[test]
+    fn greek_font_charset_guides_hex_escape_decoding() {
+        let output = parse_rtf(
+            r"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0 Times New Roman;}{\f40\fcharset161 Times New Roman Greek;}}\f40 Greek \'c1\'e1 \'d0\'f0 \'d9\'f9\par}",
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(
+            text,
+            "Greek \u{0391}\u{03b1} \u{03a0}\u{03c0} \u{03a9}\u{03c9}"
+        );
+        assert!(!text.contains("fcharset"));
+        assert!(!text.contains("Times New Roman Greek"));
+    }
+
+    #[test]
+    fn decodes_hex_escapes_with_windows_1253_semantics() {
+        let output =
+            parse_rtf(r"{\rtf1\ansi\ansicpg1253 Greek \'c1\'e1 \'d3\'f3 \'da\'fa\par}").unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(
+            text,
+            "Greek \u{0391}\u{03b1} \u{03a3}\u{03c3} \u{03aa}\u{03ca}"
         );
     }
 

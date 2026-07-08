@@ -21343,6 +21343,89 @@ fn central_european_font_charset_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn greek_font_charset_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "ansicpg1252{",
+        "\\",
+        "fonttbl{",
+        "\\",
+        "f0 Times New Roman;}{",
+        "\\",
+        "f40",
+        "\\",
+        "fcharset161 Times New Roman Greek;}}",
+        "\\",
+        "f40 Greek ",
+        "\\",
+        "'c1",
+        "\\",
+        "'e1 ",
+        "\\",
+        "'d0",
+        "\\",
+        "'f0 ",
+        "\\",
+        "'d9",
+        "\\",
+        "'f9",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Greek \u{0391}\u{03b1} \u{03a0}\u{03c0} \u{03a9}\u{03c9}"));
+    for forbidden in ["fcharset", "Times New Roman Greek"] {
+        assert!(
+            !text.contains(forbidden),
+            "Greek font metadata leaked into text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+
+    assert!(
+        symbol_bytes
+            .windows(b"AaPpWw".len())
+            .any(|window| window == b"AaPpWw"),
+        "Greek text should render through passive Symbol bytes, got {symbol_bytes:?}"
+    );
+    for forbidden in [
+        b"fcharset".as_slice(),
+        b"Times New Roman Greek",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "{} leaked into PDF",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn ansi_font_charset_hex_escapes_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
