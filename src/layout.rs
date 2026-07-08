@@ -18,6 +18,8 @@ const MAX_SYNTHETIC_DROP_CAP_FONT_SIZE_HALF_POINTS: i32 = 400;
 const AUTO_PARAGRAPH_SPACING_TWIPS: i32 = 240;
 const MAX_LAYOUT_COLUMNS: usize = 16;
 const PASSIVE_NARROW_FONT_SCALE_PERCENT: i32 = 82;
+const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
+const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -1183,9 +1185,20 @@ fn note_display_paragraph(
     let mut paragraph = footnote.clone();
     if let Some(first_run) = paragraph.runs.first_mut() {
         let label = format_note_number(number_start, sequence, number_format);
-        first_run.text = format!("{label}. {}", first_run.text);
+        let mut label_style = first_run.style.clone();
+        label_style.baseline_shift_half_points = PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS;
+        label_style.font_size_scale_percent = PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT;
+        label_style.font_size_half_points = label_style.font_size_half_points.min(20).max(2);
+        first_run.text = format!(". {}", first_run.text);
         first_run.style.font_size_half_points =
             first_run.style.font_size_half_points.min(20).max(2);
+        paragraph.runs.insert(
+            0,
+            Run {
+                text: label,
+                style: label_style,
+            },
+        );
     }
     paragraph.style.space_before_twips = paragraph.style.space_before_twips.min(60);
     paragraph.style.space_after_twips = paragraph.style.space_after_twips.min(60);
@@ -9393,6 +9406,13 @@ mod tests {
 
         assert!(text.contains("Body"));
         assert!(text.contains("1. * Footnote text"));
+        let label = text_fragment_for(page, "1");
+        let note_text = first_text_fragment_except(page, &["Body", "1"]);
+        assert_eq!(
+            label.style.font_size_scale_percent,
+            PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT
+        );
+        assert!(label.baseline_y > note_text.baseline_y);
         assert!(page.items.iter().any(|item| matches!(
             item,
             LayoutItem::Line { x1, x2, width, .. }
@@ -9484,6 +9504,13 @@ mod tests {
 
         assert!(text.contains("Body"));
         assert!(text.contains("1. * Endnote text"));
+        let label = text_fragment_for(page, "1");
+        let note_text = first_text_fragment_except(page, &["Body", "1"]);
+        assert_eq!(
+            label.style.font_size_scale_percent,
+            PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT
+        );
+        assert!(label.baseline_y > note_text.baseline_y);
         assert!(page.items.iter().any(|item| matches!(
             item,
             LayoutItem::Line { x1, x2, width, .. }
@@ -12291,6 +12318,35 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("missing text fragment {text}"))
+    }
+
+    fn text_fragment_for<'a>(page: &'a LayoutPage, text: &str) -> &'a TextFragment {
+        page.items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == text => Some(fragment),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing text fragment {text}"))
+    }
+
+    fn first_text_fragment_except<'a>(
+        page: &'a LayoutPage,
+        excluded_text: &[&str],
+    ) -> &'a TextFragment {
+        page.items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment)
+                    if !excluded_text
+                        .iter()
+                        .any(|excluded| fragment.text == *excluded) =>
+                {
+                    Some(fragment)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing text fragment outside {excluded_text:?}"))
     }
 
     fn line_text(line: &Line) -> String {
