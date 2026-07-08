@@ -14400,6 +14400,16 @@ struct WmfDrawingState {
     text_vertical_align: StaticImageTextVerticalAlign,
 }
 
+#[derive(Debug, Copy, Clone)]
+struct WmfSavedDrawingState {
+    state: WmfDrawingState,
+    current_point: (f32, f32),
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+}
+
 impl Default for WmfDrawingState {
     fn default() -> Self {
         Self {
@@ -14425,6 +14435,7 @@ const MAX_PASSIVE_WMF_COMMANDS: usize = 256;
 const MAX_PASSIVE_WMF_POINTS_PER_RECORD: usize = 128;
 const MAX_PASSIVE_WMF_TEXT_BYTES: usize = 512;
 const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
+const MAX_PASSIVE_WMF_SAVED_STATES: usize = 32;
 const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
 const WMF_ETO_GLYPH_INDEX: u16 = 0x0010;
@@ -14749,6 +14760,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut window_height = header.window_height;
     let mut objects: Vec<Option<WmfObject>> = Vec::new();
     let mut state = WmfDrawingState::default();
+    let mut saved_states: Vec<WmfSavedDrawingState> = Vec::new();
     let mut commands = Vec::new();
     let mut current_point = (0.0f32, 0.0f32);
 
@@ -14771,6 +14783,30 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
 
         match function {
             0x0000 => break,
+            0x001e => {
+                if saved_states.len() >= MAX_PASSIVE_WMF_SAVED_STATES {
+                    return None;
+                }
+                saved_states.push(WmfSavedDrawingState {
+                    state,
+                    current_point,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                });
+            }
+            0x0127 => {
+                let restore_index = read_le_i16(data, 0)?;
+                if let Some(saved) = restore_wmf_saved_state(&mut saved_states, restore_index) {
+                    state = saved.state;
+                    current_point = saved.current_point;
+                    window_origin_x = saved.window_origin_x;
+                    window_origin_y = saved.window_origin_y;
+                    window_width = saved.window_width;
+                    window_height = saved.window_height;
+                }
+            }
             0x020b => {
                 let y = read_le_i16(data, 0)?;
                 let x = read_le_i16(data, 2)?;
@@ -15134,6 +15170,28 @@ fn store_wmf_object(objects: &mut Vec<Option<WmfObject>>, object: WmfObject) -> 
     }
     objects.push(Some(object));
     Some(())
+}
+
+fn restore_wmf_saved_state(
+    saved_states: &mut Vec<WmfSavedDrawingState>,
+    restore_index: i16,
+) -> Option<WmfSavedDrawingState> {
+    if saved_states.is_empty() {
+        return None;
+    }
+    let restore_count = if restore_index < 0 {
+        usize::from(restore_index.unsigned_abs())
+    } else {
+        1
+    };
+    if restore_count == 0 || restore_count > saved_states.len() {
+        return None;
+    }
+    let mut restored = None;
+    for _ in 0..restore_count {
+        restored = saved_states.pop();
+    }
+    restored
 }
 
 fn parse_wmf_header_info(bytes: &[u8]) -> Option<WmfHeaderInfo> {

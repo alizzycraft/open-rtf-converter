@@ -18649,6 +18649,107 @@ fn wmf_textout_renders_passive_text_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_saved_dc_restores_passive_text_state_without_record_leakage() {
+    let wmf_hex = concat!(
+        "0100090000034000000001000c0000000000",
+        "050000000c026400c800",
+        "050000000902ff000000",
+        "030000001e00",
+        "0500000009020000ff00",
+        "0c000000fb02f4ff00000000000000000000000000000000",
+        "040000002d010000",
+        "0700000021050200496e14002800",
+        "040000002701ffff",
+        "0700000021050200486928002800",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF SaveDC/RestoreDC vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("In"));
+    assert!(!text.contains("Hi"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                text,
+                color: Some(color),
+                ..
+            } if text == "In" && color.red == 0 && color.green == 0 && color.blue == 255
+        )
+    }));
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                text,
+                color: Some(color),
+                ..
+            } if text == "Hi" && color.red == 255 && color.green == 0 && color.blue == 0
+        )
+    }));
+    for forbidden in ["wmetafile", "001e", "0127", "0209", "fb02", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SaveDC/RestoreDC internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("In"));
+    assert!(rendered_text.contains("Hi"));
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"001e",
+        b"0127",
+        b"0209",
+        b"fb02",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SaveDC/RestoreDC leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_textout_opaque_background_mode_renders_passive_fill_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000033100000001000c0000000000",
