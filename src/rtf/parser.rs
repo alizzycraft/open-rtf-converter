@@ -14367,7 +14367,7 @@ struct WmfHeaderInfo {
 enum WmfObject {
     Pen(Option<Color>),
     Brush(Option<Color>),
-    Font { height: i32 },
+    Font { height: i32, charset: Option<i32> },
     Other,
 }
 
@@ -14377,6 +14377,7 @@ struct WmfDrawingState {
     fill_color: Option<Color>,
     text_color: Option<Color>,
     font_height: Option<i32>,
+    font_charset: Option<i32>,
 }
 
 impl Default for WmfDrawingState {
@@ -14386,6 +14387,7 @@ impl Default for WmfDrawingState {
             fill_color: None,
             text_color: Some(Color::default()),
             font_height: None,
+            font_charset: None,
         }
     }
 }
@@ -14395,6 +14397,9 @@ const MAX_PASSIVE_WMF_COMMANDS: usize = 256;
 const MAX_PASSIVE_WMF_POINTS_PER_RECORD: usize = 128;
 const MAX_PASSIVE_WMF_TEXT_BYTES: usize = 512;
 const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
+const WMF_ETO_OPAQUE: u16 = 0x0002;
+const WMF_ETO_CLIPPED: u16 = 0x0004;
+const WMF_ETO_GLYPH_INDEX: u16 = 0x0010;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
 const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
@@ -14768,7 +14773,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     match object {
                         WmfObject::Pen(color) => state.stroke_color = color,
                         WmfObject::Brush(color) => state.fill_color = color,
-                        WmfObject::Font { height } => state.font_height = Some(height),
+                        WmfObject::Font { height, charset } => {
+                            state.font_height = Some(height);
+                            state.font_charset = charset;
+                        }
                         WmfObject::Other => {}
                     }
                 }
@@ -14930,6 +14938,28 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_origin_y,
                     window_width,
                     window_height,
+                    state.font_charset,
+                ) {
+                    commands.push(StaticImageVectorCommand::Text {
+                        x,
+                        y,
+                        height: normalized_wmf_text_height(state.font_height, window_height),
+                        text,
+                        color: state.text_color,
+                    });
+                }
+            }
+            0x0a32 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some((x, y, text)) = parse_wmf_exttextout(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                    state.font_charset,
                 ) {
                     commands.push(StaticImageVectorCommand::Text {
                         x,
@@ -15098,7 +15128,8 @@ fn parse_wmf_brush_object(data: &[u8]) -> Option<WmfObject> {
 
 fn parse_wmf_font_object(data: &[u8]) -> Option<WmfObject> {
     let height = i32::from(read_le_i16(data, 0)?);
-    Some(WmfObject::Font { height })
+    let charset = data.get(13).copied().map(i32::from);
+    Some(WmfObject::Font { height, charset })
 }
 
 fn parse_wmf_bounds(
@@ -15228,6 +15259,7 @@ fn parse_wmf_textout(
     window_origin_y: i32,
     window_width: i32,
     window_height: i32,
+    font_charset: Option<i32>,
 ) -> Option<(f32, f32, String)> {
     let byte_count = usize::from(read_le_u16(data, 0)?);
     if byte_count == 0 || byte_count > MAX_PASSIVE_WMF_TEXT_BYTES {
@@ -15239,7 +15271,7 @@ fn parse_wmf_textout(
     if data.len() < coordinate_offset.checked_add(4)? {
         return None;
     }
-    let text = sanitize_wmf_text_bytes(data.get(text_start..text_end)?)?;
+    let text = sanitize_wmf_text_bytes(data.get(text_start..text_end)?, font_charset)?;
     let y = i32::from(read_le_i16(data, coordinate_offset)?);
     let x = i32::from(read_le_i16(data, coordinate_offset + 2)?);
     let (x, y) = normalize_wmf_point(
@@ -15253,9 +15285,54 @@ fn parse_wmf_textout(
     Some((x, y, text))
 }
 
-fn sanitize_wmf_text_bytes(bytes: &[u8]) -> Option<String> {
+fn parse_wmf_exttextout(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+    font_charset: Option<i32>,
+) -> Option<(f32, f32, String)> {
+    if data.len() < 8 {
+        return None;
+    }
+    let y = i32::from(read_le_i16(data, 0)?);
+    let x = i32::from(read_le_i16(data, 2)?);
+    let byte_count = usize::try_from(read_le_i16(data, 4)?).ok()?;
+    if byte_count == 0 || byte_count > MAX_PASSIVE_WMF_TEXT_BYTES {
+        return None;
+    }
+    let flags = read_le_u16(data, 6)?;
+    if flags & WMF_ETO_GLYPH_INDEX != 0 {
+        return None;
+    }
+    let text_start = if flags & (WMF_ETO_OPAQUE | WMF_ETO_CLIPPED) != 0 {
+        16usize
+    } else {
+        8usize
+    };
+    let text_end = text_start.checked_add(byte_count)?;
+    if data.len() < text_end {
+        return None;
+    }
+    let text = sanitize_wmf_text_bytes(data.get(text_start..text_end)?, font_charset)?;
+    let (x, y) = normalize_wmf_point(
+        x,
+        y,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    Some((x, y, text))
+}
+
+fn sanitize_wmf_text_bytes(bytes: &[u8], font_charset: Option<i32>) -> Option<String> {
+    let code_page = font_charset
+        .and_then(CodePage::from_font_charset)
+        .unwrap_or(CodePage::Windows1252);
     let mut text = String::new();
-    for ch in decode_raw_bytes(bytes, CodePage::Windows1252).chars() {
+    for ch in decode_raw_bytes(bytes, code_page).chars() {
         match ch {
             '\0' => {}
             '\t' | '\n' | '\r' => text.push(' '),

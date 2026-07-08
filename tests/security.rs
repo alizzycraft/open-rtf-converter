@@ -18647,6 +18647,105 @@ fn wmf_textout_renders_passive_text_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_exttextout_uses_selected_font_charset_and_stays_passive() {
+    let wmf_hex = concat!(
+        "0100090000033200000001000c0000000000",
+        "050000000c026400c800",
+        "0500000009020000ff00",
+        "0c000000fb02f4ff0000000000000000000000ee00000000",
+        "040000002d010000",
+        "0c000000320a140028000100040030006000100020008c00",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF EXTTEXTOUT vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("Ś"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                x,
+                y,
+                height,
+                text,
+                color: Some(color),
+            } if (*x - 40.0).abs() < 0.01
+                && (*y - 20.0).abs() < 0.01
+                && (*height - 12.0).abs() < 0.01
+                && text == "Ś"
+                && color.red == 0
+                && color.green == 0
+                && color.blue == 255
+        )
+    }));
+    for forbidden in ["wmetafile", "0a32", "fb02", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF EXTTEXTOUT internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|font| font.as_slice() == b"F1"),
+        "WMF EXTTEXTOUT should use a passive built-in font resource"
+    );
+    assert!(
+        pdf_text_bytes_for_font(&content, b"F1").contains(&0xda),
+        "WMF EXTTEXTOUT should encode Central European text as passive WinAnsi bytes"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0a32",
+        b"fb02",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF EXTTEXTOUT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003250000000100070000000000",
