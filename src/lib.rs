@@ -17,5 +17,6 @@ pub use convert::{
 };
 pub use diagnostics::{Diagnostic, Severity};
 pub use fonts::{
-    FontAsset, FontAssetStyle, FontCoverage, FontProvider, FontProviderError, FontProviderLimits,
+    FontAsset, FontAssetStyle, FontCoverage, FontGlyphMetrics, FontProvider, FontProviderError,
+    FontProviderLimits,
 };

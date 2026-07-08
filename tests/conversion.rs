@@ -117,6 +117,48 @@ fn conversion_rejects_font_assets_over_configured_limits() {
 }
 
 #[test]
+fn valid_memory_font_assets_report_coverage_and_metrics_without_system_fonts() {
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+
+    provider.validate().unwrap();
+    assert_eq!(
+        provider.coverage_for_char("tuffy", 'A'),
+        open_rtf_converter::FontCoverage::Covered
+    );
+    assert_eq!(
+        provider.coverage_for_char("Tuffy", '\u{10ffff}'),
+        open_rtf_converter::FontCoverage::MissingGlyph
+    );
+    assert_eq!(
+        provider.coverage_for_char("Missing", 'A'),
+        open_rtf_converter::FontCoverage::NoAsset
+    );
+
+    let metrics = provider.glyph_metrics_for_char("Tuffy", 'A').unwrap();
+    assert!(metrics.units_per_em > 0);
+    assert!(metrics.advance_units > 0);
+    assert!(metrics.ascender_units > 0);
+    assert!(metrics.descender_units < 0);
+    assert!(metrics.advance_points(12.0) > 0.0);
+    assert!(
+        provider
+            .glyph_metrics_for_char("Tuffy", '\u{10ffff}')
+            .is_none()
+    );
+}
+
+#[test]
 fn conversion_audits_pdf_syntax_without_rejecting_visible_active_words() {
     let input = br"{\rtf1\ansi Visible /JavaScript /Launch /URI /Annots /Widget text\par}";
     let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults()).unwrap();

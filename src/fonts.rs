@@ -123,6 +123,38 @@ impl FontProvider {
             FontCoverage::NoAsset
         }
     }
+
+    pub fn glyph_metrics_for_char(&self, family_name: &str, ch: char) -> Option<FontGlyphMetrics> {
+        let family_name = normalized_family_name(family_name);
+        if family_name.is_empty() {
+            return None;
+        }
+        for asset in &self.assets {
+            if !asset
+                .family_names
+                .iter()
+                .any(|candidate| normalized_family_name(candidate) == family_name)
+            {
+                continue;
+            }
+            let Ok(face) = Face::parse(&asset.bytes, 0) else {
+                continue;
+            };
+            let Some(glyph_id) = face.glyph_index(ch) else {
+                continue;
+            };
+            let Some(advance_units) = face.glyph_hor_advance(glyph_id) else {
+                continue;
+            };
+            return Some(FontGlyphMetrics {
+                units_per_em: face.units_per_em(),
+                advance_units,
+                ascender_units: face.ascender(),
+                descender_units: face.descender(),
+            });
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +175,23 @@ pub enum FontCoverage {
     NoAsset,
     Covered,
     MissingGlyph,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct FontGlyphMetrics {
+    pub units_per_em: u16,
+    pub advance_units: u16,
+    pub ascender_units: i16,
+    pub descender_units: i16,
+}
+
+impl FontGlyphMetrics {
+    pub fn advance_points(self, font_size_points: f32) -> f32 {
+        if self.units_per_em == 0 {
+            return 0.0;
+        }
+        font_size_points * f32::from(self.advance_units) / f32::from(self.units_per_em)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
