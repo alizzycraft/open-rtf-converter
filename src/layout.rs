@@ -3,7 +3,7 @@ use unicode_linebreak::{BreakOpportunity, linebreaks};
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
-    DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontFamilyHint, FontPitch,
+    DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontDef, FontFamilyHint, FontPitch,
     FootnotePlacement, LineNumberRestart, PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings,
     PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticShape, StaticShapeKind,
@@ -5091,6 +5091,10 @@ fn font_family_for_style(document: &Document, style: &CharacterStyle) -> PdfFont
     else {
         return PdfFontFamily::Helvetica;
     };
+    passive_pdf_font_family_for_font(font)
+}
+
+pub(crate) fn passive_pdf_font_family_for_font(font: &FontDef) -> PdfFontFamily {
     if let Some(family) = font_family_from_name(&font.name) {
         family
     } else if let Some(family) = font
@@ -5414,6 +5418,8 @@ fn font_family_from_name(name: &str) -> Option<PdfFontFamily> {
         Some(PdfFontFamily::ZapfDingbats)
     } else if is_pdf_symbol_font_name(&name) {
         Some(PdfFontFamily::Symbol)
+    } else if is_sans_serif_font_name(&name) {
+        Some(PdfFontFamily::Helvetica)
     } else if font_name_contains_any(
         &name,
         &[
@@ -5451,6 +5457,10 @@ fn font_family_from_name(name: &str) -> Option<PdfFontFamily> {
 
 fn font_name_contains_any(name: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| name.contains(needle))
+}
+
+fn is_sans_serif_font_name(name: &str) -> bool {
+    font_name_contains_any(name, &["sans serif", "sans-serif", "microsoft sans serif"])
 }
 
 fn is_pdf_symbol_font_name(name: &str) -> bool {
@@ -10923,6 +10933,24 @@ mod tests {
                 family: FontFamilyHint::Nil,
                 pitch: FontPitch::Default,
             },
+            FontDef {
+                index: 3,
+                name: "MS Sans Serif".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Nil,
+                pitch: FontPitch::Default,
+            },
+            FontDef {
+                index: 4,
+                name: "MS Serif".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Nil,
+                pitch: FontPitch::Default,
+            },
         ];
         let mut sans_style = CharacterStyle {
             font_index: 0,
@@ -10935,6 +10963,14 @@ mod tests {
         };
         let mono_style = CharacterStyle {
             font_index: 2,
+            ..Default::default()
+        };
+        let legacy_sans_style = CharacterStyle {
+            font_index: 3,
+            ..Default::default()
+        };
+        let legacy_serif_style = CharacterStyle {
+            font_index: 4,
             ..Default::default()
         };
         document.blocks = vec![Block::Paragraph(Paragraph {
@@ -10952,6 +10988,14 @@ mod tests {
                     text: "Mono".to_string(),
                     style: mono_style,
                 },
+                Run {
+                    text: "LegacySans".to_string(),
+                    style: legacy_sans_style,
+                },
+                Run {
+                    text: "LegacySerif".to_string(),
+                    style: legacy_serif_style,
+                },
             ],
         })];
 
@@ -10965,6 +11009,12 @@ mod tests {
         ));
         assert!(layout.pages[0].items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "Mono" && fragment.font_family == PdfFontFamily::Courier)
+        ));
+        assert!(layout.pages[0].items.iter().any(
+            |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "LegacySans" && fragment.font_family == PdfFontFamily::Helvetica)
+        ));
+        assert!(layout.pages[0].items.iter().any(
+            |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "LegacySerif" && fragment.font_family == PdfFontFamily::Times)
         ));
     }
 

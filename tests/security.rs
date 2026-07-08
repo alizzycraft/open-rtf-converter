@@ -11919,7 +11919,7 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
     let input_path = dir.path().join("office-font-substitution.rtf");
     let output_path = dir.path().join("office-font-substitution.pdf");
     fs::write(&input_path, input).unwrap();
-    convert_rtf_file_to_pdf(
+    let report = convert_rtf_file_to_pdf(
         &input_path,
         &output_path,
         &ConvertOptions {
@@ -11928,6 +11928,20 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         },
     )
     .unwrap();
+    for expected in [
+        "font 'Calibri' substituted with passive PDF base font Helvetica",
+        "font 'Cambria' substituted with passive PDF base font Times-Roman",
+        "font 'Aptos Mono' substituted with passive PDF base font Courier",
+    ] {
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing font substitution diagnostic {expected:?}; diagnostics were {:?}",
+            report.diagnostics
+        );
+    }
     let pdf = fs::read(&output_path).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
