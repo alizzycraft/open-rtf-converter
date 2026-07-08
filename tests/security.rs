@@ -6,8 +6,9 @@ use open_rtf_converter::model::{
     Block, BorderStyle, CharacterEmphasisMark, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint,
     FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImageVectorCommand, TOTAL_PAGES_MARKER,
-    TabAlignment, TextRelief, UnderlineStyle,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
+    StaticImageTextVerticalAlign, StaticImageVectorCommand, TOTAL_PAGES_MARKER, TabAlignment,
+    TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
@@ -18583,6 +18584,7 @@ fn wmf_textout_renders_passive_text_without_payload_leakage() {
                 height,
                 text,
                 color: Some(color),
+                ..
             } if (*x - 40.0).abs() < 0.01
                 && (*y - 20.0).abs() < 0.01
                 && (*height - 12.0).abs() < 0.01
@@ -18688,6 +18690,7 @@ fn wmf_exttextout_uses_selected_font_charset_and_stays_passive() {
                 height,
                 text,
                 color: Some(color),
+                ..
             } if (*x - 40.0).abs() < 0.01
                 && (*y - 20.0).abs() < 0.01
                 && (*height - 12.0).abs() < 0.01
@@ -18855,6 +18858,109 @@ fn wmf_exttextout_opaque_background_renders_as_passive_fill() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "opaque EXTTEXTOUT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn wmf_settextalign_positions_passive_text_without_flag_leakage() {
+    let wmf_hex = concat!(
+        "0100090000032c00000001000c0000000000",
+        "050000000c026400c800",
+        "0c000000fb02f4ff00000000000000000000000000000000",
+        "040000002d010000",
+        "040000002e011e00",
+        "0700000021050200486914006400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF SETTEXTALIGN vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("Hi"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                x,
+                y,
+                height,
+                text,
+                horizontal_align,
+                vertical_align,
+                ..
+            } if (*x - 100.0).abs() < 0.01
+                && (*y - 20.0).abs() < 0.01
+                && (*height - 12.0).abs() < 0.01
+                && text == "Hi"
+                && *horizontal_align == StaticImageTextHorizontalAlign::Center
+                && *vertical_align == StaticImageTextVerticalAlign::Baseline
+        )
+    }));
+    for forbidden in ["wmetafile", "012e", "1e00", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SETTEXTALIGN internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let (x, y) =
+        pdf_first_text_position_for_text(&content, "Hi").expect("SETTEXTALIGN text position");
+    assert!(
+        (120.0..126.0).contains(&x),
+        "center alignment should shift text left of the page-space anchor, got {x}"
+    );
+    assert!(
+        y > 300.0,
+        "baseline alignment should keep baseline near the anchor, got {y}"
+    );
+    assert!(
+        decoded_pdf_text(&content).contains("Hi"),
+        "WMF SETTEXTALIGN text should still render passively"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"012e",
+        b"1e00",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SETTEXTALIGN leaked forbidden PDF content: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -26428,6 +26534,40 @@ fn decoded_pdf_text(content: &lopdf::content::Content) -> String {
         }
     }
     text
+}
+
+fn pdf_first_text_position_for_text(
+    content: &lopdf::content::Content,
+    needle: &str,
+) -> Option<(f32, f32)> {
+    let mut position = None;
+    for operation in &content.operations {
+        if operation.operator == "Td" {
+            let x = operation.operands.first().and_then(pdf_operand_number)?;
+            let y = operation.operands.get(1).and_then(pdf_operand_number)?;
+            position = Some((x, y));
+        } else if operation.operator == "Tj" {
+            if operation.operands.iter().any(|operand| {
+                operand
+                    .as_str()
+                    .is_ok_and(|bytes| String::from_utf8_lossy(bytes).contains(needle))
+            }) {
+                return position;
+            }
+        } else if operation.operator == "TJ"
+            && operation.operands.iter().any(|operand| {
+                operand.as_array().is_ok_and(|items| {
+                    items.iter().any(|item| {
+                        item.as_str()
+                            .is_ok_and(|bytes| String::from_utf8_lossy(bytes).contains(needle))
+                    })
+                })
+            })
+        {
+            return position;
+        }
+    }
+    None
 }
 
 fn pdf_text_font_names(content: &lopdf::content::Content) -> Vec<Vec<u8>> {

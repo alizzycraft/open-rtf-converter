@@ -13,8 +13,8 @@ use crate::layout::{
     passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
-    CharacterEmphasisMark, CharacterStyle, ImageFormat, StaticImageVectorCommand, TextRelief,
-    UnderlineStyle,
+    CharacterEmphasisMark, CharacterStyle, ImageFormat, StaticImageTextHorizontalAlign,
+    StaticImageTextVerticalAlign, StaticImageVectorCommand, TextRelief, UnderlineStyle,
 };
 
 const HELVETICA_REGULAR: &[u8] = b"F1";
@@ -1363,10 +1363,20 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 height,
                 text,
                 color,
+                horizontal_align,
+                vertical_align,
             } => {
                 let point = vector_command_point(draw, source_width, source_height, *x, *y);
                 let font_size = ((*height / source_height) * draw.height).clamp(4.0, 72.0);
-                draw_passive_vector_text(content, point, font_size, text, *color);
+                draw_passive_vector_text(
+                    content,
+                    point,
+                    font_size,
+                    text,
+                    *color,
+                    *horizontal_align,
+                    *vertical_align,
+                );
             }
         }
     }
@@ -1571,6 +1581,8 @@ fn draw_passive_vector_text(
     font_size: f32,
     text: &str,
     color: Option<crate::model::Color>,
+    horizontal_align: StaticImageTextHorizontalAlign,
+    vertical_align: StaticImageTextVerticalAlign,
 ) {
     if text.is_empty() {
         return;
@@ -1586,6 +1598,17 @@ fn draw_passive_vector_text(
         }),
     );
     let encoded = encode_pdf_text_for_font(text, PdfFontFamily::Helvetica);
+    let text_width = estimated_passive_vector_text_width(text, font_size);
+    let x = match horizontal_align {
+        StaticImageTextHorizontalAlign::Left => point.x,
+        StaticImageTextHorizontalAlign::Center => point.x - (text_width / 2.0),
+        StaticImageTextHorizontalAlign::Right => point.x - text_width,
+    };
+    let baseline_y = match vertical_align {
+        StaticImageTextVerticalAlign::Top => point.y - font_size,
+        StaticImageTextVerticalAlign::Baseline => point.y,
+        StaticImageTextVerticalAlign::Bottom => point.y + (font_size * 0.2),
+    };
     write_text_fragment(
         content,
         text,
@@ -1593,11 +1616,28 @@ fn draw_passive_vector_text(
         Some(PdfFontFamily::Helvetica),
         &style,
         0.0,
-        point.x,
-        point.y - font_size,
+        x,
+        baseline_y,
         &encoded,
         TextRenderingMode::Fill,
     );
+}
+
+fn estimated_passive_vector_text_width(text: &str, font_size: f32) -> f32 {
+    text.chars()
+        .map(|ch| {
+            if ch.is_whitespace() {
+                0.28
+            } else if matches!(ch, 'i' | 'l' | 'I' | '.' | ',' | ':' | ';' | '!' | '|') {
+                0.28
+            } else if matches!(ch, 'm' | 'w' | 'M' | 'W') {
+                0.85
+            } else {
+                0.55
+            }
+        })
+        .sum::<f32>()
+        * font_size
 }
 
 fn pdf_color_from_model(color: crate::model::Color) -> PdfColor {

@@ -423,7 +423,25 @@ pub enum StaticImageVectorCommand {
         height: f32,
         text: String,
         color: Option<Color>,
+        horizontal_align: StaticImageTextHorizontalAlign,
+        vertical_align: StaticImageTextVerticalAlign,
     },
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum StaticImageTextHorizontalAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum StaticImageTextVerticalAlign {
+    #[default]
+    Top,
+    Baseline,
+    Bottom,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -9,10 +9,11 @@ use crate::model::{
     FontFamilyHint, FontPitch, FootnotePlacement, ImageCrop, ImageFormat, LineNumberRestart,
     PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
-    StaticImageVectorCommand, StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER,
-    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellBorders,
-    TableCellHorizontalMerge, TableCellPadding, TableCellVerticalAlign, TableCellVerticalMerge,
-    TableRow, TableRowAlignment, TextRelief, UnderlineStyle,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
+    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
+    TableCellPadding, TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -14387,6 +14388,8 @@ struct WmfDrawingState {
     background_color: Option<Color>,
     font_height: Option<i32>,
     font_charset: Option<i32>,
+    text_horizontal_align: StaticImageTextHorizontalAlign,
+    text_vertical_align: StaticImageTextVerticalAlign,
 }
 
 impl Default for WmfDrawingState {
@@ -14402,6 +14405,8 @@ impl Default for WmfDrawingState {
             }),
             font_height: None,
             font_charset: None,
+            text_horizontal_align: StaticImageTextHorizontalAlign::Left,
+            text_vertical_align: StaticImageTextVerticalAlign::Top,
         }
     }
 }
@@ -14414,6 +14419,12 @@ const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
 const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
 const WMF_ETO_GLYPH_INDEX: u16 = 0x0010;
+const WMF_TA_RIGHT: u16 = 0x0002;
+const WMF_TA_CENTER: u16 = 0x0006;
+const WMF_TA_BOTTOM: u16 = 0x0008;
+const WMF_TA_BASELINE: u16 = 0x0018;
+const WMF_TA_HORIZONTAL_MASK: u16 = 0x0006;
+const WMF_TA_VERTICAL_MASK: u16 = 0x0018;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
 const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
@@ -14805,6 +14816,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     state.background_color = Some(color);
                 }
             }
+            0x012e => {
+                let mode = read_le_u16(data, 0)?;
+                state.text_horizontal_align = wmf_text_horizontal_align(mode);
+                state.text_vertical_align = wmf_text_vertical_align(mode);
+            }
             0x0214 => {
                 current_point = parse_wmf_yx_point(
                     data,
@@ -14965,6 +14981,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         height: normalized_wmf_text_height(state.font_height, window_height),
                         text,
                         color: state.text_color,
+                        horizontal_align: state.text_horizontal_align,
+                        vertical_align: state.text_vertical_align,
                     });
                 }
             }
@@ -15008,6 +15026,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         height: normalized_wmf_text_height(state.font_height, window_height),
                         text: ext_text.text,
                         color: state.text_color,
+                        horizontal_align: state.text_horizontal_align,
+                        vertical_align: state.text_vertical_align,
                     });
                 }
             }
@@ -15171,6 +15191,22 @@ fn parse_wmf_font_object(data: &[u8]) -> Option<WmfObject> {
     let height = i32::from(read_le_i16(data, 0)?);
     let charset = data.get(13).copied().map(i32::from);
     Some(WmfObject::Font { height, charset })
+}
+
+fn wmf_text_horizontal_align(mode: u16) -> StaticImageTextHorizontalAlign {
+    match mode & WMF_TA_HORIZONTAL_MASK {
+        WMF_TA_RIGHT => StaticImageTextHorizontalAlign::Right,
+        WMF_TA_CENTER => StaticImageTextHorizontalAlign::Center,
+        _ => StaticImageTextHorizontalAlign::Left,
+    }
+}
+
+fn wmf_text_vertical_align(mode: u16) -> StaticImageTextVerticalAlign {
+    match mode & WMF_TA_VERTICAL_MASK {
+        WMF_TA_BOTTOM => StaticImageTextVerticalAlign::Bottom,
+        WMF_TA_BASELINE => StaticImageTextVerticalAlign::Baseline,
+        _ => StaticImageTextVerticalAlign::Top,
+    }
 }
 
 fn parse_wmf_bounds(
