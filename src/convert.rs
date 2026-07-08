@@ -89,7 +89,8 @@ pub fn convert_rtf_to_pdf(
             &options.font_provider,
         ));
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout =
+        LayoutEngine::layout_with_font_provider(&parsed.document, Some(&options.font_provider));
     let page_count = layout.pages.len();
     let pdf = render_pdf(&layout);
     let output_limit = options.parse_options.limits.max_pdf_output_bytes;

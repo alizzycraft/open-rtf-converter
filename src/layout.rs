@@ -1,5 +1,6 @@
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 
+use crate::fonts::FontProvider;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
@@ -663,6 +664,13 @@ struct ResolvedCellPadding {
 
 impl LayoutEngine {
     pub fn layout(document: &Document) -> LayoutDocument {
+        Self::layout_with_font_provider(document, None)
+    }
+
+    pub fn layout_with_font_provider(
+        document: &Document,
+        font_provider: Option<&FontProvider>,
+    ) -> LayoutDocument {
         let document_stats = document_stats(document);
         let mut header_footer_sets = vec![HeaderFooterSet::from_document(document)];
         let mut geometry = PageGeometry::from_settings(
@@ -699,6 +707,7 @@ impl LayoutEngine {
                         geometry.margin_bottom,
                         &mut geometry,
                         document_stats,
+                        font_provider,
                     );
                     section_number = section_number.saturating_add(1);
                     geometry.section_number = section_number;
@@ -720,6 +729,7 @@ impl LayoutEngine {
                         geometry.margin_bottom,
                         &mut geometry,
                         document_stats,
+                        font_provider,
                     );
                     section_number = section_number.saturating_add(1);
                     geometry.section_number = section_number;
@@ -743,6 +753,7 @@ impl LayoutEngine {
                         geometry.margin_bottom,
                         &mut geometry,
                         document_stats,
+                        font_provider,
                     );
                     section_number = section_number.saturating_add(1);
                     geometry.section_number = section_number;
@@ -767,6 +778,7 @@ impl LayoutEngine {
                         geometry.margin_bottom,
                         &mut geometry,
                         document_stats,
+                        font_provider,
                     );
                     section_number = section_number.saturating_add(1);
                     geometry.section_number = section_number;
@@ -839,6 +851,7 @@ impl LayoutEngine {
                         document_stats,
                         Some(&mut line_number_state),
                         &markers,
+                        font_provider,
                     );
                 }
                 Block::Table(table) => {
@@ -853,6 +866,7 @@ impl LayoutEngine {
                         &mut current_column,
                         document,
                         document_stats,
+                        font_provider,
                     );
                 }
                 Block::Image(image) => {
@@ -879,6 +893,7 @@ impl LayoutEngine {
                         &mut current_column,
                         document,
                         document_stats,
+                        font_provider,
                     );
                 }
                 Block::Paragraph(paragraph) => {
@@ -910,6 +925,7 @@ impl LayoutEngine {
                             &mut current_column,
                             document,
                             &markers,
+                            font_provider,
                         );
                         reset_line_numbers_for_page_restart(
                             Some(&mut line_number_state),
@@ -933,6 +949,7 @@ impl LayoutEngine {
                         document_stats,
                         Some(&mut line_number_state),
                         &markers,
+                        font_provider,
                     );
                 }
             }
@@ -952,6 +969,7 @@ impl LayoutEngine {
             &mut geometry,
             document,
             document_stats,
+            font_provider,
         );
         layout_remaining_section_endnotes(
             &mut pages,
@@ -963,6 +981,7 @@ impl LayoutEngine {
             geometry.margin_bottom,
             &mut geometry,
             document_stats,
+            font_provider,
         );
         layout_endnotes_for_placement(
             &mut pages,
@@ -976,6 +995,7 @@ impl LayoutEngine {
             geometry.margin_bottom,
             &mut geometry,
             document_stats,
+            font_provider,
         );
         layout_endnotes_for_placement(
             &mut pages,
@@ -989,6 +1009,7 @@ impl LayoutEngine {
             geometry.margin_bottom,
             &mut geometry,
             document_stats,
+            font_provider,
         );
 
         apply_page_vertical_alignment(&mut pages);
@@ -1000,6 +1021,7 @@ impl LayoutEngine {
             &header_footer_sets,
             true,
             document_stats,
+            font_provider,
         );
         layout_repeating_header_footer(
             &mut pages,
@@ -1007,9 +1029,16 @@ impl LayoutEngine {
             &header_footer_sets,
             false,
             document_stats,
+            font_provider,
         );
-        layout_background_shapes(&mut pages, &header_footer_sets, document, document_stats);
-        resolve_bookmark_page_ref_markers(&mut pages);
+        layout_background_shapes(
+            &mut pages,
+            &header_footer_sets,
+            document,
+            document_stats,
+            font_provider,
+        );
+        resolve_bookmark_page_ref_markers(&mut pages, document, font_provider);
         resolve_section_page_markers(&mut pages);
         resolve_total_page_markers(&mut pages);
 
@@ -1045,6 +1074,7 @@ fn layout_footnotes(
     geometry: &mut PageGeometry,
     document: &Document,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     if footnotes.is_empty() {
         return;
@@ -1063,6 +1093,7 @@ fn layout_footnotes(
             geometry,
             document,
             document_stats,
+            font_provider,
         );
         margin_left = geometry.body_left(0);
     }
@@ -1112,6 +1143,7 @@ fn layout_footnotes(
             document_stats,
             None,
             &markers,
+            font_provider,
         );
     }
 }
@@ -1129,6 +1161,7 @@ fn position_cursor_for_bottom_notes(
     geometry: &mut PageGeometry,
     document: &Document,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     let note_height = note_block_height(
         footnotes,
@@ -1138,6 +1171,7 @@ fn position_cursor_for_bottom_notes(
         content_width,
         document,
         document_stats,
+        font_provider,
     );
     let body_top = geometry.height - geometry.margin_top;
     let target_cursor_y = (margin_bottom + note_height).min(body_top);
@@ -1156,6 +1190,7 @@ fn note_block_height(
     content_width: f32,
     document: &Document,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) -> f32 {
     let mut height = 9.0;
     let markers = marker_context("1".to_string(), "1".to_string(), document_stats);
@@ -1167,10 +1202,16 @@ fn note_block_height(
             number_format,
         );
         height += twips_to_points(effective_space_before_twips(&paragraph.style));
-        height += wrap_paragraph(&paragraph, content_width, &markers, document)
-            .into_iter()
-            .map(|line| apply_line_spacing(line.height, &paragraph.style))
-            .sum::<f32>();
+        height += wrap_paragraph_with_font_provider(
+            &paragraph,
+            content_width,
+            &markers,
+            document,
+            font_provider,
+        )
+        .into_iter()
+        .map(|line| apply_line_spacing(line.height, &paragraph.style))
+        .sum::<f32>();
         height += twips_to_points(effective_space_after_twips(&paragraph.style));
     }
     height
@@ -1218,6 +1259,7 @@ fn layout_endnote_entries(
     geometry: &mut PageGeometry,
     document: &Document,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     if endnotes.is_empty() {
         return;
@@ -1262,6 +1304,7 @@ fn layout_endnote_entries(
             document_stats,
             None,
             &markers,
+            font_provider,
         );
     }
 }
@@ -1279,6 +1322,7 @@ fn layout_endnotes_for_placement(
     margin_bottom: f32,
     geometry: &mut PageGeometry,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     let entries = document
         .endnotes
@@ -1307,6 +1351,7 @@ fn layout_endnotes_for_placement(
         geometry,
         document,
         document_stats,
+        font_provider,
     );
     for (idx, _) in entries {
         if let Some(rendered) = rendered_endnotes.get_mut(idx) {
@@ -1327,6 +1372,7 @@ fn layout_endnotes_for_section(
     margin_bottom: f32,
     geometry: &mut PageGeometry,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     let mut section_notes = Vec::new();
     for (idx, endnote) in document.endnotes.iter().enumerate() {
@@ -1361,6 +1407,7 @@ fn layout_endnotes_for_section(
         geometry,
         document,
         document_stats,
+        font_provider,
     );
 
     for (idx, _) in section_notes {
@@ -1381,6 +1428,7 @@ fn layout_remaining_section_endnotes(
     margin_bottom: f32,
     geometry: &mut PageGeometry,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     let mut sections = document
         .endnotes
@@ -1411,6 +1459,7 @@ fn layout_remaining_section_endnotes(
             margin_bottom,
             geometry,
             document_stats,
+            font_provider,
         );
     }
 }
@@ -1501,6 +1550,7 @@ fn layout_shape(
     current_column: &mut usize,
     document: &Document,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     let left = twips_to_points(shape.left_twips.max(0));
     let top = twips_to_points(shape.top_twips.max(0));
@@ -1701,6 +1751,7 @@ fn layout_shape(
         width,
         document,
         document_stats,
+        font_provider,
     );
     *cursor_y -= block_height + 6.0;
 }
@@ -1714,6 +1765,7 @@ fn layout_shape_text(
     width: f32,
     document: &Document,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     if shape.text.is_empty() {
         return;
@@ -1726,7 +1778,13 @@ fn layout_shape_text(
 
     for paragraph in &shape.text {
         cursor_y -= twips_to_points(effective_space_before_twips(&paragraph.style));
-        let mut lines = wrap_paragraph(paragraph, content_width, &markers, document);
+        let mut lines = wrap_paragraph_with_font_provider(
+            paragraph,
+            content_width,
+            &markers,
+            document,
+            font_provider,
+        );
         for line in &mut lines {
             line.height = apply_line_spacing(line.height, &paragraph.style);
         }
@@ -1826,6 +1884,7 @@ fn start_new_page_for_kept_paragraphs(
     current_column: &mut usize,
     document: &Document,
     markers: &MarkerContext,
+    font_provider: Option<&FontProvider>,
 ) {
     if !paragraph.style.keep_together && next_paragraph.is_none() {
         return;
@@ -1834,10 +1893,19 @@ fn start_new_page_for_kept_paragraphs(
         return;
     }
 
-    let kept_height = paragraph_block_height(paragraph, content_width, markers, document)
-        + next_paragraph
-            .map(|paragraph| paragraph_block_height(paragraph, content_width, markers, document))
-            .unwrap_or(0.0);
+    let kept_height =
+        paragraph_block_height(paragraph, content_width, markers, document, font_provider)
+            + next_paragraph
+                .map(|paragraph| {
+                    paragraph_block_height(
+                        paragraph,
+                        content_width,
+                        markers,
+                        document,
+                        font_provider,
+                    )
+                })
+                .unwrap_or(0.0);
     let usable_height = (geometry.height - geometry.margin_top - margin_bottom).max(0.0);
     if kept_height <= usable_height && *cursor_y - kept_height < margin_bottom {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
@@ -1849,11 +1917,18 @@ fn paragraph_block_height(
     content_width: f32,
     markers: &MarkerContext,
     document: &Document,
+    font_provider: Option<&FontProvider>,
 ) -> f32 {
-    let line_height = wrap_paragraph(paragraph, content_width, markers, document)
-        .into_iter()
-        .map(|line| apply_line_spacing(line.height, &paragraph.style))
-        .sum::<f32>();
+    let line_height = wrap_paragraph_with_font_provider(
+        paragraph,
+        content_width,
+        markers,
+        document,
+        font_provider,
+    )
+    .into_iter()
+    .map(|line| apply_line_spacing(line.height, &paragraph.style))
+    .sum::<f32>();
     twips_to_points(effective_space_before_twips(&paragraph.style))
         + line_height
         + twips_to_points(effective_space_after_twips(&paragraph.style))
@@ -2149,6 +2224,7 @@ fn layout_background_shapes(
     header_footer_sets: &[HeaderFooterSet],
     document: &Document,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     for (page_idx, page) in pages.iter_mut().enumerate() {
         let shapes = background_shapes_for_page(header_footer_sets, page.geometry);
@@ -2181,6 +2257,7 @@ fn layout_background_shapes(
                 &mut background_column,
                 document,
                 document_stats,
+                font_provider,
             );
         }
 
@@ -2209,6 +2286,7 @@ fn layout_repeating_header_footer(
     header_footer_sets: &[HeaderFooterSet],
     is_header: bool,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     for (page_idx, page) in pages.iter_mut().enumerate() {
         let geometry = page.geometry;
@@ -2250,7 +2328,13 @@ fn layout_repeating_header_footer(
         };
 
         for paragraph in paragraphs {
-            let lines = wrap_paragraph(paragraph, geometry.content_width, &markers, document);
+            let lines = wrap_paragraph_with_font_provider(
+                paragraph,
+                geometry.content_width,
+                &markers,
+                document,
+                font_provider,
+            );
             let line_count = lines.len();
             for (line_idx, line) in lines.into_iter().enumerate() {
                 let x = aligned_x(
@@ -2349,6 +2433,7 @@ fn layout_repeating_header_footer(
                 &mut shape_column,
                 document,
                 document_stats,
+                font_provider,
             );
         }
 
@@ -2565,6 +2650,7 @@ fn layout_table(
     current_column: &mut usize,
     document: &Document,
     document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
 ) {
     if table.rows.is_empty() {
         return;
@@ -2593,6 +2679,7 @@ fn layout_table(
             content_width / column_count as f32,
             &current_marker_context(pages, document_stats),
             document,
+            font_provider,
         );
 
         if *cursor_y - prepared.row_height < margin_bottom {
@@ -2607,6 +2694,7 @@ fn layout_table(
                         content_width / column_count as f32,
                         &current_marker_context(pages, document_stats),
                         document,
+                        font_provider,
                     );
                     if *cursor_y - header.row_height < margin_bottom {
                         break;
@@ -2630,6 +2718,7 @@ fn layout_table(
                     content_width / column_count as f32,
                     &current_marker_context(pages, document_stats),
                     document,
+                    font_provider,
                 );
             }
         }
@@ -2657,6 +2746,7 @@ fn prepare_table_row(
     default_column_width: f32,
     markers: &MarkerContext,
     document: &Document,
+    font_provider: Option<&FontProvider>,
 ) -> PreparedTableRow {
     let visual_cells = table_visual_cells(row, column_widths, default_column_width);
     let cell_paddings = visual_cells
@@ -2671,11 +2761,12 @@ fn prepare_table_row(
             cell.paragraphs
                 .iter()
                 .flat_map(|paragraph| {
-                    let lines = wrap_paragraph(
+                    let lines = wrap_paragraph_with_font_provider(
                         paragraph,
                         (visual_cell.width - padding.left - padding.right).max(12.0),
                         markers,
                         document,
+                        font_provider,
                     );
                     let line_count = lines.len();
                     lines
@@ -3213,6 +3304,7 @@ fn layout_paragraph(
     document_stats: DocumentStats,
     mut line_numbers: Option<&mut LineNumberState>,
     markers: &MarkerContext,
+    font_provider: Option<&FontProvider>,
 ) {
     let mut markers = markers.clone();
     if paragraph.style.page_break_before && !pages.last().is_none_or(|page| page.items.is_empty()) {
@@ -3238,6 +3330,7 @@ fn layout_paragraph(
         current_column,
         document,
         &markers,
+        font_provider,
     );
     reset_line_numbers_for_page_restart(
         line_numbers.as_mut().map(|state| &mut **state),
@@ -3254,7 +3347,13 @@ fn layout_paragraph(
         twips_to_points(effective_space_before_twips(&paragraph.style))
     };
     *cursor_y -= paragraph_top;
-    let mut lines = wrap_paragraph(paragraph, content_width, &markers, document);
+    let mut lines = wrap_paragraph_with_font_provider(
+        paragraph,
+        content_width,
+        &markers,
+        document,
+        font_provider,
+    );
     for line in &mut lines {
         line.height = apply_line_spacing_with_grid(line.height, &paragraph.style, *geometry);
     }
@@ -3451,11 +3550,22 @@ fn should_advance_for_widow_control(
     line_idx == 0 || line_idx + 2 == lines.len()
 }
 
+#[cfg(test)]
 fn wrap_paragraph(
     paragraph: &Paragraph,
     content_width: f32,
     markers: &MarkerContext,
     document: &Document,
+) -> Vec<Line> {
+    wrap_paragraph_with_font_provider(paragraph, content_width, markers, document, None)
+}
+
+fn wrap_paragraph_with_font_provider(
+    paragraph: &Paragraph,
+    content_width: f32,
+    markers: &MarkerContext,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
 ) -> Vec<Line> {
     let mut lines = Vec::new();
     let mut current = Line {
@@ -3474,8 +3584,13 @@ fn wrap_paragraph(
             &mut drop_cap_applied,
         );
         if paragraph.style.auto_hyphenation && !paragraph.style.no_wrap {
-            segments =
-                apply_passive_auto_hyphenation(segments, content_width, &paragraph.style, document);
+            segments = apply_passive_auto_hyphenation(
+                segments,
+                content_width,
+                &paragraph.style,
+                document,
+                font_provider,
+            );
         }
         for segment in segments {
             if segment.text == "\n" {
@@ -3485,11 +3600,17 @@ fn wrap_paragraph(
                 continue;
             }
 
-            let width = measure_flow_run(&segment, current.width, &paragraph.style, document);
+            let width = measure_flow_run(
+                &segment,
+                current.width,
+                &paragraph.style,
+                document,
+                font_provider,
+            );
             let line_width = paragraph_line_width(content_width, &paragraph.style, is_first_line);
             if !paragraph.style.no_wrap && current.width > 0.0 && current.width + width > line_width
             {
-                materialize_line_end_soft_hyphen(&mut current, document);
+                materialize_line_end_soft_hyphen(&mut current, document, font_provider);
                 lines.push(current);
                 current = empty_line();
                 is_first_line = false;
@@ -3511,9 +3632,16 @@ fn wrap_paragraph(
                     },
                     &paragraph.style,
                     document,
+                    font_provider,
                 );
             } else {
-                push_segment(&mut current, segment, &paragraph.style, document);
+                push_segment(
+                    &mut current,
+                    segment,
+                    &paragraph.style,
+                    document,
+                    font_provider,
+                );
             }
         }
     }
@@ -3616,6 +3744,7 @@ fn apply_passive_auto_hyphenation(
     content_width: f32,
     paragraph_style: &ParagraphStyle,
     document: &Document,
+    font_provider: Option<&FontProvider>,
 ) -> Vec<FlowRun> {
     let max_line_width = paragraph_line_width(content_width, paragraph_style, false)
         .max(paragraph_line_width(content_width, paragraph_style, true));
@@ -3631,8 +3760,13 @@ fn apply_passive_auto_hyphenation(
         }
         let display = display_text(&segment.text, &segment.style);
         let family = font_family_for_run_text(document, &segment.style, &display);
-        if measure_text_with_family(&display, &segment.style, family)
-            <= max_line_width + hyphenation_zone
+        if measure_text_with_document_font(
+            &display,
+            &segment.style,
+            family,
+            document,
+            font_provider,
+        ) <= max_line_width + hyphenation_zone
         {
             consecutive_hyphenated = 0;
             output.push(segment);
@@ -3643,6 +3777,8 @@ fn apply_passive_auto_hyphenation(
             segment,
             max_line_width,
             family,
+            document,
+            font_provider,
             paragraph_style.max_consecutive_hyphenated_lines,
             &mut consecutive_hyphenated,
         );
@@ -3680,6 +3816,8 @@ fn push_auto_hyphenated_segment(
     segment: FlowRun,
     max_line_width: f32,
     family: PdfFontFamily,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
     max_consecutive_hyphenated: Option<usize>,
     consecutive_hyphenated: &mut usize,
 ) {
@@ -3712,8 +3850,20 @@ fn push_auto_hyphenated_segment(
         let mut end = chars.len() - 3;
         while end > start + 3 {
             let text = chars[start..end].iter().collect::<String>();
-            let text_width = measure_text_with_family(&text, &segment.style, family);
-            let hyphen_width = measure_text_with_family("-", &segment.style, family);
+            let text_width = measure_text_with_document_font(
+                &text,
+                &segment.style,
+                family,
+                document,
+                font_provider,
+            );
+            let hyphen_width = measure_text_with_document_font(
+                "-",
+                &segment.style,
+                family,
+                document,
+                font_provider,
+            );
             if text_width + hyphen_width <= max_line_width {
                 break;
             }
@@ -4089,7 +4239,11 @@ fn resolve_section_page_markers(pages: &mut [LayoutPage]) {
     }
 }
 
-fn resolve_bookmark_page_ref_markers(pages: &mut [LayoutPage]) {
+fn resolve_bookmark_page_ref_markers(
+    pages: &mut [LayoutPage],
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) {
     let mut page_for_bookmark = Vec::<(usize, String)>::new();
     for page in pages.iter() {
         for item in &page.items {
@@ -4126,10 +4280,12 @@ fn resolve_bookmark_page_ref_markers(pages: &mut [LayoutPage]) {
                             (*bookmark_id == id).then(|| page_number.clone())
                         })
                         .unwrap_or_else(|| "?".to_string());
-                    let width = measure_text_with_family(
+                    let width = measure_text_with_document_font(
                         &fragment.text,
                         &fragment.style,
                         fragment.font_family,
+                        document,
+                        font_provider,
                     );
                     shifts.push((item_idx, fragment.baseline_y, fragment.x, width));
                 }
@@ -4429,15 +4585,22 @@ fn push_segment(
     mut segment: FlowRun,
     paragraph_style: &ParagraphStyle,
     document: &Document,
+    font_provider: Option<&FontProvider>,
 ) {
     if segment.text == "\t" {
         segment.tab_leader = next_tab_leader(line.width, paragraph_style);
         segment.tab_alignment = next_tab_alignment(line.width, paragraph_style);
         segment.tab_stop_position = Some(next_tab_position(line.width, paragraph_style, document));
     }
-    segment.width = measure_flow_run(&segment, line.width, paragraph_style, document);
+    segment.width = measure_flow_run(
+        &segment,
+        line.width,
+        paragraph_style,
+        document,
+        font_provider,
+    );
     if segment.text != "\t" {
-        adjust_pending_aligned_tab(line, &segment, document);
+        adjust_pending_aligned_tab(line, &segment, document, font_provider);
     }
     line.width += segment.width;
     line.height = line
@@ -4446,7 +4609,12 @@ fn push_segment(
     line.runs.push(segment);
 }
 
-fn adjust_pending_aligned_tab(line: &mut Line, following: &FlowRun, document: &Document) {
+fn adjust_pending_aligned_tab(
+    line: &mut Line,
+    following: &FlowRun,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) {
     let Some(tab) = line.runs.last_mut() else {
         return;
     };
@@ -4461,9 +4629,8 @@ fn adjust_pending_aligned_tab(line: &mut Line, following: &FlowRun, document: &D
         TabAlignment::Left => target,
         TabAlignment::Center => target - (following.width / 2.0),
         TabAlignment::Right => target - following.width,
-        TabAlignment::Decimal => {
-            decimal_tab_start(target, following, document).unwrap_or(target - following.width)
-        }
+        TabAlignment::Decimal => decimal_tab_start(target, following, document, font_provider)
+            .unwrap_or(target - following.width),
         TabAlignment::Bar => target,
     };
     let adjusted_width = (desired_start - width_before_tab).max(0.0);
@@ -4471,22 +4638,33 @@ fn adjust_pending_aligned_tab(line: &mut Line, following: &FlowRun, document: &D
     line.width = width_before_tab + adjusted_width;
 }
 
-fn decimal_tab_start(target: f32, following: &FlowRun, document: &Document) -> Option<f32> {
+fn decimal_tab_start(
+    target: f32,
+    following: &FlowRun,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> Option<f32> {
     let style = passive_pdf_style_for_run(document, &following.style);
     let text = display_text(&following.text, &style);
     let decimal_idx = text.find(['.', ','])?;
     let prefix = &text[..decimal_idx];
     Some(
         target
-            - measure_text_with_family(
+            - measure_text_with_document_font(
                 prefix,
                 &style,
                 font_family_for_run_text(document, &style, prefix),
+                document,
+                font_provider,
             ),
     )
 }
 
-fn materialize_line_end_soft_hyphen(line: &mut Line, document: &Document) {
+fn materialize_line_end_soft_hyphen(
+    line: &mut Line,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) {
     let Some(last) = line
         .runs
         .iter_mut()
@@ -4501,8 +4679,13 @@ fn materialize_line_end_soft_hyphen(line: &mut Line, document: &Document) {
     last.text.push('-');
     last.soft_hyphen_after = false;
     let style = passive_pdf_style_for_run(document, &last.style);
-    let added_width =
-        measure_text_with_family("-", &style, font_family_for_style(document, &style));
+    let added_width = measure_text_with_document_font(
+        "-",
+        &style,
+        font_family_for_style(document, &style),
+        document,
+        font_provider,
+    );
     last.width += added_width;
     line.width += added_width;
     line.height = line
@@ -4515,6 +4698,7 @@ fn measure_flow_run(
     current_line_width: f32,
     paragraph_style: &ParagraphStyle,
     document: &Document,
+    font_provider: Option<&FontProvider>,
 ) -> f32 {
     if parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
         || parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_some()
@@ -4528,7 +4712,7 @@ fn measure_flow_run(
     let style = passive_pdf_style_for_run(document, &run.style);
     let text = display_text(&run.text, &style);
     let font_family = font_family_for_run_text(document, &style, &text);
-    measure_text_with_family(&text, &style, font_family)
+    measure_text_with_document_font(&text, &style, font_family, document, font_provider)
 }
 
 fn next_tab_position(
@@ -5094,14 +5278,17 @@ fn is_passive_bullet_text(text: &str) -> bool {
 }
 
 fn font_family_for_style(document: &Document, style: &CharacterStyle) -> PdfFontFamily {
-    let Some(font) = document
-        .fonts
-        .iter()
-        .find(|font| font.index == style.font_index)
-    else {
+    let Some(font) = font_for_style(document, style) else {
         return PdfFontFamily::Helvetica;
     };
     passive_pdf_font_family_for_font(font)
+}
+
+fn font_for_style<'a>(document: &'a Document, style: &CharacterStyle) -> Option<&'a FontDef> {
+    document
+        .fonts
+        .iter()
+        .find(|font| font.index == style.font_index)
 }
 
 pub(crate) fn passive_pdf_font_family_for_font(font: &FontDef) -> PdfFontFamily {
@@ -5831,6 +6018,31 @@ fn measure_text_with_family(text: &str, style: &CharacterStyle, family: PdfFontF
         * style.horizontal_scale()
 }
 
+fn measure_text_with_document_font(
+    text: &str,
+    style: &CharacterStyle,
+    family: PdfFontFamily,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
+    let size = style.font_size_points();
+    let mut width = 0.0;
+    let source_font = font_for_style(document, style);
+    for ch in text.chars() {
+        if is_zero_width_format_char(ch) {
+            continue;
+        }
+        let font_width = font_provider
+            .zip(source_font)
+            .filter(|_| !matches!(family, PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats))
+            .and_then(|(provider, font)| provider.glyph_metrics_for_char(&font.name, ch))
+            .map(|metrics| metrics.advance_points(size));
+        width += font_width.unwrap_or_else(|| base14_char_width_points(ch, size, family, style));
+    }
+    (width + character_spacing_width(text, style) + passive_kerning_width(text, style, family))
+        * style.horizontal_scale()
+}
+
 fn base14_char_width_points(
     ch: char,
     size: f32,
@@ -6170,6 +6382,7 @@ pub fn twips_to_points(twips: i32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use crate::fonts::{FontAsset, FontAssetStyle, FontProviderLimits};
     use crate::model::{
         Block, Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat,
         PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, Paragraph, Run, StaticShape,
@@ -10593,6 +10806,61 @@ mod tests {
         assert!(layout.pages[0].items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::Courier)
         ));
+    }
+
+    #[test]
+    fn caller_font_metrics_drive_layout_widths_without_system_fonts() {
+        let mut document = Document::default();
+        document.fonts = vec![FontDef {
+            index: 0,
+            name: "Tuffy".to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Swiss,
+            pitch: FontPitch::Default,
+        }];
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![
+                Run {
+                    text: "A".to_string(),
+                    style: Default::default(),
+                },
+                Run {
+                    text: "B".to_string(),
+                    style: Default::default(),
+                },
+            ],
+        })];
+        let provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["Tuffy".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: FontProviderLimits {
+                max_asset_bytes: 256 * 1024,
+                max_total_bytes: 256 * 1024,
+                ..FontProviderLimits::default()
+            },
+        };
+        provider.validate().unwrap();
+        let metrics = provider.glyph_metrics_for_char("Tuffy", 'A').unwrap();
+
+        let fallback_layout = LayoutEngine::layout(&document);
+        let provided_layout = LayoutEngine::layout_with_font_provider(&document, Some(&provider));
+        let fallback_advance = text_x(&fallback_layout.pages[0], "B").unwrap()
+            - text_x(&fallback_layout.pages[0], "A").unwrap();
+        let provided_advance = text_x(&provided_layout.pages[0], "B").unwrap()
+            - text_x(&provided_layout.pages[0], "A").unwrap();
+        let expected_advance = metrics.advance_points(CharacterStyle::default().font_size_points());
+
+        assert!((provided_advance - expected_advance).abs() < 0.01);
+        assert!(
+            (provided_advance - fallback_advance).abs() > 0.1,
+            "provided metrics should visibly differ from fallback width"
+        );
     }
 
     #[test]
