@@ -1365,11 +1365,14 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 color,
                 background_color,
                 clip_bounds,
+                character_extra,
                 horizontal_align,
                 vertical_align,
             } => {
                 let point = vector_command_point(draw, source_width, source_height, *x, *y);
                 let font_size = ((*height / source_height) * draw.height).clamp(4.0, 72.0);
+                let character_extra = ((*character_extra / source_width) * draw.width)
+                    .clamp(-font_size, font_size * 4.0);
                 let clip_rect = clip_bounds.map(|bounds| {
                     vector_command_rect(
                         draw,
@@ -1389,6 +1392,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     *color,
                     *background_color,
                     clip_rect,
+                    character_extra,
                     *horizontal_align,
                     *vertical_align,
                 );
@@ -1598,6 +1602,7 @@ fn draw_passive_vector_text(
     color: Option<crate::model::Color>,
     background_color: Option<crate::model::Color>,
     clip_rect: Option<VectorDrawRect>,
+    character_extra: f32,
     horizontal_align: StaticImageTextHorizontalAlign,
     vertical_align: StaticImageTextVerticalAlign,
 ) {
@@ -1612,8 +1617,15 @@ fn draw_passive_vector_text(
     }
     let mut style = CharacterStyle::default();
     style.font_size_half_points = (font_size * 2.0).round().clamp(1.0, 144.0) as i32;
-    let metrics =
-        passive_vector_text_metrics(point, font_size, text, horizontal_align, vertical_align);
+    style.character_spacing_twips = (character_extra * 20.0).round().clamp(-1440.0, 5760.0) as i32;
+    let metrics = passive_vector_text_metrics(
+        point,
+        font_size,
+        text,
+        character_extra,
+        horizontal_align,
+        vertical_align,
+    );
     if let Some(background_color) = background_color {
         draw_passive_vector_rectangle(
             content,
@@ -1666,10 +1678,12 @@ fn passive_vector_text_metrics(
     point: crate::layout::LayoutPoint,
     font_size: f32,
     text: &str,
+    character_extra: f32,
     horizontal_align: StaticImageTextHorizontalAlign,
     vertical_align: StaticImageTextVerticalAlign,
 ) -> PassiveVectorTextMetrics {
-    let text_width = estimated_passive_vector_text_width(text, font_size);
+    let text_width = estimated_passive_vector_text_width(text, font_size)
+        + passive_vector_text_extra_width(text, character_extra);
     let x = match horizontal_align {
         StaticImageTextHorizontalAlign::Left => point.x,
         StaticImageTextHorizontalAlign::Center => point.x - (text_width / 2.0),
@@ -1696,6 +1710,18 @@ fn passive_vector_text_metrics(
         top_y,
         bottom_y,
         width: text_width.max(font_size * 0.25),
+    }
+}
+
+fn passive_vector_text_extra_width(text: &str, character_extra: f32) -> f32 {
+    if character_extra == 0.0 {
+        return 0.0;
+    }
+    let visible_count = text.chars().filter(|ch| !ch.is_control()).count();
+    if visible_count <= 1 {
+        0.0
+    } else {
+        character_extra * visible_count.saturating_sub(1) as f32
     }
 }
 

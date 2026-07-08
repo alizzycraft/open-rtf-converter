@@ -14394,6 +14394,7 @@ struct WmfDrawingState {
     text_color: Option<Color>,
     background_color: Option<Color>,
     text_background_mode: WmfTextBackgroundMode,
+    text_character_extra: f32,
     font_height: Option<i32>,
     font_charset: Option<i32>,
     text_horizontal_align: StaticImageTextHorizontalAlign,
@@ -14422,6 +14423,7 @@ impl Default for WmfDrawingState {
                 blue: 255,
             }),
             text_background_mode: WmfTextBackgroundMode::Transparent,
+            text_character_extra: 0.0,
             font_height: None,
             font_charset: None,
             text_horizontal_align: StaticImageTextHorizontalAlign::Left,
@@ -14869,6 +14871,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     WmfTextBackgroundMode::Transparent
                 };
             }
+            0x0108 => {
+                state.text_character_extra =
+                    normalized_wmf_text_character_extra(data, 0, window_width)?;
+            }
             0x012e => {
                 let mode = read_le_u16(data, 0)?;
                 state.text_horizontal_align = wmf_text_horizontal_align(mode);
@@ -15039,6 +15045,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             WmfTextBackgroundMode::Transparent => None,
                         },
                         clip_bounds: None,
+                        character_extra: state.text_character_extra,
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
@@ -15093,6 +15100,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                                 bottom,
                             }
                         }),
+                        character_extra: state.text_character_extra,
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
@@ -15542,6 +15550,16 @@ fn normalized_wmf_text_height(font_height: Option<i32>, window_height: i32) -> f
         .map(|height| height.unsigned_abs().max(1) as f32)
         .unwrap_or(fallback)
         .clamp(1.0, window_height.max(1) as f32)
+}
+
+fn normalized_wmf_text_character_extra(
+    data: &[u8],
+    offset: usize,
+    window_width: i32,
+) -> Option<f32> {
+    let value = i32::from(read_le_i16(data, offset)?);
+    let max = window_width.max(1);
+    Some(value.clamp(-max, max) as f32)
 }
 
 fn pixel_rect_start(value: f32, max: f32) -> f32 {

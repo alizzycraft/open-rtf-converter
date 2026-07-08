@@ -18750,6 +18750,104 @@ fn wmf_saved_dc_restores_passive_text_state_without_record_leakage() {
 }
 
 #[test]
+fn wmf_text_character_extra_renders_passive_spacing_without_record_leakage() {
+    let wmf_hex = concat!(
+        "0100090000033100000001000c0000000000",
+        "050000000c026400c800",
+        "050000000902ff000000",
+        "0400000008010a00",
+        "0c000000fb02f4ff00000000000000000000000000000000",
+        "040000002d010000",
+        "0700000021050200486914002800",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF SETTEXTCHAREXTRA vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("Hi"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                text,
+                character_extra,
+                ..
+            } if text == "Hi" && (*character_extra - 10.0).abs() < 0.01
+        )
+    }));
+    for forbidden in ["wmetafile", "0108", "0521", "fb02", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SETTEXTCHAREXTRA internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        decoded_pdf_text(&content).contains("Hi"),
+        "WMF SETTEXTCHAREXTRA should still render passive PDF text"
+    );
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "Tc"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(pdf_operand_number)
+                    .is_some_and(|value| value > 1.0)
+        }),
+        "WMF SETTEXTCHAREXTRA should emit nonzero passive PDF character spacing"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0108",
+        b"0521",
+        b"fb02",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SETTEXTCHAREXTRA leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_textout_opaque_background_mode_renders_passive_fill_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000033100000001000c0000000000",

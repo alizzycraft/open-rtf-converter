@@ -425,6 +425,7 @@ pub enum StaticImageVectorCommand {
         color: Option<Color>,
         background_color: Option<Color>,
         clip_bounds: Option<StaticImageVectorTextBounds>,
+        character_extra: f32,
         horizontal_align: StaticImageTextHorizontalAlign,
         vertical_align: StaticImageTextVerticalAlign,
     },
