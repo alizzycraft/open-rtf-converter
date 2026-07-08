@@ -214,6 +214,12 @@ const EXTENDED_LATIN_TO_UNICODE: &[(u8, char)] = &[
     (0x8d, '\u{0151}'),
     (0x8f, '\u{0170}'),
     (0x90, '\u{0171}'),
+    (0xd0, '\u{011e}'),
+    (0xdd, '\u{0130}'),
+    (0xde, '\u{015e}'),
+    (0xf0, '\u{011f}'),
+    (0xfd, '\u{0131}'),
+    (0xfe, '\u{015f}'),
 ];
 
 const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
@@ -617,6 +623,10 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                 differences.consecutive(0x8d, [Name(b"ohungarumlaut")]);
                 differences.consecutive(0x8f, [Name(b"Uhungarumlaut")]);
                 differences.consecutive(0x90, [Name(b"uhungarumlaut")]);
+                differences.consecutive(0xd0, [Name(b"Gbreve")]);
+                differences.consecutive(0xdd, [Name(b"Idotaccent"), Name(b"Scedilla")]);
+                differences.consecutive(0xf0, [Name(b"gbreve")]);
+                differences.consecutive(0xfd, [Name(b"dotlessi"), Name(b"scedilla")]);
             }
             if let Some(to_unicode_ref) = extended_latin_to_unicode_ref {
                 font.to_unicode(to_unicode_ref);
@@ -2230,6 +2240,12 @@ fn encode_win_ansi_char(ch: char) -> u8 {
         '\u{0151}' => 0x8d,
         '\u{0170}' => 0x8f,
         '\u{0171}' => 0x90,
+        '\u{011e}' => 0xd0,
+        '\u{0130}' => 0xdd,
+        '\u{015e}' => 0xde,
+        '\u{011f}' => 0xf0,
+        '\u{0131}' => 0xfd,
+        '\u{015f}' => 0xfe,
         '\u{20ac}' => 0x80,
         '\u{201a}' => 0x82,
         '\u{0192}' => 0x83,
@@ -2268,7 +2284,19 @@ fn encode_win_ansi_char(ch: char) -> u8 {
 }
 
 fn is_passive_extended_latin_char(ch: char) -> bool {
-    matches!(ch, '\u{0150}' | '\u{0151}' | '\u{0170}' | '\u{0171}')
+    matches!(
+        ch,
+        '\u{011e}'
+            | '\u{011f}'
+            | '\u{0130}'
+            | '\u{0131}'
+            | '\u{0150}'
+            | '\u{0151}'
+            | '\u{015e}'
+            | '\u{015f}'
+            | '\u{0170}'
+            | '\u{0171}'
+    )
 }
 
 fn set_fill_color(content: &mut Content, color: PdfColor) {
