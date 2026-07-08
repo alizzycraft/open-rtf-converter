@@ -1,9 +1,13 @@
 use std::error::Error;
 use std::fmt;
 
-use pdf_writer::types::{Predictor, SystemInfo, TextRenderingMode, UnicodeCmap};
+use pdf_writer::types::{
+    CidFontType, FontFlags, Predictor, SystemInfo, TextRenderingMode, UnicodeCmap,
+};
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
+use ttf_parser::Face;
 
+use crate::fonts::{FontAsset, FontProvider};
 use crate::layout::{
     LayoutDocument, LayoutItem, LineStyle, PdfColor, PdfFontFamily, TextFragment,
     passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
@@ -295,6 +299,32 @@ struct ExtendedLatinEntry {
     glyph_name: &'static [u8],
 }
 
+#[derive(Debug, Clone)]
+struct SuppliedPdfFont {
+    asset_index: usize,
+    resource_name: Vec<u8>,
+    base_name: Vec<u8>,
+    type0_ref: Ref,
+    cid_ref: Ref,
+    descriptor_ref: Ref,
+    font_file_ref: Ref,
+    to_unicode_ref: Ref,
+    used_glyphs: Vec<SuppliedGlyph>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct SuppliedGlyph {
+    cid: u16,
+    unicode: char,
+    width: f32,
+}
+
+#[derive(Debug, Clone)]
+struct SuppliedTextEncoding {
+    font_index: usize,
+    encoded: Vec<u8>,
+}
+
 impl fmt::Display for PassivePdfError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(issue) = self.issues.first() {
@@ -359,6 +389,13 @@ pub fn audit_passive_pdf_bytes(pdf: &[u8]) -> Result<(), PassivePdfError> {
 }
 
 pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
+    render_pdf_with_font_provider(layout, None)
+}
+
+pub fn render_pdf_with_font_provider(
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+) -> Vec<u8> {
     let mut pdf = Pdf::new();
     let catalog_id = Ref::new(1);
     let page_tree_id = Ref::new(2);
@@ -384,6 +421,9 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
             extended_latin_to_unicode_refs[font_idx] = Some(next_ref(&mut next_object_id));
         }
     }
+    let supplied_fonts = collect_supplied_pdf_fonts(layout, font_provider, &mut next_object_id);
+    let page_supplied_font_indexes =
+        collect_page_supplied_font_indexes(layout, font_provider, &supplied_fonts);
     let first_image_id = next_object_id;
 
     let page_refs = (0..layout.pages.len())
@@ -414,6 +454,10 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                         fonts.pair(Name(resource_name), font_ref);
                     }
                 }
+                for supplied_idx in &page_supplied_font_indexes[idx] {
+                    let supplied = &supplied_fonts[*supplied_idx];
+                    fonts.pair(Name(&supplied.resource_name), supplied.type0_ref);
+                }
             }
             if let Some(page_images) = image_refs.get(idx)
                 && !page_images.is_empty()
@@ -441,13 +485,33 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                     content.fill_nonzero();
                 }
                 LayoutItem::Text(fragment) => {
-                    let encoded = encode_pdf_text_for_font(&fragment.text, fragment.font_family);
+                    let supplied_encoding = encode_supplied_text_fragment(
+                        fragment,
+                        layout,
+                        font_provider,
+                        &supplied_fonts,
+                    );
+                    let mut base_encoded = Vec::new();
+                    let font_resource = if let Some(supplied) = supplied_encoding.as_ref() {
+                        supplied_fonts[supplied.font_index].resource_name.as_slice()
+                    } else {
+                        base_encoded =
+                            encode_pdf_text_for_font(&fragment.text, fragment.font_family);
+                        font_name_for_style(fragment.font_family, &fragment.style).0
+                    };
+                    let passive_kerning_family =
+                        supplied_encoding.is_none().then_some(fragment.font_family);
+                    let encoded = supplied_encoding
+                        .as_ref()
+                        .map(|supplied| supplied.encoded.as_slice())
+                        .unwrap_or(base_encoded.as_slice());
                     if fragment.style.shadow {
                         set_fill_color(&mut content, shadow_color(fragment.color));
                         write_text_fragment(
                             &mut content,
                             &fragment.text,
-                            fragment.font_family,
+                            font_resource,
+                            passive_kerning_family,
                             &fragment.style,
                             fragment.word_spacing,
                             fragment.x + shadow_offset(&fragment.style),
@@ -464,7 +528,8 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                         write_text_fragment(
                             &mut content,
                             &fragment.text,
-                            fragment.font_family,
+                            font_resource,
+                            passive_kerning_family,
                             &fragment.style,
                             fragment.word_spacing,
                             fragment.x + first_dx,
@@ -476,7 +541,8 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                         write_text_fragment(
                             &mut content,
                             &fragment.text,
-                            fragment.font_family,
+                            font_resource,
+                            passive_kerning_family,
                             &fragment.style,
                             fragment.word_spacing,
                             fragment.x + second_dx,
@@ -495,7 +561,8 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
                     write_text_fragment(
                         &mut content,
                         &fragment.text,
-                        fragment.font_family,
+                        font_resource,
+                        passive_kerning_family,
                         &fragment.style,
                         fragment.word_spacing,
                         fragment.x,
@@ -675,6 +742,7 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
             passive_to_unicode_cmap(b"OpenRtfConverter-ExtendedLatin", &entries);
         pdf.stream(to_unicode_ref, &extended_latin_to_unicode);
     }
+    write_supplied_pdf_fonts(&mut pdf, font_provider, &supplied_fonts);
 
     for (page_idx, page) in layout.pages.iter().enumerate() {
         for (item_idx, item) in page.items.iter().enumerate() {
@@ -803,6 +871,81 @@ fn collect_used_font_indexes_for_page(page: &crate::layout::LayoutPage) -> Vec<u
     used_font_index_list(&used)
 }
 
+fn collect_supplied_pdf_fonts(
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+    next_object_id: &mut i32,
+) -> Vec<SuppliedPdfFont> {
+    let Some(font_provider) = font_provider else {
+        return Vec::new();
+    };
+    let mut fonts = Vec::<SuppliedPdfFont>::new();
+    for page in &layout.pages {
+        for item in &page.items {
+            let LayoutItem::Text(fragment) = item else {
+                continue;
+            };
+            let Some((asset_index, glyphs, _encoded)) =
+                supplied_text_encoding_parts(fragment, layout, font_provider)
+            else {
+                continue;
+            };
+            let font_index = if let Some(index) = fonts
+                .iter()
+                .position(|font| font.asset_index == asset_index)
+            {
+                index
+            } else {
+                let index = fonts.len();
+                fonts.push(SuppliedPdfFont {
+                    asset_index,
+                    resource_name: format!("TF{}", index + 1).into_bytes(),
+                    base_name: format!("ORTFSuppliedFont{}", index + 1).into_bytes(),
+                    type0_ref: next_ref(next_object_id),
+                    cid_ref: next_ref(next_object_id),
+                    descriptor_ref: next_ref(next_object_id),
+                    font_file_ref: next_ref(next_object_id),
+                    to_unicode_ref: next_ref(next_object_id),
+                    used_glyphs: Vec::new(),
+                });
+                index
+            };
+            for glyph in glyphs {
+                add_supplied_glyph(&mut fonts[font_index].used_glyphs, glyph);
+            }
+        }
+    }
+    fonts
+}
+
+fn collect_page_supplied_font_indexes(
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+    supplied_fonts: &[SuppliedPdfFont],
+) -> Vec<Vec<usize>> {
+    layout
+        .pages
+        .iter()
+        .map(|page| {
+            let mut indexes = Vec::new();
+            for item in &page.items {
+                let LayoutItem::Text(fragment) = item else {
+                    continue;
+                };
+                let Some(encoding) =
+                    encode_supplied_text_fragment(fragment, layout, font_provider, supplied_fonts)
+                else {
+                    continue;
+                };
+                if !indexes.contains(&encoding.font_index) {
+                    indexes.push(encoding.font_index);
+                }
+            }
+            indexes
+        })
+        .collect()
+}
+
 fn collect_extended_latin_font_usage(layout: &LayoutDocument) -> [ExtendedLatinUsage; 14] {
     let mut usage: [ExtendedLatinUsage; 14] =
         std::array::from_fn(|_| ExtendedLatinUsage::default());
@@ -824,6 +967,103 @@ fn collect_extended_latin_font_usage(layout: &LayoutDocument) -> [ExtendedLatinU
         }
     }
     usage
+}
+
+fn encode_supplied_text_fragment(
+    fragment: &TextFragment,
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+    supplied_fonts: &[SuppliedPdfFont],
+) -> Option<SuppliedTextEncoding> {
+    let font_provider = font_provider?;
+    let (asset_index, _glyphs, encoded) =
+        supplied_text_encoding_parts(fragment, layout, font_provider)?;
+    let font_index = supplied_fonts
+        .iter()
+        .position(|font| font.asset_index == asset_index)?;
+    Some(SuppliedTextEncoding {
+        font_index,
+        encoded,
+    })
+}
+
+fn supplied_text_encoding_parts(
+    fragment: &TextFragment,
+    layout: &LayoutDocument,
+    font_provider: &FontProvider,
+) -> Option<(usize, Vec<SuppliedGlyph>, Vec<u8>)> {
+    if fragment.text.is_empty()
+        || matches!(
+            fragment.font_family,
+            PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats
+        )
+    {
+        return None;
+    }
+    let source_font = layout
+        .fonts
+        .iter()
+        .find(|font| font.index == fragment.style.font_index)?;
+    for (asset_index, asset) in font_provider.assets.iter().enumerate() {
+        if !font_asset_matches_family(asset, &source_font.name) {
+            continue;
+        }
+        if let Some((glyphs, encoded)) = encode_text_with_font_asset(&fragment.text, asset) {
+            if !glyphs.is_empty() {
+                return Some((asset_index, glyphs, encoded));
+            }
+        }
+    }
+    None
+}
+
+fn encode_text_with_font_asset(
+    text: &str,
+    asset: &FontAsset,
+) -> Option<(Vec<SuppliedGlyph>, Vec<u8>)> {
+    let face = Face::parse(&asset.bytes, 0).ok()?;
+    let units_per_em = f32::from(face.units_per_em()).max(1.0);
+    let mut glyphs = Vec::new();
+    let mut encoded = Vec::new();
+    for ch in text.chars() {
+        if is_zero_width_pdf_char(ch) {
+            continue;
+        }
+        let glyph_id = face.glyph_index(ch)?;
+        if glyph_id.0 == 0 {
+            return None;
+        }
+        let advance = face.glyph_hor_advance(glyph_id)?;
+        let cid = glyph_id.0;
+        encoded.extend_from_slice(&cid.to_be_bytes());
+        glyphs.push(SuppliedGlyph {
+            cid,
+            unicode: ch,
+            width: f32::from(advance) * 1000.0 / units_per_em,
+        });
+    }
+    Some((glyphs, encoded))
+}
+
+fn add_supplied_glyph(glyphs: &mut Vec<SuppliedGlyph>, glyph: SuppliedGlyph) {
+    if glyphs.iter().any(|existing| existing.cid == glyph.cid) {
+        return;
+    }
+    glyphs.push(glyph);
+    glyphs.sort_by_key(|glyph| glyph.cid);
+}
+
+fn font_asset_matches_family(asset: &FontAsset, family_name: &str) -> bool {
+    let family_name = normalize_pdf_font_family_name(family_name);
+    !family_name.is_empty()
+        && asset
+            .family_names
+            .iter()
+            .any(|candidate| normalize_pdf_font_family_name(candidate) == family_name)
+}
+
+fn normalize_pdf_font_family_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
 }
 
 fn is_normal_text_font_index(font_idx: usize) -> bool {
@@ -1315,7 +1555,8 @@ fn draw_passive_image_placeholder(content: &mut Content, fragment: &crate::layou
     write_text_fragment(
         content,
         label,
-        PdfFontFamily::Helvetica,
+        font_name_for_style(PdfFontFamily::Helvetica, &style).0,
+        Some(PdfFontFamily::Helvetica),
         &style,
         0.0,
         fragment.x + 6.0,
@@ -1413,6 +1654,96 @@ fn passive_to_unicode_cmap(name: &'static [u8], mappings: &[(u8, char)]) -> Vec<
         cmap.pair(*glyph, *unicode);
     }
     cmap.finish().into_vec()
+}
+
+fn write_supplied_pdf_fonts(
+    pdf: &mut Pdf,
+    font_provider: Option<&FontProvider>,
+    supplied_fonts: &[SuppliedPdfFont],
+) {
+    let Some(font_provider) = font_provider else {
+        return;
+    };
+    for supplied in supplied_fonts {
+        let Some(asset) = font_provider.assets.get(supplied.asset_index) else {
+            continue;
+        };
+        let Ok(face) = Face::parse(&asset.bytes, 0) else {
+            continue;
+        };
+        let system_info = supplied_cid_system_info();
+
+        pdf.type0_font(supplied.type0_ref)
+            .base_font(Name(&supplied.base_name))
+            .encoding_predefined(Name(b"Identity-H"))
+            .descendant_font(supplied.cid_ref)
+            .to_unicode(supplied.to_unicode_ref);
+
+        {
+            let mut cid_font = pdf.cid_font(supplied.cid_ref);
+            cid_font
+                .subtype(CidFontType::Type2)
+                .base_font(Name(&supplied.base_name))
+                .system_info(system_info)
+                .font_descriptor(supplied.descriptor_ref)
+                .cid_to_gid_map_predefined(Name(b"Identity"));
+            if let Some(default_width) = supplied.used_glyphs.first().map(|glyph| glyph.width) {
+                cid_font.default_width(default_width);
+            }
+            {
+                let mut widths = cid_font.widths();
+                for glyph in &supplied.used_glyphs {
+                    widths.same(glyph.cid, glyph.cid, glyph.width);
+                }
+            }
+        }
+
+        let units_per_em = f32::from(face.units_per_em()).max(1.0);
+        let scale = |value: i16| f32::from(value) * 1000.0 / units_per_em;
+        let bbox = face.global_bounding_box();
+        let mut flags = FontFlags::NON_SYMBOLIC;
+        if asset.style.italic {
+            flags |= FontFlags::ITALIC;
+        }
+        if asset.style.bold {
+            flags |= FontFlags::FORCE_BOLD;
+        }
+        pdf.font_descriptor(supplied.descriptor_ref)
+            .name(Name(&supplied.base_name))
+            .flags(flags)
+            .bbox(Rect::new(
+                scale(bbox.x_min),
+                scale(bbox.y_min),
+                scale(bbox.x_max),
+                scale(bbox.y_max),
+            ))
+            .italic_angle(if asset.style.italic { -12.0 } else { 0.0 })
+            .ascent(scale(face.ascender()))
+            .descent(scale(face.descender()))
+            .cap_height(scale(face.ascender()))
+            .stem_v(if asset.style.bold { 120.0 } else { 80.0 })
+            .font_file2(supplied.font_file_ref);
+
+        {
+            let mut font_file = pdf.stream(supplied.font_file_ref, &asset.bytes);
+            font_file.pair(Name(b"Length1"), asset.bytes.len() as i32);
+        }
+
+        let mut cmap =
+            UnicodeCmap::<u16>::new(Name(&supplied.base_name), supplied_cid_system_info());
+        for glyph in &supplied.used_glyphs {
+            cmap.pair(glyph.cid, glyph.unicode);
+        }
+        pdf.stream(supplied.to_unicode_ref, &cmap.finish());
+    }
+}
+
+fn supplied_cid_system_info() -> SystemInfo<'static> {
+    SystemInfo {
+        registry: Str(b"Adobe"),
+        ordering: Str(b"Identity"),
+        supplement: 0,
+    }
 }
 
 fn draw_underline(
@@ -2428,7 +2759,8 @@ fn set_stroke_color(content: &mut Content, color: PdfColor) {
 fn write_text_fragment(
     content: &mut Content,
     text: &str,
-    font_family: PdfFontFamily,
+    font_resource: &[u8],
+    passive_kerning_family: Option<PdfFontFamily>,
     style: &CharacterStyle,
     word_spacing: f32,
     x: f32,
@@ -2437,10 +2769,7 @@ fn write_text_fragment(
     rendering_mode: TextRenderingMode,
 ) {
     content.begin_text();
-    content.set_font(
-        font_name_for_style(font_family, style),
-        style.font_size_points(),
-    );
+    content.set_font(Name(font_resource), style.font_size_points());
     if rendering_mode != TextRenderingMode::Fill {
         content.set_text_rendering_mode(rendering_mode);
     }
@@ -2448,7 +2777,10 @@ fn write_text_fragment(
     content.set_char_spacing(twips_to_points(style.character_spacing_twips));
     content.set_horizontal_scaling(style.character_scaling_percent as f32);
     content.next_line(x, baseline_y);
-    if style_uses_passive_kerning(style) && text_has_passive_kerning(text, font_family, style) {
+    if let Some(font_family) = passive_kerning_family
+        && style_uses_passive_kerning(style)
+        && text_has_passive_kerning(text, font_family, style)
+    {
         write_positioned_text(content, text, font_family, style);
     } else {
         content.show(Str(encoded));

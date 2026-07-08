@@ -8,7 +8,7 @@ use crate::diagnostics::Diagnostic;
 use crate::fonts::{FontCoverage, FontProvider, FontProviderError};
 use crate::layout::{LayoutEngine, PdfFontFamily, passive_pdf_font_family_for_font};
 use crate::model::{Block, Document, FontDef, Paragraph, Run, StaticShape, Table};
-use crate::pdf::{PassivePdfError, audit_passive_pdf_bytes, render_pdf};
+use crate::pdf::{PassivePdfError, audit_passive_pdf_bytes, render_pdf_with_font_provider};
 use crate::rtf::{ParseError, parse_rtf_bytes_with_options};
 
 #[derive(Debug, Clone)]
@@ -92,7 +92,7 @@ pub fn convert_rtf_to_pdf(
     let layout =
         LayoutEngine::layout_with_font_provider(&parsed.document, Some(&options.font_provider));
     let page_count = layout.pages.len();
-    let pdf = render_pdf(&layout);
+    let pdf = render_pdf_with_font_provider(&layout, Some(&options.font_provider));
     let output_limit = options.parse_options.limits.max_pdf_output_bytes;
     if pdf.len() > output_limit {
         return Err(ConvertError::OutputTooLarge {

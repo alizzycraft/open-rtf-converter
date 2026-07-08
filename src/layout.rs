@@ -26,6 +26,7 @@ const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
 pub struct LayoutDocument {
     pub width: f32,
     pub height: f32,
+    pub fonts: Vec<FontDef>,
     pub pages: Vec<LayoutPage>,
 }
 
@@ -1054,6 +1055,7 @@ impl LayoutEngine {
         LayoutDocument {
             width,
             height,
+            fonts: document.fonts.clone(),
             pages,
         }
     }

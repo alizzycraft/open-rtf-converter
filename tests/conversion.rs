@@ -159,6 +159,93 @@ fn valid_memory_font_assets_report_coverage_and_metrics_without_system_fonts() {
 }
 
 #[test]
+fn caller_provided_font_asset_embeds_passive_type0_font_without_system_fonts() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Tuffy;}}\f0 AB\par}";
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/ToUnicode".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected supplied passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/Launch".as_slice(),
+        b"/EmbeddedFile".as_slice(),
+        b"/Filespec".as_slice(),
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active PDF marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn rtf_embedded_font_payload_does_not_become_pdf_font_file() {
+    let input =
+        br"{\rtf1\ansi{\fonttbl{\f0 Arial{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}};}}Visible\par}";
+    let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults()).unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for forbidden in [
+        b"/FontFile".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/FontFile3".as_slice(),
+        b"HOSTILE-FONT-PAYLOAD".as_slice(),
+        b"fontemb".as_slice(),
+        b"fontfile".as_slice(),
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "RTF embedded font payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn conversion_audits_pdf_syntax_without_rejecting_visible_active_words() {
     let input = br"{\rtf1\ansi Visible /JavaScript /Launch /URI /Annots /Widget text\par}";
     let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults()).unwrap();
