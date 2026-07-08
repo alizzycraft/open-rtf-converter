@@ -18408,6 +18408,111 @@ fn wmf_patblt_patcopy_renders_passive_brush_rectangle_without_payload_leakage() 
 }
 
 #[test]
+fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "010009000003180000000000070000000000",
+        "050000000c026400c800",
+        "070000001f04ff00000020004000",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF SETPIXEL vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Rectangle {
+                left,
+                top,
+                right,
+                bottom,
+                stroke_color: None,
+                fill_color: Some(color),
+            } if (*left - 64.0).abs() < 0.01
+                && (*top - 32.0).abs() < 0.01
+                && (*right - 65.0).abs() < 0.01
+                && (*bottom - 33.0).abs() < 0.01
+                && color.red == 255
+                && color.green == 0
+                && color.blue == 0
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in ["wmetafile", "041f", "ff0000", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SETPIXEL internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "WMF SETPIXEL should render as a passive PDF rectangle path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "f"),
+        "WMF SETPIXEL should render as a passive PDF fill"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"041f",
+        b"ff0000",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SETPIXEL leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003250000000100070000000000",

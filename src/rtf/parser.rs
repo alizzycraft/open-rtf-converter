@@ -14769,6 +14769,28 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
+            0x041f => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some((left, top, right, bottom, color)) = parse_wmf_setpixel_rect(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                ) && bounds_is_visible((left, top, right, bottom))
+                {
+                    commands.push(StaticImageVectorCommand::Rectangle {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        stroke_color: None,
+                        fill_color: Some(color),
+                    });
+                }
+            }
             _ => {}
         }
 
@@ -14967,6 +14989,54 @@ fn parse_wmf_patblt_bounds(
         left_top.0.max(right_bottom.0),
         left_top.1.max(right_bottom.1),
     ))
+}
+
+fn parse_wmf_setpixel_rect(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32, f32, f32, Color)> {
+    if data.len() < 8 {
+        return None;
+    }
+    let color = color_from_colorref(data, 0)?;
+    let y = i32::from(read_le_i16(data, 4)?);
+    let x = i32::from(read_le_i16(data, 6)?);
+    let (x, y) = normalize_wmf_point(
+        x,
+        y,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    let max_x = window_width.max(1) as f32;
+    let max_y = window_height.max(1) as f32;
+    Some((
+        pixel_rect_start(x, max_x),
+        pixel_rect_start(y, max_y),
+        pixel_rect_end(x, max_x),
+        pixel_rect_end(y, max_y),
+        color,
+    ))
+}
+
+fn pixel_rect_start(value: f32, max: f32) -> f32 {
+    if value >= max {
+        (max - 1.0).max(0.0)
+    } else {
+        value.max(0.0)
+    }
+}
+
+fn pixel_rect_end(value: f32, max: f32) -> f32 {
+    if value >= max {
+        max
+    } else {
+        (value + 1.0).min(max)
+    }
 }
 
 fn parse_wmf_yx_point(
