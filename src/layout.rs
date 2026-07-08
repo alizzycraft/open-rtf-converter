@@ -2722,12 +2722,22 @@ fn prepare_table_row(
 }
 
 fn resolve_cell_padding(row: &TableRow, cell: &TableCell) -> ResolvedCellPadding {
-    let fallback = row.cell_gap_twips.max(0);
+    let horizontal_fallback = row.cell_gap_twips.max(0);
     ResolvedCellPadding {
-        left: twips_to_points(cell.padding.left_twips.unwrap_or(fallback).max(0)),
-        right: twips_to_points(cell.padding.right_twips.unwrap_or(fallback).max(0)),
-        top: twips_to_points(cell.padding.top_twips.unwrap_or(fallback).max(0)),
-        bottom: twips_to_points(cell.padding.bottom_twips.unwrap_or(fallback).max(0)),
+        left: twips_to_points(
+            cell.padding
+                .left_twips
+                .unwrap_or(horizontal_fallback)
+                .max(0),
+        ),
+        right: twips_to_points(
+            cell.padding
+                .right_twips
+                .unwrap_or(horizontal_fallback)
+                .max(0),
+        ),
+        top: twips_to_points(cell.padding.top_twips.unwrap_or(0).max(0)),
+        bottom: twips_to_points(cell.padding.bottom_twips.unwrap_or(0).max(0)),
     }
 }
 
@@ -7466,6 +7476,70 @@ mod tests {
             .expect("padded text");
 
         assert!((text_x - 84.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn table_cell_gap_does_not_add_implicit_vertical_padding() {
+        let mut document = Document::default();
+        document.colors = vec![
+            Color::default(),
+            Color {
+                red: 240,
+                green: 240,
+                blue: 240,
+            },
+        ];
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440],
+            borders_visible: true,
+            rows: vec![TableRow {
+                height_twips: Some(489),
+                left_offset_twips: 0,
+                cell_gap_twips: 108,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: Some(1),
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    borders: TableCellBorders::default(),
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text: "Compact".to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let row_height = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Highlight { height, .. } => Some(*height),
+                _ => None,
+            })
+            .expect("row background");
+        let text_x = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "Compact" => Some(fragment.x),
+                _ => None,
+            })
+            .expect("compact cell text");
+
+        assert!((row_height - twips_to_points(489)).abs() < 0.01);
+        assert!((text_x - 77.4).abs() < 0.01);
     }
 
     #[test]
