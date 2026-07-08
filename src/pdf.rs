@@ -3626,6 +3626,7 @@ fn lighten_color(color: PdfColor) -> PdfColor {
 
 #[cfg(test)]
 mod tests {
+    use crate::fonts::{FontAsset, FontAssetStyle, FontProvider};
     use crate::layout::LayoutEngine;
     use crate::model::{
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
@@ -3653,6 +3654,82 @@ mod tests {
         assert!(pdf.starts_with(b"%PDF-"));
         let parsed = lopdf::Document::load_mem(&pdf).unwrap();
         assert_eq!(parsed.get_pages().len(), 1);
+    }
+
+    #[test]
+    fn styled_supplied_font_assets_are_selected_by_run_style() {
+        let mut document = Document {
+            fonts: vec![FontDef {
+                index: 0,
+                name: "Tuffy".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Variable,
+            }],
+            ..Document::default()
+        };
+        let mut regular_style = CharacterStyle::default();
+        regular_style.font_index = 0;
+        let mut bold_style = regular_style.clone();
+        bold_style.bold = true;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: ParagraphStyle::default(),
+            runs: vec![
+                Run {
+                    text: "Regular".to_string(),
+                    style: regular_style,
+                },
+                Run {
+                    text: " Bold".to_string(),
+                    style: bold_style,
+                },
+            ],
+        })];
+        let provider = FontProvider {
+            assets: vec![
+                FontAsset {
+                    family_names: vec!["Tuffy".to_string()],
+                    style: FontAssetStyle::default(),
+                    bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+                },
+                FontAsset {
+                    family_names: vec!["Tuffy".to_string()],
+                    style: FontAssetStyle {
+                        bold: true,
+                        italic: false,
+                    },
+                    bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+                },
+            ],
+            limits: Default::default(),
+        };
+
+        let layout = LayoutEngine::layout_with_font_provider(&document, Some(&provider));
+        let pdf = render_pdf_with_font_provider(&layout, Some(&provider));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+        let page_fonts = page_font_resource_names(&pdf, 0);
+
+        assert!(page_fonts.iter().any(|name| name == b"TF1"));
+        assert!(page_fonts.iter().any(|name| name == b"TF2"));
+        assert!(!content_bytes_for_font(&content, b"TF1").is_empty());
+        assert!(!content_bytes_for_font(&content, b"TF2").is_empty());
+        assert!(
+            pdf.windows(b"ORTFSuppliedFont1".len())
+                .any(|window| window == b"ORTFSuppliedFont1")
+        );
+        assert!(
+            pdf.windows(b"ORTFSuppliedFont2".len())
+                .any(|window| window == b"ORTFSuppliedFont2")
+        );
+        assert!(
+            pdf.windows(b"/FontFile2".len())
+                .any(|window| window == b"/FontFile2")
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
     }
 
     fn page_font_resource_names(pdf: &[u8], page_index: usize) -> Vec<Vec<u8>> {

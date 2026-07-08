@@ -33,8 +33,10 @@ struct Cli {
     #[arg(long)]
     diagnostics: bool,
 
-    /// Caller-provided passive font asset in the form FAMILY[,ALIAS...]=PATH. Repeat for multiple fonts.
-    #[arg(long = "font", value_name = "FAMILY[,ALIAS...]=PATH")]
+    /// Caller-provided passive font asset in the form FAMILY[,ALIAS...][:STYLE]=PATH. Repeat for multiple fonts.
+    ///
+    /// STYLE may be regular, bold, italic, or bold-italic. If omitted, regular is used.
+    #[arg(long = "font", value_name = "FAMILY[,ALIAS...][:STYLE]=PATH")]
     fonts: Vec<String>,
 }
 
@@ -109,7 +111,7 @@ fn load_cli_font_provider(specs: &[String]) -> Result<FontProvider, CliFontError
     }
     let mut total_bytes = 0usize;
     for spec in specs {
-        let (families, path) = parse_font_spec(spec)?;
+        let (families, style, path) = parse_font_spec(spec)?;
         let bytes = read_bounded_font_file(path, provider.limits.max_asset_bytes)?;
         total_bytes =
             total_bytes
@@ -126,7 +128,7 @@ fn load_cli_font_provider(specs: &[String]) -> Result<FontProvider, CliFontError
         }
         provider.assets.push(FontAsset {
             family_names: families,
-            style: FontAssetStyle::default(),
+            style,
             bytes,
         });
     }
@@ -134,23 +136,31 @@ fn load_cli_font_provider(specs: &[String]) -> Result<FontProvider, CliFontError
     Ok(provider)
 }
 
-fn parse_font_spec(spec: &str) -> Result<(Vec<String>, &Path), CliFontError> {
+fn parse_font_spec(spec: &str) -> Result<(Vec<String>, FontAssetStyle, &Path), CliFontError> {
     let Some((family, path)) = spec.split_once('=') else {
         return Err(CliFontError::MalformedFontSpec {
             spec: spec.to_string(),
         });
     };
-    let families = parse_font_family_aliases(family, spec)?;
+    let (family, style) = parse_font_family_aliases_and_style(family, spec)?;
     let path = path.trim();
     if path.is_empty() {
         return Err(CliFontError::MalformedFontSpec {
             spec: spec.to_string(),
         });
     }
-    Ok((families, Path::new(path)))
+    Ok((family, style, Path::new(path)))
 }
 
-fn parse_font_family_aliases(families: &str, spec: &str) -> Result<Vec<String>, CliFontError> {
+fn parse_font_family_aliases_and_style(
+    families: &str,
+    spec: &str,
+) -> Result<(Vec<String>, FontAssetStyle), CliFontError> {
+    let (families, style) = if let Some((families, style)) = families.rsplit_once(':') {
+        (families, parse_font_asset_style(style, spec)?)
+    } else {
+        (families, FontAssetStyle::default())
+    };
     let parsed = families
         .split(',')
         .map(str::trim)
@@ -162,7 +172,34 @@ fn parse_font_family_aliases(families: &str, spec: &str) -> Result<Vec<String>, 
             spec: spec.to_string(),
         });
     }
-    Ok(parsed)
+    Ok((parsed, style))
+}
+
+fn parse_font_asset_style(style: &str, spec: &str) -> Result<FontAssetStyle, CliFontError> {
+    let normalized = style.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "regular" | "normal" => Ok(FontAssetStyle {
+            bold: false,
+            italic: false,
+        }),
+        "bold" => Ok(FontAssetStyle {
+            bold: true,
+            italic: false,
+        }),
+        "italic" | "oblique" => Ok(FontAssetStyle {
+            bold: false,
+            italic: true,
+        }),
+        "bold-italic" | "bolditalic" | "bold_italic" | "bold-oblique" | "boldoblique" => {
+            Ok(FontAssetStyle {
+                bold: true,
+                italic: true,
+            })
+        }
+        _ => Err(CliFontError::MalformedFontSpec {
+            spec: spec.to_string(),
+        }),
+    }
 }
 
 fn read_bounded_font_file(path: &Path, limit: usize) -> Result<Vec<u8>, CliFontError> {
@@ -225,7 +262,7 @@ impl fmt::Display for CliFontError {
         match self {
             Self::MalformedFontSpec { spec } => write!(
                 formatter,
-                "font asset must use FAMILY[,ALIAS...]=PATH syntax, got {spec:?}"
+                "font asset must use FAMILY[,ALIAS...][:STYLE]=PATH syntax, got {spec:?}"
             ),
             Self::ReadFont { path, .. } => {
                 write!(formatter, "failed to read font asset {}", path.display())
@@ -260,18 +297,38 @@ mod tests {
 
     #[test]
     fn parses_font_spec_with_spaced_family_name() {
-        let (families, path) = parse_font_spec("Times New Roman=fixtures/fonts/Tuffy.ttf").unwrap();
+        let (families, style, path) =
+            parse_font_spec("Times New Roman=fixtures/fonts/Tuffy.ttf").unwrap();
 
         assert_eq!(families, vec!["Times New Roman"]);
+        assert_eq!(style, FontAssetStyle::default());
         assert_eq!(path, Path::new("fixtures/fonts/Tuffy.ttf"));
     }
 
     #[test]
     fn parses_font_spec_with_alias_family_names() {
-        let (families, path) =
+        let (families, style, path) =
             parse_font_spec("Times New Roman,Arial,Book Antiqua=fixtures/fonts/Tuffy.ttf").unwrap();
 
         assert_eq!(families, vec!["Times New Roman", "Arial", "Book Antiqua"]);
+        assert_eq!(style, FontAssetStyle::default());
+        assert_eq!(path, Path::new("fixtures/fonts/Tuffy.ttf"));
+    }
+
+    #[test]
+    fn parses_font_spec_with_style_suffix() {
+        let (families, style, path) =
+            parse_font_spec("Times New Roman,Book Antiqua:bold-italic=fixtures/fonts/Tuffy.ttf")
+                .unwrap();
+
+        assert_eq!(families, vec!["Times New Roman", "Book Antiqua"]);
+        assert_eq!(
+            style,
+            FontAssetStyle {
+                bold: true,
+                italic: true
+            }
+        );
         assert_eq!(path, Path::new("fixtures/fonts/Tuffy.ttf"));
     }
 
@@ -293,17 +350,40 @@ mod tests {
             parse_font_spec(" , =fixtures/fonts/Tuffy.ttf"),
             Err(CliFontError::MalformedFontSpec { .. })
         ));
+        assert!(matches!(
+            parse_font_spec("Tuffy:heavy=fixtures/fonts/Tuffy.ttf"),
+            Err(CliFontError::MalformedFontSpec { .. })
+        ));
     }
 
     #[test]
     fn loads_valid_cli_font_provider_without_system_fonts() {
-        let specs = vec!["Tuffy,Tuffy Alias=fixtures/fonts/Tuffy.ttf".to_string()];
+        let specs = vec![
+            "Tuffy,Tuffy Alias=fixtures/fonts/Tuffy.ttf".to_string(),
+            "Tuffy,Tuffy Alias:bold=fixtures/fonts/Tuffy.ttf".to_string(),
+            "Tuffy,Tuffy Alias:italic=fixtures/fonts/Tuffy.ttf".to_string(),
+        ];
         let provider = load_cli_font_provider(&specs).unwrap();
 
-        assert_eq!(provider.assets.len(), 1);
+        assert_eq!(provider.assets.len(), 3);
         assert_eq!(
             provider.assets[0].family_names,
             vec!["Tuffy", "Tuffy Alias"]
+        );
+        assert_eq!(provider.assets[0].style, FontAssetStyle::default());
+        assert_eq!(
+            provider.assets[1].style,
+            FontAssetStyle {
+                bold: true,
+                italic: false
+            }
+        );
+        assert_eq!(
+            provider.assets[2].style,
+            FontAssetStyle {
+                bold: false,
+                italic: true
+            }
         );
         assert_eq!(
             provider.coverage_for_char("Tuffy", 'A'),
