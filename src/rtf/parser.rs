@@ -3398,13 +3398,6 @@ impl Parser {
             "hyphcaps" => {
                 self.default_paragraph_style.hyphenate_caps = control.parameter.unwrap_or(1) != 0;
                 self.state.paragraph.hyphenate_caps = self.default_paragraph_style.hyphenate_caps;
-                let message = if self.default_paragraph_style.hyphenate_caps {
-                    "capitalized word hyphenation enabled for passive automatic hyphenation"
-                } else {
-                    "capitalized word hyphenation disabled for passive automatic hyphenation"
-                };
-                self.diagnostics
-                    .push(Diagnostic::warning(message, Some(offset)));
             }
             "hyphconsec" => {
                 self.default_paragraph_style
@@ -21684,13 +21677,14 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("capitalized word hyphenation disabled")
+                .contains("document hyphenation approximated")
         }));
-        assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("capitalized word hyphenation enabled")
-        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| { !diagnostic.message.contains("capitalized word hyphenation") })
+        );
     }
 
     #[test]

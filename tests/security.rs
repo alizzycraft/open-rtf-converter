@@ -14896,8 +14896,14 @@ fn capital_word_hyphenation_control_renders_passively_without_control_leakage() 
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("capitalized word hyphenation disabled")
+            .contains("document hyphenation approximated")
     }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| { !diagnostic.message.contains("capitalized word hyphenation") })
+    );
 
     let output = convert_rtf_to_pdf(
         &input,
