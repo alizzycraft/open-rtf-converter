@@ -562,6 +562,7 @@ struct ShapeBuilder {
     pending_point_x_twips: Option<i32>,
     right_twips: Option<i32>,
     bottom_twips: Option<i32>,
+    unsupported_or_active_property_stripped: bool,
 }
 
 impl Default for ShapeBuilder {
@@ -586,6 +587,7 @@ impl Default for ShapeBuilder {
             pending_point_x_twips: None,
             right_twips: None,
             bottom_twips: None,
+            unsupported_or_active_property_stripped: false,
         }
     }
 }
@@ -2338,7 +2340,7 @@ impl Parser {
                 self.state.shape_result_seen = true;
                 self.state.destination = Destination::ShapeText;
                 self.diagnostics.push(Diagnostic::warning(
-                    "rendering safe passive shape text/result and stripping shape properties",
+                    "rendering safe passive shape text/result",
                     Some(offset),
                 ));
             }
@@ -2355,7 +2357,7 @@ impl Parser {
                 } else {
                     self.state.destination = Destination::ShapeText;
                     self.diagnostics.push(Diagnostic::warning(
-                        "rendering safe passive shape fallback result and stripping shape properties",
+                        "rendering safe passive shape fallback result",
                         Some(offset),
                     ));
                 }
@@ -7964,17 +7966,32 @@ impl Parser {
             return Ok(false);
         };
         let Some(mut kind) = shape.kind else {
-            return self.push_shape_text_fallback(shape.owner_destination, shape.text);
+            return self.push_shape_text_fallback(
+                shape.owner_destination,
+                shape.text,
+                shape.unsupported_or_active_property_stripped,
+                offset,
+            );
         };
         if kind == StaticShapeKind::Rectangle && shape.rounded_rectangle {
             kind = StaticShapeKind::RoundedRectangle;
         }
         match kind {
             StaticShapeKind::Polyline if shape.points.len() < 2 => {
-                return self.push_shape_text_fallback(shape.owner_destination, shape.text);
+                return self.push_shape_text_fallback(
+                    shape.owner_destination,
+                    shape.text,
+                    shape.unsupported_or_active_property_stripped,
+                    offset,
+                );
             }
             StaticShapeKind::Polygon if shape.points.len() < 3 => {
-                return self.push_shape_text_fallback(shape.owner_destination, shape.text);
+                return self.push_shape_text_fallback(
+                    shape.owner_destination,
+                    shape.text,
+                    shape.unsupported_or_active_property_stripped,
+                    offset,
+                );
             }
             _ => {}
         }
@@ -8015,7 +8032,12 @@ impl Parser {
                 )
             };
         if width_twips <= 0 || height_twips <= 0 {
-            return self.push_shape_text_fallback(shape.owner_destination, shape.text);
+            return self.push_shape_text_fallback(
+                shape.owner_destination,
+                shape.text,
+                shape.unsupported_or_active_property_stripped,
+                offset,
+            );
         }
         if self.shape_count >= self.limits().max_shapes {
             return Err(ParseError::ResourceLimitExceeded {
@@ -8042,10 +8064,13 @@ impl Parser {
                 points,
             },
         );
-        self.diagnostics.push(Diagnostic::warning(
-            "rendering bounded passive static drawing shape and stripping raw drawing properties",
-            Some(offset),
-        ));
+        let shape_diagnostic = if shape.unsupported_or_active_property_stripped {
+            "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
+        } else {
+            "rendering bounded passive static drawing shape with normalized safe drawing properties"
+        };
+        self.diagnostics
+            .push(Diagnostic::warning(shape_diagnostic, Some(offset)));
         Ok(true)
     }
 
@@ -8053,9 +8078,17 @@ impl Parser {
         &mut self,
         destination: Destination,
         paragraphs: Vec<Paragraph>,
+        unsupported_or_active_property_stripped: bool,
+        offset: usize,
     ) -> Result<bool, ParseError> {
         if paragraphs.is_empty() {
             return Ok(false);
+        }
+        if unsupported_or_active_property_stripped {
+            self.diagnostics.push(Diagnostic::warning(
+                "rendering safe passive shape text fallback and stripping unsupported/active drawing properties",
+                Some(offset),
+            ));
         }
         if is_header_destination(destination) {
             if self.has_started_visible_body() {
@@ -8380,12 +8413,18 @@ impl Parser {
         let name = name.trim();
         let value = value.trim();
         match name {
-            "shapeType" => self.apply_current_shape_type_property(value),
+            "shapeType" => {
+                if !self.apply_current_shape_type_property(value) {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "fillColor" => {
                 if let Some(color) = parse_office_shape_color(value) {
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.fill_color = Some(color);
                     }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
             "lineColor" => {
@@ -8393,6 +8432,8 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.stroke_color = color;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
             "lineWidth" => {
@@ -8402,6 +8443,8 @@ impl Parser {
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.stroke_width_twips = width;
                     }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
             "fLine" => {
@@ -8410,6 +8453,8 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.stroke_width_twips = 0;
+                } else if parse_shape_property_i64(value).is_none() {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
             "fFilled" => {
@@ -8418,22 +8463,42 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.fill_color = None;
+                } else if parse_shape_property_i64(value).is_none() {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
-            _ => {}
+            _ => self.mark_current_shape_unsupported_or_active_property_stripped(),
         }
     }
 
-    fn apply_current_shape_type_property(&mut self, value: &str) {
+    fn apply_current_shape_type_property(&mut self, value: &str) -> bool {
         let Some(shape_type) = parse_shape_property_i64(value) else {
-            return;
+            return false;
         };
         match shape_type {
-            1 => self.set_current_shape_kind(StaticShapeKind::Rectangle),
-            2 => self.set_current_shape_rounded_rectangle(),
-            9 => self.set_current_shape_kind(StaticShapeKind::Ellipse),
-            20 => self.set_current_shape_kind(StaticShapeKind::Line),
-            _ => {}
+            1 => {
+                self.set_current_shape_kind(StaticShapeKind::Rectangle);
+                true
+            }
+            2 => {
+                self.set_current_shape_rounded_rectangle();
+                true
+            }
+            9 => {
+                self.set_current_shape_kind(StaticShapeKind::Ellipse);
+                true
+            }
+            20 => {
+                self.set_current_shape_kind(StaticShapeKind::Line);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn mark_current_shape_unsupported_or_active_property_stripped(&mut self) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.unsupported_or_active_property_stripped = true;
         }
     }
 

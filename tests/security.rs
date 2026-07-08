@@ -23636,6 +23636,22 @@ fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_
         },
     )
     .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering safe passive shape text/result")
+    }));
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("stripping shape properties"))
+    );
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
@@ -24142,7 +24158,7 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
     let input_path = dir.path().join("modern-static-shape.rtf");
     let output_path = dir.path().join("modern-static-shape.pdf");
     fs::write(&input_path, input).unwrap();
-    convert_rtf_file_to_pdf(
+    let report = convert_rtf_file_to_pdf(
         &input_path,
         &output_path,
         &ConvertOptions {
@@ -24151,6 +24167,17 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
         },
     )
     .unwrap();
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("stripping shape properties"))
+    );
     let pdf = fs::read(&output_path).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
