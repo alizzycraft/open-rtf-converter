@@ -423,6 +423,7 @@ pub enum StaticImageVectorCommand {
         height: f32,
         text: String,
         color: Option<Color>,
+        background_color: Option<Color>,
         horizontal_align: StaticImageTextHorizontalAlign,
         vertical_align: StaticImageTextVerticalAlign,
     },

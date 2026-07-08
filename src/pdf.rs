@@ -1363,6 +1363,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 height,
                 text,
                 color,
+                background_color,
                 horizontal_align,
                 vertical_align,
             } => {
@@ -1374,6 +1375,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     font_size,
                     text,
                     *color,
+                    *background_color,
                     *horizontal_align,
                     *vertical_align,
                 );
@@ -1581,6 +1583,7 @@ fn draw_passive_vector_text(
     font_size: f32,
     text: &str,
     color: Option<crate::model::Color>,
+    background_color: Option<crate::model::Color>,
     horizontal_align: StaticImageTextHorizontalAlign,
     vertical_align: StaticImageTextVerticalAlign,
 ) {
@@ -1589,6 +1592,21 @@ fn draw_passive_vector_text(
     }
     let mut style = CharacterStyle::default();
     style.font_size_half_points = (font_size * 2.0).round().clamp(1.0, 144.0) as i32;
+    let metrics =
+        passive_vector_text_metrics(point, font_size, text, horizontal_align, vertical_align);
+    if let Some(background_color) = background_color {
+        draw_passive_vector_rectangle(
+            content,
+            VectorDrawRect {
+                x: metrics.x,
+                y: metrics.bottom_y,
+                width: metrics.width,
+                height: metrics.top_y - metrics.bottom_y,
+            },
+            None,
+            Some(background_color),
+        );
+    }
     set_fill_color(
         content,
         color.map(pdf_color_from_model).unwrap_or(PdfColor {
@@ -1598,17 +1616,6 @@ fn draw_passive_vector_text(
         }),
     );
     let encoded = encode_pdf_text_for_font(text, PdfFontFamily::Helvetica);
-    let text_width = estimated_passive_vector_text_width(text, font_size);
-    let x = match horizontal_align {
-        StaticImageTextHorizontalAlign::Left => point.x,
-        StaticImageTextHorizontalAlign::Center => point.x - (text_width / 2.0),
-        StaticImageTextHorizontalAlign::Right => point.x - text_width,
-    };
-    let baseline_y = match vertical_align {
-        StaticImageTextVerticalAlign::Top => point.y - font_size,
-        StaticImageTextVerticalAlign::Baseline => point.y,
-        StaticImageTextVerticalAlign::Bottom => point.y + (font_size * 0.2),
-    };
     write_text_fragment(
         content,
         text,
@@ -1616,11 +1623,57 @@ fn draw_passive_vector_text(
         Some(PdfFontFamily::Helvetica),
         &style,
         0.0,
-        x,
-        baseline_y,
+        metrics.x,
+        metrics.baseline_y,
         &encoded,
         TextRenderingMode::Fill,
     );
+}
+
+#[derive(Debug, Copy, Clone)]
+struct PassiveVectorTextMetrics {
+    x: f32,
+    baseline_y: f32,
+    top_y: f32,
+    bottom_y: f32,
+    width: f32,
+}
+
+fn passive_vector_text_metrics(
+    point: crate::layout::LayoutPoint,
+    font_size: f32,
+    text: &str,
+    horizontal_align: StaticImageTextHorizontalAlign,
+    vertical_align: StaticImageTextVerticalAlign,
+) -> PassiveVectorTextMetrics {
+    let text_width = estimated_passive_vector_text_width(text, font_size);
+    let x = match horizontal_align {
+        StaticImageTextHorizontalAlign::Left => point.x,
+        StaticImageTextHorizontalAlign::Center => point.x - (text_width / 2.0),
+        StaticImageTextHorizontalAlign::Right => point.x - text_width,
+    };
+    let (baseline_y, top_y, bottom_y) = match vertical_align {
+        StaticImageTextVerticalAlign::Top => {
+            let baseline_y = point.y - font_size;
+            (baseline_y, point.y, baseline_y - (font_size * 0.2))
+        }
+        StaticImageTextVerticalAlign::Baseline => (
+            point.y,
+            point.y + (font_size * 0.8),
+            point.y - (font_size * 0.2),
+        ),
+        StaticImageTextVerticalAlign::Bottom => {
+            let baseline_y = point.y + (font_size * 0.2);
+            (baseline_y, baseline_y + (font_size * 0.8), point.y)
+        }
+    };
+    PassiveVectorTextMetrics {
+        x,
+        baseline_y,
+        top_y,
+        bottom_y,
+        width: text_width.max(font_size * 0.25),
+    }
 }
 
 fn estimated_passive_vector_text_width(text: &str, font_size: f32) -> f32 {

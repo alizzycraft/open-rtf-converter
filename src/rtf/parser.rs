@@ -14380,12 +14380,19 @@ enum WmfObject {
     Other,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum WmfTextBackgroundMode {
+    Transparent,
+    Opaque,
+}
+
 #[derive(Debug, Copy, Clone)]
 struct WmfDrawingState {
     stroke_color: Option<Color>,
     fill_color: Option<Color>,
     text_color: Option<Color>,
     background_color: Option<Color>,
+    text_background_mode: WmfTextBackgroundMode,
     font_height: Option<i32>,
     font_charset: Option<i32>,
     text_horizontal_align: StaticImageTextHorizontalAlign,
@@ -14403,6 +14410,7 @@ impl Default for WmfDrawingState {
                 green: 255,
                 blue: 255,
             }),
+            text_background_mode: WmfTextBackgroundMode::Transparent,
             font_height: None,
             font_charset: None,
             text_horizontal_align: StaticImageTextHorizontalAlign::Left,
@@ -14419,6 +14427,7 @@ const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
 const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
 const WMF_ETO_GLYPH_INDEX: u16 = 0x0010;
+const WMF_BKMODE_OPAQUE: u16 = 2;
 const WMF_TA_RIGHT: u16 = 0x0002;
 const WMF_TA_CENTER: u16 = 0x0006;
 const WMF_TA_BOTTOM: u16 = 0x0008;
@@ -14816,6 +14825,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     state.background_color = Some(color);
                 }
             }
+            0x0102 => {
+                state.text_background_mode = if read_le_u16(data, 0)? == WMF_BKMODE_OPAQUE {
+                    WmfTextBackgroundMode::Opaque
+                } else {
+                    WmfTextBackgroundMode::Transparent
+                };
+            }
             0x012e => {
                 let mode = read_le_u16(data, 0)?;
                 state.text_horizontal_align = wmf_text_horizontal_align(mode);
@@ -14981,6 +14997,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         height: normalized_wmf_text_height(state.font_height, window_height),
                         text,
                         color: state.text_color,
+                        background_color: match state.text_background_mode {
+                            WmfTextBackgroundMode::Opaque => state.background_color,
+                            WmfTextBackgroundMode::Transparent => None,
+                        },
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
@@ -15026,6 +15046,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         height: normalized_wmf_text_height(state.font_height, window_height),
                         text: ext_text.text,
                         color: state.text_color,
+                        background_color: None,
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
