@@ -193,7 +193,7 @@ fn cyrillic_charset_text_is_decoded_but_unrenderable_font_gap_is_reported() {
 }
 
 #[test]
-fn caller_font_assets_are_bounded_and_do_not_cross_into_pdf_without_embedding() {
+fn invalid_caller_font_assets_are_rejected_before_pdf_rendering() {
     let input = rtf(&[
         "{",
         "\\",
@@ -235,21 +235,13 @@ fn caller_font_assets_are_bounded_and_do_not_cross_into_pdf_without_embedding() 
         ..FontProvider::browser_safe_defaults()
     };
 
-    let output = convert_rtf_to_pdf(&input, &options).unwrap();
-    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("caller-provided passive font asset")
-            && diagnostic.message.contains("not implemented yet")
-    }));
-    assert!(
-        !output
-            .pdf
-            .windows(font_bytes.len())
-            .any(|window| window == font_bytes),
-        "raw caller-provided font bytes crossed into PDF before embedding support exists"
-    );
+    let error = convert_rtf_to_pdf(&input, &options).unwrap_err();
+    assert!(matches!(
+        error,
+        open_rtf_converter::ConvertError::FontProvider(
+            open_rtf_converter::FontProviderError::InvalidAsset { .. }
+        )
+    ));
 }
 
 #[test]

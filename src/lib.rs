@@ -16,4 +16,6 @@ pub use convert::{
     ConversionOutput, ConvertError, ConvertOptions, convert_rtf_bytes_to_pdf, convert_rtf_to_pdf,
 };
 pub use diagnostics::{Diagnostic, Severity};
-pub use fonts::{FontAsset, FontAssetStyle, FontProvider, FontProviderError, FontProviderLimits};
+pub use fonts::{
+    FontAsset, FontAssetStyle, FontCoverage, FontProvider, FontProviderError, FontProviderLimits,
+};

@@ -1,6 +1,8 @@
 use std::error::Error;
 use std::fmt;
 
+use ttf_parser::Face;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontProvider {
     pub assets: Vec<FontAsset>,
@@ -72,6 +74,10 @@ impl FontProvider {
                     });
                 }
             }
+            Face::parse(&asset.bytes, 0).map_err(|error| FontProviderError::InvalidAsset {
+                asset_index,
+                reason: error.to_string(),
+            })?;
         }
 
         Ok(())
@@ -89,6 +95,34 @@ impl FontProvider {
                 .any(|candidate| normalized_family_name(candidate) == family_name)
         })
     }
+
+    pub fn coverage_for_char(&self, family_name: &str, ch: char) -> FontCoverage {
+        let family_name = normalized_family_name(family_name);
+        if family_name.is_empty() {
+            return FontCoverage::NoAsset;
+        }
+        let mut found_asset = false;
+        for asset in &self.assets {
+            if !asset
+                .family_names
+                .iter()
+                .any(|candidate| normalized_family_name(candidate) == family_name)
+            {
+                continue;
+            }
+            found_asset = true;
+            if let Ok(face) = Face::parse(&asset.bytes, 0)
+                && face.glyph_index(ch).is_some()
+            {
+                return FontCoverage::Covered;
+            }
+        }
+        if found_asset {
+            FontCoverage::MissingGlyph
+        } else {
+            FontCoverage::NoAsset
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +136,13 @@ pub struct FontAsset {
 pub struct FontAssetStyle {
     pub bold: bool,
     pub italic: bool,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum FontCoverage {
+    NoAsset,
+    Covered,
+    MissingGlyph,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +201,10 @@ pub enum FontProviderError {
         len: usize,
         limit: usize,
     },
+    InvalidAsset {
+        asset_index: usize,
+        reason: String,
+    },
 }
 
 impl fmt::Display for FontProviderError {
@@ -196,6 +241,13 @@ impl fmt::Display for FontProviderError {
             } => write!(
                 formatter,
                 "passive font asset {asset_index} family name exceeded limit: {len} bytes > {limit} bytes"
+            ),
+            Self::InvalidAsset {
+                asset_index,
+                reason,
+            } => write!(
+                formatter,
+                "passive font asset {asset_index} is not a valid OpenType/TrueType font: {reason}"
             ),
         }
     }

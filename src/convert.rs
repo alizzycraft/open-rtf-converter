@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::config::RtfParseOptions;
 use crate::diagnostics::Diagnostic;
-use crate::fonts::{FontProvider, FontProviderError};
+use crate::fonts::{FontCoverage, FontProvider, FontProviderError};
 use crate::layout::{LayoutEngine, PdfFontFamily, passive_pdf_font_family_for_font};
 use crate::model::{Block, Document, FontDef, Paragraph, Run, StaticShape, Table};
 use crate::pdf::{PassivePdfError, audit_passive_pdf_bytes, render_pdf};
@@ -326,7 +326,7 @@ fn collect_unsupported_glyph_diagnostic_from_run(
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Some(script) = unsupported_passive_glyph_script(&run.text) else {
+    let Some((script, sample_char)) = unsupported_passive_glyph_script(&run.text) else {
         return;
     };
     let key = (run.style.font_index, script);
@@ -340,26 +340,27 @@ fn collect_unsupported_glyph_diagnostic_from_run(
         .find(|font| font.index == run.style.font_index)
         .map(|font| font.name.as_str())
         .unwrap_or("unknown");
-    let message = if font_provider.has_asset_for_family(font_name) {
-        format!(
-            "{} characters for font '{}' have a caller-provided passive font asset, but embedded font rendering is not implemented yet; current PDF base-font fallback may render replacement glyphs",
-            script, font_name
-        )
-    } else {
-        format!(
+    let message = match font_provider.coverage_for_char(font_name, sample_char) {
+        FontCoverage::NoAsset => format!(
             "{} characters for font '{}' need passive font asset support; current PDF base-font fallback may render replacement glyphs",
             script, font_name
-        )
+        ),
+        FontCoverage::Covered => format!(
+            "{} characters for font '{}' have a parsed caller-provided passive font asset, but embedded font rendering is not implemented yet; current PDF base-font fallback may render replacement glyphs",
+            script, font_name
+        ),
+        FontCoverage::MissingGlyph => format!(
+            "{} characters for font '{}' are not covered by the caller-provided passive font asset; current PDF base-font fallback may render replacement glyphs",
+            script, font_name
+        ),
     };
     diagnostics.push(Diagnostic::warning(message, None));
 }
 
-fn unsupported_passive_glyph_script(text: &str) -> Option<&'static str> {
-    if text.chars().any(is_cyrillic_char) {
-        Some("Cyrillic")
-    } else {
-        None
-    }
+fn unsupported_passive_glyph_script(text: &str) -> Option<(&'static str, char)> {
+    text.chars()
+        .find(|ch| is_cyrillic_char(*ch))
+        .map(|ch| ("Cyrillic", ch))
 }
 
 fn is_cyrillic_char(ch: char) -> bool {
