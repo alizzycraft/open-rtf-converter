@@ -42,6 +42,7 @@ pub enum TokenKind {
     EndGroup,
     Control(Control),
     Text(String),
+    RawText(Vec<u8>),
     HexByte(u8),
     Binary(Vec<u8>),
 }
@@ -157,7 +158,7 @@ impl<'a> Lexer<'a> {
         }
 
         Ok(Token {
-            kind: TokenKind::Text(String::from_utf8_lossy(&self.input[start..self.pos]).into()),
+            kind: TokenKind::RawText(self.input[start..self.pos].to_vec()),
             offset,
         })
     }
@@ -391,6 +392,19 @@ mod tests {
     }
 
     #[test]
+    fn direct_text_preserves_raw_high_bytes_for_parser_decoding() {
+        let tokens = Lexer::new(b"{\\rtf1 Quote \x93Hello\x94}", RtfLimits::default())
+            .tokenize()
+            .unwrap();
+
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::RawText(b"Quote \x93Hello\x94".to_vec()))
+        );
+    }
+
+    #[test]
     fn bin_consumes_exact_raw_bytes() {
         let tokens = Lexer::new(br"{\rtf1 \bin3 a\} visible}", RtfLimits::default())
             .tokenize()
@@ -403,7 +417,7 @@ mod tests {
         assert!(
             tokens
                 .iter()
-                .any(|token| token.kind == TokenKind::Text(" visible".to_string()))
+                .any(|token| token.kind == TokenKind::RawText(b" visible".to_vec()))
         );
     }
 }

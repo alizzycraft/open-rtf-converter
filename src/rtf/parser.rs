@@ -1000,6 +1000,7 @@ impl Parser {
                 TokenKind::EndGroup => self.end_group(token.offset)?,
                 TokenKind::Control(control) => self.apply_control(control, token.offset)?,
                 TokenKind::Text(text) => self.apply_text(text, token.offset)?,
+                TokenKind::RawText(bytes) => self.apply_raw_text(bytes, token.offset)?,
                 TokenKind::HexByte(byte) => self.apply_hex_byte(*byte, token.offset)?,
                 TokenKind::Binary(bytes) => self.apply_binary(bytes, token.offset)?,
             }
@@ -3791,6 +3792,134 @@ impl Parser {
             | Destination::Metadata
             | Destination::ObjectData => {
                 self.count_skipped_destination_bytes(text.len(), offset)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_raw_text(&mut self, bytes: &[u8], offset: usize) -> Result<(), ParseError> {
+        self.state.at_group_start = false;
+        if self.state.skip_bytes > 0 {
+            let skip = self.state.skip_bytes.min(bytes.len());
+            self.state.skip_bytes -= skip;
+            if skip == bytes.len() {
+                return Ok(());
+            }
+            return self.apply_raw_text(&bytes[skip..], offset);
+        }
+        self.state.pending_unicode_high_surrogate = None;
+
+        if self.state.skip_password_hash_payload {
+            let text = raw_bytes_to_lossless_text(bytes);
+            return self.apply_password_hash_payload_text(&text, offset);
+        }
+        if self.state.destination == Destination::Picture {
+            let text = raw_bytes_to_lossless_text(bytes);
+            return self.push_picture_hex_text(&text, offset);
+        }
+
+        let visible_text = self.decode_direct_text_bytes(bytes);
+        if self.state.office_math_delimiter_capture.is_some() {
+            return self.push_office_math_delimiter_text(&visible_text, offset);
+        }
+        if self.state.shape_property_capture.is_some() {
+            return self.push_shape_property_text(&visible_text, offset);
+        }
+        if self.state.capturing_form_default_text {
+            return self.push_form_default_text(&visible_text, offset);
+        }
+        if self.state.capturing_form_dropdown_entry {
+            return self.push_form_dropdown_text(&visible_text, offset);
+        }
+        if self.state.user_property_capture.is_some() {
+            return self.push_user_property_text(&visible_text, offset);
+        }
+        if self.state.document_variable_capture.is_some() {
+            return self.push_document_variable_text(&visible_text, offset);
+        }
+        if self.state.metadata_property.is_some() {
+            return self.push_document_property_text(&visible_text, offset);
+        }
+
+        match self.state.destination {
+            Destination::Body => {
+                if self.current_table.is_some() && self.current_table_row.is_none() {
+                    self.finish_table(offset)?;
+                }
+                if self.state.character.hidden {
+                    self.count_skipped_destination_bytes(bytes.len(), offset)?;
+                } else {
+                    self.push_text(&visible_text, offset)?;
+                }
+            }
+            Destination::ListText => {
+                if self.state.character.hidden {
+                    self.count_skipped_destination_bytes(bytes.len(), offset)?;
+                } else {
+                    self.push_list_marker_text(&visible_text, offset)?;
+                }
+            }
+            Destination::Header
+            | Destination::FirstPageHeader
+            | Destination::EvenPageHeader
+            | Destination::Footer
+            | Destination::FirstPageFooter
+            | Destination::EvenPageFooter
+            | Destination::ShapeText
+            | Destination::Footnote
+            | Destination::Endnote => {
+                if self.state.character.hidden {
+                    self.count_skipped_destination_bytes(bytes.len(), offset)?;
+                } else {
+                    self.push_text(&visible_text, offset)?
+                }
+            }
+            Destination::Picture => {
+                let text = raw_bytes_to_lossless_text(bytes);
+                self.push_picture_hex_text(&text, offset)?;
+            }
+            Destination::FontTable => {
+                let text = decode_raw_bytes(bytes, self.state.code_page);
+                self.push_font_text(&text, offset)?
+            }
+            Destination::FontAlternate => {
+                let text = decode_raw_bytes(bytes, self.state.code_page);
+                self.push_font_alternate_text(&text, offset)?
+            }
+            Destination::ColorTable => {
+                let text = raw_bytes_to_lossless_text(bytes);
+                self.push_color_text(&text, offset)?
+            }
+            Destination::ListTable if self.state.list_context == ListContext::ListLevelText => {
+                let text = decode_raw_bytes(bytes, self.state.code_page);
+                self.push_list_level_text(&text, offset)?
+            }
+            Destination::ListOverrideTable
+                if self.state.list_context == ListContext::ListLevelText =>
+            {
+                let text = decode_raw_bytes(bytes, self.state.code_page);
+                self.push_list_level_text(&text, offset)?
+            }
+            Destination::FieldInstruction => {
+                let text = decode_raw_bytes(bytes, self.state.code_page);
+                self.push_field_instruction_text(&text, offset)?
+            }
+            Destination::BookmarkStart | Destination::BookmarkEnd => {
+                let text = decode_raw_bytes(bytes, self.state.code_page);
+                self.push_bookmark_name_text(&text, offset)?
+            }
+            Destination::StyleSheet => {
+                let text = decode_raw_bytes(bytes, self.state.code_page);
+                self.push_style_name_text(&text, offset)?
+            }
+            Destination::ListTable
+            | Destination::ListOverrideTable
+            | Destination::Shape
+            | Destination::Background
+            | Destination::Ignored
+            | Destination::Metadata
+            | Destination::ObjectData => {
+                self.count_skipped_destination_bytes(bytes.len(), offset)?;
             }
         }
         Ok(())
@@ -8897,6 +9026,24 @@ impl Parser {
         decode_hex_byte(byte, code_page)
     }
 
+    fn decode_direct_text_bytes(&self, bytes: &[u8]) -> String {
+        let font = self
+            .document
+            .fonts
+            .iter()
+            .find(|font| font.index == self.state.character.font_index);
+        let code_page = match font.and_then(|font| font.code_page) {
+            Some(code_page) => {
+                CodePage::from_rtf_code_page(code_page).unwrap_or(CodePage::Unsupported)
+            }
+            None => font
+                .and_then(|font| font.charset)
+                .and_then(CodePage::from_font_charset)
+                .unwrap_or(self.state.code_page),
+        };
+        decode_raw_bytes(bytes, code_page)
+    }
+
     fn push_color_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         for ch in text.chars() {
             if ch == ';' {
@@ -13549,6 +13696,17 @@ fn decode_hex_byte(byte: u8, code_page: CodePage) -> char {
     }
 }
 
+fn decode_raw_bytes(bytes: &[u8], code_page: CodePage) -> String {
+    bytes
+        .iter()
+        .map(|byte| decode_hex_byte(*byte, code_page))
+        .collect()
+}
+
+fn raw_bytes_to_lossless_text(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| char::from(*byte)).collect()
+}
+
 fn decode_high_byte(byte: u8, high_table: &[char; 128]) -> char {
     if byte.is_ascii() {
         byte as char
@@ -15420,6 +15578,43 @@ mod tests {
             .collect::<String>();
 
         assert_eq!(text, "Quote \u{201c}Hello\u{201d} dash \u{2014}");
+    }
+
+    #[test]
+    fn decodes_direct_ansi_bytes_with_document_code_page() {
+        let output =
+            parse_rtf_bytes(b"{\\rtf1\\ansi\\ansicpg1252 Quote \x93Hello\x94 dash \x97\\par}")
+                .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let text = paragraph
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(text, "Quote \u{201c}Hello\u{201d} dash \u{2014}");
+    }
+
+    #[test]
+    fn font_charset_overrides_direct_ansi_byte_decoding() {
+        let output = parse_rtf_bytes(
+            b"{\\rtf1\\ansi\\ansicpg1252{\\fonttbl{\\f0 Times New Roman;}{\\f37\\fcharset238 Times New Roman CE;}}\\f37 \xf6t \xe1rv\xedzt\xfbr\xf5\\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let text = paragraph
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(text.trim(), "öt árvíztűrő");
     }
 
     #[test]
