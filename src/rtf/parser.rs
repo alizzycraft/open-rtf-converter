@@ -15091,7 +15091,14 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         height: normalized_wmf_text_height(state.font_height, window_height),
                         text: ext_text.text,
                         color: state.text_color,
-                        background_color: None,
+                        background_color: if ext_text.opaque_bounds.is_none() {
+                            match state.text_background_mode {
+                                WmfTextBackgroundMode::Opaque => state.background_color,
+                                WmfTextBackgroundMode::Transparent => None,
+                            }
+                        } else {
+                            None
+                        },
                         clip_bounds: ext_text.clip_bounds.map(|(left, top, right, bottom)| {
                             crate::model::StaticImageVectorTextBounds {
                                 left,
