@@ -651,7 +651,7 @@ impl Default for ParagraphStyle {
             right_indent_twips: 0,
             first_line_indent_twips: 0,
             space_before_twips: 0,
-            space_after_twips: 120,
+            space_after_twips: 0,
             auto_space_before: false,
             auto_space_after: false,
             contextual_spacing: false,

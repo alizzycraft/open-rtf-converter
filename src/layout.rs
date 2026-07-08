@@ -9559,7 +9559,7 @@ mod tests {
             "bottom footnote baseline should stay near page bottom, got {note_y}"
         );
         assert!(
-            (separator_y - 95.0).abs() < 0.01,
+            (separator_y - 92.0).abs() < 0.01,
             "separator should sit above bottom footnote band, got {separator_y}"
         );
     }
@@ -10172,7 +10172,7 @@ mod tests {
         let default_gap =
             paragraph_baseline_gap(ParagraphStyle::default(), ParagraphStyle::default());
 
-        assert!((spaced_gap - default_gap - 24.0).abs() < 0.01);
+        assert!((spaced_gap - default_gap - 30.0).abs() < 0.01);
     }
 
     #[test]
@@ -11565,13 +11565,13 @@ mod tests {
     fn flows_body_text_to_next_column_before_next_page() {
         let mut document = small_test_page_document();
         document.page.column_count = 2;
-        document.blocks = (0..8)
+        document.blocks = (0..11)
             .map(|idx| paragraph_with_text(&format!("P{idx}")))
             .collect();
 
         let layout = LayoutEngine::layout(&document);
         let first_x = text_x(&layout.pages[0], "P0").expect("first paragraph");
-        let overflow_x = text_x(&layout.pages[0], "P7").expect("overflow paragraph");
+        let overflow_x = text_x(&layout.pages[0], "P10").expect("overflow paragraph");
 
         assert_eq!(layout.pages.len(), 1);
         assert!(overflow_x > first_x + 200.0);
@@ -11797,20 +11797,16 @@ mod tests {
         let mut document = small_test_page_document();
         let mut keep_style = ParagraphStyle::default();
         keep_style.keep_together = true;
-        document.blocks = vec![
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            Block::Paragraph(Paragraph {
+        document.blocks = (0..8)
+            .map(|_| paragraph_with_text("Filler"))
+            .chain([Block::Paragraph(Paragraph {
                 style: keep_style,
                 runs: vec![Run {
                     text: "Keep\nTogether\nLines".to_string(),
                     style: Default::default(),
                 }],
-            }),
-        ];
+            })])
+            .collect();
 
         let layout = LayoutEngine::layout(&document);
 
@@ -11824,21 +11820,19 @@ mod tests {
         let mut document = small_test_page_document();
         let mut keep_next_style = ParagraphStyle::default();
         keep_next_style.keep_with_next = true;
-        document.blocks = vec![
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            Block::Paragraph(Paragraph {
-                style: keep_next_style,
-                runs: vec![Run {
-                    text: "Keep next".to_string(),
-                    style: Default::default(),
-                }],
-            }),
-            paragraph_with_text("Follower"),
-        ];
+        document.blocks = (0..9)
+            .map(|_| paragraph_with_text("Filler"))
+            .chain([
+                Block::Paragraph(Paragraph {
+                    style: keep_next_style,
+                    runs: vec![Run {
+                        text: "Keep next".to_string(),
+                        style: Default::default(),
+                    }],
+                }),
+                paragraph_with_text("Follower"),
+            ])
+            .collect();
 
         let layout = LayoutEngine::layout(&document);
 
@@ -11853,19 +11847,16 @@ mod tests {
         let mut document = small_test_page_document();
         let mut widow_style = ParagraphStyle::default();
         widow_style.widow_control = true;
-        document.blocks = vec![
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            paragraph_with_text("Filler"),
-            Block::Paragraph(Paragraph {
+        document.blocks = (0..6)
+            .map(|_| paragraph_with_text("Filler"))
+            .chain([Block::Paragraph(Paragraph {
                 style: widow_style,
                 runs: vec![Run {
                     text: "Alpha\nBeta\nGamma".to_string(),
                     style: Default::default(),
                 }],
-            }),
-        ];
+            })])
+            .collect();
 
         let layout = LayoutEngine::layout(&document);
 
