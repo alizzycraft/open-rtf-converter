@@ -23378,6 +23378,18 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
     assert!(text.contains("visible"));
     assert!(!text.contains("414243"));
     assert!(!text.contains("[Embedded object removed]"));
+    assert_eq!(
+        parsed
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic
+                .message
+                .contains("active content removed: object payload in skipped destination"))
+            .count(),
+        1,
+        "one skipped object should produce one object-payload diagnostic: {:?}",
+        parsed.diagnostics
+    );
 }
 
 #[test]

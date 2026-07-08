@@ -70,6 +70,7 @@ struct ParserState {
     pending_unicode_high_surrogate: Option<u16>,
     skip_bytes: usize,
     destination: Destination,
+    last_skipped_active_feature: Option<&'static str>,
     inside_metadata: bool,
     inside_document_info: bool,
     inside_user_properties: bool,
@@ -150,6 +151,7 @@ impl Default for ParserState {
             pending_unicode_high_surrogate: None,
             skip_bytes: 0,
             destination: Destination::Body,
+            last_skipped_active_feature: None,
             inside_metadata: false,
             inside_document_info: false,
             inside_user_properties: false,
@@ -2857,7 +2859,7 @@ impl Parser {
                 && skipped_destination_active_feature(name).is_some() =>
             {
                 let feature = skipped_destination_active_feature(name).expect("checked above");
-                self.handle_active_content(feature, offset)?;
+                self.handle_skipped_destination_active_content(feature, offset)?;
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
             name if matches!(
@@ -9943,6 +9945,27 @@ impl Parser {
                 Ok(())
             }
         }
+    }
+
+    fn handle_skipped_destination_active_content(
+        &mut self,
+        feature: &'static str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.options.active_content_policy == ActiveContentPolicy::Reject {
+            return Err(ParseError::ActiveContentRejected {
+                feature: feature.to_string(),
+                offset,
+            });
+        }
+        if self.state.last_skipped_active_feature != Some(feature) {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("active content removed: {feature}"),
+                Some(offset),
+            ));
+            self.state.last_skipped_active_feature = Some(feature);
+        }
+        Ok(())
     }
 
     fn handle_field_boundary(&mut self, offset: usize) -> Result<(), ParseError> {
