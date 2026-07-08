@@ -1342,7 +1342,9 @@ impl Parser {
                 self.state = previous;
                 let has_visible_stored_result =
                     field_result_seen && field_result_has_visible_content;
-                if !has_visible_stored_result
+                if has_visible_stored_result && !field_hidden {
+                    self.warn_stored_field_result(&field_instruction, offset);
+                } else if !has_visible_stored_result
                     && self.options.active_content_policy == ActiveContentPolicy::Placeholder
                     && !field_hidden
                 {
@@ -2650,7 +2652,7 @@ impl Parser {
             }
             "field" if destination_allows_visible_content(&self.state) => {
                 let owner_destination = self.state.destination;
-                self.handle_active_content("field instruction", offset)?;
+                self.handle_field_boundary(offset)?;
                 self.state.inside_field = true;
                 self.state.field_owner_destination = owner_destination;
                 self.state.field_result_seen = false;
@@ -9944,6 +9946,26 @@ impl Parser {
                 Ok(())
             }
         }
+    }
+
+    fn handle_field_boundary(&mut self, offset: usize) -> Result<(), ParseError> {
+        if self.options.active_content_policy == ActiveContentPolicy::Reject {
+            return Err(ParseError::ActiveContentRejected {
+                feature: "field instruction".to_string(),
+                offset,
+            });
+        }
+        Ok(())
+    }
+
+    fn warn_stored_field_result(&mut self, instruction: &str, offset: usize) {
+        let message = if let Some(name) = field_instruction_name(instruction) {
+            format!("rendering stored result for field {name} without executing field instruction")
+        } else {
+            "rendering stored field result without executing field instruction".to_string()
+        };
+        self.diagnostics
+            .push(Diagnostic::warning(message, Some(offset)));
     }
 
     fn handle_dynamic_date_time_control(
@@ -18451,6 +18473,11 @@ After\par}"#;
                 .message
                 .contains("rendering passive field SYMBOL without executing field instruction")
         }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("active content removed: field instruction")
+        }));
     }
 
     #[test]
@@ -18466,6 +18493,16 @@ After\par}"#;
         assert!(!text.contains("MMMM"));
         assert!(!text.contains("fldinst"));
         assert!(!text.contains("[Field removed"));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("rendering stored result for field DATE")
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("active content removed: field instruction")
+        }));
     }
 
     #[test]
