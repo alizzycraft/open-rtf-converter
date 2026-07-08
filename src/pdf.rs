@@ -330,9 +330,18 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
     let first_page_id = 3;
     let first_content_id = first_page_id + layout.pages.len() as i32;
     let first_font_id = first_content_id + layout.pages.len() as i32;
-    let symbol_to_unicode_id = first_font_id + BUILTIN_FONTS.len() as i32;
-    let zapf_dingbats_to_unicode_id = symbol_to_unicode_id + 1;
-    let first_image_id = zapf_dingbats_to_unicode_id + 1;
+    let used_font_indexes = collect_used_font_indexes(layout);
+    let mut next_object_id = first_font_id;
+    let mut font_refs = [None; 14];
+    for font_idx in &used_font_indexes {
+        font_refs[*font_idx] = Some(Ref::new(next_object_id));
+        next_object_id += 1;
+    }
+    let symbol_to_unicode_ref =
+        font_refs[font_index_for_resource(SYMBOL_REGULAR)].map(|_| next_ref(&mut next_object_id));
+    let zapf_dingbats_to_unicode_ref = font_refs[font_index_for_resource(ZAPF_DINGBATS_REGULAR)]
+        .map(|_| next_ref(&mut next_object_id));
+    let first_image_id = next_object_id;
 
     let page_refs = (0..layout.pages.len())
         .map(|idx| Ref::new(first_page_id + idx as i32))
@@ -356,8 +365,11 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
             let mut resources = page_writer.resources();
             {
                 let mut fonts = resources.fonts();
-                for (idx, (resource_name, _base_font)) in BUILTIN_FONTS.iter().enumerate() {
-                    fonts.pair(Name(resource_name), Ref::new(first_font_id + idx as i32));
+                for font_idx in &used_font_indexes {
+                    let (resource_name, _base_font) = BUILTIN_FONTS[*font_idx];
+                    if let Some(font_ref) = font_refs[*font_idx] {
+                        fonts.pair(Name(resource_name), font_ref);
+                    }
                 }
             }
             if let Some(page_images) = image_refs.get(idx)
@@ -567,29 +579,38 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
         pdf.stream(content_id, &content.finish());
     }
 
-    for (idx, (_resource_name, base_font)) in BUILTIN_FONTS.iter().enumerate() {
-        let mut font = pdf.type1_font(Ref::new(first_font_id + idx as i32));
+    for font_idx in used_font_indexes {
+        let Some(font_ref) = font_refs[font_idx] else {
+            continue;
+        };
+        let (_resource_name, base_font) = BUILTIN_FONTS[font_idx];
+        let mut font = pdf.type1_font(font_ref);
         font.base_font(Name(base_font));
-        if *base_font == b"Symbol" {
-            font.to_unicode(Ref::new(symbol_to_unicode_id));
-        } else if *base_font == b"ZapfDingbats" {
-            font.to_unicode(Ref::new(zapf_dingbats_to_unicode_id));
+        if base_font == b"Symbol" {
+            if let Some(to_unicode_ref) = symbol_to_unicode_ref {
+                font.to_unicode(to_unicode_ref);
+            }
+        } else if base_font == b"ZapfDingbats" {
+            if let Some(to_unicode_ref) = zapf_dingbats_to_unicode_ref {
+                font.to_unicode(to_unicode_ref);
+            }
         } else {
             font.encoding_predefined(Name(b"WinAnsiEncoding"));
         }
     }
 
-    let symbol_to_unicode =
-        passive_to_unicode_cmap(b"OpenRtfConverter-Symbol", PASSIVE_SYMBOL_TO_UNICODE);
-    pdf.stream(Ref::new(symbol_to_unicode_id), &symbol_to_unicode);
-    let zapf_dingbats_to_unicode = passive_to_unicode_cmap(
-        b"OpenRtfConverter-ZapfDingbats",
-        PASSIVE_ZAPF_DINGBATS_TO_UNICODE,
-    );
-    pdf.stream(
-        Ref::new(zapf_dingbats_to_unicode_id),
-        &zapf_dingbats_to_unicode,
-    );
+    if let Some(to_unicode_ref) = symbol_to_unicode_ref {
+        let symbol_to_unicode =
+            passive_to_unicode_cmap(b"OpenRtfConverter-Symbol", PASSIVE_SYMBOL_TO_UNICODE);
+        pdf.stream(to_unicode_ref, &symbol_to_unicode);
+    }
+    if let Some(to_unicode_ref) = zapf_dingbats_to_unicode_ref {
+        let zapf_dingbats_to_unicode = passive_to_unicode_cmap(
+            b"OpenRtfConverter-ZapfDingbats",
+            PASSIVE_ZAPF_DINGBATS_TO_UNICODE,
+        );
+        pdf.stream(to_unicode_ref, &zapf_dingbats_to_unicode);
+    }
 
     for (page_idx, page) in layout.pages.iter().enumerate() {
         for (item_idx, item) in page.items.iter().enumerate() {
@@ -669,6 +690,51 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
     }
 
     pdf.finish()
+}
+
+fn next_ref(next_object_id: &mut i32) -> Ref {
+    let reference = Ref::new(*next_object_id);
+    *next_object_id += 1;
+    reference
+}
+
+fn collect_used_font_indexes(layout: &LayoutDocument) -> Vec<usize> {
+    let mut used = [false; 14];
+    for page in &layout.pages {
+        for item in &page.items {
+            match item {
+                LayoutItem::Text(fragment) => {
+                    mark_used_font_resource(
+                        &mut used,
+                        font_resource_for_style(fragment.font_family, &fragment.style),
+                    );
+                }
+                LayoutItem::Image(fragment)
+                    if fragment.image.format == ImageFormat::Placeholder
+                        && fragment.width >= 96.0
+                        && fragment.height >= 24.0 =>
+                {
+                    mark_used_font_resource(&mut used, HELVETICA_REGULAR);
+                }
+                _ => {}
+            }
+        }
+    }
+    used.iter()
+        .enumerate()
+        .filter_map(|(idx, is_used)| is_used.then_some(idx))
+        .collect()
+}
+
+fn mark_used_font_resource(used: &mut [bool; 14], resource_name: &[u8]) {
+    used[font_index_for_resource(resource_name)] = true;
+}
+
+fn font_index_for_resource(resource_name: &[u8]) -> usize {
+    BUILTIN_FONTS
+        .iter()
+        .position(|(candidate, _base_font)| *candidate == resource_name)
+        .expect("font resource must be one of the PDF base fonts")
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1200,21 +1266,25 @@ fn is_pdf_whitespace(byte: u8) -> bool {
 }
 
 fn font_name_for_style(family: PdfFontFamily, style: &CharacterStyle) -> Name<'static> {
+    Name(font_resource_for_style(family, style))
+}
+
+fn font_resource_for_style(family: PdfFontFamily, style: &CharacterStyle) -> &'static [u8] {
     match (family, style.bold, style.italic) {
-        (PdfFontFamily::Helvetica, true, true) => Name(HELVETICA_BOLD_ITALIC),
-        (PdfFontFamily::Helvetica, true, false) => Name(HELVETICA_BOLD),
-        (PdfFontFamily::Helvetica, false, true) => Name(HELVETICA_ITALIC),
-        (PdfFontFamily::Helvetica, false, false) => Name(HELVETICA_REGULAR),
-        (PdfFontFamily::Courier, true, true) => Name(COURIER_BOLD_ITALIC),
-        (PdfFontFamily::Courier, true, false) => Name(COURIER_BOLD),
-        (PdfFontFamily::Courier, false, true) => Name(COURIER_ITALIC),
-        (PdfFontFamily::Courier, false, false) => Name(COURIER_REGULAR),
-        (PdfFontFamily::Times, true, true) => Name(TIMES_BOLD_ITALIC),
-        (PdfFontFamily::Times, true, false) => Name(TIMES_BOLD),
-        (PdfFontFamily::Times, false, true) => Name(TIMES_ITALIC),
-        (PdfFontFamily::Times, false, false) => Name(TIMES_REGULAR),
-        (PdfFontFamily::Symbol, _, _) => Name(SYMBOL_REGULAR),
-        (PdfFontFamily::ZapfDingbats, _, _) => Name(ZAPF_DINGBATS_REGULAR),
+        (PdfFontFamily::Helvetica, true, true) => HELVETICA_BOLD_ITALIC,
+        (PdfFontFamily::Helvetica, true, false) => HELVETICA_BOLD,
+        (PdfFontFamily::Helvetica, false, true) => HELVETICA_ITALIC,
+        (PdfFontFamily::Helvetica, false, false) => HELVETICA_REGULAR,
+        (PdfFontFamily::Courier, true, true) => COURIER_BOLD_ITALIC,
+        (PdfFontFamily::Courier, true, false) => COURIER_BOLD,
+        (PdfFontFamily::Courier, false, true) => COURIER_ITALIC,
+        (PdfFontFamily::Courier, false, false) => COURIER_REGULAR,
+        (PdfFontFamily::Times, true, true) => TIMES_BOLD_ITALIC,
+        (PdfFontFamily::Times, true, false) => TIMES_BOLD,
+        (PdfFontFamily::Times, false, true) => TIMES_ITALIC,
+        (PdfFontFamily::Times, false, false) => TIMES_REGULAR,
+        (PdfFontFamily::Symbol, _, _) => SYMBOL_REGULAR,
+        (PdfFontFamily::ZapfDingbats, _, _) => ZAPF_DINGBATS_REGULAR,
     }
 }
 
@@ -2269,6 +2339,43 @@ mod tests {
         assert!(pdf.starts_with(b"%PDF-"));
         let parsed = lopdf::Document::load_mem(&pdf).unwrap();
         assert_eq!(parsed.get_pages().len(), 1);
+    }
+
+    #[test]
+    fn omits_unused_pdf_base_font_resources() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Plain Helvetica text".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+
+        assert!(
+            pdf.windows(b"/BaseFont /Helvetica".len())
+                .any(|window| window == b"/BaseFont /Helvetica")
+        );
+        for forbidden in [
+            b"/BaseFont /Helvetica-Bold".as_slice(),
+            b"/BaseFont /Courier",
+            b"/BaseFont /Times-Roman",
+            b"/BaseFont /Symbol",
+            b"/BaseFont /ZapfDingbats",
+            b"OpenRtfConverter-Symbol",
+            b"OpenRtfConverter-ZapfDingbats",
+        ] {
+            assert!(
+                !pdf.windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "unused font resource leaked into PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+        audit_passive_pdf_bytes(&pdf).unwrap();
     }
 
     #[test]
