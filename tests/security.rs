@@ -17759,6 +17759,106 @@ fn wmf_line_polyline_and_polygon_render_as_passive_paths_without_payload_leakage
 }
 
 #[test]
+fn wmf_polypolygon_renders_multiple_passive_polygons_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "010009000003300000000100140000000000",
+        "050000000c026400c800",
+        "07000000fc02000000ffff000000",
+        "040000002d010000",
+        "14000000380502000300040014001400b400140064003c00",
+        "2800460050005a007800460050003200",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF POLYPOLYGON vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    let polygons = image
+        .vector_commands
+        .iter()
+        .filter_map(|command| match command {
+            StaticImageVectorCommand::Polygon {
+                points, fill_color, ..
+            } => Some((points, fill_color)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(polygons.len(), 2);
+    assert_eq!(polygons[0].0.len(), 3);
+    assert_eq!(polygons[1].0.len(), 4);
+    assert!(
+        polygons
+            .iter()
+            .all(|(_, fill_color)| matches!(fill_color, Some(color) if color.red == 0 && color.green == 255 && color.blue == 255))
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in ["wmetafile", "0538", "00ffff", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF POLYPOLYGON internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "h")
+            .count()
+            >= 2,
+        "WMF POLYPOLYGON should close each passive polygon path"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0538",
+        b"00ffff",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF POLYPOLYGON leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_deleted_object_handles_are_reused_for_passive_style_selection() {
     let wmf_hex = concat!(
         "0100090000032e00000001000c0000000000",

@@ -14295,6 +14295,27 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
+            0x0538 => {
+                let polygons = parse_wmf_polypolygon_list(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                )?;
+                for points in polygons {
+                    if points.len() >= 3 && point_bounds_are_visible(&points) {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
+                        commands.push(StaticImageVectorCommand::Polygon {
+                            points,
+                            stroke_color: state.stroke_color,
+                            fill_color: state.fill_color,
+                        });
+                    }
+                }
+            }
             0x041b | 0x0418 | 0x061c => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -14662,6 +14683,61 @@ fn parse_wmf_point_list(
         )?);
     }
     Some(points)
+}
+
+fn parse_wmf_polypolygon_list(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<Vec<Vec<(f32, f32)>>> {
+    let polygon_count = usize::from(read_le_u16(data, 0)?);
+    if polygon_count == 0 || polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+        return None;
+    }
+    let counts_bytes = polygon_count.checked_mul(2)?;
+    let mut counts = Vec::with_capacity(polygon_count);
+    let mut total_points = 0usize;
+    for index in 0..polygon_count {
+        let offset = 2usize.checked_add(index.checked_mul(2)?)?;
+        let count = usize::from(read_le_u16(data, offset)?);
+        if count == 0 {
+            return None;
+        }
+        total_points = total_points.checked_add(count)?;
+        if total_points > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+            return None;
+        }
+        counts.push(count);
+    }
+
+    let points_start = 2usize.checked_add(counts_bytes)?;
+    let points_bytes = total_points.checked_mul(4)?;
+    let required_len = points_start.checked_add(points_bytes)?;
+    if data.len() < required_len {
+        return None;
+    }
+
+    let mut polygons = Vec::with_capacity(polygon_count);
+    let mut point_index = 0usize;
+    for count in counts {
+        let mut points = Vec::with_capacity(count);
+        for _ in 0..count {
+            let offset = points_start.checked_add(point_index.checked_mul(4)?)?;
+            points.push(parse_wmf_xy_point(
+                data,
+                offset,
+                window_origin_x,
+                window_origin_y,
+                window_width,
+                window_height,
+            )?);
+            point_index += 1;
+        }
+        polygons.push(points);
+    }
+    Some(polygons)
 }
 
 fn bounds_is_visible((left, top, right, bottom): (f32, f32, f32, f32)) -> bool {
