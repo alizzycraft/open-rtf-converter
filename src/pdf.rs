@@ -70,6 +70,7 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/Movie", "/Movie"),
     (b"/Names", "/Names"),
     (b"/Named", "/Named"),
+    (b"/ObjStm", "/ObjStm"),
     (b"/OpenAction", "/OpenAction"),
     (b"/Perms", "/Perms"),
     (b"/Rendition", "/Rendition"),
@@ -2101,6 +2102,9 @@ endobj
 9 0 obj
 << /S /Rendition /OP 0 >>
 endobj
+10 0 obj
+<< /Type /ObjStm /N 1 /First 8 /Length 16 >>
+endobj
 %%EOF";
 
         let error = audit_passive_pdf_bytes(pdf).expect_err("active PDF names must be rejected");
@@ -2137,6 +2141,7 @@ endobj
         );
         assert!(error.issues.iter().any(|issue| issue.token == "/GoTo"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Named"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/ObjStm"));
         assert!(error.issues.iter().any(|issue| issue.token == "/ResetForm"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Rendition"));
     }
@@ -2147,7 +2152,7 @@ endobj
 1 0 obj
 << /Length 54 >>
 stream
-BT (/JavaScript /Launch /URI /Annots /Widget) Tj ET
+BT (/JavaScript /Launch /URI /Annots /Widget /ObjStm) Tj ET
 endstream
 endobj
 %%EOF";
