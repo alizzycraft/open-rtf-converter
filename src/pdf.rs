@@ -330,7 +330,8 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
     let first_page_id = 3;
     let first_content_id = first_page_id + layout.pages.len() as i32;
     let first_font_id = first_content_id + layout.pages.len() as i32;
-    let used_font_indexes = collect_used_font_indexes(layout);
+    let page_used_font_indexes = collect_page_used_font_indexes(layout);
+    let used_font_indexes = collect_used_font_indexes(&page_used_font_indexes);
     let mut next_object_id = first_font_id;
     let mut font_refs = [None; 14];
     for font_idx in &used_font_indexes {
@@ -365,7 +366,7 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
             let mut resources = page_writer.resources();
             {
                 let mut fonts = resources.fonts();
-                for font_idx in &used_font_indexes {
+                for font_idx in &page_used_font_indexes[idx] {
                     let (resource_name, _base_font) = BUILTIN_FONTS[*font_idx];
                     if let Some(font_ref) = font_refs[*font_idx] {
                         fonts.pair(Name(resource_name), font_ref);
@@ -698,28 +699,48 @@ fn next_ref(next_object_id: &mut i32) -> Ref {
     reference
 }
 
-fn collect_used_font_indexes(layout: &LayoutDocument) -> Vec<usize> {
+fn collect_page_used_font_indexes(layout: &LayoutDocument) -> Vec<Vec<usize>> {
+    layout
+        .pages
+        .iter()
+        .map(collect_used_font_indexes_for_page)
+        .collect()
+}
+
+fn collect_used_font_indexes(page_used_font_indexes: &[Vec<usize>]) -> Vec<usize> {
     let mut used = [false; 14];
-    for page in &layout.pages {
-        for item in &page.items {
-            match item {
-                LayoutItem::Text(fragment) => {
-                    mark_used_font_resource(
-                        &mut used,
-                        font_resource_for_style(fragment.font_family, &fragment.style),
-                    );
-                }
-                LayoutItem::Image(fragment)
-                    if fragment.image.format == ImageFormat::Placeholder
-                        && fragment.width >= 96.0
-                        && fragment.height >= 24.0 =>
-                {
-                    mark_used_font_resource(&mut used, HELVETICA_REGULAR);
-                }
-                _ => {}
-            }
+    for page_fonts in page_used_font_indexes {
+        for font_idx in page_fonts {
+            used[*font_idx] = true;
         }
     }
+    used_font_index_list(&used)
+}
+
+fn collect_used_font_indexes_for_page(page: &crate::layout::LayoutPage) -> Vec<usize> {
+    let mut used = [false; 14];
+    for item in &page.items {
+        match item {
+            LayoutItem::Text(fragment) => {
+                mark_used_font_resource(
+                    &mut used,
+                    font_resource_for_style(fragment.font_family, &fragment.style),
+                );
+            }
+            LayoutItem::Image(fragment)
+                if fragment.image.format == ImageFormat::Placeholder
+                    && fragment.width >= 96.0
+                    && fragment.height >= 24.0 =>
+            {
+                mark_used_font_resource(&mut used, HELVETICA_REGULAR);
+            }
+            _ => {}
+        }
+    }
+    used_font_index_list(&used)
+}
+
+fn used_font_index_list(used: &[bool; 14]) -> Vec<usize> {
     used.iter()
         .enumerate()
         .filter_map(|(idx, is_used)| is_used.then_some(idx))
@@ -2320,6 +2341,7 @@ mod tests {
         ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticShape, StaticShapeKind,
         TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder, TableRow, UnderlineStyle,
     };
+    use lopdf::{Dictionary, Object};
 
     use super::*;
 
@@ -2339,6 +2361,26 @@ mod tests {
         assert!(pdf.starts_with(b"%PDF-"));
         let parsed = lopdf::Document::load_mem(&pdf).unwrap();
         assert_eq!(parsed.get_pages().len(), 1);
+    }
+
+    fn page_font_resource_names(pdf: &[u8], page_index: usize) -> Vec<Vec<u8>> {
+        let parsed = lopdf::Document::load_mem(pdf).unwrap();
+        let page_id = *parsed
+            .get_pages()
+            .values()
+            .nth(page_index)
+            .expect("page index");
+        let page = parsed.get_object(page_id).unwrap().as_dict().unwrap();
+        let resources = pdf_object_dict(&parsed, page.get(b"Resources").unwrap());
+        let fonts = pdf_object_dict(&parsed, resources.get(b"Font").unwrap());
+        fonts.iter().map(|(name, _object)| name.to_vec()).collect()
+    }
+
+    fn pdf_object_dict<'a>(parsed: &'a lopdf::Document, object: &'a Object) -> &'a Dictionary {
+        match object {
+            Object::Reference(id) => parsed.get_object(*id).unwrap().as_dict().unwrap(),
+            _ => object.as_dict().unwrap(),
+        }
     }
 
     #[test]
@@ -2375,6 +2417,44 @@ mod tests {
                 String::from_utf8_lossy(forbidden)
             );
         }
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn page_resources_omit_fonts_used_only_on_other_pages() {
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Plain page".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+            Block::PageBreak,
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "\u{2611}".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        let first_page_fonts = page_font_resource_names(&pdf, 0);
+        let second_page_fonts = page_font_resource_names(&pdf, 1);
+
+        assert!(first_page_fonts.iter().any(|name| name == b"F1"));
+        assert!(!first_page_fonts.iter().any(|name| name == b"F14"));
+        assert!(second_page_fonts.iter().any(|name| name == b"F14"));
+        assert!(!second_page_fonts.iter().any(|name| name == b"F1"));
+        assert!(
+            pdf.windows(b"/BaseFont /ZapfDingbats".len())
+                .any(|window| window == b"/BaseFont /ZapfDingbats"),
+            "shared font object should still be emitted when used by any page"
+        );
         audit_passive_pdf_bytes(&pdf).unwrap();
     }
 
