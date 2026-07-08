@@ -1532,13 +1532,15 @@ impl Parser {
                         field_form_dropdown_selected_index,
                         offset,
                     )? {
-                        self.diagnostics.push(Diagnostic::warning(
-                            format!(
-                                "rendering passive field {} without executing field instruction",
-                                field_instruction_name(&field_instruction).unwrap_or("unknown")
-                            ),
-                            Some(offset),
-                        ));
+                        if passive_field_result_needs_diagnostic(&field_instruction) {
+                            self.diagnostics.push(Diagnostic::warning(
+                                format!(
+                                    "rendering passive field {} without executing field instruction",
+                                    field_instruction_name(&field_instruction).unwrap_or("unknown")
+                                ),
+                                Some(offset),
+                            ));
+                        }
                         self.push_passive_field_result(result, offset)?;
                     } else {
                         if let Some(name) = field_instruction_name(&field_instruction) {
@@ -1685,13 +1687,15 @@ impl Parser {
                             field_form_dropdown_selected_index,
                             offset,
                         )? {
-                            self.diagnostics.push(Diagnostic::warning(
-                                format!(
-                                    "rendering passive field {} without executing field instruction",
-                                    field_instruction_name(&field_instruction).unwrap_or("unknown")
-                                ),
-                                Some(offset),
-                            ));
+                            if passive_field_result_needs_diagnostic(&field_instruction) {
+                                self.diagnostics.push(Diagnostic::warning(
+                                    format!(
+                                        "rendering passive field {} without executing field instruction",
+                                        field_instruction_name(&field_instruction).unwrap_or("unknown")
+                                    ),
+                                    Some(offset),
+                                ));
+                            }
                             self.push_passive_field_result(result, offset)?;
                         }
                     }
@@ -11493,6 +11497,10 @@ fn passive_field_result(
     }
 }
 
+fn passive_field_result_needs_diagnostic(instruction: &str) -> bool {
+    !matches!(field_instruction_name(instruction), Some("SYMBOL"))
+}
+
 fn is_form_field_instruction_name(name: &str) -> bool {
     matches!(name, "FORMTEXT" | "FORMDROPDOWN" | "FORMCHECKBOX")
 }
@@ -19349,8 +19357,8 @@ After\par}"#;
         assert_eq!(symbol_run.style.font_index, 1);
         assert!(!text.contains("SYMBOL"));
         assert!(!text.contains("fldinst"));
-        assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
                 .message
                 .contains("rendering passive field SYMBOL without executing field instruction")
         }));

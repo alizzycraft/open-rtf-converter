@@ -7529,8 +7529,8 @@ fn resultless_symbol_fields_render_without_executing_field_instruction() {
     assert!(!text.contains("SYMBOL"));
     assert!(!text.contains("fldinst"));
     assert!(!text.contains("[Field removed"));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("rendering passive field SYMBOL without executing field instruction")
     }));
@@ -7597,8 +7597,8 @@ fn empty_stored_symbol_result_falls_back_to_passive_symbol_rendering() {
             "forbidden empty-result symbol metadata leaked to text: {forbidden}"
         );
     }
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("rendering passive field SYMBOL without executing field instruction")
     }));
