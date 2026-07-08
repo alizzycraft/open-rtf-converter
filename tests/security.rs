@@ -17921,6 +17921,127 @@ fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_non_rectangular_hatched_brushes_render_with_passive_clipping() {
+    let wmf_hex = concat!(
+        "0100090000032d00000001000a0000000000",
+        "050000000c026400c800",
+        "07000000fc0202000000ff000500",
+        "040000002d010000",
+        "0a0000002403030014002800b400280064005a00",
+        "0700000018045a00be0014006400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("non-rectangular hatch WMF vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Polygon {
+                fill_pattern: ShadingPattern::DiagonalCross,
+                fill_color: Some(color),
+                ..
+            } if color.red == 0 && color.green == 0 && color.blue == 255
+        )
+    }));
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Ellipse {
+                fill_pattern: ShadingPattern::DiagonalCross,
+                fill_color: Some(color),
+                ..
+            } if color.red == 0 && color.green == 0 && color.blue == 255
+        )
+    }));
+    for forbidden in [
+        "wmetafile",
+        "010009",
+        "02fc",
+        "02000000ff000500",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "non-rectangular hatch WMF internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "W" || operation.operator == "W*")
+            .count()
+            >= 2,
+        "polygon and ellipse hatch fills should both be clipped before passive line drawing"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "l")
+            .count()
+            >= 4,
+        "non-rectangular hatch fills should render passive line paths"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "ellipse hatch clipping should preserve the passive Bezier ellipse path"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"02fc",
+        b"02000000ff000500",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "non-rectangular hatch preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn placeable_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
     let wmf_hex = concat!(
         "d7cdc69a000000000000c8006400a005000000001d52",

@@ -1307,7 +1307,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 stroke_width,
                 stroke_style,
                 fill_rule,
-                fill_pattern: _,
+                fill_pattern,
                 fill_color,
             } => {
                 let points = vector_command_points(draw, source_width, source_height, points);
@@ -1321,6 +1321,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     stroke_width,
                     stroke_style,
                     *fill_rule,
+                    *fill_pattern,
                     *fill_color,
                 );
             }
@@ -1367,7 +1368,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 stroke_color,
                 stroke_width,
                 stroke_style,
-                fill_pattern: _,
+                fill_pattern,
                 fill_color,
             } => {
                 let rect = vector_command_rect(
@@ -1392,6 +1393,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     *stroke_color,
                     stroke_width,
                     stroke_style,
+                    *fill_pattern,
                     *fill_color,
                 );
             }
@@ -1403,7 +1405,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 stroke_color,
                 stroke_width,
                 stroke_style,
-                fill_pattern: _,
+                fill_pattern,
                 fill_color,
             } => {
                 let rect = vector_command_rect(
@@ -1424,6 +1426,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     *stroke_color,
                     stroke_width,
                     stroke_style,
+                    *fill_pattern,
                     *fill_color,
                 );
             }
@@ -1604,9 +1607,38 @@ fn draw_passive_vector_polygon(
     stroke_width: f32,
     stroke_style: LineStyle,
     fill_rule: StaticImageVectorFillRule,
+    fill_pattern: ShadingPattern,
     fill_color: Option<crate::model::Color>,
 ) {
     if points.len() < 3 {
+        return;
+    }
+    if fill_pattern != ShadingPattern::None
+        && let Some(fill_color) = fill_color
+    {
+        draw_passive_hatch_polygon(
+            content,
+            points,
+            fill_rule,
+            fill_pattern,
+            pdf_color_from_model(fill_color),
+        );
+        if stroke_color.is_none() || stroke_width <= 0.0 {
+            return;
+        }
+        draw_passive_polygon(
+            content,
+            points,
+            stroke_width,
+            stroke_color.map(pdf_color_from_model).unwrap_or(PdfColor {
+                red: 0.0,
+                green: 0.0,
+                blue: 0.0,
+            }),
+            stroke_style,
+            fill_rule,
+            None,
+        );
         return;
     }
     draw_passive_polygon(
@@ -1678,6 +1710,79 @@ fn draw_passive_hatch_rect(
     content.rect(rect.x, rect.y, rect.width, rect.height);
     content.clip_nonzero();
     content.end_path();
+    draw_passive_hatch_lines(content, rect, pattern, color);
+    content.restore_state();
+}
+
+fn draw_passive_hatch_polygon(
+    content: &mut Content,
+    points: &[crate::layout::LayoutPoint],
+    fill_rule: StaticImageVectorFillRule,
+    pattern: ShadingPattern,
+    color: PdfColor,
+) {
+    let Some(bounds) = vector_points_bounds(points) else {
+        return;
+    };
+    if pattern == ShadingPattern::None || bounds.width <= 0.5 || bounds.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    append_passive_polygon_path(content, points);
+    match fill_rule {
+        StaticImageVectorFillRule::Alternate => {
+            content.clip_even_odd();
+        }
+        StaticImageVectorFillRule::Winding => {
+            content.clip_nonzero();
+        }
+    }
+    content.end_path();
+    draw_passive_hatch_lines(content, bounds, pattern, color);
+    content.restore_state();
+}
+
+fn draw_passive_hatch_rounded_rectangle(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    radius: f32,
+    pattern: ShadingPattern,
+    color: PdfColor,
+) {
+    if pattern == ShadingPattern::None || rect.width <= 0.5 || rect.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    append_passive_rounded_rectangle_path(content, rect.x, rect.y, rect.width, rect.height, radius);
+    content.clip_nonzero();
+    content.end_path();
+    draw_passive_hatch_lines(content, rect, pattern, color);
+    content.restore_state();
+}
+
+fn draw_passive_hatch_ellipse(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    pattern: ShadingPattern,
+    color: PdfColor,
+) {
+    if pattern == ShadingPattern::None || rect.width <= 0.5 || rect.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    append_passive_ellipse_path(content, rect.x, rect.y, rect.width, rect.height);
+    content.clip_nonzero();
+    content.end_path();
+    draw_passive_hatch_lines(content, rect, pattern, color);
+    content.restore_state();
+}
+
+fn draw_passive_hatch_lines(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    pattern: ShadingPattern,
+    color: PdfColor,
+) {
     set_stroke_color(content, color);
     content.set_line_width(0.35);
 
@@ -1713,7 +1818,6 @@ fn draw_passive_hatch_rect(
         }
         ShadingPattern::None => {}
     }
-    content.restore_state();
 }
 
 fn draw_passive_horizontal_hatch_lines(content: &mut Content, rect: VectorDrawRect, spacing: f32) {
@@ -1810,9 +1914,41 @@ fn draw_passive_vector_rounded_rectangle(
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
     stroke_style: LineStyle,
+    fill_pattern: ShadingPattern,
     fill_color: Option<crate::model::Color>,
 ) {
     let radius = (corner_width.min(corner_height) * 0.5).max(0.1);
+    if fill_pattern != ShadingPattern::None
+        && let Some(fill_color) = fill_color
+    {
+        draw_passive_hatch_rounded_rectangle(
+            content,
+            rect,
+            radius,
+            fill_pattern,
+            pdf_color_from_model(fill_color),
+        );
+        if stroke_color.is_none() || stroke_width <= 0.0 {
+            return;
+        }
+        draw_passive_rounded_rectangle(
+            content,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            radius,
+            stroke_width,
+            stroke_color.map(pdf_color_from_model).unwrap_or(PdfColor {
+                red: 0.0,
+                green: 0.0,
+                blue: 0.0,
+            }),
+            stroke_style,
+            None,
+        );
+        return;
+    }
     draw_passive_rounded_rectangle(
         content,
         rect.x,
@@ -1837,8 +1973,38 @@ fn draw_passive_vector_ellipse(
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
     stroke_style: LineStyle,
+    fill_pattern: ShadingPattern,
     fill_color: Option<crate::model::Color>,
 ) {
+    if fill_pattern != ShadingPattern::None
+        && let Some(fill_color) = fill_color
+    {
+        draw_passive_hatch_ellipse(
+            content,
+            rect,
+            fill_pattern,
+            pdf_color_from_model(fill_color),
+        );
+        if stroke_color.is_none() || stroke_width <= 0.0 {
+            return;
+        }
+        draw_passive_ellipse(
+            content,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            stroke_width,
+            stroke_color.map(pdf_color_from_model).unwrap_or(PdfColor {
+                red: 0.0,
+                green: 0.0,
+                blue: 0.0,
+            }),
+            stroke_style,
+            None,
+        );
+        return;
+    }
     draw_passive_ellipse(
         content,
         rect.x,
@@ -2363,19 +2529,9 @@ fn draw_passive_ellipse(
     stroke_style: LineStyle,
     fill_color: Option<PdfColor>,
 ) {
-    const KAPPA: f32 = 0.552_284_8;
-
     if stroke_width <= 0.0 && fill_color.is_none() {
         return;
     }
-    let width = width.max(0.1);
-    let height = height.max(0.1);
-    let rx = width / 2.0;
-    let ry = height / 2.0;
-    let cx = x + rx;
-    let cy = y + ry;
-    let dx = rx * KAPPA;
-    let dy = ry * KAPPA;
 
     let has_stroke = stroke_width > 0.0;
     content.save_state();
@@ -2387,12 +2543,7 @@ fn draw_passive_ellipse(
     if let Some(fill_color) = fill_color {
         set_fill_color(content, fill_color);
     }
-    content.move_to(cx + rx, cy);
-    content.cubic_to(cx + rx, cy + dy, cx + dx, cy + ry, cx, cy + ry);
-    content.cubic_to(cx - dx, cy + ry, cx - rx, cy + dy, cx - rx, cy);
-    content.cubic_to(cx - rx, cy - dy, cx - dx, cy - ry, cx, cy - ry);
-    content.cubic_to(cx + dx, cy - ry, cx + rx, cy - dy, cx + rx, cy);
-    content.close_path();
+    append_passive_ellipse_path(content, x, y, width, height);
     if fill_color.is_some() && has_stroke {
         content.fill_nonzero_and_stroke();
     } else if fill_color.is_some() {
@@ -2416,17 +2567,9 @@ fn draw_passive_rounded_rectangle(
     stroke_style: LineStyle,
     fill_color: Option<PdfColor>,
 ) {
-    const KAPPA: f32 = 0.552_284_8;
-
     if stroke_width <= 0.0 && fill_color.is_none() {
         return;
     }
-    let width = width.max(0.1);
-    let height = height.max(0.1);
-    let radius = radius.clamp(0.1, width.min(height) / 2.0);
-    let control = radius * KAPPA;
-    let right = x + width;
-    let top = y + height;
 
     let has_stroke = stroke_width > 0.0;
     content.save_state();
@@ -2438,6 +2581,54 @@ fn draw_passive_rounded_rectangle(
     if let Some(fill_color) = fill_color {
         set_fill_color(content, fill_color);
     }
+    append_passive_rounded_rectangle_path(content, x, y, width, height, radius);
+    if fill_color.is_some() && has_stroke {
+        content.fill_nonzero_and_stroke();
+    } else if fill_color.is_some() {
+        content.fill_nonzero();
+    } else {
+        content.stroke();
+    }
+    content.restore_state();
+}
+
+fn append_passive_ellipse_path(content: &mut Content, x: f32, y: f32, width: f32, height: f32) {
+    const KAPPA: f32 = 0.552_284_8;
+
+    let width = width.max(0.1);
+    let height = height.max(0.1);
+    let rx = width / 2.0;
+    let ry = height / 2.0;
+    let cx = x + rx;
+    let cy = y + ry;
+    let dx = rx * KAPPA;
+    let dy = ry * KAPPA;
+
+    content.move_to(cx + rx, cy);
+    content.cubic_to(cx + rx, cy + dy, cx + dx, cy + ry, cx, cy + ry);
+    content.cubic_to(cx - dx, cy + ry, cx - rx, cy + dy, cx - rx, cy);
+    content.cubic_to(cx - rx, cy - dy, cx - dx, cy - ry, cx, cy - ry);
+    content.cubic_to(cx + dx, cy - ry, cx + rx, cy - dy, cx + rx, cy);
+    content.close_path();
+}
+
+fn append_passive_rounded_rectangle_path(
+    content: &mut Content,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    radius: f32,
+) {
+    const KAPPA: f32 = 0.552_284_8;
+
+    let width = width.max(0.1);
+    let height = height.max(0.1);
+    let radius = radius.clamp(0.1, width.min(height) / 2.0);
+    let control = radius * KAPPA;
+    let right = x + width;
+    let top = y + height;
+
     content.move_to(x + radius, y);
     content.line_to(right - radius, y);
     content.cubic_to(
@@ -2476,14 +2667,37 @@ fn draw_passive_rounded_rectangle(
         y,
     );
     content.close_path();
-    if fill_color.is_some() && has_stroke {
-        content.fill_nonzero_and_stroke();
-    } else if fill_color.is_some() {
-        content.fill_nonzero();
-    } else {
-        content.stroke();
+}
+
+fn append_passive_polygon_path(content: &mut Content, points: &[crate::layout::LayoutPoint]) {
+    let Some(first) = points.first() else {
+        return;
+    };
+    content.move_to(first.x, first.y);
+    for point in points.iter().skip(1) {
+        content.line_to(point.x, point.y);
     }
-    content.restore_state();
+    content.close_path();
+}
+
+fn vector_points_bounds(points: &[crate::layout::LayoutPoint]) -> Option<VectorDrawRect> {
+    let first = points.first()?;
+    let mut min_x = first.x;
+    let mut max_x = first.x;
+    let mut min_y = first.y;
+    let mut max_y = first.y;
+    for point in points.iter().skip(1) {
+        min_x = min_x.min(point.x);
+        max_x = max_x.max(point.x);
+        min_y = min_y.min(point.y);
+        max_y = max_y.max(point.y);
+    }
+    Some(VectorDrawRect {
+        x: min_x,
+        y: min_y,
+        width: (max_x - min_x).max(0.1),
+        height: (max_y - min_y).max(0.1),
+    })
 }
 
 fn draw_passive_polygon(
