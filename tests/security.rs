@@ -18542,6 +18542,111 @@ fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_textout_renders_passive_text_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000032d00000001000c0000000000",
+        "050000000c026400c800",
+        "050000000902ff000000",
+        "0c000000fb02f4ff00000000000000000000000000000000",
+        "040000002d010000",
+        "0700000021050200486914002800",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF TEXTOUT vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("Hi"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                x,
+                y,
+                height,
+                text,
+                color: Some(color),
+            } if (*x - 40.0).abs() < 0.01
+                && (*y - 20.0).abs() < 0.01
+                && (*height - 12.0).abs() < 0.01
+                && text == "Hi"
+                && color.red == 255
+                && color.green == 0
+                && color.blue == 0
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in ["wmetafile", "0521", "fb02", "ff0000", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF TEXTOUT internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        decoded_pdf_text(&content).contains("Hi"),
+        "WMF TEXTOUT should render through passive PDF text operations"
+    );
+    assert!(
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|font| font.as_slice() == b"F1"),
+        "WMF TEXTOUT should use a passive built-in font resource"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0521",
+        b"fb02",
+        b"ff0000",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF TEXTOUT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003250000000100070000000000",

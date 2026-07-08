@@ -417,6 +417,13 @@ pub enum StaticImageVectorCommand {
         stroke_color: Option<Color>,
         fill_color: Option<Color>,
     },
+    Text {
+        x: f32,
+        y: f32,
+        height: f32,
+        text: String,
+        color: Option<Color>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

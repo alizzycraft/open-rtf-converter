@@ -14367,6 +14367,7 @@ struct WmfHeaderInfo {
 enum WmfObject {
     Pen(Option<Color>),
     Brush(Option<Color>),
+    Font { height: i32 },
     Other,
 }
 
@@ -14374,6 +14375,8 @@ enum WmfObject {
 struct WmfDrawingState {
     stroke_color: Option<Color>,
     fill_color: Option<Color>,
+    text_color: Option<Color>,
+    font_height: Option<i32>,
 }
 
 impl Default for WmfDrawingState {
@@ -14381,6 +14384,8 @@ impl Default for WmfDrawingState {
         Self {
             stroke_color: Some(Color::default()),
             fill_color: None,
+            text_color: Some(Color::default()),
+            font_height: None,
         }
     }
 }
@@ -14388,6 +14393,7 @@ impl Default for WmfDrawingState {
 const MAX_PASSIVE_WMF_RECORDS: usize = 512;
 const MAX_PASSIVE_WMF_COMMANDS: usize = 256;
 const MAX_PASSIVE_WMF_POINTS_PER_RECORD: usize = 128;
+const MAX_PASSIVE_WMF_TEXT_BYTES: usize = 512;
 const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
@@ -14751,15 +14757,25 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 &mut objects,
                 parse_wmf_brush_object(data).unwrap_or(WmfObject::Other),
             )?,
-            0x02fb | 0x02fd => store_wmf_object(&mut objects, WmfObject::Other)?,
+            0x02fb => store_wmf_object(
+                &mut objects,
+                parse_wmf_font_object(data).unwrap_or(WmfObject::Other),
+            )?,
+            0x02fd => store_wmf_object(&mut objects, WmfObject::Other)?,
             0x012d => {
                 let handle = usize::from(read_le_u16(data, 0)?);
                 if let Some(object) = objects.get(handle).and_then(|object| *object) {
                     match object {
                         WmfObject::Pen(color) => state.stroke_color = color,
                         WmfObject::Brush(color) => state.fill_color = color,
+                        WmfObject::Font { height } => state.font_height = Some(height),
                         WmfObject::Other => {}
                     }
+                }
+            }
+            0x0209 => {
+                if let Some(color) = color_from_colorref(data, 0) {
+                    state.text_color = Some(color);
                 }
             }
             0x0214 => {
@@ -14902,6 +14918,26 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         }
                     };
                     commands.push(command);
+                }
+            }
+            0x0521 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some((x, y, text)) = parse_wmf_textout(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                ) {
+                    commands.push(StaticImageVectorCommand::Text {
+                        x,
+                        y,
+                        height: normalized_wmf_text_height(state.font_height, window_height),
+                        text,
+                        color: state.text_color,
+                    });
                 }
             }
             0x061d => {
@@ -15060,6 +15096,11 @@ fn parse_wmf_brush_object(data: &[u8]) -> Option<WmfObject> {
     }))
 }
 
+fn parse_wmf_font_object(data: &[u8]) -> Option<WmfObject> {
+    let height = i32::from(read_le_i16(data, 0)?);
+    Some(WmfObject::Font { height })
+}
+
 fn parse_wmf_bounds(
     data: &[u8],
     window_origin_x: i32,
@@ -15179,6 +15220,59 @@ fn parse_wmf_setpixel_rect(
         pixel_rect_end(y, max_y),
         color,
     ))
+}
+
+fn parse_wmf_textout(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32, String)> {
+    let byte_count = usize::from(read_le_u16(data, 0)?);
+    if byte_count == 0 || byte_count > MAX_PASSIVE_WMF_TEXT_BYTES {
+        return None;
+    }
+    let text_start = 2usize;
+    let text_end = text_start.checked_add(byte_count)?;
+    let coordinate_offset = text_start.checked_add(byte_count.next_multiple_of(2))?;
+    if data.len() < coordinate_offset.checked_add(4)? {
+        return None;
+    }
+    let text = sanitize_wmf_text_bytes(data.get(text_start..text_end)?)?;
+    let y = i32::from(read_le_i16(data, coordinate_offset)?);
+    let x = i32::from(read_le_i16(data, coordinate_offset + 2)?);
+    let (x, y) = normalize_wmf_point(
+        x,
+        y,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    Some((x, y, text))
+}
+
+fn sanitize_wmf_text_bytes(bytes: &[u8]) -> Option<String> {
+    let mut text = String::new();
+    for ch in decode_raw_bytes(bytes, CodePage::Windows1252).chars() {
+        match ch {
+            '\0' => {}
+            '\t' | '\n' | '\r' => text.push(' '),
+            ch if ch.is_control() => {}
+            ch => text.push(ch),
+        }
+    }
+    let text = text.trim_end().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+fn normalized_wmf_text_height(font_height: Option<i32>, window_height: i32) -> f32 {
+    let fallback = (window_height.max(1) as f32 / 12.0).clamp(4.0, 48.0);
+    font_height
+        .map(|height| height.unsigned_abs().max(1) as f32)
+        .unwrap_or(fallback)
+        .clamp(1.0, window_height.max(1) as f32)
 }
 
 fn pixel_rect_start(value: f32, max: f32) -> f32 {

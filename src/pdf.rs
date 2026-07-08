@@ -923,6 +923,15 @@ fn collect_used_font_indexes_for_page(page: &crate::layout::LayoutPage) -> Vec<u
             {
                 mark_used_font_resource(&mut used, HELVETICA_REGULAR);
             }
+            LayoutItem::Image(fragment)
+                if fragment
+                    .image
+                    .vector_commands
+                    .iter()
+                    .any(|command| matches!(command, StaticImageVectorCommand::Text { .. })) =>
+            {
+                mark_used_font_resource(&mut used, HELVETICA_REGULAR);
+            }
             _ => {}
         }
     }
@@ -1348,6 +1357,17 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 );
                 draw_passive_vector_ellipse(content, rect, *stroke_color, *fill_color);
             }
+            StaticImageVectorCommand::Text {
+                x,
+                y,
+                height,
+                text,
+                color,
+            } => {
+                let point = vector_command_point(draw, source_width, source_height, *x, *y);
+                let font_size = ((*height / source_height) * draw.height).clamp(4.0, 72.0);
+                draw_passive_vector_text(content, point, font_size, text, *color);
+            }
         }
     }
     content.restore_state();
@@ -1542,6 +1562,41 @@ fn draw_passive_vector_ellipse(
         }),
         LineStyle::Solid,
         fill_color.map(pdf_color_from_model),
+    );
+}
+
+fn draw_passive_vector_text(
+    content: &mut Content,
+    point: crate::layout::LayoutPoint,
+    font_size: f32,
+    text: &str,
+    color: Option<crate::model::Color>,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let mut style = CharacterStyle::default();
+    style.font_size_half_points = (font_size * 2.0).round().clamp(1.0, 144.0) as i32;
+    set_fill_color(
+        content,
+        color.map(pdf_color_from_model).unwrap_or(PdfColor {
+            red: 0.0,
+            green: 0.0,
+            blue: 0.0,
+        }),
+    );
+    let encoded = encode_pdf_text_for_font(text, PdfFontFamily::Helvetica);
+    write_text_fragment(
+        content,
+        text,
+        HELVETICA_REGULAR,
+        Some(PdfFontFamily::Helvetica),
+        &style,
+        0.0,
+        point.x,
+        point.y - font_size,
+        &encoded,
+        TextRenderingMode::Fill,
     );
 }
 
