@@ -219,6 +219,59 @@ fn caller_provided_font_asset_embeds_passive_type0_font_without_system_fonts() {
 }
 
 #[test]
+fn caller_base_font_asset_matches_word_charset_suffixed_font_names() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f38\fcharset204 Times New Roman Cyr;}}\f38 Alias AB\par}";
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Times New Roman".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected supplied passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("Times New Roman Cyr")
+            || !diagnostic.message.contains("substituted")),
+        "caller base font asset should suppress substitution diagnostic for charset alias: {:?}",
+        output.diagnostics
+    );
+}
+
+#[test]
 fn rtf_embedded_font_payload_does_not_become_pdf_font_file() {
     let input =
         br"{\rtf1\ansi{\fonttbl{\f0 Arial{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}};}}Visible\par}";

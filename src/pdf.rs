@@ -1005,7 +1005,7 @@ fn supplied_text_encoding_parts(
         .iter()
         .find(|font| font.index == fragment.style.font_index)?;
     for (asset_index, asset) in font_provider.assets.iter().enumerate() {
-        if !font_asset_matches_family(asset, &source_font.name) {
+        if !asset.matches_family(&source_font.name) {
             continue;
         }
         if let Some((glyphs, encoded)) = encode_text_with_font_asset(&fragment.text, asset) {
@@ -1051,19 +1051,6 @@ fn add_supplied_glyph(glyphs: &mut Vec<SuppliedGlyph>, glyph: SuppliedGlyph) {
     }
     glyphs.push(glyph);
     glyphs.sort_by_key(|glyph| glyph.cid);
-}
-
-fn font_asset_matches_family(asset: &FontAsset, family_name: &str) -> bool {
-    let family_name = normalize_pdf_font_family_name(family_name);
-    !family_name.is_empty()
-        && asset
-            .family_names
-            .iter()
-            .any(|candidate| normalize_pdf_font_family_name(candidate) == family_name)
-}
-
-fn normalize_pdf_font_family_name(name: &str) -> String {
-    name.trim().to_ascii_lowercase()
 }
 
 fn is_normal_text_font_index(font_idx: usize) -> bool {

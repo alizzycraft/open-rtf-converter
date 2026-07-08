@@ -88,12 +88,9 @@ impl FontProvider {
         if family_name.is_empty() {
             return false;
         }
-        self.assets.iter().any(|asset| {
-            asset
-                .family_names
-                .iter()
-                .any(|candidate| normalized_family_name(candidate) == family_name)
-        })
+        self.assets
+            .iter()
+            .any(|asset| asset.matches_family(&family_name))
     }
 
     pub fn coverage_for_char(&self, family_name: &str, ch: char) -> FontCoverage {
@@ -103,11 +100,7 @@ impl FontProvider {
         }
         let mut found_asset = false;
         for asset in &self.assets {
-            if !asset
-                .family_names
-                .iter()
-                .any(|candidate| normalized_family_name(candidate) == family_name)
-            {
+            if !asset.matches_family(&family_name) {
                 continue;
             }
             found_asset = true;
@@ -130,11 +123,7 @@ impl FontProvider {
             return None;
         }
         for asset in &self.assets {
-            if !asset
-                .family_names
-                .iter()
-                .any(|candidate| normalized_family_name(candidate) == family_name)
-            {
+            if !asset.matches_family(&family_name) {
                 continue;
             }
             let Ok(face) = Face::parse(&asset.bytes, 0) else {
@@ -162,6 +151,17 @@ pub struct FontAsset {
     pub family_names: Vec<String>,
     pub style: FontAssetStyle,
     pub bytes: Vec<u8>,
+}
+
+impl FontAsset {
+    pub(crate) fn matches_family(&self, family_name: &str) -> bool {
+        let family_name = normalized_family_name(family_name);
+        !family_name.is_empty()
+            && self
+                .family_names
+                .iter()
+                .any(|candidate| font_family_names_match(candidate, &family_name))
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -306,4 +306,83 @@ impl Error for FontProviderError {}
 
 fn normalized_family_name(value: &str) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+fn canonical_word_charset_family_name(value: &str) -> String {
+    let normalized = normalized_family_name(value);
+    for suffix in [" ce", " cyr", " greek", " tur", " baltic"] {
+        if let Some(base) = normalized.strip_suffix(suffix)
+            && !base.trim().is_empty()
+        {
+            return base.trim().to_string();
+        }
+    }
+    normalized
+}
+
+fn font_family_names_match(left: &str, right: &str) -> bool {
+    let left = normalized_family_name(left);
+    let right = normalized_family_name(right);
+    !left.is_empty()
+        && !right.is_empty()
+        && (left == right
+            || canonical_word_charset_family_name(&left)
+                == canonical_word_charset_family_name(&right))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tuffy_provider() -> FontProvider {
+        FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["Times New Roman".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: FontProviderLimits {
+                max_asset_bytes: 256 * 1024,
+                max_total_bytes: 256 * 1024,
+                ..FontProviderLimits::default()
+            },
+        }
+    }
+
+    #[test]
+    fn word_charset_suffixes_match_caller_base_font_family() {
+        let provider = tuffy_provider();
+        provider.validate().unwrap();
+
+        for family in [
+            "Times New Roman CE",
+            "Times New Roman Cyr",
+            "Times New Roman Greek",
+            "Times New Roman Tur",
+            "Times New Roman Baltic",
+        ] {
+            assert!(provider.has_asset_for_family(family), "{family}");
+            assert_eq!(
+                provider.coverage_for_char(family, 'A'),
+                FontCoverage::Covered
+            );
+            assert!(
+                provider.glyph_metrics_for_char(family, 'A').is_some(),
+                "{family}"
+            );
+        }
+    }
+
+    #[test]
+    fn word_charset_suffix_aliasing_does_not_match_unrelated_names() {
+        let provider = tuffy_provider();
+        provider.validate().unwrap();
+
+        assert!(!provider.has_asset_for_family("Times New"));
+        assert_eq!(
+            provider.coverage_for_char("Times New", 'A'),
+            FontCoverage::NoAsset
+        );
+        assert!(!provider.has_asset_for_family("Greek"));
+    }
 }
