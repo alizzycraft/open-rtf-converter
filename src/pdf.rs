@@ -15,7 +15,7 @@ use crate::layout::{
 use crate::model::{
     BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat,
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    TextRelief, UnderlineStyle,
+    StaticImageVectorFillRule, TextRelief, UnderlineStyle,
 };
 
 const HELVETICA_REGULAR: &[u8] = b"F1";
@@ -714,6 +714,7 @@ pub fn render_pdf_with_font_provider(
                         *stroke_width,
                         *stroke_color,
                         *stroke_style,
+                        StaticImageVectorFillRule::Winding,
                         *fill_color,
                     );
                 }
@@ -1305,6 +1306,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 stroke_color,
                 stroke_width,
                 stroke_style,
+                fill_rule,
                 fill_color,
             } => {
                 let points = vector_command_points(draw, source_width, source_height, points);
@@ -1317,6 +1319,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     *stroke_color,
                     stroke_width,
                     stroke_style,
+                    *fill_rule,
                     *fill_color,
                 );
             }
@@ -1595,6 +1598,7 @@ fn draw_passive_vector_polygon(
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
     stroke_style: LineStyle,
+    fill_rule: StaticImageVectorFillRule,
     fill_color: Option<crate::model::Color>,
 ) {
     if points.len() < 3 {
@@ -1610,6 +1614,7 @@ fn draw_passive_vector_polygon(
             blue: 0.0,
         }),
         stroke_style,
+        fill_rule,
         fill_color.map(pdf_color_from_model),
     );
 }
@@ -2337,6 +2342,7 @@ fn draw_passive_polygon(
     stroke_width: f32,
     stroke_color: PdfColor,
     stroke_style: LineStyle,
+    fill_rule: StaticImageVectorFillRule,
     fill_color: Option<PdfColor>,
 ) {
     let Some(first) = points.first() else {
@@ -2362,9 +2368,23 @@ fn draw_passive_polygon(
     }
     content.close_path();
     if fill_color.is_some() && has_stroke {
-        content.fill_nonzero_and_stroke();
+        match fill_rule {
+            StaticImageVectorFillRule::Alternate => {
+                content.fill_even_odd_and_stroke();
+            }
+            StaticImageVectorFillRule::Winding => {
+                content.fill_nonzero_and_stroke();
+            }
+        }
     } else if fill_color.is_some() {
-        content.fill_nonzero();
+        match fill_rule {
+            StaticImageVectorFillRule::Alternate => {
+                content.fill_even_odd();
+            }
+            StaticImageVectorFillRule::Winding => {
+                content.fill_nonzero();
+            }
+        }
     } else {
         content.stroke();
     }

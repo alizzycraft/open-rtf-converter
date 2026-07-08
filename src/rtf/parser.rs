@@ -10,10 +10,10 @@ use crate::model::{
     PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
-    TableCellPadding, TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TextRelief, UnderlineStyle,
+    StaticImageVectorFillRule, StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER,
+    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellBorders,
+    TableCellHorizontalMerge, TableCellPadding, TableCellVerticalAlign, TableCellVerticalMerge,
+    TableRow, TableRowAlignment, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -14399,6 +14399,7 @@ struct WmfDrawingState {
     stroke_color: Option<Color>,
     stroke_width: f32,
     stroke_style: BorderStyle,
+    fill_rule: StaticImageVectorFillRule,
     fill_color: Option<Color>,
     text_color: Option<Color>,
     background_color: Option<Color>,
@@ -14426,6 +14427,7 @@ impl Default for WmfDrawingState {
             stroke_color: Some(Color::default()),
             stroke_width: 1.0,
             stroke_style: BorderStyle::Single,
+            fill_rule: StaticImageVectorFillRule::Alternate,
             fill_color: None,
             text_color: Some(Color::default()),
             background_color: Some(Color {
@@ -14453,6 +14455,7 @@ const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
 const WMF_ETO_GLYPH_INDEX: u16 = 0x0010;
 const WMF_BKMODE_OPAQUE: u16 = 2;
+const WMF_POLYFILLMODE_WINDING: u16 = 2;
 const WMF_TA_RIGHT: u16 = 0x0002;
 const WMF_TA_CENTER: u16 = 0x0006;
 const WMF_TA_BOTTOM: u16 = 0x0008;
@@ -14890,6 +14893,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     WmfTextBackgroundMode::Transparent
                 };
             }
+            0x0106 => {
+                state.fill_rule = if read_le_u16(data, 0)? == WMF_POLYFILLMODE_WINDING {
+                    StaticImageVectorFillRule::Winding
+                } else {
+                    StaticImageVectorFillRule::Alternate
+                };
+            }
             0x0108 => {
                 state.text_character_extra =
                     normalized_wmf_text_character_extra(data, 0, window_width)?;
@@ -14952,6 +14962,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             stroke_color: state.stroke_color,
                             stroke_width: state.stroke_width,
                             stroke_style: state.stroke_style,
+                            fill_rule: state.fill_rule,
                             fill_color: state.fill_color,
                         });
                     }
@@ -14985,6 +14996,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             stroke_color: state.stroke_color,
                             stroke_width: state.stroke_width,
                             stroke_style: state.stroke_style,
+                            fill_rule: state.fill_rule,
                             fill_color: state.fill_color,
                         });
                     }

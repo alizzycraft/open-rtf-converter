@@ -395,6 +395,7 @@ pub enum StaticImageVectorCommand {
         stroke_color: Option<Color>,
         stroke_width: f32,
         stroke_style: BorderStyle,
+        fill_rule: StaticImageVectorFillRule,
         fill_color: Option<Color>,
     },
     Rectangle {
@@ -441,6 +442,13 @@ pub enum StaticImageVectorCommand {
         horizontal_align: StaticImageTextHorizontalAlign,
         vertical_align: StaticImageTextVerticalAlign,
     },
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum StaticImageVectorFillRule {
+    #[default]
+    Alternate,
+    Winding,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]

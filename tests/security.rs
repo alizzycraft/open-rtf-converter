@@ -7,8 +7,8 @@ use open_rtf_converter::model::{
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint,
     FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
-    StaticImageTextVerticalAlign, StaticImageVectorCommand, TOTAL_PAGES_MARKER, TabAlignment,
-    TextRelief, UnderlineStyle,
+    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
+    TOTAL_PAGES_MARKER, TabAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
@@ -18348,6 +18348,98 @@ fn wmf_pen_dash_style_renders_passive_dash_pattern_without_record_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "WMF dashed-pen leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn wmf_polyfill_alternate_renders_even_odd_fill_without_record_leakage() {
+    let wmf_hex = concat!(
+        "0100090000032c00000001000c0000000000",
+        "050000000c026400c800",
+        "07000000fc02000000ffff000000",
+        "040000002d010000",
+        "0400000006010100",
+        "0c0000002403040014001400b400500014005000b4001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF polyfill-mode vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Polygon {
+                points,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                fill_color: Some(_),
+                ..
+            } if points.len() == 4
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in ["wmetafile", "0106", "0324", "00ffff", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF polyfill-mode internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "B*"),
+        "WMF ALTERNATE polyfill mode should emit passive even-odd fill/stroke"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0106",
+        b"0324",
+        b"00ffff",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF polyfill-mode leaked forbidden PDF content: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
