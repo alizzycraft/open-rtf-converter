@@ -9637,6 +9637,121 @@ fn formshade_renders_passive_form_field_background_without_pdf_form() {
 }
 
 #[test]
+fn formshade_applies_to_stored_form_field_result_without_pdf_form() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "formshade Before {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst FORMTEXT}{",
+        "\\",
+        "formfield{",
+        "\\",
+        "fftype0}{",
+        "\\",
+        "ffname HiddenName}{",
+        "\\",
+        "ffdeftext HiddenDefault}{",
+        "\\",
+        "ffentrymcr launch.exe}{",
+        "\\",
+        "datafield 414243}}{",
+        "\\",
+        "fldrslt Visible value}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        other => panic!("expected paragraph, got {other:?}"),
+    };
+    let form_run = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text == "Visible value")
+        .expect("stored form result run");
+
+    assert!(text.contains("Before Visible value After"));
+    assert!(
+        form_run.style.form_field_shading,
+        "stored form-field result should carry passive shading style"
+    );
+    for forbidden in [
+        "FORMTEXT",
+        "HiddenName",
+        "HiddenDefault",
+        "launch.exe",
+        "414243",
+        "formshade",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden stored formshade metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+
+    assert!(decoded_pdf_text(&content).contains("Before Visible value After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "stored form shading should render as a passive rectangle"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "f"),
+        "stored form shading should render as a passive fill"
+    );
+    for forbidden in [
+        b"FORMTEXT".as_slice(),
+        b"HiddenName",
+        b"HiddenDefault",
+        b"launch.exe",
+        b"414243",
+        b"formshade",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden stored formshade content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_form_checkbox_renders_passively_without_metadata_or_pdf_form() {
     let input = rtf(&[
         "{",

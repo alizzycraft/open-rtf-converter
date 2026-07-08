@@ -88,6 +88,7 @@ struct ParserState {
     field_owner_destination: Destination,
     field_result_seen: bool,
     field_result_has_visible_content: bool,
+    field_result_form_field_shading: bool,
     field_instruction: String,
     field_form_result_value: Option<i32>,
     field_form_default_result_value: Option<i32>,
@@ -167,6 +168,7 @@ impl Default for ParserState {
             field_owner_destination: Destination::Body,
             field_result_seen: false,
             field_result_has_visible_content: false,
+            field_result_form_field_shading: false,
             field_instruction: String::new(),
             field_form_result_value: None,
             field_form_default_result_value: None,
@@ -1268,6 +1270,8 @@ impl Parser {
                 previous.field_result_seen |= self.state.field_result_seen;
                 previous.field_result_has_visible_content |=
                     self.state.field_result_has_visible_content;
+                previous.field_result_form_field_shading |=
+                    self.state.field_result_form_field_shading;
                 previous.field_form_result_value = self
                     .state
                     .field_form_result_value
@@ -2644,6 +2648,7 @@ impl Parser {
                 self.state.field_owner_destination = owner_destination;
                 self.state.field_result_seen = false;
                 self.state.field_result_has_visible_content = false;
+                self.state.field_result_form_field_shading = false;
                 self.state.destination = Destination::FieldInstruction;
             }
             "fldinst"
@@ -2656,6 +2661,9 @@ impl Parser {
                 if self.state.inside_field && destination_allows_visible_content(&self.state) =>
             {
                 self.state.field_result_seen = true;
+                self.state.field_result_form_field_shading = self.form_field_shading
+                    && field_instruction_name(&self.state.field_instruction)
+                        .is_some_and(is_form_field_instruction_name);
                 self.state.destination = self.state.field_owner_destination;
             }
             "fldrslt" if destination_allows_visible_content(&self.state) => {
@@ -5003,12 +5011,11 @@ impl Parser {
         if let Some((marker_text, marker_style)) = styled_marker.as_ref() {
             push_text_to_paragraph(paragraph, marker_text, &self.state.paragraph, marker_style);
         }
-        push_text_to_paragraph(
-            paragraph,
-            text,
-            &self.state.paragraph,
-            &self.state.character,
-        );
+        let mut style = self.state.character.clone();
+        if self.state.field_result_form_field_shading {
+            style.form_field_shading = true;
+        }
+        push_text_to_paragraph(paragraph, text, &self.state.paragraph, &style);
         Ok(())
     }
 
@@ -11180,6 +11187,10 @@ fn passive_field_result(
         "SYMBOL" => passive_symbol_field_result(instruction),
         _ => None,
     }
+}
+
+fn is_form_field_instruction_name(name: &str) -> bool {
+    matches!(name, "FORMTEXT" | "FORMDROPDOWN" | "FORMCHECKBOX")
 }
 
 fn field_instruction_name(instruction: &str) -> Option<&'static str> {
