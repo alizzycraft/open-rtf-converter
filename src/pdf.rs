@@ -13,7 +13,7 @@ use crate::layout::{
     passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
-    BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat,
+    BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ShadingPattern,
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
     StaticImageVectorFillRule, TextRelief, UnderlineStyle,
 };
@@ -1307,6 +1307,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 stroke_width,
                 stroke_style,
                 fill_rule,
+                fill_pattern: _,
                 fill_color,
             } => {
                 let points = vector_command_points(draw, source_width, source_height, points);
@@ -1331,6 +1332,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 stroke_color,
                 stroke_width,
                 stroke_style,
+                fill_pattern,
                 fill_color,
             } => {
                 let rect = vector_command_rect(
@@ -1351,6 +1353,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     *stroke_color,
                     stroke_width,
                     stroke_style,
+                    *fill_pattern,
                     *fill_color,
                 );
             }
@@ -1364,6 +1367,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 stroke_color,
                 stroke_width,
                 stroke_style,
+                fill_pattern: _,
                 fill_color,
             } => {
                 let rect = vector_command_rect(
@@ -1399,6 +1403,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 stroke_color,
                 stroke_width,
                 stroke_style,
+                fill_pattern: _,
                 fill_color,
             } => {
                 let rect = vector_command_rect(
@@ -1625,13 +1630,18 @@ fn draw_passive_vector_rectangle(
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
     stroke_style: LineStyle,
+    fill_pattern: ShadingPattern,
     fill_color: Option<crate::model::Color>,
 ) {
     if fill_color.is_none() && stroke_color.is_none() {
         return;
     }
-    if let Some(color) = fill_color {
+    if let Some(color) = fill_color
+        && fill_pattern == ShadingPattern::None
+    {
         set_fill_color(content, pdf_color_from_model(color));
+    } else if let Some(color) = fill_color {
+        draw_passive_hatch_rect(content, rect, fill_pattern, pdf_color_from_model(color));
     }
     if let Some(color) = stroke_color {
         set_stroke_color(content, pdf_color_from_model(color));
@@ -1639,17 +1649,156 @@ fn draw_passive_vector_rectangle(
         set_passive_path_stroke_style(content, stroke_width, stroke_style);
     }
     content.rect(rect.x, rect.y, rect.width, rect.height);
-    match (fill_color, stroke_color) {
-        (Some(_), Some(_)) => {
+    match (fill_color, stroke_color, fill_pattern) {
+        (Some(_), Some(_), ShadingPattern::None) => {
             content.fill_nonzero_and_stroke();
         }
-        (Some(_), None) => {
+        (Some(_), None, ShadingPattern::None) => {
             content.fill_nonzero();
         }
-        (None, Some(_)) => {
+        (_, Some(_), _) => {
             content.stroke();
         }
-        (None, None) => {}
+        _ => {
+            content.end_path();
+        }
+    }
+}
+
+fn draw_passive_hatch_rect(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    pattern: ShadingPattern,
+    color: PdfColor,
+) {
+    if pattern == ShadingPattern::None || rect.width <= 0.5 || rect.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    content.rect(rect.x, rect.y, rect.width, rect.height);
+    content.clip_nonzero();
+    content.end_path();
+    set_stroke_color(content, color);
+    content.set_line_width(0.35);
+
+    let spacing = match pattern {
+        ShadingPattern::DarkHorizontal
+        | ShadingPattern::DarkVertical
+        | ShadingPattern::DarkForwardDiagonal
+        | ShadingPattern::DarkBackwardDiagonal
+        | ShadingPattern::DarkCross
+        | ShadingPattern::DarkDiagonalCross => 2.5,
+        _ => 4.0,
+    };
+    match pattern {
+        ShadingPattern::Horizontal | ShadingPattern::DarkHorizontal => {
+            draw_passive_horizontal_hatch_lines(content, rect, spacing);
+        }
+        ShadingPattern::Vertical | ShadingPattern::DarkVertical => {
+            draw_passive_vertical_hatch_lines(content, rect, spacing);
+        }
+        ShadingPattern::ForwardDiagonal | ShadingPattern::DarkForwardDiagonal => {
+            draw_passive_forward_diagonal_hatch_lines(content, rect, spacing);
+        }
+        ShadingPattern::BackwardDiagonal | ShadingPattern::DarkBackwardDiagonal => {
+            draw_passive_backward_diagonal_hatch_lines(content, rect, spacing);
+        }
+        ShadingPattern::Cross | ShadingPattern::DarkCross => {
+            draw_passive_horizontal_hatch_lines(content, rect, spacing);
+            draw_passive_vertical_hatch_lines(content, rect, spacing);
+        }
+        ShadingPattern::DiagonalCross | ShadingPattern::DarkDiagonalCross => {
+            draw_passive_forward_diagonal_hatch_lines(content, rect, spacing);
+            draw_passive_backward_diagonal_hatch_lines(content, rect, spacing);
+        }
+        ShadingPattern::None => {}
+    }
+    content.restore_state();
+}
+
+fn draw_passive_horizontal_hatch_lines(content: &mut Content, rect: VectorDrawRect, spacing: f32) {
+    let mut cursor = rect.y + spacing;
+    let max_y = rect.y + rect.height;
+    while cursor < max_y {
+        stroke_line(content, rect.x, cursor, rect.x + rect.width, cursor, 0.35);
+        cursor += spacing;
+    }
+}
+
+fn draw_passive_vertical_hatch_lines(content: &mut Content, rect: VectorDrawRect, spacing: f32) {
+    let mut cursor = rect.x + spacing;
+    let max_x = rect.x + rect.width;
+    while cursor < max_x {
+        stroke_line(content, cursor, rect.y, cursor, rect.y + rect.height, 0.35);
+        cursor += spacing;
+    }
+}
+
+fn draw_passive_forward_diagonal_hatch_lines(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    spacing: f32,
+) {
+    let mut offset = spacing;
+    while offset < rect.width {
+        let length = (rect.width - offset).min(rect.height);
+        stroke_line(
+            content,
+            rect.x + offset,
+            rect.y,
+            rect.x + offset + length,
+            rect.y + length,
+            0.35,
+        );
+        offset += spacing;
+    }
+
+    let mut offset = spacing;
+    while offset < rect.height {
+        let length = rect.width.min(rect.height - offset);
+        stroke_line(
+            content,
+            rect.x,
+            rect.y + offset,
+            rect.x + length,
+            rect.y + offset + length,
+            0.35,
+        );
+        offset += spacing;
+    }
+}
+
+fn draw_passive_backward_diagonal_hatch_lines(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    spacing: f32,
+) {
+    let mut offset = spacing;
+    while offset < rect.height {
+        let length = rect.width.min(offset);
+        stroke_line(
+            content,
+            rect.x,
+            rect.y + offset,
+            rect.x + length,
+            rect.y + offset - length,
+            0.35,
+        );
+        offset += spacing;
+    }
+
+    let mut offset = spacing;
+    while offset < rect.width {
+        let length = (rect.width - offset).min(rect.height);
+        stroke_line(
+            content,
+            rect.x + offset,
+            rect.y + rect.height,
+            rect.x + offset + length,
+            rect.y + rect.height - length,
+            0.35,
+        );
+        offset += spacing;
     }
 }
 
@@ -1751,6 +1900,7 @@ fn draw_passive_vector_text(
             None,
             0.0,
             LineStyle::Solid,
+            ShadingPattern::None,
             Some(background_color),
         );
     }

@@ -396,6 +396,7 @@ pub enum StaticImageVectorCommand {
         stroke_width: f32,
         stroke_style: BorderStyle,
         fill_rule: StaticImageVectorFillRule,
+        fill_pattern: ShadingPattern,
         fill_color: Option<Color>,
     },
     Rectangle {
@@ -406,6 +407,7 @@ pub enum StaticImageVectorCommand {
         stroke_color: Option<Color>,
         stroke_width: f32,
         stroke_style: BorderStyle,
+        fill_pattern: ShadingPattern,
         fill_color: Option<Color>,
     },
     RoundedRectangle {
@@ -418,6 +420,7 @@ pub enum StaticImageVectorCommand {
         stroke_color: Option<Color>,
         stroke_width: f32,
         stroke_style: BorderStyle,
+        fill_pattern: ShadingPattern,
         fill_color: Option<Color>,
     },
     Ellipse {
@@ -428,6 +431,7 @@ pub enum StaticImageVectorCommand {
         stroke_color: Option<Color>,
         stroke_width: f32,
         stroke_style: BorderStyle,
+        fill_pattern: ShadingPattern,
         fill_color: Option<Color>,
     },
     Text {

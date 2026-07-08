@@ -17813,6 +17813,114 @@ fn simple_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "010009000003230000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020200ff0000000000",
+        "040000002d010000",
+        "070000001b045000b4000a001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF vector preview image");
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Rectangle {
+                fill_pattern: ShadingPattern::Horizontal,
+                fill_color: Some(color),
+                ..
+            } if color.red == 255 && color.green == 0 && color.blue == 0
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in [
+        "wmetafile",
+        "010009",
+        "02fc",
+        "0200ff0000000000",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF parser internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "WMF hatch fill should be clipped to the passive rectangle"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "l")
+            .count()
+            >= 2,
+        "WMF hatch fill should render as passive PDF line paths"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"02fc",
+        b"0200ff0000000000",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF hatch preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn placeable_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
     let wmf_hex = concat!(
         "d7cdc69a000000000000c8006400a005000000001d52",
