@@ -61,6 +61,13 @@ impl FontProvider {
             if asset.family_names.is_empty() {
                 return Err(FontProviderError::MissingFamilyName { asset_index });
             }
+            if asset.family_names.len() > self.limits.max_family_names_per_asset {
+                return Err(FontProviderError::TooManyFamilyNames {
+                    asset_index,
+                    count: asset.family_names.len(),
+                    limit: self.limits.max_family_names_per_asset,
+                });
+            }
             for family in &asset.family_names {
                 let trimmed = family.trim();
                 if trimmed.is_empty() {
@@ -199,6 +206,7 @@ pub struct FontProviderLimits {
     pub max_assets: usize,
     pub max_asset_bytes: usize,
     pub max_total_bytes: usize,
+    pub max_family_names_per_asset: usize,
     pub max_family_name_len: usize,
 }
 
@@ -208,6 +216,7 @@ impl Default for FontProviderLimits {
             max_assets: 64,
             max_asset_bytes: 10 * 1024 * 1024,
             max_total_bytes: 40 * 1024 * 1024,
+            max_family_names_per_asset: 64,
             max_family_name_len: 128,
         }
     }
@@ -219,6 +228,7 @@ impl FontProviderLimits {
             max_assets: 16,
             max_asset_bytes: 2 * 1024 * 1024,
             max_total_bytes: 8 * 1024 * 1024,
+            max_family_names_per_asset: 24,
             max_family_name_len: 128,
         }
     }
@@ -240,6 +250,11 @@ pub enum FontProviderError {
     },
     TotalBytesTooLarge {
         size: usize,
+        limit: usize,
+    },
+    TooManyFamilyNames {
+        asset_index: usize,
+        count: usize,
         limit: usize,
     },
     MissingFamilyName {
@@ -276,6 +291,14 @@ impl fmt::Display for FontProviderError {
             Self::TotalBytesTooLarge { size, limit } => write!(
                 formatter,
                 "passive font assets exceeded total limit: {size} bytes > {limit} bytes"
+            ),
+            Self::TooManyFamilyNames {
+                asset_index,
+                count,
+                limit,
+            } => write!(
+                formatter,
+                "passive font asset {asset_index} has too many family names: {count} > {limit}"
             ),
             Self::MissingFamilyName { asset_index } => {
                 write!(
@@ -384,5 +407,22 @@ mod tests {
             FontCoverage::NoAsset
         );
         assert!(!provider.has_asset_for_family("Greek"));
+    }
+
+    #[test]
+    fn validates_family_name_count_per_asset() {
+        let mut provider = tuffy_provider();
+        provider.assets[0].family_names =
+            vec!["One".to_string(), "Two".to_string(), "Three".to_string()];
+        provider.limits.max_family_names_per_asset = 2;
+
+        assert!(matches!(
+            provider.validate(),
+            Err(FontProviderError::TooManyFamilyNames {
+                asset_index: 0,
+                count: 3,
+                limit: 2,
+            })
+        ));
     }
 }

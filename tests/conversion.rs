@@ -272,6 +272,87 @@ fn caller_base_font_asset_matches_word_charset_suffixed_font_names() {
 }
 
 #[test]
+fn caller_font_asset_aliases_embed_passive_font_for_multiple_word_names() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial Narrow;}{\f1 Book Antiqua;}}\f0 Narrow AB\par\f1 Serif CD\par}";
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec![
+                "Arial Narrow".to_string(),
+                "Book Antiqua".to_string(),
+                "Times New Roman".to_string(),
+            ],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected supplied passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/OpenAction".as_slice(),
+        b"/AA".as_slice(),
+        b"/AcroForm".as_slice(),
+        b"/Widget".as_slice(),
+        b"/Launch".as_slice(),
+        b"/EmbeddedFile".as_slice(),
+        b"/Filespec".as_slice(),
+        b"/RichMedia".as_slice(),
+        b"/XFA".as_slice(),
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active PDF marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    for family in ["Arial Narrow", "Book Antiqua"] {
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains(family)
+                    || !diagnostic.message.contains("substituted")),
+            "caller alias should suppress substitution diagnostic for {family}: {:?}",
+            output.diagnostics
+        );
+    }
+}
+
+#[test]
 fn rtf_embedded_font_payload_does_not_become_pdf_font_file() {
     let input =
         br"{\rtf1\ansi{\fonttbl{\f0 Arial{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}};}}Visible\par}";

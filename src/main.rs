@@ -33,8 +33,8 @@ struct Cli {
     #[arg(long)]
     diagnostics: bool,
 
-    /// Caller-provided passive font asset in the form FAMILY=PATH. Repeat for multiple fonts.
-    #[arg(long = "font", value_name = "FAMILY=PATH")]
+    /// Caller-provided passive font asset in the form FAMILY[,ALIAS...]=PATH. Repeat for multiple fonts.
+    #[arg(long = "font", value_name = "FAMILY[,ALIAS...]=PATH")]
     fonts: Vec<String>,
 }
 
@@ -109,7 +109,7 @@ fn load_cli_font_provider(specs: &[String]) -> Result<FontProvider, CliFontError
     }
     let mut total_bytes = 0usize;
     for spec in specs {
-        let (family, path) = parse_font_spec(spec)?;
+        let (families, path) = parse_font_spec(spec)?;
         let bytes = read_bounded_font_file(path, provider.limits.max_asset_bytes)?;
         total_bytes =
             total_bytes
@@ -125,7 +125,7 @@ fn load_cli_font_provider(specs: &[String]) -> Result<FontProvider, CliFontError
             });
         }
         provider.assets.push(FontAsset {
-            family_names: vec![family.to_string()],
+            family_names: families,
             style: FontAssetStyle::default(),
             bytes,
         });
@@ -134,20 +134,35 @@ fn load_cli_font_provider(specs: &[String]) -> Result<FontProvider, CliFontError
     Ok(provider)
 }
 
-fn parse_font_spec(spec: &str) -> Result<(&str, &Path), CliFontError> {
+fn parse_font_spec(spec: &str) -> Result<(Vec<String>, &Path), CliFontError> {
     let Some((family, path)) = spec.split_once('=') else {
         return Err(CliFontError::MalformedFontSpec {
             spec: spec.to_string(),
         });
     };
-    let family = family.trim();
+    let families = parse_font_family_aliases(family, spec)?;
     let path = path.trim();
-    if family.is_empty() || path.is_empty() {
+    if path.is_empty() {
         return Err(CliFontError::MalformedFontSpec {
             spec: spec.to_string(),
         });
     }
-    Ok((family, Path::new(path)))
+    Ok((families, Path::new(path)))
+}
+
+fn parse_font_family_aliases(families: &str, spec: &str) -> Result<Vec<String>, CliFontError> {
+    let parsed = families
+        .split(',')
+        .map(str::trim)
+        .filter(|family| !family.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if parsed.is_empty() {
+        return Err(CliFontError::MalformedFontSpec {
+            spec: spec.to_string(),
+        });
+    }
+    Ok(parsed)
 }
 
 fn read_bounded_font_file(path: &Path, limit: usize) -> Result<Vec<u8>, CliFontError> {
@@ -210,7 +225,7 @@ impl fmt::Display for CliFontError {
         match self {
             Self::MalformedFontSpec { spec } => write!(
                 formatter,
-                "font asset must use FAMILY=PATH syntax, got {spec:?}"
+                "font asset must use FAMILY[,ALIAS...]=PATH syntax, got {spec:?}"
             ),
             Self::ReadFont { path, .. } => {
                 write!(formatter, "failed to read font asset {}", path.display())
@@ -245,9 +260,18 @@ mod tests {
 
     #[test]
     fn parses_font_spec_with_spaced_family_name() {
-        let (family, path) = parse_font_spec("Times New Roman=fixtures/fonts/Tuffy.ttf").unwrap();
+        let (families, path) = parse_font_spec("Times New Roman=fixtures/fonts/Tuffy.ttf").unwrap();
 
-        assert_eq!(family, "Times New Roman");
+        assert_eq!(families, vec!["Times New Roman"]);
+        assert_eq!(path, Path::new("fixtures/fonts/Tuffy.ttf"));
+    }
+
+    #[test]
+    fn parses_font_spec_with_alias_family_names() {
+        let (families, path) =
+            parse_font_spec("Times New Roman,Arial,Book Antiqua=fixtures/fonts/Tuffy.ttf").unwrap();
+
+        assert_eq!(families, vec!["Times New Roman", "Arial", "Book Antiqua"]);
         assert_eq!(path, Path::new("fixtures/fonts/Tuffy.ttf"));
     }
 
@@ -265,18 +289,45 @@ mod tests {
             parse_font_spec("=fixtures/fonts/Tuffy.ttf"),
             Err(CliFontError::MalformedFontSpec { .. })
         ));
+        assert!(matches!(
+            parse_font_spec(" , =fixtures/fonts/Tuffy.ttf"),
+            Err(CliFontError::MalformedFontSpec { .. })
+        ));
     }
 
     #[test]
     fn loads_valid_cli_font_provider_without_system_fonts() {
-        let specs = vec!["Tuffy=fixtures/fonts/Tuffy.ttf".to_string()];
+        let specs = vec!["Tuffy,Tuffy Alias=fixtures/fonts/Tuffy.ttf".to_string()];
         let provider = load_cli_font_provider(&specs).unwrap();
 
         assert_eq!(provider.assets.len(), 1);
         assert_eq!(
+            provider.assets[0].family_names,
+            vec!["Tuffy", "Tuffy Alias"]
+        );
+        assert_eq!(
             provider.coverage_for_char("Tuffy", 'A'),
             open_rtf_converter::FontCoverage::Covered
         );
+        assert_eq!(
+            provider.coverage_for_char("Tuffy Alias", 'A'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+    }
+
+    #[test]
+    fn rejects_cli_font_aliases_over_provider_limit() {
+        let aliases = (0..=FontProvider::default().limits.max_family_names_per_asset)
+            .map(|idx| format!("Alias {idx}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let specs = vec![format!("{aliases}=fixtures/fonts/Tuffy.ttf")];
+        let error = load_cli_font_provider(&specs).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CliFontError::Provider(FontProviderError::TooManyFamilyNames { .. })
+        ));
     }
 
     #[test]
