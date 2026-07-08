@@ -7652,6 +7652,71 @@ fn empty_stored_symbol_result_falls_back_to_passive_symbol_rendering() {
 }
 
 #[test]
+fn unquoted_symbol_font_switch_renders_passive_dingbat_without_metadata_leakage() {
+    let input =
+        br"{\rtf1 Before {\field{\*\fldinst SYMBOL 74 \\f Wingdings \\s 12}} After\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Before \u{263a} After"),
+        "unquoted Wingdings SYMBOL field should render a passive dingbat, got {text:?}"
+    );
+    for forbidden in ["fldinst", "SYMBOL", "Wingdings"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden unquoted-symbol metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        zapf_bytes.contains(&b'J'),
+        "unquoted Wingdings SYMBOL should use passive ZapfDingbats bytes, got {zapf_bytes:?}"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "unquoted Wingdings smiley should draw a passive vector overlay for viewer-stable output"
+    );
+    for forbidden in [
+        b"Wingdings".as_slice(),
+        b"fldinst",
+        b"SYMBOL",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden unquoted-symbol content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_number_start_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

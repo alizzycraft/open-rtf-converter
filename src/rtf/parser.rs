@@ -11221,6 +11221,7 @@ struct FormulaParser<'a> {
 const MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS: usize = 4096;
 const MAX_PASSIVE_FIELD_NUMERIC_PICTURE_CHARS: usize = 64;
 const MAX_PASSIVE_FIELD_DATE_PICTURE_CHARS: usize = 96;
+const MAX_PASSIVE_FIELD_SWITCH_VALUE_CHARS: usize = 128;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum FieldTextFormatSwitch {
@@ -11943,7 +11944,7 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
     let font_size_half_points = field_switch_i32_value(rest_after_value.as_str(), 's')
         .and_then(|points| points.checked_mul(2))
         .filter(|half_points| *half_points > 0);
-    let font_name = field_switch_quoted_value(instruction, b'f');
+    let font_name = field_switch_string_value(instruction, b'f');
     let mut passive_font_name = font_name.clone();
     let text = if let Some(name) = font_name.as_deref()
         && name.eq_ignore_ascii_case("Symbol")
@@ -13074,28 +13075,56 @@ fn field_switch_i32_value(instruction: &str, target_switch: char) -> Option<i32>
     None
 }
 
-fn field_switch_quoted_value(instruction: &str, switch: u8) -> Option<String> {
+fn field_switch_string_value(instruction: &str, switch: u8) -> Option<String> {
     let bytes = instruction.as_bytes();
     let switch = switch.to_ascii_lowercase();
     let mut index = 0;
     while index + 1 < bytes.len() {
         if bytes[index] == b'\\' && bytes[index + 1].to_ascii_lowercase() == switch {
             let mut value_start = index + 2;
+            if value_start < bytes.len()
+                && !bytes[value_start].is_ascii_whitespace()
+                && bytes[value_start] != b'"'
+            {
+                index += 1;
+                continue;
+            }
             while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
                 value_start += 1;
             }
-            if value_start < bytes.len() && bytes[value_start] == b'"' {
-                value_start += 1;
-                let value_end = bytes[value_start..]
-                    .iter()
-                    .position(|byte| *byte == b'"')
-                    .map(|relative| value_start + relative)?;
-                return Some(instruction[value_start..value_end].to_string());
+            if let Some(value) = field_switch_argument_value(&instruction[value_start..]) {
+                return Some(value);
             }
         }
         index += 1;
     }
     None
+}
+
+fn field_switch_argument_value(input: &str) -> Option<String> {
+    let value = if input.starts_with('"') {
+        field_quoted_prefix(input)?
+    } else {
+        let end = input
+            .char_indices()
+            .find_map(|(index, ch)| ch.is_whitespace().then_some(index))
+            .unwrap_or(input.len());
+        if end == 0 {
+            return None;
+        }
+        input[..end].to_string()
+    };
+    let value = value.trim();
+    if value.is_empty()
+        || value.chars().count() > MAX_PASSIVE_FIELD_SWITCH_VALUE_CHARS
+        || value
+            .chars()
+            .any(|ch| ch.is_control() || matches!(ch, '\\' | '{' | '}') || ch == '\u{fffd}')
+        || contains_internal_marker(value)
+    {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 fn is_internal_marker(text: &str) -> bool {
