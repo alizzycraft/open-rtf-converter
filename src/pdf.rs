@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
-use pdf_writer::types::{Predictor, TextRenderingMode};
+use pdf_writer::types::{Predictor, SystemInfo, TextRenderingMode, UnicodeCmap};
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
 
 use crate::layout::{
@@ -43,6 +43,170 @@ const BUILTIN_FONTS: [(&[u8], &[u8]); 14] = [
     (TIMES_BOLD_ITALIC, b"Times-BoldItalic"),
     (SYMBOL_REGULAR, b"Symbol"),
     (ZAPF_DINGBATS_REGULAR, b"ZapfDingbats"),
+];
+
+const PASSIVE_SYMBOL_TO_UNICODE: &[(u8, char)] = &[
+    (b'A', '\u{0391}'),
+    (b'B', '\u{0392}'),
+    (b'C', '\u{03a7}'),
+    (b'D', '\u{0394}'),
+    (b'E', '\u{0395}'),
+    (b'F', '\u{03a6}'),
+    (b'G', '\u{0393}'),
+    (b'H', '\u{0397}'),
+    (b'I', '\u{0399}'),
+    (b'J', '\u{03d1}'),
+    (b'K', '\u{039a}'),
+    (b'L', '\u{039b}'),
+    (b'M', '\u{039c}'),
+    (b'N', '\u{039d}'),
+    (b'O', '\u{039f}'),
+    (b'P', '\u{03a0}'),
+    (b'Q', '\u{0398}'),
+    (b'R', '\u{03a1}'),
+    (b'S', '\u{03a3}'),
+    (b'T', '\u{03a4}'),
+    (b'U', '\u{03a5}'),
+    (b'V', '\u{03c2}'),
+    (b'W', '\u{03a9}'),
+    (b'X', '\u{039e}'),
+    (b'Y', '\u{03a8}'),
+    (b'Z', '\u{0396}'),
+    (b'a', '\u{03b1}'),
+    (b'b', '\u{03b2}'),
+    (b'c', '\u{03c7}'),
+    (b'd', '\u{03b4}'),
+    (b'e', '\u{03b5}'),
+    (b'f', '\u{03c6}'),
+    (b'g', '\u{03b3}'),
+    (b'h', '\u{03b7}'),
+    (b'i', '\u{03b9}'),
+    (b'j', '\u{03d5}'),
+    (b'k', '\u{03ba}'),
+    (b'l', '\u{03bb}'),
+    (b'm', '\u{03bc}'),
+    (b'n', '\u{03bd}'),
+    (b'o', '\u{03bf}'),
+    (b'p', '\u{03c0}'),
+    (b'q', '\u{03b8}'),
+    (b'r', '\u{03c1}'),
+    (b's', '\u{03c3}'),
+    (b't', '\u{03c4}'),
+    (b'u', '\u{03c5}'),
+    (b'v', '\u{03d6}'),
+    (b'w', '\u{03c9}'),
+    (b'x', '\u{03be}'),
+    (b'y', '\u{03c8}'),
+    (b'z', '\u{03b6}'),
+    (b' ', ' '),
+    (b'"', '\u{2200}'),
+    (b'$', '\u{2203}'),
+    (b'\'', '\u{220b}'),
+    (b'*', '\u{2217}'),
+    (b'-', '\u{2212}'),
+    (b'@', '\u{2245}'),
+    (b'\\', '\u{2234}'),
+    (b'^', '\u{22a5}'),
+    (b'~', '\u{223c}'),
+    (0xa1, '\u{03d2}'),
+    (0xa2, '\u{2032}'),
+    (0xa3, '\u{2264}'),
+    (0xa4, '\u{2044}'),
+    (0xa5, '\u{221e}'),
+    (0xa6, '\u{0192}'),
+    (0xa7, '\u{2663}'),
+    (0xa8, '\u{2666}'),
+    (0xa9, '\u{2665}'),
+    (0xaa, '\u{2660}'),
+    (0xab, '\u{2194}'),
+    (0xac, '\u{2190}'),
+    (0xad, '\u{2191}'),
+    (0xae, '\u{2192}'),
+    (0xaf, '\u{2193}'),
+    (0xb0, '\u{00b0}'),
+    (0xb1, '\u{00b1}'),
+    (0xb2, '\u{2033}'),
+    (0xb3, '\u{2265}'),
+    (0xb4, '\u{00d7}'),
+    (0xb5, '\u{221d}'),
+    (0xb6, '\u{2202}'),
+    (0xb7, '\u{2022}'),
+    (0xb8, '\u{00f7}'),
+    (0xb9, '\u{2260}'),
+    (0xba, '\u{2261}'),
+    (0xbb, '\u{2248}'),
+    (0xbc, '\u{2026}'),
+    (0xbd, '\u{23d0}'),
+    (0xbe, '\u{23af}'),
+    (0xbf, '\u{21b5}'),
+    (0xc0, '\u{2135}'),
+    (0xc1, '\u{2111}'),
+    (0xc2, '\u{211c}'),
+    (0xc3, '\u{2118}'),
+    (0xc4, '\u{2297}'),
+    (0xc5, '\u{2295}'),
+    (0xc6, '\u{2205}'),
+    (0xc7, '\u{2229}'),
+    (0xc8, '\u{222a}'),
+    (0xc9, '\u{2283}'),
+    (0xca, '\u{2287}'),
+    (0xcb, '\u{2284}'),
+    (0xcc, '\u{2282}'),
+    (0xcd, '\u{2286}'),
+    (0xce, '\u{2208}'),
+    (0xcf, '\u{2209}'),
+    (0xd0, '\u{2220}'),
+    (0xd1, '\u{2207}'),
+    (0xd2, '\u{00ae}'),
+    (0xd3, '\u{00a9}'),
+    (0xd4, '\u{2122}'),
+    (0xd5, '\u{220f}'),
+    (0xd6, '\u{221a}'),
+    (0xd7, '\u{22c5}'),
+    (0xd8, '\u{00ac}'),
+    (0xd9, '\u{2227}'),
+    (0xda, '\u{2228}'),
+    (0xdb, '\u{21d4}'),
+    (0xdc, '\u{21d0}'),
+    (0xdd, '\u{21d1}'),
+    (0xde, '\u{21d2}'),
+    (0xdf, '\u{21d3}'),
+    (0xe0, '\u{25ca}'),
+    (0xe1, '\u{2329}'),
+    (0xe5, '\u{2211}'),
+    (0xe6, '\u{239b}'),
+    (0xe7, '\u{239c}'),
+    (0xe8, '\u{239d}'),
+    (0xe9, '\u{23a1}'),
+    (0xea, '\u{23a2}'),
+    (0xeb, '\u{23a3}'),
+    (0xec, '\u{23a7}'),
+    (0xed, '\u{23a8}'),
+    (0xee, '\u{23a9}'),
+    (0xef, '\u{23aa}'),
+    (0xf0, '\u{20ac}'),
+    (0xf1, '\u{232a}'),
+    (0xf2, '\u{222b}'),
+    (0xf3, '\u{2320}'),
+    (0xf4, '\u{23ae}'),
+    (0xf5, '\u{2321}'),
+    (0xf7, '\u{239e}'),
+    (0xf8, '\u{239f}'),
+    (0xf9, '\u{23a0}'),
+    (0xfa, '\u{23a4}'),
+    (0xfb, '\u{23a5}'),
+    (0xfc, '\u{23a6}'),
+    (0xfd, '\u{23ab}'),
+    (0xfe, '\u{23ac}'),
+    (0xff, '\u{23ad}'),
+];
+
+const PASSIVE_ZAPF_DINGBATS_TO_UNICODE: &[(u8, char)] = &[
+    (b' ', ' '),
+    (b'q', '\u{2610}'),
+    (b'J', '\u{263a}'),
+    (b'3', '\u{2713}'),
+    (b'7', '\u{2717}'),
 ];
 
 const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
@@ -166,7 +330,9 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
     let first_page_id = 3;
     let first_content_id = first_page_id + layout.pages.len() as i32;
     let first_font_id = first_content_id + layout.pages.len() as i32;
-    let first_image_id = first_font_id + BUILTIN_FONTS.len() as i32;
+    let symbol_to_unicode_id = first_font_id + BUILTIN_FONTS.len() as i32;
+    let zapf_dingbats_to_unicode_id = symbol_to_unicode_id + 1;
+    let first_image_id = zapf_dingbats_to_unicode_id + 1;
 
     let page_refs = (0..layout.pages.len())
         .map(|idx| Ref::new(first_page_id + idx as i32))
@@ -404,10 +570,26 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
     for (idx, (_resource_name, base_font)) in BUILTIN_FONTS.iter().enumerate() {
         let mut font = pdf.type1_font(Ref::new(first_font_id + idx as i32));
         font.base_font(Name(base_font));
-        if *base_font != b"Symbol" && *base_font != b"ZapfDingbats" {
+        if *base_font == b"Symbol" {
+            font.to_unicode(Ref::new(symbol_to_unicode_id));
+        } else if *base_font == b"ZapfDingbats" {
+            font.to_unicode(Ref::new(zapf_dingbats_to_unicode_id));
+        } else {
             font.encoding_predefined(Name(b"WinAnsiEncoding"));
         }
     }
+
+    let symbol_to_unicode =
+        passive_to_unicode_cmap(b"OpenRtfConverter-Symbol", PASSIVE_SYMBOL_TO_UNICODE);
+    pdf.stream(Ref::new(symbol_to_unicode_id), &symbol_to_unicode);
+    let zapf_dingbats_to_unicode = passive_to_unicode_cmap(
+        b"OpenRtfConverter-ZapfDingbats",
+        PASSIVE_ZAPF_DINGBATS_TO_UNICODE,
+    );
+    pdf.stream(
+        Ref::new(zapf_dingbats_to_unicode_id),
+        &zapf_dingbats_to_unicode,
+    );
 
     for (page_idx, page) in layout.pages.iter().enumerate() {
         for (item_idx, item) in page.items.iter().enumerate() {
@@ -1034,6 +1216,21 @@ fn font_name_for_style(family: PdfFontFamily, style: &CharacterStyle) -> Name<'s
         (PdfFontFamily::Symbol, _, _) => Name(SYMBOL_REGULAR),
         (PdfFontFamily::ZapfDingbats, _, _) => Name(ZAPF_DINGBATS_REGULAR),
     }
+}
+
+fn passive_to_unicode_cmap(name: &'static [u8], mappings: &[(u8, char)]) -> Vec<u8> {
+    let mut cmap = UnicodeCmap::<u8>::new(
+        Name(name),
+        SystemInfo {
+            registry: Str(b"Adobe"),
+            ordering: Str(b"UCS"),
+            supplement: 0,
+        },
+    );
+    for (glyph, unicode) in mappings {
+        cmap.pair(*glyph, *unicode);
+    }
+    cmap.finish().into_vec()
 }
 
 fn draw_underline(
@@ -2072,6 +2269,51 @@ mod tests {
         assert!(pdf.starts_with(b"%PDF-"));
         let parsed = lopdf::Document::load_mem(&pdf).unwrap();
         assert_eq!(parsed.get_pages().len(), 1);
+    }
+
+    #[test]
+    fn symbol_and_dingbat_fonts_include_passive_to_unicode_maps() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "alpha \u{03b1} check \u{2611}".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+
+        assert!(
+            pdf.windows(b"/BaseFont /Symbol".len())
+                .any(|window| window == b"/BaseFont /Symbol")
+        );
+        assert!(
+            pdf.windows(b"/BaseFont /ZapfDingbats".len())
+                .any(|window| window == b"/BaseFont /ZapfDingbats")
+        );
+        assert!(
+            pdf.windows(b"/ToUnicode".len())
+                .filter(|window| *window == b"/ToUnicode")
+                .count()
+                >= 2
+        );
+        assert!(
+            pdf.windows(b"<61> <03B1>".len())
+                .any(|window| window == b"<61> <03B1>"),
+            "Symbol alpha byte must map back to Unicode alpha"
+        );
+        assert!(
+            pdf.windows(b"<71> <2610>".len())
+                .any(|window| window == b"<71> <2610>"),
+            "Zapf box byte must map back to a passive Unicode checkbox box"
+        );
+        assert!(
+            pdf.windows(b"<33> <2713>".len())
+                .any(|window| window == b"<33> <2713>"),
+            "Zapf checkmark byte must map back to Unicode checkmark"
+        );
     }
 
     #[test]
