@@ -2701,11 +2701,14 @@ fn layout_table(
                     if *cursor_y - header.row_height < margin_bottom {
                         break;
                     }
+                    let header_vertical_span_heights =
+                        vec![header.row_height; header.visual_cells.len()];
                     push_table_row(
                         pages,
                         cursor_y,
                         header_row,
                         &header,
+                        &header_vertical_span_heights,
                         content_width,
                         margin_left,
                         table_width,
@@ -2725,11 +2728,23 @@ fn layout_table(
             }
         }
 
+        let vertical_span_heights = table_vertical_span_heights(
+            table,
+            row_idx,
+            &prepared,
+            &column_widths,
+            content_width / column_count as f32,
+            current_marker_context(pages, document_stats),
+            document,
+            font_provider,
+            (*cursor_y - geometry.margin_bottom).max(prepared.row_height),
+        );
         push_table_row(
             pages,
             cursor_y,
             row,
             &prepared,
+            &vertical_span_heights,
             content_width,
             margin_left,
             table_width,
@@ -2740,6 +2755,64 @@ fn layout_table(
     }
 
     *cursor_y -= 6.0;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn table_vertical_span_heights(
+    table: &Table,
+    row_idx: usize,
+    prepared: &PreparedTableRow,
+    column_widths: &[f32],
+    default_column_width: f32,
+    markers: MarkerContext,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+    max_span_height: f32,
+) -> Vec<f32> {
+    let Some(row) = table.rows.get(row_idx) else {
+        return vec![prepared.row_height; prepared.visual_cells.len()];
+    };
+
+    prepared
+        .visual_cells
+        .iter()
+        .map(|visual_cell| {
+            let Some(cell) = row.cells.get(visual_cell.cell_index) else {
+                return prepared.row_height;
+            };
+            if cell.vertical_merge != TableCellVerticalMerge::First {
+                return prepared.row_height;
+            }
+
+            let mut span_height = prepared.row_height;
+            for next_row in table.rows.iter().skip(row_idx + 1) {
+                let continues =
+                    next_row
+                        .cells
+                        .get(visual_cell.cell_index)
+                        .is_some_and(|next_cell| {
+                            next_cell.vertical_merge == TableCellVerticalMerge::Continuation
+                        });
+                if !continues {
+                    break;
+                }
+
+                let next_prepared = prepare_table_row(
+                    next_row,
+                    column_widths,
+                    default_column_width,
+                    &markers,
+                    document,
+                    font_provider,
+                );
+                if span_height + next_prepared.row_height > max_span_height {
+                    break;
+                }
+                span_height += next_prepared.row_height;
+            }
+            span_height
+        })
+        .collect()
 }
 
 fn prepare_table_row(
@@ -2840,6 +2913,7 @@ fn push_table_row(
     cursor_y: &mut f32,
     row: &TableRow,
     prepared: &PreparedTableRow,
+    vertical_span_heights: &[f32],
     content_width: f32,
     margin_left: f32,
     table_width: f32,
@@ -2852,11 +2926,15 @@ fn push_table_row(
     let top = *cursor_y;
     let bottom = top - prepared.row_height;
 
-    for visual_cell in &prepared.visual_cells {
+    for (idx, visual_cell) in prepared.visual_cells.iter().enumerate() {
         let cell = &row.cells[visual_cell.cell_index];
         if cell.vertical_merge == TableCellVerticalMerge::Continuation {
             continue;
         }
+        let span_height = vertical_span_heights
+            .get(idx)
+            .copied()
+            .unwrap_or(prepared.row_height);
         if let Some(color_index) = cell.shading_color_index
             && color_index > 0
         {
@@ -2864,9 +2942,9 @@ fn push_table_row(
                 pages,
                 document,
                 row_left + visual_cell.x_offset,
-                bottom,
+                top - span_height,
                 visual_cell.width,
-                prepared.row_height,
+                span_height,
                 color_index,
                 cell.shading_basis_points,
                 cell.shading_pattern,
@@ -2886,11 +2964,15 @@ fn push_table_row(
         if cell.vertical_merge == TableCellVerticalMerge::Continuation {
             continue;
         }
+        let span_height = vertical_span_heights
+            .get(idx)
+            .copied()
+            .unwrap_or(prepared.row_height);
         let content_height = lines
             .iter()
             .map(|prepared_line| prepared_line.line.height)
             .sum::<f32>();
-        let available_height = (prepared.row_height - padding.top - padding.bottom).max(0.0);
+        let available_height = (span_height - padding.top - padding.bottom).max(0.0);
         let extra_height = (available_height - content_height).max(0.0);
         let vertical_offset = match cell.vertical_align {
             TableCellVerticalAlign::Top => 0.0,
@@ -8248,12 +8330,24 @@ mod tests {
     #[test]
     fn lays_out_vertical_merged_table_cells() {
         let mut document = Document::default();
+        document.colors = vec![
+            Color {
+                red: 255,
+                green: 255,
+                blue: 255,
+            },
+            Color {
+                red: 210,
+                green: 230,
+                blue: 255,
+            },
+        ];
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440, 1440],
             borders_visible: true,
             rows: vec![
                 TableRow {
-                    height_twips: None,
+                    height_twips: Some(720),
                     left_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
@@ -8261,12 +8355,12 @@ mod tests {
                     keep_together: false,
                     cells: vec![
                         TableCell {
-                            shading_color_index: None,
+                            shading_color_index: Some(1),
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
                             borders: TableCellBorders::default(),
-                            vertical_align: TableCellVerticalAlign::Top,
+                            vertical_align: TableCellVerticalAlign::Bottom,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::First,
                             paragraphs: vec![Paragraph {
@@ -8297,7 +8391,7 @@ mod tests {
                     ],
                 },
                 TableRow {
-                    height_twips: None,
+                    height_twips: Some(720),
                     left_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
@@ -8348,10 +8442,33 @@ mod tests {
         let text = layout_text(page);
         let internal_y = internal_horizontal_line_y(page, 144.0, 216.0)
             .expect("unmerged column internal border");
+        let baseline_y = |needle: &str| {
+            page.items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.contains(needle) => {
+                        Some(fragment.baseline_y)
+                    }
+                    _ => None,
+                })
+                .expect("table cell text")
+        };
+        let merged_shading_height = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Highlight { x, height, .. } if (*x - 72.0).abs() < 0.01 => {
+                    Some(*height)
+                }
+                _ => None,
+            })
+            .expect("merged cell shading");
 
         assert!(text.contains("Merged top"));
         assert!(!text.contains("Hidden continuation"));
         assert!(text.contains("Right bottom"));
+        assert!((merged_shading_height - 72.0).abs() < 0.01);
+        assert!(baseline_y("Merged") < baseline_y("Right"));
         assert!(!has_horizontal_line_segment_at_y(
             page, 72.0, 144.0, internal_y
         ));
