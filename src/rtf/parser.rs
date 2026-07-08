@@ -14360,6 +14360,7 @@ struct ParsedWmfExtTextOut {
     y: f32,
     text: String,
     opaque_bounds: Option<(f32, f32, f32, f32)>,
+    clip_bounds: Option<(f32, f32, f32, f32)>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -15001,6 +15002,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             WmfTextBackgroundMode::Opaque => state.background_color,
                             WmfTextBackgroundMode::Transparent => None,
                         },
+                        clip_bounds: None,
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
@@ -15047,6 +15049,14 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         text: ext_text.text,
                         color: state.text_color,
                         background_color: None,
+                        clip_bounds: ext_text.clip_bounds.map(|(left, top, right, bottom)| {
+                            crate::model::StaticImageVectorTextBounds {
+                                left,
+                                top,
+                                right,
+                                bottom,
+                            }
+                        }),
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
@@ -15404,7 +15414,7 @@ fn parse_wmf_exttextout(
     if flags & WMF_ETO_GLYPH_INDEX != 0 {
         return None;
     }
-    let opaque_bounds = if flags & WMF_ETO_OPAQUE != 0 {
+    let bounds = if flags & (WMF_ETO_OPAQUE | WMF_ETO_CLIPPED) != 0 {
         Some(parse_wmf_bounds_at(
             data,
             8,
@@ -15438,7 +15448,16 @@ fn parse_wmf_exttextout(
         x,
         y,
         text,
-        opaque_bounds,
+        opaque_bounds: if flags & WMF_ETO_OPAQUE != 0 {
+            bounds
+        } else {
+            None
+        },
+        clip_bounds: if flags & WMF_ETO_CLIPPED != 0 {
+            bounds
+        } else {
+            None
+        },
     })
 }
 

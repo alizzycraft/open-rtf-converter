@@ -1364,11 +1364,23 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 text,
                 color,
                 background_color,
+                clip_bounds,
                 horizontal_align,
                 vertical_align,
             } => {
                 let point = vector_command_point(draw, source_width, source_height, *x, *y);
                 let font_size = ((*height / source_height) * draw.height).clamp(4.0, 72.0);
+                let clip_rect = clip_bounds.map(|bounds| {
+                    vector_command_rect(
+                        draw,
+                        source_width,
+                        source_height,
+                        bounds.left,
+                        bounds.top,
+                        bounds.right,
+                        bounds.bottom,
+                    )
+                });
                 draw_passive_vector_text(
                     content,
                     point,
@@ -1376,6 +1388,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     text,
                     *color,
                     *background_color,
+                    clip_rect,
                     *horizontal_align,
                     *vertical_align,
                 );
@@ -1584,11 +1597,18 @@ fn draw_passive_vector_text(
     text: &str,
     color: Option<crate::model::Color>,
     background_color: Option<crate::model::Color>,
+    clip_rect: Option<VectorDrawRect>,
     horizontal_align: StaticImageTextHorizontalAlign,
     vertical_align: StaticImageTextVerticalAlign,
 ) {
     if text.is_empty() {
         return;
+    }
+    if let Some(rect) = clip_rect {
+        content.save_state();
+        content.rect(rect.x, rect.y, rect.width, rect.height);
+        content.clip_nonzero();
+        content.end_path();
     }
     let mut style = CharacterStyle::default();
     style.font_size_half_points = (font_size * 2.0).round().clamp(1.0, 144.0) as i32;
@@ -1628,6 +1648,9 @@ fn draw_passive_vector_text(
         &encoded,
         TextRenderingMode::Fill,
     );
+    if clip_rect.is_some() {
+        content.restore_state();
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

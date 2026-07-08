@@ -18860,6 +18860,113 @@ fn wmf_exttextout_uses_selected_font_charset_and_stays_passive() {
 }
 
 #[test]
+fn wmf_exttextout_clips_passive_text_without_flag_leakage() {
+    let wmf_hex = concat!(
+        "010009000003360000000100100000000000",
+        "050000000c026400c800",
+        "0500000009020000ff00",
+        "0c000000fb02f4ff00000000000000000000000000000000",
+        "040000002d010000",
+        "10000000320a140028000a0004001e002d000a001e0048656c6c6f576f726c64",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF clipped EXTTEXTOUT vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("HelloWorld"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                x,
+                y,
+                text,
+                clip_bounds: Some(bounds),
+                ..
+            } if (*x - 40.0).abs() < 0.01
+                && (*y - 20.0).abs() < 0.01
+                && text == "HelloWorld"
+                && (bounds.left - 30.0).abs() < 0.01
+                && (bounds.top - 10.0).abs() < 0.01
+                && (bounds.right - 45.0).abs() < 0.01
+                && (bounds.bottom - 30.0).abs() < 0.01
+        )
+    }));
+    for forbidden in ["wmetafile", "0a32", "fb02", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF clipped EXTTEXTOUT internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "clipped EXTTEXTOUT should emit a passive PDF clipping path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "n"),
+        "clipped EXTTEXTOUT should terminate the clipping path before text"
+    );
+    assert!(
+        decoded_pdf_text(&content).contains("HelloWorld"),
+        "clipped EXTTEXTOUT should still render text through passive text operations"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0a32",
+        b"fb02",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF clipped EXTTEXTOUT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_exttextout_opaque_background_renders_as_passive_fill() {
     let wmf_hex = concat!(
         "0100090000032200000000000c0000000000",

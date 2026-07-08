@@ -424,9 +424,18 @@ pub enum StaticImageVectorCommand {
         text: String,
         color: Option<Color>,
         background_color: Option<Color>,
+        clip_bounds: Option<StaticImageVectorTextBounds>,
         horizontal_align: StaticImageTextHorizontalAlign,
         vertical_align: StaticImageTextVerticalAlign,
     },
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct StaticImageVectorTextBounds {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
