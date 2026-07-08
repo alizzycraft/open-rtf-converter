@@ -21250,6 +21250,99 @@ fn font_charset_hex_escapes_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn central_european_font_charset_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "ansicpg1252{",
+        "\\",
+        "fonttbl{",
+        "\\",
+        "f0 Times New Roman;}{",
+        "\\",
+        "f37",
+        "\\",
+        "fcharset238 Times New Roman CE;}}",
+        "\\",
+        "f37 ",
+        "\\",
+        "'f6t ",
+        "\\",
+        "'e1rv",
+        "\\",
+        "'edzt",
+        "\\",
+        "'fb",
+        "r",
+        "\\",
+        "'f5 ",
+        "\\",
+        "'fctvef",
+        "\\",
+        "'fa",
+        "r",
+        "\\",
+        "'f3g",
+        "\\",
+        "'e9p",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(
+        "\u{00f6}t \u{00e1}rv\u{00ed}zt\u{0171}r\u{0151} \u{00fc}tvef\u{00fa}r\u{00f3}g\u{00e9}p"
+    ));
+    for forbidden in ["fcharset", "Times New Roman CE"] {
+        assert!(
+            !text.contains(forbidden),
+            "Central European font metadata leaked into text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let times_bytes = pdf_text_bytes_for_font(&content, b"F9");
+
+    assert!(
+        times_bytes
+            .windows([0x90, b'r', 0x8d].len())
+            .any(|window| window == [0x90, b'r', 0x8d]),
+        "Hungarian double-acute glyphs should use passive extended Latin bytes, got {times_bytes:?}"
+    );
+    for forbidden in [
+        b"fcharset".as_slice(),
+        b"Times New Roman CE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "{} leaked into PDF",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn ansi_font_charset_hex_escapes_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

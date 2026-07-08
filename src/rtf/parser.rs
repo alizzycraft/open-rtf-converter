@@ -259,6 +259,7 @@ enum ShapePropertyCapture {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum CodePage {
+    Windows1250,
     Windows1252,
     MacRoman,
     Ibm437,
@@ -269,6 +270,7 @@ enum CodePage {
 impl CodePage {
     fn from_rtf_code_page(code_page: i32) -> Option<Self> {
         match code_page {
+            1250 => Some(Self::Windows1250),
             1252 => Some(Self::Windows1252),
             437 => Some(Self::Ibm437),
             850 => Some(Self::Ibm850),
@@ -280,6 +282,7 @@ impl CodePage {
     fn from_font_charset(charset: i32) -> Option<Self> {
         match charset {
             0 => Some(Self::Windows1252),
+            238 => Some(Self::Windows1250),
             77 => Some(Self::MacRoman),
             255 => Some(Self::Ibm437),
             _ => None,
@@ -13325,6 +13328,7 @@ fn take_rtf_unicode_char(pending_high_surrogate: &mut Option<u16>, value: i32) -
 
 fn decode_hex_byte(byte: u8, code_page: CodePage) -> char {
     match code_page {
+        CodePage::Windows1250 => decode_high_byte(byte, &WINDOWS_1250_HIGH),
         CodePage::Windows1252 => decode_windows_1252(byte),
         CodePage::MacRoman => decode_high_byte(byte, &MAC_ROMAN_HIGH),
         CodePage::Ibm437 => decode_high_byte(byte, &CP437_HIGH),
@@ -13686,6 +13690,25 @@ fn decode_windows_1252(byte: u8) -> char {
         _ => byte as char,
     }
 }
+
+const WINDOWS_1250_HIGH: [char; 128] = [
+    '\u{20ac}', '\u{fffd}', '\u{201a}', '\u{fffd}', '\u{201e}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{fffd}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{015a}', '\u{0164}', '\u{017d}', '\u{0179}',
+    '\u{fffd}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}', '\u{2014}',
+    '\u{fffd}', '\u{2122}', '\u{0161}', '\u{203a}', '\u{015b}', '\u{0165}', '\u{017e}', '\u{017a}',
+    '\u{00a0}', '\u{02c7}', '\u{02d8}', '\u{0141}', '\u{00a4}', '\u{0104}', '\u{00a6}', '\u{00a7}',
+    '\u{00a8}', '\u{00a9}', '\u{015e}', '\u{00ab}', '\u{00ac}', '\u{00ad}', '\u{00ae}', '\u{017b}',
+    '\u{00b0}', '\u{00b1}', '\u{02db}', '\u{0142}', '\u{00b4}', '\u{00b5}', '\u{00b6}', '\u{00b7}',
+    '\u{00b8}', '\u{0105}', '\u{015f}', '\u{00bb}', '\u{013d}', '\u{02dd}', '\u{013e}', '\u{017c}',
+    '\u{0154}', '\u{00c1}', '\u{00c2}', '\u{0102}', '\u{00c4}', '\u{0139}', '\u{0106}', '\u{00c7}',
+    '\u{010c}', '\u{00c9}', '\u{0118}', '\u{00cb}', '\u{011a}', '\u{00cd}', '\u{00ce}', '\u{010e}',
+    '\u{0110}', '\u{0143}', '\u{0147}', '\u{00d3}', '\u{00d4}', '\u{0150}', '\u{00d6}', '\u{00d7}',
+    '\u{0158}', '\u{016e}', '\u{00da}', '\u{0170}', '\u{00dc}', '\u{00dd}', '\u{0162}', '\u{00df}',
+    '\u{0155}', '\u{00e1}', '\u{00e2}', '\u{0103}', '\u{00e4}', '\u{013a}', '\u{0107}', '\u{00e7}',
+    '\u{010d}', '\u{00e9}', '\u{0119}', '\u{00eb}', '\u{011b}', '\u{00ed}', '\u{00ee}', '\u{010f}',
+    '\u{0111}', '\u{0144}', '\u{0148}', '\u{00f3}', '\u{00f4}', '\u{0151}', '\u{00f6}', '\u{00f7}',
+    '\u{0159}', '\u{016f}', '\u{00fa}', '\u{0171}', '\u{00fc}', '\u{00fd}', '\u{0163}', '\u{02d9}',
+];
 
 const MAC_ROMAN_HIGH: [char; 128] = [
     '\u{00c4}', '\u{00c5}', '\u{00c7}', '\u{00c9}', '\u{00d1}', '\u{00d6}', '\u{00dc}', '\u{00e1}',
@@ -15175,6 +15198,34 @@ mod tests {
         assert_eq!(text, "Quote \u{201c}Hello\u{201d} dash \u{2014}");
         assert!(!text.contains("fcharset"));
         assert!(!text.contains("Ansi Face"));
+    }
+
+    #[test]
+    fn central_european_font_charset_guides_hex_escape_decoding() {
+        let output = parse_rtf(
+            r"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0 Times New Roman;}{\f37\fcharset238 Times New Roman CE;}}\f0 Latin \f37 \'f6t \'e1rv\'edzt\'fbr\'f5 \'fctvef\'far\'f3g\'e9p\par}",
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(
+            text,
+            "Latin \u{00f6}t \u{00e1}rv\u{00ed}zt\u{0171}r\u{0151} \u{00fc}tvef\u{00fa}r\u{00f3}g\u{00e9}p"
+        );
+        assert!(!text.contains("fcharset"));
+        assert!(!text.contains("Times New Roman CE"));
+    }
+
+    #[test]
+    fn decodes_hex_escapes_with_windows_1250_semantics() {
+        let output =
+            parse_rtf(r"{\rtf1\ansi\ansicpg1250 Central \'8a\'9a \'8c\'9c \'8e\'9e\par}").unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(
+            text,
+            "Central \u{0160}\u{0161} \u{015a}\u{015b} \u{017d}\u{017e}"
+        );
     }
 
     #[test]

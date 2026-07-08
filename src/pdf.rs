@@ -209,6 +209,13 @@ const PASSIVE_ZAPF_DINGBATS_TO_UNICODE: &[(u8, char)] = &[
     (b'7', '\u{2717}'),
 ];
 
+const EXTENDED_LATIN_TO_UNICODE: &[(u8, char)] = &[
+    (0x81, '\u{0150}'),
+    (0x8d, '\u{0151}'),
+    (0x8f, '\u{0170}'),
+    (0x90, '\u{0171}'),
+];
+
 const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/3D", "/3D"),
     (b"/AA", "/AA"),
@@ -342,6 +349,12 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
         font_refs[font_index_for_resource(SYMBOL_REGULAR)].map(|_| next_ref(&mut next_object_id));
     let zapf_dingbats_to_unicode_ref = font_refs[font_index_for_resource(ZAPF_DINGBATS_REGULAR)]
         .map(|_| next_ref(&mut next_object_id));
+    let extended_latin_font_indexes = collect_extended_latin_font_indexes(layout);
+    let extended_latin_to_unicode_ref = if extended_latin_font_indexes.iter().any(|used| *used) {
+        Some(next_ref(&mut next_object_id))
+    } else {
+        None
+    };
     let first_image_id = next_object_id;
 
     let page_refs = (0..layout.pages.len())
@@ -595,6 +608,19 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
             if let Some(to_unicode_ref) = zapf_dingbats_to_unicode_ref {
                 font.to_unicode(to_unicode_ref);
             }
+        } else if extended_latin_font_indexes[font_idx] {
+            {
+                let mut encoding = font.encoding_custom();
+                encoding.base_encoding(Name(b"WinAnsiEncoding"));
+                let mut differences = encoding.differences();
+                differences.consecutive(0x81, [Name(b"Ohungarumlaut")]);
+                differences.consecutive(0x8d, [Name(b"ohungarumlaut")]);
+                differences.consecutive(0x8f, [Name(b"Uhungarumlaut")]);
+                differences.consecutive(0x90, [Name(b"uhungarumlaut")]);
+            }
+            if let Some(to_unicode_ref) = extended_latin_to_unicode_ref {
+                font.to_unicode(to_unicode_ref);
+            }
         } else {
             font.encoding_predefined(Name(b"WinAnsiEncoding"));
         }
@@ -611,6 +637,11 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
             PASSIVE_ZAPF_DINGBATS_TO_UNICODE,
         );
         pdf.stream(to_unicode_ref, &zapf_dingbats_to_unicode);
+    }
+    if let Some(to_unicode_ref) = extended_latin_to_unicode_ref {
+        let extended_latin_to_unicode =
+            passive_to_unicode_cmap(b"OpenRtfConverter-ExtendedLatin", EXTENDED_LATIN_TO_UNICODE);
+        pdf.stream(to_unicode_ref, &extended_latin_to_unicode);
     }
 
     for (page_idx, page) in layout.pages.iter().enumerate() {
@@ -738,6 +769,31 @@ fn collect_used_font_indexes_for_page(page: &crate::layout::LayoutPage) -> Vec<u
         }
     }
     used_font_index_list(&used)
+}
+
+fn collect_extended_latin_font_indexes(layout: &LayoutDocument) -> [bool; 14] {
+    let mut used = [false; 14];
+    for page in &layout.pages {
+        for item in &page.items {
+            let LayoutItem::Text(fragment) = item else {
+                continue;
+            };
+            if !fragment.text.chars().any(is_passive_extended_latin_char) {
+                continue;
+            }
+            let resource = font_resource_for_style(fragment.font_family, &fragment.style);
+            let font_idx = font_index_for_resource(resource);
+            if is_normal_text_font_index(font_idx) {
+                used[font_idx] = true;
+            }
+        }
+    }
+    used
+}
+
+fn is_normal_text_font_index(font_idx: usize) -> bool {
+    let (_resource_name, base_font) = BUILTIN_FONTS[font_idx];
+    base_font != b"Symbol" && base_font != b"ZapfDingbats"
 }
 
 fn used_font_index_list(used: &[bool; 14]) -> Vec<usize> {
@@ -2170,6 +2226,10 @@ fn encode_zapf_dingbats_char(ch: char) -> u8 {
 
 fn encode_win_ansi_char(ch: char) -> u8 {
     match ch {
+        '\u{0150}' => 0x81,
+        '\u{0151}' => 0x8d,
+        '\u{0170}' => 0x8f,
+        '\u{0171}' => 0x90,
         '\u{20ac}' => 0x80,
         '\u{201a}' => 0x82,
         '\u{0192}' => 0x83,
@@ -2205,6 +2265,10 @@ fn encode_win_ansi_char(ch: char) -> u8 {
         ch if ch.is_ascii() => ch as u8,
         _ => b'?',
     }
+}
+
+fn is_passive_extended_latin_char(ch: char) -> bool {
+    matches!(ch, '\u{0150}' | '\u{0151}' | '\u{0170}' | '\u{0171}')
 }
 
 fn set_fill_color(content: &mut Content, color: PdfColor) {
