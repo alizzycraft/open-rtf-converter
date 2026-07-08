@@ -13,8 +13,9 @@ use crate::layout::{
     passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
-    CharacterEmphasisMark, CharacterStyle, ImageFormat, StaticImageTextHorizontalAlign,
-    StaticImageTextVerticalAlign, StaticImageVectorCommand, TextRelief, UnderlineStyle,
+    BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    TextRelief, UnderlineStyle,
 };
 
 const HELVETICA_REGULAR: &[u8] = b"F1";
@@ -1267,41 +1268,55 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 y2,
                 stroke_color,
                 stroke_width,
+                stroke_style,
             } => {
                 let stroke_width =
                     vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
                 draw_passive_vector_line(
                     content,
                     vector_command_point(draw, source_width, source_height, *x1, *y1),
                     vector_command_point(draw, source_width, source_height, *x2, *y2),
                     *stroke_color,
                     stroke_width,
+                    stroke_style,
                 );
             }
             StaticImageVectorCommand::Polyline {
                 points,
                 stroke_color,
                 stroke_width,
+                stroke_style,
             } => {
                 let points = vector_command_points(draw, source_width, source_height, points);
                 let stroke_width =
                     vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
-                draw_passive_vector_polyline(content, &points, *stroke_color, stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
+                draw_passive_vector_polyline(
+                    content,
+                    &points,
+                    *stroke_color,
+                    stroke_width,
+                    stroke_style,
+                );
             }
             StaticImageVectorCommand::Polygon {
                 points,
                 stroke_color,
                 stroke_width,
+                stroke_style,
                 fill_color,
             } => {
                 let points = vector_command_points(draw, source_width, source_height, points);
                 let stroke_width =
                     vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
                 draw_passive_vector_polygon(
                     content,
                     &points,
                     *stroke_color,
                     stroke_width,
+                    stroke_style,
                     *fill_color,
                 );
             }
@@ -1312,6 +1327,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 bottom,
                 stroke_color,
                 stroke_width,
+                stroke_style,
                 fill_color,
             } => {
                 let rect = vector_command_rect(
@@ -1325,11 +1341,13 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 );
                 let stroke_width =
                     vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
                 draw_passive_vector_rectangle(
                     content,
                     rect,
                     *stroke_color,
                     stroke_width,
+                    stroke_style,
                     *fill_color,
                 );
             }
@@ -1342,6 +1360,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 corner_height,
                 stroke_color,
                 stroke_width,
+                stroke_style,
                 fill_color,
             } => {
                 let rect = vector_command_rect(
@@ -1357,6 +1376,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 let corner_height = (*corner_height / source_height) * draw.height;
                 let stroke_width =
                     vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
                 draw_passive_vector_rounded_rectangle(
                     content,
                     rect,
@@ -1364,6 +1384,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     corner_height,
                     *stroke_color,
                     stroke_width,
+                    stroke_style,
                     *fill_color,
                 );
             }
@@ -1374,6 +1395,7 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 bottom,
                 stroke_color,
                 stroke_width,
+                stroke_style,
                 fill_color,
             } => {
                 let rect = vector_command_rect(
@@ -1387,11 +1409,13 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 );
                 let stroke_width =
                     vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
                 draw_passive_vector_ellipse(
                     content,
                     rect,
                     *stroke_color,
                     stroke_width,
+                    stroke_style,
                     *fill_color,
                 );
             }
@@ -1509,12 +1533,21 @@ fn vector_command_stroke_width(
     ((x_width + y_width) * 0.5).clamp(0.25, 24.0)
 }
 
+fn vector_command_line_style(style: BorderStyle) -> LineStyle {
+    match style {
+        BorderStyle::Dotted => LineStyle::Dotted,
+        BorderStyle::Dashed => LineStyle::Dashed,
+        _ => LineStyle::Solid,
+    }
+}
+
 fn draw_passive_vector_line(
     content: &mut Content,
     from: crate::layout::LayoutPoint,
     to: crate::layout::LayoutPoint,
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
+    stroke_style: LineStyle,
 ) {
     let Some(color) = stroke_color else {
         return;
@@ -1530,7 +1563,7 @@ fn draw_passive_vector_line(
         to.y,
         stroke_width,
         pdf_color_from_model(color),
-        LineStyle::Solid,
+        stroke_style,
     );
 }
 
@@ -1539,12 +1572,20 @@ fn draw_passive_vector_polyline(
     points: &[crate::layout::LayoutPoint],
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
+    stroke_style: LineStyle,
 ) {
     if points.len() < 2 {
         return;
     }
     for pair in points.windows(2) {
-        draw_passive_vector_line(content, pair[0], pair[1], stroke_color, stroke_width);
+        draw_passive_vector_line(
+            content,
+            pair[0],
+            pair[1],
+            stroke_color,
+            stroke_width,
+            stroke_style,
+        );
     }
 }
 
@@ -1553,6 +1594,7 @@ fn draw_passive_vector_polygon(
     points: &[crate::layout::LayoutPoint],
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
+    stroke_style: LineStyle,
     fill_color: Option<crate::model::Color>,
 ) {
     if points.len() < 3 {
@@ -1567,7 +1609,7 @@ fn draw_passive_vector_polygon(
             green: 0.0,
             blue: 0.0,
         }),
-        LineStyle::Solid,
+        stroke_style,
         fill_color.map(pdf_color_from_model),
     );
 }
@@ -1577,6 +1619,7 @@ fn draw_passive_vector_rectangle(
     rect: VectorDrawRect,
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
+    stroke_style: LineStyle,
     fill_color: Option<crate::model::Color>,
 ) {
     if fill_color.is_none() && stroke_color.is_none() {
@@ -1588,6 +1631,7 @@ fn draw_passive_vector_rectangle(
     if let Some(color) = stroke_color {
         set_stroke_color(content, pdf_color_from_model(color));
         content.set_line_width(stroke_width.max(0.25));
+        set_passive_path_stroke_style(content, stroke_width, stroke_style);
     }
     content.rect(rect.x, rect.y, rect.width, rect.height);
     match (fill_color, stroke_color) {
@@ -1611,6 +1655,7 @@ fn draw_passive_vector_rounded_rectangle(
     corner_height: f32,
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
+    stroke_style: LineStyle,
     fill_color: Option<crate::model::Color>,
 ) {
     let radius = (corner_width.min(corner_height) * 0.5).max(0.1);
@@ -1627,7 +1672,7 @@ fn draw_passive_vector_rounded_rectangle(
             green: 0.0,
             blue: 0.0,
         }),
-        LineStyle::Solid,
+        stroke_style,
         fill_color.map(pdf_color_from_model),
     );
 }
@@ -1637,6 +1682,7 @@ fn draw_passive_vector_ellipse(
     rect: VectorDrawRect,
     stroke_color: Option<crate::model::Color>,
     stroke_width: f32,
+    stroke_style: LineStyle,
     fill_color: Option<crate::model::Color>,
 ) {
     draw_passive_ellipse(
@@ -1651,7 +1697,7 @@ fn draw_passive_vector_ellipse(
             green: 0.0,
             blue: 0.0,
         }),
-        LineStyle::Solid,
+        stroke_style,
         fill_color.map(pdf_color_from_model),
     );
 }
@@ -1699,6 +1745,7 @@ fn draw_passive_vector_text(
             },
             None,
             0.0,
+            LineStyle::Solid,
             Some(background_color),
         );
     }

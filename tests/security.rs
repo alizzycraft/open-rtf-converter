@@ -18254,6 +18254,106 @@ fn wmf_pen_width_renders_passive_stroke_width_without_record_leakage() {
 }
 
 #[test]
+fn wmf_pen_dash_style_renders_passive_dash_pattern_without_record_leakage() {
+    let wmf_hex = concat!(
+        "010009000003270000000100080000000000",
+        "050000000c026400c800",
+        "08000000fa02010004000000ff000000",
+        "040000002d010000",
+        "05000000140214001400",
+        "0500000013021400b400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF dashed-pen vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Line {
+                stroke_color: Some(color),
+                stroke_width,
+                stroke_style: BorderStyle::Dashed,
+                ..
+            } if color.red == 255
+                && color.green == 0
+                && color.blue == 0
+                && (*stroke_width - 4.0).abs() < 0.01
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in [
+        "wmetafile",
+        "02fa",
+        "010004000000",
+        "ff000000",
+        "JavaScript",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF dashed-pen internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "d"),
+        "WMF dashed pen should emit a passive PDF dash pattern"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"02fa",
+        b"010004000000",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF dashed-pen leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_polypolygon_renders_multiple_passive_polygons_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003300000000100140000000000",

@@ -14375,9 +14375,16 @@ struct WmfHeaderInfo {
 
 #[derive(Debug, Copy, Clone)]
 enum WmfObject {
-    Pen { color: Option<Color>, width: i32 },
+    Pen {
+        color: Option<Color>,
+        width: i32,
+        style: BorderStyle,
+    },
     Brush(Option<Color>),
-    Font { height: i32, charset: Option<i32> },
+    Font {
+        height: i32,
+        charset: Option<i32>,
+    },
     Other,
 }
 
@@ -14391,6 +14398,7 @@ enum WmfTextBackgroundMode {
 struct WmfDrawingState {
     stroke_color: Option<Color>,
     stroke_width: f32,
+    stroke_style: BorderStyle,
     fill_color: Option<Color>,
     text_color: Option<Color>,
     background_color: Option<Color>,
@@ -14417,6 +14425,7 @@ impl Default for WmfDrawingState {
         Self {
             stroke_color: Some(Color::default()),
             stroke_width: 1.0,
+            stroke_style: BorderStyle::Single,
             fill_color: None,
             text_color: Some(Color::default()),
             background_color: Some(Color {
@@ -14846,9 +14855,14 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 let handle = usize::from(read_le_u16(data, 0)?);
                 if let Some(object) = objects.get(handle).and_then(|object| *object) {
                     match object {
-                        WmfObject::Pen { color, width } => {
+                        WmfObject::Pen {
+                            color,
+                            width,
+                            style,
+                        } => {
                             state.stroke_color = color;
                             state.stroke_width = normalized_wmf_stroke_width(width, window_width);
+                            state.stroke_style = style;
                         }
                         WmfObject::Brush(color) => state.fill_color = color,
                         WmfObject::Font { height, charset } => {
@@ -14915,6 +14929,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         y2: end.1,
                         stroke_color: state.stroke_color,
                         stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
                     });
                 }
                 current_point = end;
@@ -14936,6 +14951,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             points,
                             stroke_color: state.stroke_color,
                             stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
                             fill_color: state.fill_color,
                         });
                     }
@@ -14947,6 +14963,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         points,
                         stroke_color: state.stroke_color,
                         stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
                     });
                 }
             }
@@ -14967,6 +14984,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             points,
                             stroke_color: state.stroke_color,
                             stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
                             fill_color: state.fill_color,
                         });
                     }
@@ -15004,6 +15022,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             bottom,
                             stroke_color: state.stroke_color,
                             stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
                             fill_color: state.fill_color,
                         }
                     } else if function == 0x0418 {
@@ -15014,6 +15033,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             bottom,
                             stroke_color: state.stroke_color,
                             stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
                             fill_color: state.fill_color,
                         }
                     } else {
@@ -15028,6 +15048,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             corner_height,
                             stroke_color: state.stroke_color,
                             stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
                             fill_color: state.fill_color,
                         }
                     };
@@ -15095,6 +15116,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             bottom,
                             stroke_color: None,
                             stroke_width: 0.0,
+                            stroke_style: BorderStyle::Single,
                             fill_color: state.background_color,
                         });
                     }
@@ -15146,6 +15168,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         bottom,
                         stroke_color: None,
                         stroke_width: 0.0,
+                        stroke_style: BorderStyle::Single,
                         fill_color: state.fill_color,
                     });
                 }
@@ -15169,6 +15192,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         bottom,
                         stroke_color: None,
                         stroke_width: 0.0,
+                        stroke_style: BorderStyle::Single,
                         fill_color: Some(color),
                     });
                 }
@@ -15294,7 +15318,16 @@ fn parse_wmf_pen_object(data: &[u8]) -> Option<WmfObject> {
     Some(WmfObject::Pen {
         color: if style == 5 { None } else { Some(color) },
         width,
+        style: wmf_pen_border_style(style),
     })
+}
+
+fn wmf_pen_border_style(style: u16) -> BorderStyle {
+    match style & 0x000f {
+        1 | 3 | 4 => BorderStyle::Dashed,
+        2 => BorderStyle::Dotted,
+        _ => BorderStyle::Single,
+    }
 }
 
 fn parse_wmf_brush_object(data: &[u8]) -> Option<WmfObject> {

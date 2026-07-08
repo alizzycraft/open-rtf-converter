@@ -382,16 +382,19 @@ pub enum StaticImageVectorCommand {
         y2: f32,
         stroke_color: Option<Color>,
         stroke_width: f32,
+        stroke_style: BorderStyle,
     },
     Polyline {
         points: Vec<(f32, f32)>,
         stroke_color: Option<Color>,
         stroke_width: f32,
+        stroke_style: BorderStyle,
     },
     Polygon {
         points: Vec<(f32, f32)>,
         stroke_color: Option<Color>,
         stroke_width: f32,
+        stroke_style: BorderStyle,
         fill_color: Option<Color>,
     },
     Rectangle {
@@ -401,6 +404,7 @@ pub enum StaticImageVectorCommand {
         bottom: f32,
         stroke_color: Option<Color>,
         stroke_width: f32,
+        stroke_style: BorderStyle,
         fill_color: Option<Color>,
     },
     RoundedRectangle {
@@ -412,6 +416,7 @@ pub enum StaticImageVectorCommand {
         corner_height: f32,
         stroke_color: Option<Color>,
         stroke_width: f32,
+        stroke_style: BorderStyle,
         fill_color: Option<Color>,
     },
     Ellipse {
@@ -421,6 +426,7 @@ pub enum StaticImageVectorCommand {
         bottom: f32,
         stroke_color: Option<Color>,
         stroke_width: f32,
+        stroke_style: BorderStyle,
         fill_color: Option<Color>,
     },
     Text {
