@@ -1004,17 +1004,31 @@ fn supplied_text_encoding_parts(
         .fonts
         .iter()
         .find(|font| font.index == fragment.style.font_index)?;
-    for (asset_index, asset) in font_provider.assets.iter().enumerate() {
-        if !asset.matches_family(&source_font.name) {
-            continue;
-        }
-        if let Some((glyphs, encoded)) = encode_text_with_font_asset(&fragment.text, asset) {
-            if !glyphs.is_empty() {
-                return Some((asset_index, glyphs, encoded));
-            }
-        }
-    }
-    None
+    font_provider
+        .assets
+        .iter()
+        .enumerate()
+        .filter(|(_, asset)| asset.matches_family(&source_font.name))
+        .filter_map(|(asset_index, asset)| {
+            let (glyphs, encoded) = encode_text_with_font_asset(&fragment.text, asset)?;
+            (!glyphs.is_empty()).then(|| {
+                (
+                    supplied_font_style_mismatch_score(asset.style, &fragment.style),
+                    asset_index,
+                    glyphs,
+                    encoded,
+                )
+            })
+        })
+        .min_by_key(|(score, asset_index, _, _)| (*score, *asset_index))
+        .map(|(_, asset_index, glyphs, encoded)| (asset_index, glyphs, encoded))
+}
+
+fn supplied_font_style_mismatch_score(
+    asset_style: crate::fonts::FontAssetStyle,
+    run_style: &CharacterStyle,
+) -> u8 {
+    u8::from(asset_style.bold != run_style.bold) + u8::from(asset_style.italic != run_style.italic)
 }
 
 fn encode_text_with_font_asset(

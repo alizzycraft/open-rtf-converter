@@ -219,6 +219,92 @@ fn caller_provided_font_asset_embeds_passive_type0_font_without_system_fonts() {
 }
 
 #[test]
+fn caller_provided_font_assets_prefer_matching_run_style() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Tuffy;}}\f0 Regular {\b Bold}\par}";
+    let provider = FontProvider {
+        assets: vec![
+            FontAsset {
+                family_names: vec!["Tuffy".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            },
+            FontAsset {
+                family_names: vec!["Tuffy".to_string()],
+                style: FontAssetStyle {
+                    bold: true,
+                    italic: false,
+                },
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            },
+        ],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 512 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            font_provider: provider,
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/TF1".as_slice(),
+        b"/TF2".as_slice(),
+        b"ORTFSuppliedFont1",
+        b"ORTFSuppliedFont2",
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected style-matched supplied font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    assert_eq!(
+        output
+            .pdf
+            .windows(b"/FontFile2".len())
+            .filter(|window| *window == b"/FontFile2")
+            .count(),
+        2,
+        "regular and bold caller-provided assets should both be embedded"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("font 'Tuffy' substituted")),
+        "caller-provided styled assets should avoid base-font substitution diagnostics: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/Launch".as_slice(),
+        b"/EmbeddedFile".as_slice(),
+        b"/Filespec".as_slice(),
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active PDF marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn caller_base_font_asset_matches_word_charset_suffixed_font_names() {
     let input = br"{\rtf1\ansi{\fonttbl{\f38\fcharset204 Times New Roman Cyr;}}\f38 Alias AB\par}";
     let provider = FontProvider {
