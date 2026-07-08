@@ -852,6 +852,9 @@ struct Parser {
     current_section_index: usize,
     current_section_column_index: usize,
     note_type_mode: NoteTypeMode,
+    deferred_note_type_diagnostics: Vec<(NoteTypeMode, usize)>,
+    deferred_footnote_placement_diagnostics: Vec<(FootnotePlacement, usize)>,
+    deferred_endnote_placement_diagnostics: Vec<(EndnotePlacement, usize)>,
     footnote_reference_count: usize,
     endnote_reference_count: usize,
     options: RtfParseOptions,
@@ -965,6 +968,9 @@ impl Parser {
             current_section_index: 1,
             current_section_column_index: 0,
             note_type_mode: NoteTypeMode::FootnotesOnly,
+            deferred_note_type_diagnostics: Vec::new(),
+            deferred_footnote_placement_diagnostics: Vec::new(),
+            deferred_endnote_placement_diagnostics: Vec::new(),
             footnote_reference_count: 0,
             endnote_reference_count: 0,
             options,
@@ -1005,6 +1011,7 @@ impl Parser {
         self.finish_endnote_paragraph();
         self.resolve_unmatched_note_reference_markers();
         self.normalize_page_orientation();
+        self.emit_deferred_note_diagnostics();
         self.document.blocks.retain(|block| match block {
             Block::Paragraph(paragraph) => !paragraph.runs.is_empty(),
             Block::Table(table) => !table.rows.is_empty(),
@@ -4178,31 +4185,14 @@ impl Parser {
 
     fn set_footnote_placement(&mut self, placement: FootnotePlacement, offset: usize) {
         self.document.footnote_placement = placement;
-        let message = match placement {
-            FootnotePlacement::BeneathText => {
-                "footnote placement rendered beneath document text as passive note layout"
-            }
-            FootnotePlacement::BottomOfPage => {
-                "footnotes placed at passive page bottom without active note behavior"
-            }
-        };
-        self.diagnostics
-            .push(Diagnostic::warning(message, Some(offset)));
+        self.deferred_footnote_placement_diagnostics
+            .push((placement, offset));
     }
 
     fn set_endnote_placement(&mut self, placement: EndnotePlacement, offset: usize) {
         self.document.endnote_placement = placement;
-        let message = match placement {
-            EndnotePlacement::EndOfDocument => {
-                "endnotes placed on passive final page without active note behavior"
-            }
-            EndnotePlacement::EndOfSection => {
-                "endnotes placed at passive section boundary without active note behavior"
-            }
-            EndnotePlacement::AfterBody => "endnote placement rendered after body text",
-        };
-        self.diagnostics
-            .push(Diagnostic::warning(message, Some(offset)));
+        self.deferred_endnote_placement_diagnostics
+            .push((placement, offset));
     }
 
     fn legacy_footnote_destination(&self) -> Destination {
@@ -4216,10 +4206,8 @@ impl Parser {
     fn set_note_type_mode(&mut self, parameter: Option<i32>, offset: usize) {
         let Some(value) = parameter else {
             self.note_type_mode = NoteTypeMode::FootnotesOnly;
-            self.diagnostics.push(Diagnostic::warning(
-                "note type set to passive footnote-only interpretation",
-                Some(offset),
-            ));
+            self.deferred_note_type_diagnostics
+                .push((self.note_type_mode, offset));
             return;
         };
         let Some(mode) = note_type_mode_from_parameter(value) else {
@@ -4230,15 +4218,39 @@ impl Parser {
             return;
         };
         self.note_type_mode = mode;
-        let message = match mode {
-            NoteTypeMode::FootnotesOnly => "note type set to passive footnote-only interpretation",
-            NoteTypeMode::EndnotesOnly => "note type set to passive endnote-only interpretation",
-            NoteTypeMode::FootnotesAndEndnotes => {
-                "note type set to passive footnote/endnote interpretation"
+        self.deferred_note_type_diagnostics.push((mode, offset));
+    }
+
+    fn emit_deferred_note_diagnostics(&mut self) {
+        let has_footnotes = !self.document.footnotes.is_empty();
+        let has_endnotes = !self.document.endnotes.is_empty();
+        if has_footnotes {
+            let diagnostics = std::mem::take(&mut self.deferred_footnote_placement_diagnostics);
+            for (placement, offset) in diagnostics {
+                self.diagnostics.push(Diagnostic::warning(
+                    footnote_placement_diagnostic_message(placement),
+                    Some(offset),
+                ));
             }
-        };
-        self.diagnostics
-            .push(Diagnostic::warning(message, Some(offset)));
+        }
+        if has_endnotes {
+            let diagnostics = std::mem::take(&mut self.deferred_endnote_placement_diagnostics);
+            for (placement, offset) in diagnostics {
+                self.diagnostics.push(Diagnostic::warning(
+                    endnote_placement_diagnostic_message(placement),
+                    Some(offset),
+                ));
+            }
+        }
+        if has_footnotes || has_endnotes {
+            let diagnostics = std::mem::take(&mut self.deferred_note_type_diagnostics);
+            for (mode, offset) in diagnostics {
+                self.diagnostics.push(Diagnostic::warning(
+                    note_type_diagnostic_message(mode),
+                    Some(offset),
+                ));
+            }
+        }
     }
 
     fn clamp_paragraph_spacing(&mut self, value: Option<i32>, label: &str, offset: usize) -> i32 {
@@ -10261,6 +10273,39 @@ fn note_type_mode_from_parameter(value: i32) -> Option<NoteTypeMode> {
         1 => Some(NoteTypeMode::EndnotesOnly),
         2 => Some(NoteTypeMode::FootnotesAndEndnotes),
         _ => None,
+    }
+}
+
+fn footnote_placement_diagnostic_message(placement: FootnotePlacement) -> &'static str {
+    match placement {
+        FootnotePlacement::BeneathText => {
+            "footnote placement rendered beneath document text as passive note layout"
+        }
+        FootnotePlacement::BottomOfPage => {
+            "footnotes placed at passive page bottom without active note behavior"
+        }
+    }
+}
+
+fn endnote_placement_diagnostic_message(placement: EndnotePlacement) -> &'static str {
+    match placement {
+        EndnotePlacement::EndOfDocument => {
+            "endnotes placed on passive final page without active note behavior"
+        }
+        EndnotePlacement::EndOfSection => {
+            "endnotes placed at passive section boundary without active note behavior"
+        }
+        EndnotePlacement::AfterBody => "endnote placement rendered after body text",
+    }
+}
+
+fn note_type_diagnostic_message(mode: NoteTypeMode) -> &'static str {
+    match mode {
+        NoteTypeMode::FootnotesOnly => "note type set to passive footnote-only interpretation",
+        NoteTypeMode::EndnotesOnly => "note type set to passive endnote-only interpretation",
+        NoteTypeMode::FootnotesAndEndnotes => {
+            "note type set to passive footnote/endnote interpretation"
+        }
     }
 }
 
@@ -17165,6 +17210,31 @@ mod tests {
                 .message
                 .contains("endnotes placed on passive final page")
         }));
+    }
+
+    #[test]
+    fn note_option_controls_without_notes_do_not_emit_rendering_approximation_diagnostics() {
+        let output = parse_rtf(r"{\rtf1\ftnbj\aenddoc\endnhere\fet1 Body only\par}").unwrap();
+
+        assert_eq!(
+            output.document.footnote_placement,
+            FootnotePlacement::BottomOfPage
+        );
+        assert_eq!(
+            output.document.endnote_placement,
+            EndnotePlacement::EndOfSection
+        );
+        assert!(output.document.footnotes.is_empty());
+        assert!(output.document.endnotes.is_empty());
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| {
+                !diagnostic.message.contains("footnotes placed")
+                    && !diagnostic.message.contains("endnotes placed")
+                    && !diagnostic.message.contains("note type set")
+            }),
+            "inert note options should not warn as rendered approximations: {:?}",
+            output.diagnostics
+        );
     }
 
     #[test]

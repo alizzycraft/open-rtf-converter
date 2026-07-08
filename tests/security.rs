@@ -15229,8 +15229,8 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
         "Word preamble controls should not be reported as unsupported: {:?}",
         parsed.diagnostics
     );
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("endnotes placed at passive section boundary")
     }));
