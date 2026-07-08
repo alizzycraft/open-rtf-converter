@@ -21509,6 +21509,109 @@ fn turkish_font_charset_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn baltic_font_charset_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "ansicpg1252{",
+        "\\",
+        "fonttbl{",
+        "\\",
+        "f0 Times New Roman;}{",
+        "\\",
+        "f42",
+        "\\",
+        "fcharset186 Times New Roman Baltic;}}",
+        "\\",
+        "f42 Baltic ",
+        "\\",
+        "'c0",
+        "\\",
+        "'e0 ",
+        "\\",
+        "'c8",
+        "\\",
+        "'e8 ",
+        "\\",
+        "'d8",
+        "\\",
+        "'f8 ",
+        "\\",
+        "'da",
+        "\\",
+        "'fa ",
+        "\\",
+        "'dd",
+        "\\",
+        "'fd",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(
+        "Baltic \u{0104}\u{0105} \u{010c}\u{010d} \u{0172}\u{0173} \u{015a}\u{015b} \u{017b}\u{017c}"
+    ));
+    for forbidden in ["fcharset", "Times New Roman Baltic"] {
+        assert!(
+            !text.contains(forbidden),
+            "Baltic font metadata leaked into text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let times_bytes = pdf_text_bytes_for_font(&content, b"F9");
+
+    assert!(
+        times_bytes
+            .windows(
+                [
+                    0xc0, 0xe0, b' ', 0xc8, 0xe8, b' ', 0xd8, 0xf8, b' ', 0xda, 0xfa, b' ', 0x8c,
+                    0x9c,
+                ]
+                .len()
+            )
+            .any(|window| window
+                == [
+                    0xc0, 0xe0, b' ', 0xc8, 0xe8, b' ', 0xd8, 0xf8, b' ', 0xda, 0xfa, b' ', 0x8c,
+                    0x9c,
+                ]),
+        "Baltic glyphs should use passive extended Latin bytes, got {times_bytes:?}"
+    );
+    for forbidden in [
+        b"fcharset".as_slice(),
+        b"Times New Roman Baltic",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "{} leaked into PDF",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn ansi_font_charset_hex_escapes_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

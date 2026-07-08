@@ -263,6 +263,7 @@ enum CodePage {
     Windows1252,
     Windows1253,
     Windows1254,
+    Windows1257,
     MacRoman,
     Ibm437,
     Ibm850,
@@ -276,6 +277,7 @@ impl CodePage {
             1252 => Some(Self::Windows1252),
             1253 => Some(Self::Windows1253),
             1254 => Some(Self::Windows1254),
+            1257 => Some(Self::Windows1257),
             437 => Some(Self::Ibm437),
             850 => Some(Self::Ibm850),
             10000 => Some(Self::MacRoman),
@@ -288,6 +290,7 @@ impl CodePage {
             0 => Some(Self::Windows1252),
             161 => Some(Self::Windows1253),
             162 => Some(Self::Windows1254),
+            186 => Some(Self::Windows1257),
             238 => Some(Self::Windows1250),
             77 => Some(Self::MacRoman),
             255 => Some(Self::Ibm437),
@@ -13338,6 +13341,7 @@ fn decode_hex_byte(byte: u8, code_page: CodePage) -> char {
         CodePage::Windows1252 => decode_windows_1252(byte),
         CodePage::Windows1253 => decode_high_byte(byte, &WINDOWS_1253_HIGH),
         CodePage::Windows1254 => decode_high_byte(byte, &WINDOWS_1254_HIGH),
+        CodePage::Windows1257 => decode_high_byte(byte, &WINDOWS_1257_HIGH),
         CodePage::MacRoman => decode_high_byte(byte, &MAC_ROMAN_HIGH),
         CodePage::Ibm437 => decode_high_byte(byte, &CP437_HIGH),
         CodePage::Ibm850 => decode_high_byte(byte, &CP850_HIGH),
@@ -13754,6 +13758,25 @@ const WINDOWS_1254_HIGH: [char; 128] = [
     '\u{00e8}', '\u{00e9}', '\u{00ea}', '\u{00eb}', '\u{00ec}', '\u{00ed}', '\u{00ee}', '\u{00ef}',
     '\u{011f}', '\u{00f1}', '\u{00f2}', '\u{00f3}', '\u{00f4}', '\u{00f5}', '\u{00f6}', '\u{00f7}',
     '\u{00f8}', '\u{00f9}', '\u{00fa}', '\u{00fb}', '\u{00fc}', '\u{0131}', '\u{015f}', '\u{00ff}',
+];
+
+const WINDOWS_1257_HIGH: [char; 128] = [
+    '\u{20ac}', '\u{fffd}', '\u{201a}', '\u{fffd}', '\u{201e}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{fffd}', '\u{2030}', '\u{fffd}', '\u{2039}', '\u{fffd}', '\u{00a8}', '\u{02c7}', '\u{00b8}',
+    '\u{fffd}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}', '\u{2014}',
+    '\u{fffd}', '\u{2122}', '\u{fffd}', '\u{203a}', '\u{fffd}', '\u{00af}', '\u{02db}', '\u{fffd}',
+    '\u{00a0}', '\u{fffd}', '\u{00a2}', '\u{00a3}', '\u{00a4}', '\u{fffd}', '\u{00a6}', '\u{00a7}',
+    '\u{00d8}', '\u{00a9}', '\u{0156}', '\u{00ab}', '\u{00ac}', '\u{00ad}', '\u{00ae}', '\u{00c6}',
+    '\u{00b0}', '\u{00b1}', '\u{00b2}', '\u{00b3}', '\u{00b4}', '\u{00b5}', '\u{00b6}', '\u{00b7}',
+    '\u{00f8}', '\u{00b9}', '\u{0157}', '\u{00bb}', '\u{00bc}', '\u{00bd}', '\u{00be}', '\u{00e6}',
+    '\u{0104}', '\u{012e}', '\u{0100}', '\u{0106}', '\u{00c4}', '\u{00c5}', '\u{0118}', '\u{0112}',
+    '\u{010c}', '\u{00c9}', '\u{0179}', '\u{0116}', '\u{0122}', '\u{0136}', '\u{012a}', '\u{013b}',
+    '\u{0160}', '\u{0143}', '\u{0145}', '\u{00d3}', '\u{014c}', '\u{00d5}', '\u{00d6}', '\u{00d7}',
+    '\u{0172}', '\u{0141}', '\u{015a}', '\u{016a}', '\u{00dc}', '\u{017b}', '\u{017d}', '\u{00df}',
+    '\u{0105}', '\u{012f}', '\u{0101}', '\u{0107}', '\u{00e4}', '\u{00e5}', '\u{0119}', '\u{0113}',
+    '\u{010d}', '\u{00e9}', '\u{017a}', '\u{0117}', '\u{0123}', '\u{0137}', '\u{012b}', '\u{013c}',
+    '\u{0161}', '\u{0144}', '\u{0146}', '\u{00f3}', '\u{014d}', '\u{00f5}', '\u{00f6}', '\u{00f7}',
+    '\u{0173}', '\u{0142}', '\u{015b}', '\u{016b}', '\u{00fc}', '\u{017c}', '\u{017e}', '\u{02d9}',
 ];
 
 const MAC_ROMAN_HIGH: [char; 128] = [
@@ -15327,6 +15350,34 @@ mod tests {
         assert_eq!(
             text,
             "Turkish \u{011e}\u{0130}\u{015e} \u{011f}\u{0131}\u{015f}"
+        );
+    }
+
+    #[test]
+    fn baltic_font_charset_guides_hex_escape_decoding() {
+        let output = parse_rtf(
+            r"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0 Times New Roman;}{\f42\fcharset186 Times New Roman Baltic;}}\f42 Baltic \'c0\'e0 \'c8\'e8 \'d8\'f8 \'da\'fa \'dd\'fd\par}",
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(
+            text,
+            "Baltic \u{0104}\u{0105} \u{010c}\u{010d} \u{0172}\u{0173} \u{015a}\u{015b} \u{017b}\u{017c}"
+        );
+        assert!(!text.contains("fcharset"));
+        assert!(!text.contains("Times New Roman Baltic"));
+    }
+
+    #[test]
+    fn decodes_hex_escapes_with_windows_1257_semantics() {
+        let output =
+            parse_rtf(r"{\rtf1\ansi\ansicpg1257 Baltic \'c1\'e1 \'cc\'ec \'d9\'f9\par}").unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(
+            text,
+            "Baltic \u{012e}\u{012f} \u{0122}\u{0123} \u{0141}\u{0142}"
         );
     }
 

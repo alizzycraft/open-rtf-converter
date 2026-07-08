@@ -209,19 +209,6 @@ const PASSIVE_ZAPF_DINGBATS_TO_UNICODE: &[(u8, char)] = &[
     (b'7', '\u{2717}'),
 ];
 
-const EXTENDED_LATIN_TO_UNICODE: &[(u8, char)] = &[
-    (0x81, '\u{0150}'),
-    (0x8d, '\u{0151}'),
-    (0x8f, '\u{0170}'),
-    (0x90, '\u{0171}'),
-    (0xd0, '\u{011e}'),
-    (0xdd, '\u{0130}'),
-    (0xde, '\u{015e}'),
-    (0xf0, '\u{011f}'),
-    (0xfd, '\u{0131}'),
-    (0xfe, '\u{015f}'),
-];
-
 const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/3D", "/3D"),
     (b"/AA", "/AA"),
@@ -271,6 +258,41 @@ pub struct PassivePdfIssue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PassivePdfError {
     pub issues: Vec<PassivePdfIssue>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ExtendedLatinUsage {
+    entries: Vec<ExtendedLatinEntry>,
+}
+
+impl ExtendedLatinUsage {
+    fn add(&mut self, entry: ExtendedLatinEntry) {
+        if !self
+            .entries
+            .iter()
+            .any(|existing| existing.byte == entry.byte)
+        {
+            self.entries.push(entry);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn to_unicode_entries(&self) -> Vec<(u8, char)> {
+        self.entries
+            .iter()
+            .map(|entry| (entry.byte, entry.unicode))
+            .collect()
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct ExtendedLatinEntry {
+    byte: u8,
+    unicode: char,
+    glyph_name: &'static [u8],
 }
 
 impl fmt::Display for PassivePdfError {
@@ -355,12 +377,13 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
         font_refs[font_index_for_resource(SYMBOL_REGULAR)].map(|_| next_ref(&mut next_object_id));
     let zapf_dingbats_to_unicode_ref = font_refs[font_index_for_resource(ZAPF_DINGBATS_REGULAR)]
         .map(|_| next_ref(&mut next_object_id));
-    let extended_latin_font_indexes = collect_extended_latin_font_indexes(layout);
-    let extended_latin_to_unicode_ref = if extended_latin_font_indexes.iter().any(|used| *used) {
-        Some(next_ref(&mut next_object_id))
-    } else {
-        None
-    };
+    let extended_latin_usage = collect_extended_latin_font_usage(layout);
+    let mut extended_latin_to_unicode_refs = [None; 14];
+    for (font_idx, usage) in extended_latin_usage.iter().enumerate() {
+        if !usage.is_empty() {
+            extended_latin_to_unicode_refs[font_idx] = Some(next_ref(&mut next_object_id));
+        }
+    }
     let first_image_id = next_object_id;
 
     let page_refs = (0..layout.pages.len())
@@ -614,21 +637,16 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
             if let Some(to_unicode_ref) = zapf_dingbats_to_unicode_ref {
                 font.to_unicode(to_unicode_ref);
             }
-        } else if extended_latin_font_indexes[font_idx] {
+        } else if !extended_latin_usage[font_idx].is_empty() {
             {
                 let mut encoding = font.encoding_custom();
                 encoding.base_encoding(Name(b"WinAnsiEncoding"));
                 let mut differences = encoding.differences();
-                differences.consecutive(0x81, [Name(b"Ohungarumlaut")]);
-                differences.consecutive(0x8d, [Name(b"ohungarumlaut")]);
-                differences.consecutive(0x8f, [Name(b"Uhungarumlaut")]);
-                differences.consecutive(0x90, [Name(b"uhungarumlaut")]);
-                differences.consecutive(0xd0, [Name(b"Gbreve")]);
-                differences.consecutive(0xdd, [Name(b"Idotaccent"), Name(b"Scedilla")]);
-                differences.consecutive(0xf0, [Name(b"gbreve")]);
-                differences.consecutive(0xfd, [Name(b"dotlessi"), Name(b"scedilla")]);
+                for entry in &extended_latin_usage[font_idx].entries {
+                    differences.consecutive(entry.byte, [Name(entry.glyph_name)]);
+                }
             }
-            if let Some(to_unicode_ref) = extended_latin_to_unicode_ref {
+            if let Some(to_unicode_ref) = extended_latin_to_unicode_refs[font_idx] {
                 font.to_unicode(to_unicode_ref);
             }
         } else {
@@ -648,9 +666,13 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
         );
         pdf.stream(to_unicode_ref, &zapf_dingbats_to_unicode);
     }
-    if let Some(to_unicode_ref) = extended_latin_to_unicode_ref {
+    for (font_idx, to_unicode_ref) in extended_latin_to_unicode_refs.iter().enumerate() {
+        let Some(to_unicode_ref) = *to_unicode_ref else {
+            continue;
+        };
+        let entries = extended_latin_usage[font_idx].to_unicode_entries();
         let extended_latin_to_unicode =
-            passive_to_unicode_cmap(b"OpenRtfConverter-ExtendedLatin", EXTENDED_LATIN_TO_UNICODE);
+            passive_to_unicode_cmap(b"OpenRtfConverter-ExtendedLatin", &entries);
         pdf.stream(to_unicode_ref, &extended_latin_to_unicode);
     }
 
@@ -781,24 +803,27 @@ fn collect_used_font_indexes_for_page(page: &crate::layout::LayoutPage) -> Vec<u
     used_font_index_list(&used)
 }
 
-fn collect_extended_latin_font_indexes(layout: &LayoutDocument) -> [bool; 14] {
-    let mut used = [false; 14];
+fn collect_extended_latin_font_usage(layout: &LayoutDocument) -> [ExtendedLatinUsage; 14] {
+    let mut usage: [ExtendedLatinUsage; 14] =
+        std::array::from_fn(|_| ExtendedLatinUsage::default());
     for page in &layout.pages {
         for item in &page.items {
             let LayoutItem::Text(fragment) = item else {
                 continue;
             };
-            if !fragment.text.chars().any(is_passive_extended_latin_char) {
-                continue;
-            }
             let resource = font_resource_for_style(fragment.font_family, &fragment.style);
             let font_idx = font_index_for_resource(resource);
-            if is_normal_text_font_index(font_idx) {
-                used[font_idx] = true;
+            if !is_normal_text_font_index(font_idx) {
+                continue;
+            }
+            for ch in fragment.text.chars() {
+                if let Some(entry) = extended_latin_entry_for_char(ch) {
+                    usage[font_idx].add(entry);
+                }
             }
         }
     }
-    used
+    usage
 }
 
 fn is_normal_text_font_index(font_idx: usize) -> bool {
@@ -2236,6 +2261,20 @@ fn encode_zapf_dingbats_char(ch: char) -> u8 {
 
 fn encode_win_ansi_char(ch: char) -> u8 {
     match ch {
+        '\u{0100}' => 0xc2,
+        '\u{0101}' => 0xe2,
+        '\u{0104}' => 0xc0,
+        '\u{0105}' => 0xe0,
+        '\u{0106}' => 0xc3,
+        '\u{0107}' => 0xe3,
+        '\u{010c}' => 0xc8,
+        '\u{010d}' => 0xe8,
+        '\u{0112}' => 0xc7,
+        '\u{0113}' => 0xe7,
+        '\u{0116}' => 0xcb,
+        '\u{0117}' => 0xeb,
+        '\u{0118}' => 0xc6,
+        '\u{0119}' => 0xe6,
         '\u{0150}' => 0x81,
         '\u{0151}' => 0x8d,
         '\u{0170}' => 0x8f,
@@ -2246,6 +2285,36 @@ fn encode_win_ansi_char(ch: char) -> u8 {
         '\u{011f}' => 0xf0,
         '\u{0131}' => 0xfd,
         '\u{015f}' => 0xfe,
+        '\u{0122}' => 0xcc,
+        '\u{0123}' => 0xec,
+        '\u{012a}' => 0xce,
+        '\u{012b}' => 0xee,
+        '\u{012e}' => 0xc1,
+        '\u{012f}' => 0xe1,
+        '\u{0136}' => 0xcd,
+        '\u{0137}' => 0xed,
+        '\u{013b}' => 0xcf,
+        '\u{013c}' => 0xef,
+        '\u{0141}' => 0xd9,
+        '\u{0142}' => 0xf9,
+        '\u{0143}' => 0xd1,
+        '\u{0144}' => 0xf1,
+        '\u{0145}' => 0xd2,
+        '\u{0146}' => 0xf2,
+        '\u{014c}' => 0xd4,
+        '\u{014d}' => 0xf4,
+        '\u{0156}' => 0xaa,
+        '\u{0157}' => 0xba,
+        '\u{015a}' => 0xda,
+        '\u{015b}' => 0xfa,
+        '\u{016a}' => 0xdb,
+        '\u{016b}' => 0xfb,
+        '\u{0172}' => 0xd8,
+        '\u{0173}' => 0xf8,
+        '\u{0179}' => 0xca,
+        '\u{017a}' => 0xea,
+        '\u{017b}' => 0x8c,
+        '\u{017c}' => 0x9c,
         '\u{20ac}' => 0x80,
         '\u{201a}' => 0x82,
         '\u{0192}' => 0x83,
@@ -2283,20 +2352,69 @@ fn encode_win_ansi_char(ch: char) -> u8 {
     }
 }
 
-fn is_passive_extended_latin_char(ch: char) -> bool {
-    matches!(
-        ch,
-        '\u{011e}'
-            | '\u{011f}'
-            | '\u{0130}'
-            | '\u{0131}'
-            | '\u{0150}'
-            | '\u{0151}'
-            | '\u{015e}'
-            | '\u{015f}'
-            | '\u{0170}'
-            | '\u{0171}'
-    )
+fn extended_latin_entry_for_char(ch: char) -> Option<ExtendedLatinEntry> {
+    let (byte, glyph_name) = match ch {
+        '\u{0100}' => (0xc2, b"Amacron".as_slice()),
+        '\u{0101}' => (0xe2, b"amacron".as_slice()),
+        '\u{0104}' => (0xc0, b"Aogonek".as_slice()),
+        '\u{0105}' => (0xe0, b"aogonek".as_slice()),
+        '\u{0106}' => (0xc3, b"Cacute".as_slice()),
+        '\u{0107}' => (0xe3, b"cacute".as_slice()),
+        '\u{010c}' => (0xc8, b"Ccaron".as_slice()),
+        '\u{010d}' => (0xe8, b"ccaron".as_slice()),
+        '\u{0112}' => (0xc7, b"Emacron".as_slice()),
+        '\u{0113}' => (0xe7, b"emacron".as_slice()),
+        '\u{0116}' => (0xcb, b"Edotaccent".as_slice()),
+        '\u{0117}' => (0xeb, b"edotaccent".as_slice()),
+        '\u{0118}' => (0xc6, b"Eogonek".as_slice()),
+        '\u{0119}' => (0xe6, b"eogonek".as_slice()),
+        '\u{011e}' => (0xd0, b"Gbreve".as_slice()),
+        '\u{011f}' => (0xf0, b"gbreve".as_slice()),
+        '\u{0122}' => (0xcc, b"Gcommaaccent".as_slice()),
+        '\u{0123}' => (0xec, b"gcommaaccent".as_slice()),
+        '\u{012a}' => (0xce, b"Imacron".as_slice()),
+        '\u{012b}' => (0xee, b"imacron".as_slice()),
+        '\u{012e}' => (0xc1, b"Iogonek".as_slice()),
+        '\u{012f}' => (0xe1, b"iogonek".as_slice()),
+        '\u{0130}' => (0xdd, b"Idotaccent".as_slice()),
+        '\u{0131}' => (0xfd, b"dotlessi".as_slice()),
+        '\u{0136}' => (0xcd, b"Kcommaaccent".as_slice()),
+        '\u{0137}' => (0xed, b"kcommaaccent".as_slice()),
+        '\u{013b}' => (0xcf, b"Lcommaaccent".as_slice()),
+        '\u{013c}' => (0xef, b"lcommaaccent".as_slice()),
+        '\u{0141}' => (0xd9, b"Lslash".as_slice()),
+        '\u{0142}' => (0xf9, b"lslash".as_slice()),
+        '\u{0143}' => (0xd1, b"Nacute".as_slice()),
+        '\u{0144}' => (0xf1, b"nacute".as_slice()),
+        '\u{0145}' => (0xd2, b"Ncommaaccent".as_slice()),
+        '\u{0146}' => (0xf2, b"ncommaaccent".as_slice()),
+        '\u{014c}' => (0xd4, b"Omacron".as_slice()),
+        '\u{014d}' => (0xf4, b"omacron".as_slice()),
+        '\u{0150}' => (0x81, b"Ohungarumlaut".as_slice()),
+        '\u{0151}' => (0x8d, b"ohungarumlaut".as_slice()),
+        '\u{0156}' => (0xaa, b"Rcommaaccent".as_slice()),
+        '\u{0157}' => (0xba, b"rcommaaccent".as_slice()),
+        '\u{015a}' => (0xda, b"Sacute".as_slice()),
+        '\u{015b}' => (0xfa, b"sacute".as_slice()),
+        '\u{015e}' => (0xde, b"Scedilla".as_slice()),
+        '\u{015f}' => (0xfe, b"scedilla".as_slice()),
+        '\u{016a}' => (0xdb, b"Umacron".as_slice()),
+        '\u{016b}' => (0xfb, b"umacron".as_slice()),
+        '\u{0170}' => (0x8f, b"Uhungarumlaut".as_slice()),
+        '\u{0171}' => (0x90, b"uhungarumlaut".as_slice()),
+        '\u{0172}' => (0xd8, b"Uogonek".as_slice()),
+        '\u{0173}' => (0xf8, b"uogonek".as_slice()),
+        '\u{0179}' => (0xca, b"Zacute".as_slice()),
+        '\u{017a}' => (0xea, b"zacute".as_slice()),
+        '\u{017b}' => (0x8c, b"Zdotaccent".as_slice()),
+        '\u{017c}' => (0x9c, b"zdotaccent".as_slice()),
+        _ => return None,
+    };
+    Some(ExtendedLatinEntry {
+        byte,
+        unicode: ch,
+        glyph_name,
+    })
 }
 
 fn set_fill_color(content: &mut Content, color: PdfColor) {
