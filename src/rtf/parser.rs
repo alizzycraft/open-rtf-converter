@@ -14375,7 +14375,7 @@ struct WmfHeaderInfo {
 
 #[derive(Debug, Copy, Clone)]
 enum WmfObject {
-    Pen(Option<Color>),
+    Pen { color: Option<Color>, width: i32 },
     Brush(Option<Color>),
     Font { height: i32, charset: Option<i32> },
     Other,
@@ -14390,6 +14390,7 @@ enum WmfTextBackgroundMode {
 #[derive(Debug, Copy, Clone)]
 struct WmfDrawingState {
     stroke_color: Option<Color>,
+    stroke_width: f32,
     fill_color: Option<Color>,
     text_color: Option<Color>,
     background_color: Option<Color>,
@@ -14415,6 +14416,7 @@ impl Default for WmfDrawingState {
     fn default() -> Self {
         Self {
             stroke_color: Some(Color::default()),
+            stroke_width: 1.0,
             fill_color: None,
             text_color: Some(Color::default()),
             background_color: Some(Color {
@@ -14844,7 +14846,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 let handle = usize::from(read_le_u16(data, 0)?);
                 if let Some(object) = objects.get(handle).and_then(|object| *object) {
                     match object {
-                        WmfObject::Pen(color) => state.stroke_color = color,
+                        WmfObject::Pen { color, width } => {
+                            state.stroke_color = color;
+                            state.stroke_width = normalized_wmf_stroke_width(width, window_width);
+                        }
                         WmfObject::Brush(color) => state.fill_color = color,
                         WmfObject::Font { height, charset } => {
                             state.font_height = Some(height);
@@ -14909,6 +14914,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         x2: end.0,
                         y2: end.1,
                         stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
                     });
                 }
                 current_point = end;
@@ -14929,6 +14935,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
                             stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
                             fill_color: state.fill_color,
                         });
                     }
@@ -14939,6 +14946,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
                         stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
                     });
                 }
             }
@@ -14958,6 +14966,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
                             stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
                             fill_color: state.fill_color,
                         });
                     }
@@ -14994,6 +15003,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             right,
                             bottom,
                             stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
                             fill_color: state.fill_color,
                         }
                     } else if function == 0x0418 {
@@ -15003,6 +15013,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             right,
                             bottom,
                             stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
                             fill_color: state.fill_color,
                         }
                     } else {
@@ -15016,6 +15027,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             corner_width,
                             corner_height,
                             stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
                             fill_color: state.fill_color,
                         }
                     };
@@ -15082,6 +15094,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             right,
                             bottom,
                             stroke_color: None,
+                            stroke_width: 0.0,
                             fill_color: state.background_color,
                         });
                     }
@@ -15132,6 +15145,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         right,
                         bottom,
                         stroke_color: None,
+                        stroke_width: 0.0,
                         fill_color: state.fill_color,
                     });
                 }
@@ -15154,6 +15168,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         right,
                         bottom,
                         stroke_color: None,
+                        stroke_width: 0.0,
                         fill_color: Some(color),
                     });
                 }
@@ -15274,8 +15289,12 @@ fn parse_wmf_pen_object(data: &[u8]) -> Option<WmfObject> {
         return None;
     }
     let style = read_le_u16(data, 0)?;
+    let width = i32::from(read_le_i16(data, 2)?.unsigned_abs().max(1));
     let color = color_from_colorref(data, 6)?;
-    Some(WmfObject::Pen(if style == 5 { None } else { Some(color) }))
+    Some(WmfObject::Pen {
+        color: if style == 5 { None } else { Some(color) },
+        width,
+    })
 }
 
 fn parse_wmf_brush_object(data: &[u8]) -> Option<WmfObject> {
@@ -15557,6 +15576,10 @@ fn normalized_wmf_text_height(font_height: Option<i32>, window_height: i32) -> f
         .map(|height| height.unsigned_abs().max(1) as f32)
         .unwrap_or(fallback)
         .clamp(1.0, window_height.max(1) as f32)
+}
+
+fn normalized_wmf_stroke_width(width: i32, window_width: i32) -> f32 {
+    width.clamp(1, window_width.max(1)) as f32
 }
 
 fn normalized_wmf_text_character_extra(

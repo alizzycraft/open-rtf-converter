@@ -18157,6 +18157,103 @@ fn wmf_line_polyline_and_polygon_render_as_passive_paths_without_payload_leakage
 }
 
 #[test]
+fn wmf_pen_width_renders_passive_stroke_width_without_record_leakage() {
+    let wmf_hex = concat!(
+        "010009000003270000000100080000000000",
+        "050000000c026400c800",
+        "08000000fa0200000c000000ff000000",
+        "040000002d010000",
+        "05000000140214001400",
+        "0500000013021400b400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF pen-width vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Line {
+                stroke_color: Some(color),
+                stroke_width,
+                ..
+            } if color.red == 255
+                && color.green == 0
+                && color.blue == 0
+                && (*stroke_width - 12.0).abs() < 0.01
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    }));
+    for forbidden in ["wmetafile", "02fa", "0c000000", "ff000000", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF pen-width internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "w"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(pdf_operand_number)
+                    .is_some_and(|value| value > 1.0)
+        }),
+        "WMF pen width should emit a bounded passive PDF stroke width"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"02fa",
+        b"0c000000",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF pen-width leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_polypolygon_renders_multiple_passive_polygons_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003300000000100140000000000",
@@ -18377,6 +18474,7 @@ fn wmf_patblt_patcopy_renders_passive_brush_rectangle_without_payload_leakage() 
                 bottom,
                 stroke_color: None,
                 fill_color: Some(color),
+                ..
             } if (*left - 40.0).abs() < 0.01
                 && (*top - 20.0).abs() < 0.01
                 && (*right - 90.0).abs() < 0.01
@@ -18476,6 +18574,7 @@ fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
                 bottom,
                 stroke_color: None,
                 fill_color: Some(color),
+                ..
             } if (*left - 64.0).abs() < 0.01
                 && (*top - 32.0).abs() < 0.01
                 && (*right - 65.0).abs() < 0.01
@@ -19314,6 +19413,7 @@ fn wmf_exttextout_opaque_background_renders_as_passive_fill() {
                     bottom,
                     stroke_color: None,
                     fill_color: Some(color),
+                    ..
                 } if (*left - 30.0).abs() < 0.01
                     && (*top - 10.0).abs() < 0.01
                     && (*right - 90.0).abs() < 0.01
