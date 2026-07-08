@@ -217,12 +217,15 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/3D", "/3D"),
     (b"/AA", "/AA"),
     (b"/AF", "/AF"),
+    (b"/AFRelationship", "/AFRelationship"),
     (b"/AcroForm", "/AcroForm"),
     (b"/Action", "/Action"),
     (b"/Annot", "/Annot"),
     (b"/Annots", "/Annots"),
     (b"/Collection", "/Collection"),
+    (b"/EF", "/EF"),
     (b"/EmbeddedFile", "/EmbeddedFile"),
+    (b"/EmbeddedFiles", "/EmbeddedFiles"),
     (b"/Encrypt", "/Encrypt"),
     (b"/FileAttachment", "/FileAttachment"),
     (b"/Filespec", "/Filespec"),
@@ -3081,6 +3084,9 @@ endobj
 11 0 obj
 << /Type /XRef /Size 11 /Length 0 >>
 endobj
+12 0 obj
+<< /Names << /EmbeddedFiles [(payload.bin) 4 0 R] >> >>
+endobj
 %%EOF";
 
         let error = audit_passive_pdf_bytes(pdf).expect_err("active PDF names must be rejected");
@@ -3105,7 +3111,20 @@ endobj
             error
                 .issues
                 .iter()
+                .any(|issue| issue.token == "/AFRelationship")
+        );
+        assert!(error.issues.iter().any(|issue| issue.token == "/EF"));
+        assert!(
+            error
+                .issues
+                .iter()
                 .any(|issue| issue.token == "/FileAttachment")
+        );
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == "/EmbeddedFiles")
         );
         assert!(error.issues.iter().any(|issue| issue.token == "/Encrypt"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Perms"));
