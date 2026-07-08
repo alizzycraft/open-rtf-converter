@@ -2345,10 +2345,6 @@ impl Parser {
             {
                 self.state.shape_result_seen = true;
                 self.state.destination = Destination::ShapeText;
-                self.diagnostics.push(Diagnostic::warning(
-                    "rendering safe passive shape text/result",
-                    Some(offset),
-                ));
             }
             "shprslt"
                 if self.state.inside_shape && destination_allows_visible_content(&self.state) =>
@@ -8180,6 +8176,12 @@ impl Parser {
             });
         }
         self.shape_count += 1;
+        if !shape.text.is_empty() {
+            self.diagnostics.push(Diagnostic::warning(
+                "rendering safe passive shape text/result",
+                Some(offset),
+            ));
+        }
         self.push_static_shape(
             shape.owner_destination,
             StaticShape {
@@ -8218,6 +8220,10 @@ impl Parser {
         if paragraphs.is_empty() {
             return Ok(false);
         }
+        self.diagnostics.push(Diagnostic::warning(
+            "rendering safe passive shape text/result",
+            Some(offset),
+        ));
         if unsupported_or_active_property_stripped {
             self.diagnostics.push(Diagnostic::warning(
                 "rendering safe passive shape text fallback and stripping unsupported/active drawing properties",

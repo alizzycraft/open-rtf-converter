@@ -4559,6 +4559,11 @@ fn shape_result_fallback_is_ignored_after_primary_passive_visual_result() {
     assert_eq!(images[0].format, ImageFormat::Placeholder);
     assert_eq!(images[0].display_width_twips, Some(2160));
     assert_eq!(images[0].display_height_twips, Some(720));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("rendering safe passive shape text/result")
+    }));
     for forbidden in ["objdata", "shprslt", "wmetafile", "JavaScript"] {
         assert!(
             !text.contains(forbidden),
@@ -4586,6 +4591,11 @@ fn shape_result_fallback_is_ignored_after_primary_passive_visual_result() {
         "PDF should contain one passive image placeholder label"
     );
     assert!(rendered_text.contains("After"));
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("rendering safe passive shape text/result")
+    }));
     for forbidden in [
         b"objdata".as_slice(),
         b"shprslt",
