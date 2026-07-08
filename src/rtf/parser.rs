@@ -13865,14 +13865,18 @@ const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
 const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
 
 fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
+    const BITMAPCOREHEADER_SIZE: usize = 12;
     const BITMAPINFOHEADER_SIZE: usize = 40;
     const BI_RGB: u32 = 0;
 
-    if bytes.len() < BITMAPINFOHEADER_SIZE {
+    if bytes.len() < 4 {
         return None;
     }
 
     let header_size = read_le_u32(bytes, 0)? as usize;
+    if header_size == BITMAPCOREHEADER_SIZE {
+        return parse_bitmap_core_dib_image_data(bytes, max_pixels);
+    }
     if header_size < BITMAPINFOHEADER_SIZE || header_size > bytes.len() {
         return None;
     }
@@ -13896,7 +13900,6 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     }
 
     let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
     let colors_used = read_le_u32(bytes, 32)?;
     let (row_stride, pixel_start, palette_entries) = match bits_per_pixel {
         1 | 4 | 8 => {
@@ -13938,9 +13941,112 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         return None;
     }
 
+    decode_uncompressed_dib_pixels(
+        bytes,
+        width_px,
+        height_px,
+        bits_per_pixel,
+        row_stride,
+        pixel_start,
+        palette_entries,
+        header_size,
+        4,
+        raw_height < 0,
+    )
+}
+
+fn parse_bitmap_core_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
+    const BITMAPCOREHEADER_SIZE: usize = 12;
+
+    if bytes.len() < BITMAPCOREHEADER_SIZE {
+        return None;
+    }
+
+    let width_px = u32::from(read_le_u16(bytes, 4)?);
+    let height_px = u32::from(read_le_u16(bytes, 6)?);
+    let planes = read_le_u16(bytes, 8)?;
+    let bits_per_pixel = read_le_u16(bytes, 10)?;
+    if width_px == 0 || height_px == 0 || planes != 1 {
+        return None;
+    }
+
+    let pixels = usize::try_from(width_px)
+        .ok()?
+        .checked_mul(usize::try_from(height_px).ok()?)?;
+    if pixels == 0 || pixels > max_pixels {
+        return None;
+    }
+
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let (row_stride, pixel_start, palette_entries) =
+        dib_layout_for_uncompressed_bitmap(width, bits_per_pixel, BITMAPCOREHEADER_SIZE, 3)?;
+    let pixel_bytes = row_stride.checked_mul(height)?;
+    let pixel_end = pixel_start.checked_add(pixel_bytes)?;
+    if pixel_end > bytes.len() {
+        return None;
+    }
+
+    decode_uncompressed_dib_pixels(
+        bytes,
+        width_px,
+        height_px,
+        bits_per_pixel,
+        row_stride,
+        pixel_start,
+        palette_entries,
+        BITMAPCOREHEADER_SIZE,
+        3,
+        false,
+    )
+}
+
+fn dib_layout_for_uncompressed_bitmap(
+    width: usize,
+    bits_per_pixel: u16,
+    header_size: usize,
+    palette_entry_size: usize,
+) -> Option<(usize, usize, Option<usize>)> {
+    match bits_per_pixel {
+        1 | 4 | 8 => {
+            let palette_entries = 1usize.checked_shl(u32::from(bits_per_pixel))?;
+            let palette_bytes = palette_entries.checked_mul(palette_entry_size)?;
+            let palette_end = header_size.checked_add(palette_bytes)?;
+            let row_bits = width.checked_mul(usize::from(bits_per_pixel))?;
+            let row_stride = row_bits.checked_add(31)?.checked_div(32)?.checked_mul(4)?;
+            Some((row_stride, palette_end, Some(palette_entries)))
+        }
+        24 => {
+            let unpadded_row_bytes = width.checked_mul(3)?;
+            let row_stride = unpadded_row_bytes
+                .checked_add(3)?
+                .checked_div(4)?
+                .checked_mul(4)?;
+            Some((row_stride, header_size, None))
+        }
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decode_uncompressed_dib_pixels(
+    bytes: &[u8],
+    width_px: u32,
+    height_px: u32,
+    bits_per_pixel: u16,
+    row_stride: usize,
+    pixel_start: usize,
+    palette_entries: Option<usize>,
+    palette_start: usize,
+    palette_entry_size: usize,
+    top_down: bool,
+) -> Option<ParsedDib> {
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let pixels = width.checked_mul(height)?;
     let output_len = pixels.checked_mul(3)?;
     let mut rgb = vec![0; output_len];
-    let top_down = raw_height < 0;
+
     for output_y in 0..height {
         let source_y = if top_down {
             output_y
@@ -13959,8 +14065,9 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
                     let palette_index = usize::from((byte >> shift) & 0x01);
                     copy_dib_palette_color(
                         bytes,
-                        header_size,
+                        palette_start,
                         palette_entries?,
+                        palette_entry_size,
                         palette_index,
                         &mut rgb[output..output + 3],
                     )?;
@@ -13975,8 +14082,9 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
                     };
                     copy_dib_palette_color(
                         bytes,
-                        header_size,
+                        palette_start,
                         palette_entries?,
+                        palette_entry_size,
                         palette_index,
                         &mut rgb[output..output + 3],
                     )?;
@@ -13986,20 +14094,16 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
                     let palette_index = usize::from(*bytes.get(source)?);
                     copy_dib_palette_color(
                         bytes,
-                        header_size,
+                        palette_start,
                         palette_entries?,
+                        palette_entry_size,
                         palette_index,
                         &mut rgb[output..output + 3],
                     )?;
                 }
-                24 => {
-                    let source = source_row.checked_add(x.checked_mul(3)?)?;
-                    rgb[output] = bytes[source + 2];
-                    rgb[output + 1] = bytes[source + 1];
-                    rgb[output + 2] = bytes[source];
-                }
-                32 => {
-                    let source = source_row.checked_add(x.checked_mul(4)?)?;
+                24 | 32 => {
+                    let bytes_per_pixel = usize::from(bits_per_pixel / 8);
+                    let source = source_row.checked_add(x.checked_mul(bytes_per_pixel)?)?;
                     rgb[output] = bytes[source + 2];
                     rgb[output + 1] = bytes[source + 1];
                     rgb[output + 2] = bytes[source];
@@ -14020,13 +14124,17 @@ fn copy_dib_palette_color(
     bytes: &[u8],
     palette_start: usize,
     palette_entries: usize,
+    palette_entry_size: usize,
     palette_index: usize,
     output: &mut [u8],
 ) -> Option<()> {
     if palette_index >= palette_entries || output.len() < 3 {
         return None;
     }
-    let palette = palette_start.checked_add(palette_index.checked_mul(4)?)?;
+    if palette_entry_size < 3 {
+        return None;
+    }
+    let palette = palette_start.checked_add(palette_index.checked_mul(palette_entry_size)?)?;
     output[0] = *bytes.get(palette + 2)?;
     output[1] = *bytes.get(palette + 1)?;
     output[2] = *bytes.get(palette)?;
@@ -22597,6 +22705,46 @@ After\par}"#;
     }
 
     #[test]
+    fn normalizes_bitmap_core_dib_picture_as_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_24bit_bitmap_core_dib_with_dimensions(2, 1))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Rgb8);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0]);
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(720));
+    }
+
+    #[test]
+    fn normalizes_paletted_bitmap_core_dib_picture_as_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_4bit_bitmap_core_dib_with_dimensions(2, 1))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Rgb8);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0]);
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(720));
+    }
+
+    #[test]
     fn normalizes_ignorable_shape_picture_and_suppresses_nonshape_fallback() {
         let image_hex = bytes_to_hex(&minimal_rgb_png_with_dimensions(1, 1));
         let input = format!(
@@ -23026,6 +23174,66 @@ fn minimal_4bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
 #[cfg(test)]
 fn minimal_1bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     minimal_indexed_dib_with_dimensions(width, height, 1)
+}
+
+#[cfg(test)]
+fn minimal_24bit_bitmap_core_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
+    let row_stride = (width as usize * 3).div_ceil(4) * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let mut dib = Vec::with_capacity(12 + pixel_bytes);
+    dib.extend_from_slice(&12u32.to_le_bytes());
+    dib.extend_from_slice(&(width as u16).to_le_bytes());
+    dib.extend_from_slice(&(height as u16).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&24u16.to_le_bytes());
+
+    for _ in 0..height {
+        let mut row = Vec::with_capacity(row_stride);
+        for x in 0..width {
+            if x % 2 == 0 {
+                row.extend_from_slice(&[0, 0, 255]);
+            } else {
+                row.extend_from_slice(&[0, 255, 0]);
+            }
+        }
+        row.resize(row_stride, 0);
+        dib.extend_from_slice(&row);
+    }
+    dib
+}
+
+#[cfg(test)]
+fn minimal_4bit_bitmap_core_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
+    minimal_indexed_bitmap_core_dib_with_dimensions(width, height, 4)
+}
+
+#[cfg(test)]
+fn minimal_indexed_bitmap_core_dib_with_dimensions(
+    width: u32,
+    height: u32,
+    bits_per_pixel: u16,
+) -> Vec<u8> {
+    let row_stride = ((width as usize * usize::from(bits_per_pixel)).div_ceil(32)) * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let palette_entries = 1u32 << bits_per_pixel;
+    let mut dib = Vec::with_capacity(12 + (palette_entries as usize * 3) + pixel_bytes);
+    dib.extend_from_slice(&12u32.to_le_bytes());
+    dib.extend_from_slice(&(width as u16).to_le_bytes());
+    dib.extend_from_slice(&(height as u16).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&bits_per_pixel.to_le_bytes());
+    dib.extend_from_slice(&[0, 0, 255]);
+    dib.extend_from_slice(&[0, 255, 0]);
+    for _ in 2..palette_entries {
+        dib.extend_from_slice(&[0, 0, 0]);
+    }
+
+    for _ in 0..height {
+        let mut row = indexed_dib_test_row(width, bits_per_pixel);
+        row.resize(row_stride, 0);
+        dib.extend_from_slice(&row);
+    }
+    dib
 }
 
 #[cfg(test)]

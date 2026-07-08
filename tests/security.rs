@@ -16864,6 +16864,88 @@ fn low_bit_depth_dib_picture_renders_passively_without_payload_leakage() {
 }
 
 #[test]
+fn bitmap_core_dib_picture_renders_passively_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_4bit_bitmap_core_dib_with_dimensions(2, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "dibitmap",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("bitmap core DIB image block");
+    assert_eq!(image.format, open_rtf_converter::model::ImageFormat::Rgb8);
+    assert_eq!(image.width_px, 2);
+    assert_eq!(image.height_px, 1);
+    assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0]);
+    assert!(!text.contains("dibitmap"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image")
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/ColorSpace /DeviceRGB".len())
+            .any(|window| window == b"/ColorSpace /DeviceRGB")
+    );
+    for forbidden in [
+        b"dibitmap".as_slice(),
+        b"picwgoal",
+        b"pichgoal",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden bitmap core DIB content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shape_picture_wrapper_renders_modern_static_image_without_fallback_payload() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
@@ -24745,6 +24827,30 @@ fn minimal_8bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
 
 fn minimal_4bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     minimal_indexed_dib_with_dimensions(width, height, 4)
+}
+
+fn minimal_4bit_bitmap_core_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
+    let row_stride = ((width as usize * 4).div_ceil(32)) * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let palette_entries = 16u32;
+    let mut dib = Vec::with_capacity(12 + (palette_entries as usize * 3) + pixel_bytes);
+    dib.extend_from_slice(&12u32.to_le_bytes());
+    dib.extend_from_slice(&(width as u16).to_le_bytes());
+    dib.extend_from_slice(&(height as u16).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&4u16.to_le_bytes());
+    dib.extend_from_slice(&[0, 0, 255]);
+    dib.extend_from_slice(&[0, 255, 0]);
+    for _ in 2..palette_entries {
+        dib.extend_from_slice(&[0, 0, 0]);
+    }
+
+    for _ in 0..height {
+        let mut row = indexed_dib_test_row(width, 4);
+        row.resize(row_stride, 0);
+        dib.extend_from_slice(&row);
+    }
+    dib
 }
 
 fn minimal_indexed_dib_with_dimensions(width: u32, height: u32, bits_per_pixel: u16) -> Vec<u8> {
