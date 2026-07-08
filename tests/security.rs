@@ -12021,13 +12021,25 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         "\\",
         "f1 Cambria;}{",
         "\\",
-        "f2 Aptos Mono;}}",
+        "f2 Aptos Mono;}{",
+        "\\",
+        "f3 MS Sans Serif;}{",
+        "\\",
+        "f4 MS Serif;}{",
+        "\\",
+        "f5 Wingdings;}}",
         "\\",
         "f0 Sans ",
         "\\",
         "f1 Serif ",
         "\\",
-        "f2 Mono",
+        "f2 Mono ",
+        "\\",
+        "f3 LegacySans ",
+        "\\",
+        "f4 LegacySerif ",
+        "\\",
+        "f5 Wing",
         "\\",
         "par}",
     ]);
@@ -12037,6 +12049,9 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
     assert!(text.contains("Sans"));
     assert!(text.contains("Serif"));
     assert!(text.contains("Mono"));
+    assert!(text.contains("LegacySans"));
+    assert!(text.contains("LegacySerif"));
+    assert!(text.contains("Wing"));
     assert!(!text.contains("fonttbl"));
 
     let dir = tempdir().unwrap();
@@ -12066,6 +12081,20 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
             report.diagnostics
         );
     }
+    for unexpected in [
+        "font 'MS Sans Serif' substituted",
+        "font 'MS Serif' substituted",
+        "font 'Wingdings' substituted",
+    ] {
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains(unexpected)),
+            "known passive font alias should not emit substitution diagnostic {unexpected:?}; diagnostics were {:?}",
+            report.diagnostics
+        );
+    }
     let pdf = fs::read(&output_path).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
@@ -12089,6 +12118,9 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         b"Calibri",
         b"Cambria",
         b"Aptos Mono",
+        b"MS Sans Serif",
+        b"MS Serif",
+        b"Wingdings",
         b"fontemb",
         b"fontfile",
         b"/JavaScript",

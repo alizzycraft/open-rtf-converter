@@ -382,13 +382,22 @@ fn font_name_matches_pdf_family(name: &str, family: PdfFontFamily) -> bool {
     let normalized = name.to_ascii_lowercase();
     match family {
         PdfFontFamily::Helvetica => {
-            normalized == "helvetica" || normalized.starts_with("helvetica ")
+            matches!(
+                normalized.as_str(),
+                "helvetica" | "ms sans serif" | "microsoft sans serif"
+            ) || normalized.starts_with("helvetica ")
         }
         PdfFontFamily::Courier => normalized == "courier" || normalized.starts_with("courier "),
-        PdfFontFamily::Times => normalized == "times-roman" || normalized == "times roman",
+        PdfFontFamily::Times => matches!(
+            normalized.as_str(),
+            "times-roman" | "times roman" | "ms serif"
+        ),
         PdfFontFamily::Symbol => normalized == "symbol",
         PdfFontFamily::ZapfDingbats => {
-            normalized == "zapfdingbats" || normalized == "zapf dingbats"
+            matches!(
+                normalized.as_str(),
+                "zapfdingbats" | "zapf dingbats" | "wingdings" | "wingdings 2" | "webdings"
+            )
         }
     }
 }
