@@ -7456,6 +7456,16 @@ fn empty_stored_symbol_result_falls_back_to_passive_symbol_rendering() {
         text.contains("Before (\u{263a}) After"),
         "empty stored SYMBOL result should render a passive Unicode dingbat result, got {text:?}"
     );
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        other => panic!("expected paragraph with passive SYMBOL field, got {other:?}"),
+    };
+    let symbol_run = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text == "\u{263a}")
+        .expect("passive SYMBOL field run");
+    assert_eq!(symbol_run.style.font_size_half_points, 24);
     for forbidden in ["fldinst", "fldrslt", "SYMBOL", "Wingdings"] {
         assert!(
             !text.contains(forbidden),

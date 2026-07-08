@@ -5680,14 +5680,20 @@ impl Parser {
         let previous_shading = self.state.character.form_field_shading;
         self.state.character.form_field_shading = self.form_field_shading && result.form_field;
         let previous_font = self.state.character.font_index;
+        let previous_font_size = self.state.character.font_size_half_points;
 
         if let Some(font_name) = result.font_name.as_deref()
             && let Some(font_index) = self.ensure_passive_result_font(font_name, offset)?
         {
             self.state.character.font_index = font_index;
         }
+        if let Some(font_size_half_points) = result.font_size_half_points {
+            self.state.character.font_size_half_points =
+                self.clamp_font_size(font_size_half_points, offset);
+        }
 
         let result = self.push_text(&result.text, offset);
+        self.state.character.font_size_half_points = previous_font_size;
         self.state.character.font_index = previous_font;
         self.state.character.form_field_shading = previous_shading;
         result
@@ -5763,6 +5769,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text: text.clone(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -5778,6 +5785,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text: text.clone(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -5788,6 +5796,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text: self.document_property_text(property)?.clone(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -5799,6 +5808,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text: self.document_property_text(property)?.clone(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -5826,6 +5836,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text,
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -5834,6 +5845,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text: self.document_edit_minutes?.to_string(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -5842,6 +5854,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text: self.document_revision_number?.to_string(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -5857,6 +5870,7 @@ impl Parser {
         Ok(Some(PassiveFieldResult {
             text: String::new(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         }))
     }
@@ -5900,6 +5914,7 @@ impl Parser {
         Ok(Some(PassiveFieldResult {
             text,
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         }))
     }
@@ -5969,6 +5984,7 @@ impl Parser {
         Ok(Some(PassiveFieldResult {
             text: self.field_auto_number_counter.to_string(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         }))
     }
@@ -5999,6 +6015,7 @@ impl Parser {
         Ok(Some(PassiveFieldResult {
             text: value.to_string(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         }))
     }
@@ -6061,6 +6078,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text,
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -6116,6 +6134,7 @@ impl Parser {
         Ok(Some(PassiveFieldResult {
             text: bookmark_page_ref_marker(id),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         }))
     }
@@ -6132,6 +6151,7 @@ impl Parser {
         Some(PassiveFieldResult {
             text,
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         })
     }
@@ -10999,6 +11019,7 @@ fn normalize_table_cell_text_direction(
 struct PassiveFieldResult {
     text: String,
     font_name: Option<String>,
+    font_size_half_points: Option<i32>,
     form_field: bool,
 }
 
@@ -11054,6 +11075,7 @@ impl PassiveFieldResult {
         Self {
             text: text.to_string(),
             font_name: None,
+            font_size_half_points: None,
             form_field: false,
         }
     }
@@ -11129,6 +11151,7 @@ fn passive_field_result(
             }
             .to_string(),
             font_name: Some("ZapfDingbats".to_string()),
+            font_size_half_points: None,
             form_field: true,
         }),
         "FORMULA" => passive_formula_field_result(instruction),
@@ -11521,6 +11544,7 @@ fn passive_form_text_field_result(form_default_text: &str) -> Option<PassiveFiel
     Some(PassiveFieldResult {
         text,
         font_name: None,
+        font_size_half_points: None,
         form_field: true,
     })
 }
@@ -11537,6 +11561,7 @@ fn passive_form_dropdown_field_result(
     Some(PassiveFieldResult {
         text,
         font_name: None,
+        font_size_half_points: None,
         form_field: true,
     })
 }
@@ -11550,6 +11575,7 @@ fn passive_formula_field_result(instruction: &str) -> Option<PassiveFieldResult>
     Some(PassiveFieldResult {
         text: value.to_string(),
         font_name: None,
+        font_size_half_points: None,
         form_field: false,
     })
 }
@@ -11569,6 +11595,7 @@ fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     Some(PassiveFieldResult {
         text: format!("{numerator}/{denominator}"),
         font_name: None,
+        font_size_half_points: None,
         form_field: false,
     })
 }
@@ -11598,6 +11625,7 @@ fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     Some(PassiveFieldResult {
         text,
         font_name: None,
+        font_size_half_points: None,
         form_field: false,
     })
 }
@@ -11619,6 +11647,7 @@ fn passive_compare_field_result(instruction: &str) -> Option<PassiveFieldResult>
         }
         .to_string(),
         font_name: None,
+        font_size_half_points: None,
         form_field: false,
     })
 }
@@ -11631,6 +11660,7 @@ fn passive_quote_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     Some(PassiveFieldResult {
         text,
         font_name: None,
+        font_size_half_points: None,
         form_field: false,
     })
 }
@@ -11655,6 +11685,7 @@ fn passive_macrobutton_field_result(instruction: &str) -> Option<PassiveFieldRes
     Some(PassiveFieldResult {
         text,
         font_name: None,
+        font_size_half_points: None,
         form_field: false,
     })
 }
@@ -11683,6 +11714,7 @@ fn passive_gotobutton_field_result(instruction: &str) -> Option<PassiveFieldResu
     Some(PassiveFieldResult {
         text,
         font_name: None,
+        font_size_half_points: None,
         form_field: false,
     })
 }
@@ -11697,6 +11729,7 @@ fn passive_mergefield_result(instruction: &str) -> Option<PassiveFieldResult> {
     Some(PassiveFieldResult {
         text: format!("\u{00ab}{name}\u{00bb}"),
         font_name: None,
+        font_size_half_points: None,
         form_field: false,
     })
 }
@@ -11725,6 +11758,10 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
         return None;
     }
 
+    let rest_after_value = chars.collect::<String>();
+    let font_size_half_points = field_switch_i32_value(rest_after_value.as_str(), 's')
+        .and_then(|points| points.checked_mul(2))
+        .filter(|half_points| *half_points > 0);
     let font_name = field_switch_quoted_value(instruction, b'f');
     let mut passive_font_name = font_name.clone();
     let text = if let Some(name) = font_name.as_deref()
@@ -11748,6 +11785,7 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
     Some(PassiveFieldResult {
         text,
         font_name: passive_font_name,
+        font_size_half_points,
         form_field: false,
     })
 }
@@ -12830,6 +12868,29 @@ fn field_switch_i32(input: &str) -> (Option<i32>, &str) {
 
     let value = input[..end].parse::<i32>().ok();
     (value, &input[end..])
+}
+
+fn field_switch_i32_value(instruction: &str, target_switch: char) -> Option<i32> {
+    let target_switch = target_switch.to_ascii_lowercase();
+    let mut index = 0;
+    while index < instruction.len() {
+        let rest = &instruction[index..];
+        let Some(relative) = rest.find('\\') else {
+            break;
+        };
+        let switch_start = index + relative;
+        let after_slash = switch_start + '\\'.len_utf8();
+        let Some(switch) = instruction[after_slash..].chars().next() else {
+            break;
+        };
+        let switch_end = after_slash + switch.len_utf8();
+        if switch.to_ascii_lowercase() == target_switch {
+            let (value, _) = field_switch_i32(&instruction[switch_end..]);
+            return value;
+        }
+        index = switch_end;
+    }
+    None
 }
 
 fn field_switch_quoted_value(instruction: &str, switch: u8) -> Option<String> {
