@@ -12207,7 +12207,17 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         "\\",
         "f4 MS Serif;}{",
         "\\",
-        "f5 Wingdings;}}",
+        "f5 Wingdings;}{",
+        "\\",
+        "f6 Times New Roman;}{",
+        "\\",
+        "f7",
+        "\\",
+        "fcharset238 Times New Roman CE;}{",
+        "\\",
+        "f8 Arial;}{",
+        "\\",
+        "f9 Courier New;}}",
         "\\",
         "f0 Sans ",
         "\\",
@@ -12221,6 +12231,14 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         "\\",
         "f5 Wing",
         "\\",
+        "f6 DirectTimes ",
+        "\\",
+        "f7 CharsetTimes ",
+        "\\",
+        "f8 DirectSans ",
+        "\\",
+        "f9 DirectCourier",
+        "\\",
         "par}",
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -12232,6 +12250,10 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
     assert!(text.contains("LegacySans"));
     assert!(text.contains("LegacySerif"));
     assert!(text.contains("Wing"));
+    assert!(text.contains("DirectTimes"));
+    assert!(text.contains("CharsetTimes"));
+    assert!(text.contains("DirectSans"));
+    assert!(text.contains("DirectCourier"));
     assert!(!text.contains("fonttbl"));
 
     let dir = tempdir().unwrap();
@@ -12265,6 +12287,10 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         "font 'MS Sans Serif' substituted",
         "font 'MS Serif' substituted",
         "font 'Wingdings' substituted",
+        "font 'Times New Roman' substituted",
+        "font 'Times New Roman CE' substituted",
+        "font 'Arial' substituted",
+        "font 'Courier New' substituted",
     ] {
         assert!(
             report
@@ -12301,6 +12327,9 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         b"MS Sans Serif",
         b"MS Serif",
         b"Wingdings",
+        b"Times New Roman",
+        b"Arial",
+        b"Courier New",
         b"fontemb",
         b"fontfile",
         b"/JavaScript",

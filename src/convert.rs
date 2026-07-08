@@ -379,27 +379,55 @@ fn is_cyrillic_char(ch: char) -> bool {
 }
 
 fn font_name_matches_pdf_family(name: &str, family: PdfFontFamily) -> bool {
-    let normalized = name.to_ascii_lowercase();
+    let normalized = direct_base14_alias_name(name);
     match family {
         PdfFontFamily::Helvetica => {
             matches!(
                 normalized.as_str(),
-                "helvetica" | "ms sans serif" | "microsoft sans serif"
+                "helvetica" | "arial" | "ms sans serif" | "microsoft sans serif"
             ) || normalized.starts_with("helvetica ")
         }
-        PdfFontFamily::Courier => normalized == "courier" || normalized.starts_with("courier "),
+        PdfFontFamily::Courier => {
+            matches!(normalized.as_str(), "courier" | "courier new")
+                || normalized.starts_with("courier ")
+        }
         PdfFontFamily::Times => matches!(
             normalized.as_str(),
-            "times-roman" | "times roman" | "ms serif"
+            "times-roman" | "times roman" | "times new roman" | "ms serif"
         ),
-        PdfFontFamily::Symbol => normalized == "symbol",
+        PdfFontFamily::Symbol => matches!(normalized.as_str(), "symbol" | "symbol mt" | "symbolmt"),
         PdfFontFamily::ZapfDingbats => {
             matches!(
                 normalized.as_str(),
-                "zapfdingbats" | "zapf dingbats" | "wingdings" | "wingdings 2" | "webdings"
+                "zapfdingbats"
+                    | "zapf dingbats"
+                    | "wingdings"
+                    | "wingdings 2"
+                    | "wingdings2"
+                    | "wingdings 3"
+                    | "wingdings3"
+                    | "webdings"
             )
         }
     }
+}
+
+fn direct_base14_alias_name(name: &str) -> String {
+    let normalized = name
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    strip_word_charset_suffix(&normalized).to_string()
+}
+
+fn strip_word_charset_suffix(name: &str) -> &str {
+    for suffix in [" ce", " cyr", " greek", " tur", " baltic"] {
+        if let Some(stripped) = name.strip_suffix(suffix) {
+            return stripped;
+        }
+    }
+    name
 }
 
 fn passive_pdf_font_family_label(family: PdfFontFamily) -> &'static str {
