@@ -32,6 +32,7 @@ fn converter_mutation_corpus_rejects_or_emits_passive_pdf_without_payload_leakag
     let options = ConvertOptions {
         diagnostics: true,
         parse_options: RtfParseOptions::browser_safe_defaults(),
+        ..ConvertOptions::default()
     };
 
     for (case_idx, case) in mutation_corpus().into_iter().enumerate() {

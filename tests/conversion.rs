@@ -2,8 +2,8 @@ use std::fs;
 
 use lopdf::Document as PdfDocument;
 use open_rtf_converter::{
-    ConvertError, ConvertOptions, RtfLimits, RtfParseOptions, convert_rtf_file_to_pdf,
-    convert_rtf_to_pdf,
+    ConvertError, ConvertOptions, FontAsset, FontAssetStyle, FontProvider, FontProviderLimits,
+    RtfLimits, RtfParseOptions, convert_rtf_file_to_pdf, convert_rtf_to_pdf,
 };
 use tempfile::tempdir;
 
@@ -50,6 +50,13 @@ fn browser_safe_defaults_use_stricter_pdf_output_limit() {
             .max_pdf_output_bytes,
         20 * 1024 * 1024
     );
+    assert_eq!(
+        ConvertOptions::browser_safe_defaults()
+            .font_provider
+            .limits
+            .max_asset_bytes,
+        2 * 1024 * 1024
+    );
 }
 
 #[test]
@@ -66,6 +73,7 @@ fn conversion_rejects_pdf_output_over_configured_limit() {
                 },
                 ..RtfParseOptions::default()
             },
+            ..ConvertOptions::default()
         },
     )
     .expect_err("rendered PDF should exceed one byte");
@@ -73,6 +81,38 @@ fn conversion_rejects_pdf_output_over_configured_limit() {
     assert!(matches!(
         error,
         ConvertError::OutputTooLarge { size, limit } if limit == 1 && size > limit
+    ));
+}
+
+#[test]
+fn conversion_rejects_font_assets_over_configured_limits() {
+    let input = br"{\rtf1\ansi Font asset limit\par}";
+    let error = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            font_provider: FontProvider {
+                assets: vec![FontAsset {
+                    family_names: vec!["Bounded Font".to_string()],
+                    style: FontAssetStyle::default(),
+                    bytes: vec![0; 4],
+                }],
+                limits: FontProviderLimits {
+                    max_asset_bytes: 3,
+                    ..FontProviderLimits::default()
+                },
+            },
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ConvertError::FontProvider(open_rtf_converter::FontProviderError::AssetTooLarge {
+            size: 4,
+            limit: 3,
+            ..
+        })
     ));
 }
 

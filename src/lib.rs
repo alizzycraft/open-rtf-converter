@@ -1,6 +1,7 @@
 pub mod config;
 pub mod convert;
 pub mod diagnostics;
+pub mod fonts;
 pub mod layout;
 pub mod model;
 pub mod pdf;
@@ -15,3 +16,4 @@ pub use convert::{
     ConversionOutput, ConvertError, ConvertOptions, convert_rtf_bytes_to_pdf, convert_rtf_to_pdf,
 };
 pub use diagnostics::{Diagnostic, Severity};
+pub use fonts::{FontAsset, FontAssetStyle, FontProvider, FontProviderError, FontProviderLimits};

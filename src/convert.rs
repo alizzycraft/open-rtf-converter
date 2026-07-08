@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use crate::config::RtfParseOptions;
 use crate::diagnostics::Diagnostic;
+use crate::fonts::{FontProvider, FontProviderError};
 use crate::layout::{LayoutEngine, PdfFontFamily, passive_pdf_font_family_for_font};
 use crate::model::{Block, Document, FontDef, Paragraph, Run, StaticShape, Table};
 use crate::pdf::{PassivePdfError, audit_passive_pdf_bytes, render_pdf};
@@ -14,6 +15,7 @@ use crate::rtf::{ParseError, parse_rtf_bytes_with_options};
 pub struct ConvertOptions {
     pub diagnostics: bool,
     pub parse_options: RtfParseOptions,
+    pub font_provider: FontProvider,
 }
 
 impl Default for ConvertOptions {
@@ -21,6 +23,7 @@ impl Default for ConvertOptions {
         Self {
             diagnostics: false,
             parse_options: RtfParseOptions::default(),
+            font_provider: FontProvider::default(),
         }
     }
 }
@@ -30,6 +33,7 @@ impl ConvertOptions {
         Self {
             diagnostics: false,
             parse_options: RtfParseOptions::browser_safe_defaults(),
+            font_provider: FontProvider::browser_safe_defaults(),
         }
     }
 }
@@ -60,6 +64,8 @@ pub enum ConvertError {
     #[error("rendered PDF output exceeded limit: {size} bytes > {limit} bytes")]
     OutputTooLarge { size: usize, limit: usize },
     #[error(transparent)]
+    FontProvider(#[from] FontProviderError),
+    #[error(transparent)]
     Parse(#[from] ParseError),
 }
 
@@ -67,6 +73,7 @@ pub fn convert_rtf_to_pdf(
     input: &[u8],
     options: &ConvertOptions,
 ) -> Result<ConversionOutput, ConvertError> {
+    options.font_provider.validate()?;
     let parsed = parse_rtf_bytes_with_options(input, &options.parse_options)?;
     let mut diagnostics = if options.diagnostics {
         parsed.diagnostics.clone()
@@ -77,7 +84,10 @@ pub fn convert_rtf_to_pdf(
         diagnostics.extend(passive_font_substitution_diagnostics(
             &parsed.document.fonts,
         ));
-        diagnostics.extend(unsupported_passive_glyph_diagnostics(&parsed.document));
+        diagnostics.extend(unsupported_passive_glyph_diagnostics(
+            &parsed.document,
+            &options.font_provider,
+        ));
     }
     let layout = LayoutEngine::layout(&parsed.document);
     let page_count = layout.pages.len();
@@ -123,13 +133,17 @@ fn passive_font_substitution_diagnostics(fonts: &[FontDef]) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn unsupported_passive_glyph_diagnostics(document: &Document) -> Vec<Diagnostic> {
+fn unsupported_passive_glyph_diagnostics(
+    document: &Document,
+    font_provider: &FontProvider,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = Vec::<(i32, &'static str)>::new();
 
     collect_unsupported_glyph_diagnostics_from_blocks(
         &document.blocks,
         document,
+        font_provider,
         &mut seen,
         &mut diagnostics,
     );
@@ -146,6 +160,7 @@ fn unsupported_passive_glyph_diagnostics(document: &Document) -> Vec<Diagnostic>
         collect_unsupported_glyph_diagnostics_from_paragraphs(
             paragraphs,
             document,
+            font_provider,
             &mut seen,
             &mut diagnostics,
         );
@@ -162,6 +177,7 @@ fn unsupported_passive_glyph_diagnostics(document: &Document) -> Vec<Diagnostic>
         collect_unsupported_glyph_diagnostics_from_shapes(
             shapes,
             document,
+            font_provider,
             &mut seen,
             &mut diagnostics,
         );
@@ -173,6 +189,7 @@ fn unsupported_passive_glyph_diagnostics(document: &Document) -> Vec<Diagnostic>
 fn collect_unsupported_glyph_diagnostics_from_blocks(
     blocks: &[Block],
     document: &Document,
+    font_provider: &FontProvider,
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -181,15 +198,24 @@ fn collect_unsupported_glyph_diagnostics_from_blocks(
             Block::Paragraph(paragraph) => collect_unsupported_glyph_diagnostics_from_paragraph(
                 paragraph,
                 document,
+                font_provider,
                 seen,
                 diagnostics,
             ),
-            Block::Table(table) => {
-                collect_unsupported_glyph_diagnostics_from_table(table, document, seen, diagnostics)
-            }
-            Block::Shape(shape) => {
-                collect_unsupported_glyph_diagnostics_from_shape(shape, document, seen, diagnostics)
-            }
+            Block::Table(table) => collect_unsupported_glyph_diagnostics_from_table(
+                table,
+                document,
+                font_provider,
+                seen,
+                diagnostics,
+            ),
+            Block::Shape(shape) => collect_unsupported_glyph_diagnostics_from_shape(
+                shape,
+                document,
+                font_provider,
+                seen,
+                diagnostics,
+            ),
             Block::Image(_)
             | Block::Placeholder(_)
             | Block::PageBreak
@@ -206,6 +232,7 @@ fn collect_unsupported_glyph_diagnostics_from_blocks(
 fn collect_unsupported_glyph_diagnostics_from_table(
     table: &Table,
     document: &Document,
+    font_provider: &FontProvider,
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -214,6 +241,7 @@ fn collect_unsupported_glyph_diagnostics_from_table(
             collect_unsupported_glyph_diagnostics_from_paragraphs(
                 &cell.paragraphs,
                 document,
+                font_provider,
                 seen,
                 diagnostics,
             );
@@ -224,26 +252,41 @@ fn collect_unsupported_glyph_diagnostics_from_table(
 fn collect_unsupported_glyph_diagnostics_from_shapes(
     shapes: &[StaticShape],
     document: &Document,
+    font_provider: &FontProvider,
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for shape in shapes {
-        collect_unsupported_glyph_diagnostics_from_shape(shape, document, seen, diagnostics);
+        collect_unsupported_glyph_diagnostics_from_shape(
+            shape,
+            document,
+            font_provider,
+            seen,
+            diagnostics,
+        );
     }
 }
 
 fn collect_unsupported_glyph_diagnostics_from_shape(
     shape: &StaticShape,
     document: &Document,
+    font_provider: &FontProvider,
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    collect_unsupported_glyph_diagnostics_from_paragraphs(&shape.text, document, seen, diagnostics);
+    collect_unsupported_glyph_diagnostics_from_paragraphs(
+        &shape.text,
+        document,
+        font_provider,
+        seen,
+        diagnostics,
+    );
 }
 
 fn collect_unsupported_glyph_diagnostics_from_paragraphs(
     paragraphs: &[Paragraph],
     document: &Document,
+    font_provider: &FontProvider,
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -251,6 +294,7 @@ fn collect_unsupported_glyph_diagnostics_from_paragraphs(
         collect_unsupported_glyph_diagnostics_from_paragraph(
             paragraph,
             document,
+            font_provider,
             seen,
             diagnostics,
         );
@@ -260,17 +304,25 @@ fn collect_unsupported_glyph_diagnostics_from_paragraphs(
 fn collect_unsupported_glyph_diagnostics_from_paragraph(
     paragraph: &Paragraph,
     document: &Document,
+    font_provider: &FontProvider,
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for run in &paragraph.runs {
-        collect_unsupported_glyph_diagnostic_from_run(run, document, seen, diagnostics);
+        collect_unsupported_glyph_diagnostic_from_run(
+            run,
+            document,
+            font_provider,
+            seen,
+            diagnostics,
+        );
     }
 }
 
 fn collect_unsupported_glyph_diagnostic_from_run(
     run: &Run,
     document: &Document,
+    font_provider: &FontProvider,
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -288,13 +340,18 @@ fn collect_unsupported_glyph_diagnostic_from_run(
         .find(|font| font.index == run.style.font_index)
         .map(|font| font.name.as_str())
         .unwrap_or("unknown");
-    diagnostics.push(Diagnostic::warning(
+    let message = if font_provider.has_asset_for_family(font_name) {
+        format!(
+            "{} characters for font '{}' have a caller-provided passive font asset, but embedded font rendering is not implemented yet; current PDF base-font fallback may render replacement glyphs",
+            script, font_name
+        )
+    } else {
         format!(
             "{} characters for font '{}' need passive font asset support; current PDF base-font fallback may render replacement glyphs",
             script, font_name
-        ),
-        None,
-    ));
+        )
+    };
+    diagnostics.push(Diagnostic::warning(message, None));
 }
 
 fn unsupported_passive_glyph_script(text: &str) -> Option<&'static str> {

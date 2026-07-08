@@ -13,8 +13,8 @@ use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
 };
 use open_rtf_converter::{
-    ActiveContentPolicy, ConvertOptions, PdfLinkPolicy, RtfLimits, RtfParseOptions,
-    convert_rtf_file_to_pdf, convert_rtf_to_pdf,
+    ActiveContentPolicy, ConvertOptions, FontAsset, FontAssetStyle, FontProvider, PdfLinkPolicy,
+    RtfLimits, RtfParseOptions, convert_rtf_file_to_pdf, convert_rtf_to_pdf,
 };
 use tempfile::tempdir;
 
@@ -190,6 +190,66 @@ fn cyrillic_charset_text_is_decoded_but_unrenderable_font_gap_is_reported() {
             String::from_utf8_lossy(forbidden)
         );
     }
+}
+
+#[test]
+fn caller_font_assets_are_bounded_and_do_not_cross_into_pdf_without_embedding() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi{",
+        "\\",
+        "fonttbl{",
+        "\\",
+        "f38",
+        "\\",
+        "fcharset204 Times New Roman Cyr;}}",
+        "\\",
+        "f38 ",
+        "\\",
+        "'cf",
+        "\\",
+        "'f0",
+        "\\",
+        "'e8",
+        "\\",
+        "'e2",
+        "\\",
+        "'e5",
+        "\\",
+        "'f2",
+        "\\",
+        "par}",
+    ]);
+    let font_bytes = b"not-a-real-font-but-hostile-private-data".to_vec();
+    let mut options = ConvertOptions::browser_safe_defaults();
+    options.diagnostics = true;
+    options.font_provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Times New Roman Cyr".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: font_bytes.clone(),
+        }],
+        ..FontProvider::browser_safe_defaults()
+    };
+
+    let output = convert_rtf_to_pdf(&input, &options).unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("caller-provided passive font asset")
+            && diagnostic.message.contains("not implemented yet")
+    }));
+    assert!(
+        !output
+            .pdf
+            .windows(font_bytes.len())
+            .any(|window| window == font_bytes),
+        "raw caller-provided font bytes crossed into PDF before embedding support exists"
+    );
 }
 
 #[test]
@@ -5056,6 +5116,7 @@ fn hyperlink_stored_results_render_as_inert_pdf_text_under_passive_link_policies
                     pdf_link_policy: policy,
                     ..RtfParseOptions::default()
                 },
+                ..ConvertOptions::default()
             },
         )
         .unwrap();
@@ -15271,6 +15332,7 @@ fn oversized_unicode_fallback_skip_is_bounded_before_pdf_rendering() {
         &ConvertOptions {
             diagnostics: true,
             parse_options: options,
+            ..ConvertOptions::default()
         },
     )
     .unwrap();
@@ -16136,6 +16198,7 @@ fn oversized_picture_goal_dimensions_are_bounded_before_pdf_rendering() {
         &ConvertOptions {
             diagnostics: true,
             parse_options: options,
+            ..ConvertOptions::default()
         },
     )
     .unwrap();
