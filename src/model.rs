@@ -544,6 +544,7 @@ pub struct TableCell {
     pub shading_pattern: ShadingPattern,
     pub padding: TableCellPadding,
     pub borders: TableCellBorders,
+    pub fit_text: bool,
     pub vertical_align: TableCellVerticalAlign,
     pub horizontal_merge: TableCellHorizontalMerge,
     pub vertical_merge: TableCellVerticalMerge,

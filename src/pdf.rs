@@ -5108,6 +5108,7 @@ endobj
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: crate::model::TableCellPadding::default(),
                     borders: crate::model::TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: crate::model::TableCellVerticalAlign::Top,
                     horizontal_merge: crate::model::TableCellHorizontalMerge::None,
                     vertical_merge: crate::model::TableCellVerticalMerge::None,

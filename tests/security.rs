@@ -607,10 +607,21 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
 
     assert!(text.contains("Positioned left"));
     assert!(text.contains("Positioned right"));
     assert!(text.contains("After table"));
+    assert!(!table.rows[0].cells[0].fit_text);
+    assert!(table.rows[0].cells[1].fit_text);
     for forbidden in [
         "tabsnoovrlp",
         "tdfrmtxtLeft",
@@ -641,10 +652,10 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
             .message
             .contains("floating table positioning approximated by passive table flow")
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
-            .contains("table cell fit-text approximated by passive cell text layout")
+            .contains("table cell fit-text approximated")
     }));
 
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();

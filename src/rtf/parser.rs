@@ -387,6 +387,7 @@ struct TableRowBuilder {
     cell_border_flags: Vec<TableCellBorderFlags>,
     cell_preferred_widths_twips: Vec<Option<i32>>,
     cell_no_wraps: Vec<bool>,
+    cell_fit_texts: Vec<bool>,
     cell_text_directions: Vec<TableCellTextDirection>,
     cell_vertical_alignments: Vec<TableCellVerticalAlign>,
     cell_horizontal_merges: Vec<TableCellHorizontalMerge>,
@@ -405,6 +406,7 @@ struct TableRowBuilder {
     current_cell_preferred_width: PreferredTableWidth,
     current_row_preferred_width: PreferredTableWidth,
     current_cell_no_wrap: bool,
+    current_cell_fit_text: bool,
     current_cell_text_direction: TableCellTextDirection,
     row_borders: TableCellBorders,
     row_inner_horizontal_border: TableCellBorder,
@@ -2974,10 +2976,9 @@ impl Parser {
             "clNoWrap" | "clnowrap" => {
                 self.set_current_cell_no_wrap(control.parameter.unwrap_or(1) != 0)
             }
-            "clFitText" | "clfittext" => self.diagnostics.push(Diagnostic::warning(
-                "table cell fit-text approximated by passive cell text layout",
-                Some(offset),
-            )),
+            "clFitText" | "clfittext" => {
+                self.set_current_cell_fit_text(control.parameter.unwrap_or(1) != 0)
+            }
             "cltxlrtb" => {
                 self.set_current_cell_text_direction(TableCellTextDirection::LeftToRightTopToBottom)
             }
@@ -6710,6 +6711,7 @@ impl Parser {
             cell_border_flags: Vec::new(),
             cell_preferred_widths_twips: Vec::new(),
             cell_no_wraps: Vec::new(),
+            cell_fit_texts: Vec::new(),
             cell_text_directions: Vec::new(),
             cell_vertical_alignments: Vec::new(),
             cell_horizontal_merges: Vec::new(),
@@ -6728,6 +6730,7 @@ impl Parser {
             current_cell_preferred_width: PreferredTableWidth::default(),
             current_row_preferred_width: PreferredTableWidth::default(),
             current_cell_no_wrap: false,
+            current_cell_fit_text: false,
             current_cell_text_direction: TableCellTextDirection::LeftToRightTopToBottom,
             row_borders: TableCellBorders::default(),
             row_inner_horizontal_border: TableCellBorder::default(),
@@ -6854,6 +6857,7 @@ impl Parser {
             row.cell_border_flags.push(row.current_cell_border_flags);
             row.cell_preferred_widths_twips.push(preferred_width_twips);
             row.cell_no_wraps.push(row.current_cell_no_wrap);
+            row.cell_fit_texts.push(row.current_cell_fit_text);
             row.cell_text_directions
                 .push(row.current_cell_text_direction);
             row.cell_vertical_alignments
@@ -6871,6 +6875,7 @@ impl Parser {
             row.current_cell_border_side = None;
             row.current_cell_preferred_width = PreferredTableWidth::default();
             row.current_cell_no_wrap = false;
+            row.current_cell_fit_text = false;
             row.current_cell_text_direction = TableCellTextDirection::LeftToRightTopToBottom;
             row.current_cell_vertical_align = TableCellVerticalAlign::Top;
             row.current_cell_horizontal_merge = TableCellHorizontalMerge::None;
@@ -6991,6 +6996,12 @@ impl Parser {
     fn set_current_cell_no_wrap(&mut self, no_wrap: bool) {
         if let Some(row) = self.current_table_row.as_mut() {
             row.current_cell_no_wrap = no_wrap;
+        }
+    }
+
+    fn set_current_cell_fit_text(&mut self, fit_text: bool) {
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.current_cell_fit_text = fit_text;
         }
     }
 
@@ -7557,6 +7568,11 @@ impl Parser {
                 paragraph.style.no_wrap = true;
             }
         }
+        let fit_text = row
+            .cell_fit_texts
+            .get(cell_index)
+            .copied()
+            .unwrap_or(row.current_cell_fit_text);
         let text_direction = row
             .cell_text_directions
             .get(cell_index)
@@ -7585,6 +7601,7 @@ impl Parser {
             shading_pattern,
             padding,
             borders,
+            fit_text,
             vertical_align,
             horizontal_merge,
             vertical_merge,

@@ -2878,19 +2878,30 @@ fn prepare_table_row(
         .zip(cell_paddings.iter())
         .map(|(visual_cell, padding)| {
             let cell = &row.cells[visual_cell.cell_index];
+            let cell_content_width = (visual_cell.width - padding.left - padding.right).max(12.0);
             cell.paragraphs
                 .iter()
                 .enumerate()
                 .flat_map(|(paragraph_idx, paragraph)| {
+                    let fit_text_paragraph;
+                    let layout_paragraph = if cell.fit_text {
+                        fit_text_paragraph = passive_fit_text_paragraph(paragraph);
+                        &fit_text_paragraph
+                    } else {
+                        paragraph
+                    };
                     let mut lines = wrap_paragraph_with_font_provider(
-                        paragraph,
-                        (visual_cell.width - padding.left - padding.right).max(12.0),
+                        layout_paragraph,
+                        cell_content_width,
                         markers,
                         document,
                         font_provider,
                     );
                     for line in &mut lines {
-                        line.height = apply_line_spacing(line.height, &paragraph.style);
+                        if cell.fit_text {
+                            apply_passive_table_cell_fit_text(line, cell_content_width);
+                        }
+                        line.height = apply_line_spacing(line.height, &layout_paragraph.style);
                     }
                     let line_count = lines.len();
                     let suppress_contextual_space_before = paragraph_idx
@@ -2968,6 +2979,29 @@ fn prepare_table_row(
         cell_paddings,
         row_height,
     }
+}
+
+fn passive_fit_text_paragraph(paragraph: &Paragraph) -> Paragraph {
+    let mut paragraph = paragraph.clone();
+    paragraph.style.no_wrap = true;
+    paragraph
+}
+
+fn apply_passive_table_cell_fit_text(line: &mut Line, content_width: f32) {
+    if line.width <= content_width || line.width <= 0.01 {
+        return;
+    }
+    let scale = (content_width / line.width).clamp(0.05, 1.0);
+    for run in &mut line.runs {
+        if run.text != "\t" {
+            let scaled_percent = ((run.style.character_scaling_percent as f32) * scale)
+                .round()
+                .clamp(5.0, run.style.character_scaling_percent.max(5) as f32);
+            run.style.character_scaling_percent = scaled_percent as i32;
+        }
+        run.width *= scale;
+    }
+    line.width *= scale;
 }
 
 fn resolve_cell_padding(row: &TableRow, cell: &TableCell) -> ResolvedCellPadding {
@@ -7250,6 +7284,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -7267,6 +7302,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -7320,6 +7356,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7374,6 +7411,7 @@ mod tests {
                         bottom: TableCellBorder::default(),
                         ..TableCellBorders::default()
                     },
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7440,6 +7478,7 @@ mod tests {
                             ..TableCellBorder::default()
                         },
                     },
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7508,6 +7547,7 @@ mod tests {
                         bottom: TableCellBorder::default(),
                         ..TableCellBorders::default()
                     },
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7632,6 +7672,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7721,6 +7762,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7775,6 +7817,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7830,6 +7873,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7872,6 +7916,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7923,6 +7968,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -7993,6 +8039,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -8046,6 +8093,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -8093,6 +8141,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8118,6 +8167,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8168,6 +8218,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -8222,6 +8273,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -8343,6 +8395,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8368,6 +8421,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8431,6 +8485,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -8476,6 +8531,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -8504,6 +8560,63 @@ mod tests {
 
         assert!((text_x("First") - 111.0).abs() < 0.01);
         assert!((text_x("Second") - 93.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn lays_out_table_cell_fit_text_as_bounded_passive_scaling() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![720],
+            borders_visible: true,
+            rows: vec![TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    borders: TableCellBorders::default(),
+                    fit_text: true,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text: "Fit text stays on one visual row".to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let first_baseline = fragments
+            .first()
+            .map(|fragment| fragment.baseline_y)
+            .expect("fit text fragments");
+
+        assert!(
+            fragments.iter().all(|fragment| {
+                fragment.style.character_scaling_percent < 100
+                    && (fragment.baseline_y - first_baseline).abs() < 0.01
+            }),
+            "fit text should render as one passively scaled visual row: {fragments:?}"
+        );
     }
 
     #[test]
@@ -8538,6 +8651,7 @@ mod tests {
                         bottom_twips: Some(120),
                     },
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -8595,6 +8709,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8612,6 +8727,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Center,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8629,6 +8745,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Bottom,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8682,6 +8799,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::First,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8699,6 +8817,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::Continuation,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8716,6 +8835,7 @@ mod tests {
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -8780,6 +8900,7 @@ mod tests {
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
                             borders: TableCellBorders::default(),
+                            fit_text: false,
                             vertical_align: TableCellVerticalAlign::Bottom,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::First,
@@ -8797,6 +8918,7 @@ mod tests {
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
                             borders: TableCellBorders::default(),
+                            fit_text: false,
                             vertical_align: TableCellVerticalAlign::Top,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::None,
@@ -8824,6 +8946,7 @@ mod tests {
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
                             borders: TableCellBorders::default(),
+                            fit_text: false,
                             vertical_align: TableCellVerticalAlign::Top,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::Continuation,
@@ -8841,6 +8964,7 @@ mod tests {
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
                             borders: TableCellBorders::default(),
+                            fit_text: false,
                             vertical_align: TableCellVerticalAlign::Top,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::None,
@@ -8910,6 +9034,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10184,6 +10309,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: Default::default(),
                     horizontal_merge: Default::default(),
                     vertical_merge: Default::default(),
@@ -10463,6 +10589,7 @@ mod tests {
                         shading_pattern: ShadingPattern::Vertical,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -10549,6 +10676,7 @@ mod tests {
                         shading_pattern: ShadingPattern::DarkCross,
                         padding: TableCellPadding::default(),
                         borders: TableCellBorders::default(),
+                        fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -10787,6 +10915,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11188,6 +11317,7 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     borders: TableCellBorders::default(),
+                    fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
