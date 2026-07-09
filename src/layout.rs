@@ -5259,6 +5259,19 @@ fn push_line(
             style: style.clone(),
         }));
 
+        if style.overline {
+            let y = run_baseline_y + (style.font_size_points() * 0.78);
+            page.items.push(LayoutItem::Line {
+                x1: cursor_x,
+                y1: y,
+                x2: cursor_x + width,
+                y2: y,
+                width: 0.5,
+                color,
+                style: LineStyle::Solid,
+            });
+        }
+
         if style.underline != UnderlineStyle::None {
             let underline_color = style
                 .underline_color_index
@@ -9463,6 +9476,37 @@ mod tests {
         assert!((base.style.font_size_points() - 12.0).abs() < 0.01);
         assert!((sup.style.font_size_points() - 7.8).abs() < 0.01);
         assert!(sup.baseline_y > base.baseline_y);
+    }
+
+    #[test]
+    fn lays_out_overline_as_passive_line_above_text() {
+        let mut overline_style = CharacterStyle::default();
+        overline_style.overline = true;
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "over".to_string(),
+                style: overline_style,
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragment = text_fragment_for(&layout.pages[0], "over");
+        let line_y = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Line { y1, y2, .. } if (*y1 - *y2).abs() < 0.01 => Some(*y1),
+                _ => None,
+            })
+            .expect("overline stroke");
+
+        assert!(
+            line_y > fragment.baseline_y,
+            "overline should sit above text baseline, line_y={line_y}, baseline={}",
+            fragment.baseline_y
+        );
     }
 
     #[test]

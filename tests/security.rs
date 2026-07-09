@@ -13880,7 +13880,9 @@ fn office_math_overbars_render_readable_passive_text() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("Before \u{00af}x After"));
+    assert!(text.contains("Before x After"));
+    let overbar_style = run_style_for_text(&parsed.document, "x").expect("overbar run");
+    assert!(overbar_style.overline);
     for forbidden in ["mmath", "moMath", "mbar", "me", "mtext"] {
         assert!(
             !text.contains(forbidden),
@@ -13900,12 +13902,19 @@ fn office_math_overbars_render_readable_passive_text() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
-    assert!(rendered_text.contains("Before "));
-    assert!(rendered_text.contains("x After"));
+    assert!(rendered_text.contains("Before x After"));
     let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
     assert!(
-        helvetica_bytes.contains(&0xaf),
-        "macron marker should encode through passive WinAnsi byte 0xaf; got {helvetica_bytes:?}"
+        !helvetica_bytes.contains(&0xaf),
+        "overbar should render as passive geometry, not as a macron glyph; got {helvetica_bytes:?}"
+    );
+    assert!(
+        content.operations.windows(3).any(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        }),
+        "Office math overbar should render as a passive stroke"
     );
     for forbidden in [
         b"mmath".as_slice(),
@@ -14085,9 +14094,19 @@ fn office_math_property_controls_are_passive_structure() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(
-        text.contains("Before \u{00af}\u{221a}xi2 After"),
+        text.contains("Before \u{221a}xi2 After"),
         "unexpected property-heavy math text: {text:?}"
     );
+    let property_overbar_run = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => paragraph.runs.iter().find(|run| run.text.contains('x')),
+            _ => None,
+        })
+        .expect("property overbar run");
+    assert!(property_overbar_run.style.overline);
     let property_subscript_style =
         run_style_for_text(&parsed.document, "i").expect("property subscript run");
     assert!(property_subscript_style.baseline_shift_half_points < 0);
@@ -14141,8 +14160,16 @@ fn office_math_property_controls_are_passive_structure() {
     );
     let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
     assert!(
-        helvetica_bytes.contains(&0xaf),
-        "property-heavy overbar should encode through passive WinAnsi byte 0xaf; got {helvetica_bytes:?}"
+        !helvetica_bytes.contains(&0xaf),
+        "property-heavy overbar should render as passive geometry, not as a macron glyph; got {helvetica_bytes:?}"
+    );
+    assert!(
+        content.operations.windows(3).any(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        }),
+        "property-heavy overbar should render as a passive stroke"
     );
     for forbidden in [
         b"mmath".as_slice(),

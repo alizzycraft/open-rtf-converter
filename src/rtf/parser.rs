@@ -1793,7 +1793,7 @@ impl Parser {
                 self.push_text("\u{2044}", offset)?;
             }
             "mbar" if destination_allows_visible_content(&self.state) => {
-                self.push_text("\u{00af}", offset)?;
+                self.state.character.overline = true;
             }
             "mbegChr" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_delimiter_capture = Some(OfficeMathDelimiterCapture::Begin);
@@ -11042,6 +11042,9 @@ fn inherit_character_style(base: &CharacterStyle, derived: &CharacterStyle) -> C
     }
     if output.underline_color_index == default.underline_color_index {
         output.underline_color_index = base.underline_color_index;
+    }
+    if output.overline == default.overline {
+        output.overline = base.overline;
     }
     if output.strike == default.strike {
         output.strike = base.strike;
