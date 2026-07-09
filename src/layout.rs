@@ -1797,19 +1797,55 @@ fn layout_shape_text(
             if cursor_y - line.height < min_y {
                 return;
             }
+            let is_first_line = line_idx == 0;
+            let is_last_line = line_idx + 1 == line_count;
+            if let Some(color_index) = paragraph.style.shading_color_index
+                && color_index > 0
+            {
+                let line_left_indent = twips_to_points(paragraph_line_left_indent_twips(
+                    &paragraph.style,
+                    is_first_line,
+                ));
+                push_shading_rect(
+                    pages,
+                    document,
+                    x + padding + line_left_indent,
+                    cursor_y - line.height,
+                    paragraph_line_width(content_width, &paragraph.style, is_first_line),
+                    line.height,
+                    color_index,
+                    paragraph.style.shading_basis_points,
+                    paragraph.style.shading_pattern,
+                );
+            }
             let text_x = aligned_x(
                 x + padding,
                 content_width,
                 line.width,
                 &paragraph.style,
-                line_idx == 0,
+                is_first_line,
             );
             let word_spacing = justified_word_spacing(
                 line,
                 &paragraph.style,
-                paragraph_line_width(content_width, &paragraph.style, line_idx == 0),
-                line_idx + 1 == line_count,
+                paragraph_line_width(content_width, &paragraph.style, is_first_line),
+                is_last_line,
             );
+            let (border_line_idx, border_line_count) =
+                paragraph_border_line_position(is_first_line, is_last_line);
+            push_paragraph_borders(
+                pages,
+                x + padding,
+                content_width,
+                &paragraph.style,
+                border_line_idx,
+                border_line_count,
+                cursor_y,
+                line.height,
+                document,
+                false,
+            );
+            push_bar_tab_stops(pages, &paragraph.style, text_x, cursor_y, line.height);
             push_line(pages, line, text_x, cursor_y, document, word_spacing);
             cursor_y -= line.height;
         }
@@ -6761,6 +6797,100 @@ mod tests {
 
         assert_eq!(fill_count, 1);
         assert_eq!(stroke_count, 0);
+    }
+
+    #[test]
+    fn lays_out_shape_text_paragraph_shading_and_borders_inside_shape_bounds() {
+        let mut document = Document::default();
+        document.colors = vec![
+            Color::default(),
+            Color {
+                red: 240,
+                green: 240,
+                blue: 0,
+            },
+            Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+        ];
+        let mut paragraph_style = ParagraphStyle {
+            shading_color_index: Some(1),
+            ..ParagraphStyle::default()
+        };
+        paragraph_style.borders.bottom = TableCellBorder {
+            visible: true,
+            width_twips: 40,
+            color_index: Some(2),
+            ..TableCellBorder::default()
+        };
+        document.blocks = vec![Block::Shape(StaticShape {
+            kind: StaticShapeKind::Rectangle,
+            left_twips: 720,
+            top_twips: 720,
+            width_twips: 2160,
+            height_twips: 720,
+            stroke_width_twips: 0,
+            stroke_color: Color::default(),
+            stroke_style: BorderStyle::Single,
+            fill_color: None,
+            text: vec![Paragraph {
+                style: paragraph_style,
+                runs: vec![Run {
+                    text: "Styled shape".to_string(),
+                    style: Default::default(),
+                }],
+            }],
+            points: Vec::new(),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let shape_left = 108.0;
+        let shape_right = 216.0;
+        let shape_bottom = 648.0;
+        let shape_top = 684.0;
+        let content_left = shape_left + 4.0;
+        let content_right = shape_right - 4.0;
+        let text = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("Styled") => Some(fragment),
+                _ => None,
+            })
+            .expect("shape text fragment");
+
+        assert!(text.x >= content_left && text.x < content_right);
+        assert!(text.baseline_y > shape_bottom && text.baseline_y < shape_top);
+        assert!(page.items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Highlight { x, y, width, height, color }
+                if *x >= content_left
+                    && *x + *width <= content_right + 0.01
+                    && *y >= shape_bottom
+                    && *y + *height <= shape_top
+                    && *color == PdfColor {
+                        red: 240.0 / 255.0,
+                        green: 240.0 / 255.0,
+                        blue: 0.0
+                    }
+        )));
+        assert!(page.items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Line { x1, y1, x2, y2, color, .. }
+                if *x1 >= content_left
+                    && *x2 <= content_right + 0.01
+                    && (*y1 - *y2).abs() < 0.01
+                    && *y1 >= shape_bottom
+                    && *y1 <= shape_top
+                    && *color == PdfColor {
+                        red: 1.0,
+                        green: 0.0,
+                        blue: 0.0
+                    }
+        )));
     }
 
     #[test]

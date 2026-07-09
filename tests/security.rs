@@ -25553,6 +25553,90 @@ fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_
 }
 
 #[test]
+fn styled_shape_text_renders_passively_without_style_control_leakage() {
+    let input = br#"{\rtf1{\colortbl;\red240\green240\blue0;\red255\green0\blue0;}{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}}{\shptxt\cbpat1\brdrb\brdrs\brdrw40\brdrcf2 Styled box text\par}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("shape block");
+
+    assert_eq!(shape.text.len(), 1);
+    assert_eq!(shape.text[0].style.shading_color_index, Some(1));
+    assert!(shape.text[0].style.borders.bottom.visible);
+    assert!(text.contains("Styled box text"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "shptxt",
+        "cbpat",
+        "brdrb",
+        "brdrs",
+        "brdrw",
+        "brdrcf",
+        "shpinst",
+        "shapeType",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden styled shape-text content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering safe passive shape text/result")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Styled box text"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"shptxt".as_slice(),
+        b"cbpat",
+        b"brdrb",
+        b"brdrs",
+        b"brdrw",
+        b"brdrcf",
+        b"shpinst",
+        b"shapeType",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden styled shape-text content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn duplicate_object_alternate_after_shape_result_is_ignored_without_generic_ole_warning() {
     let input = br#"{\rtf1 Before\par{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}}{\shptxt Box text\par}{\object\objdata 4142432f4a6176615363726970742f456d62656464656446696c65}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
