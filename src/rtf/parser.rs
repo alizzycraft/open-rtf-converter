@@ -8764,6 +8764,15 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
+            "lineDashing" => {
+                if let Some(style) = parse_shape_line_dashing_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.stroke_style = style;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "fLine" => {
                 if let Some(enabled) = parse_shape_property_i64(value)
                     && enabled == 0
@@ -11408,6 +11417,22 @@ fn parse_office_shape_color(value: &str) -> Option<Color> {
         green: ((value >> 8) & 0xff) as u8,
         blue: ((value >> 16) & 0xff) as u8,
     })
+}
+
+fn parse_shape_line_dashing_property(value: &str) -> Option<BorderStyle> {
+    let normalized = value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "0" | "solid" | "single" => Some(BorderStyle::Single),
+        "1" | "dot" | "sysdot" => Some(BorderStyle::Dotted),
+        "2" | "3" | "4" | "dash" | "sysdash" | "lgdash" | "longdash" | "dashdot" | "lgdashdot"
+        | "dashdotdot" | "lgdashdotdot" => Some(BorderStyle::Dashed),
+        _ => None,
+    }
 }
 
 fn merge_child_field_instruction(
@@ -21848,6 +21873,37 @@ After\par}"#;
         assert!(shape.flip_vertical);
         assert!(text.contains("BeforeAfter"));
         for forbidden in ["fFlipH", "fFlipV", "pFragments", "hostile-payload"] {
+            assert!(!text.contains(forbidden));
+        }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_shape_line_dashing_property_as_safe_stroke_style() {
+        let output = parse_rtf(
+            r"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn lineDashing}{\sv dashDot}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+        )
+        .unwrap();
+        let shape = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("shape");
+        let text = document_text(&output.document);
+
+        assert_eq!(shape.kind, StaticShapeKind::Line);
+        assert_eq!(shape.stroke_style, BorderStyle::Dashed);
+        assert!(text.contains("BeforeAfter"));
+        for forbidden in ["lineDashing", "dashDot", "pFragments", "hostile-payload"] {
             assert!(!text.contains(forbidden));
         }
         assert!(
