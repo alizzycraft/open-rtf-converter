@@ -15680,6 +15680,105 @@ fn zero_line_number_distance_does_not_enable_margin_numbers_or_leak_controls() {
 }
 
 #[test]
+fn line_number_restart_modes_render_passively_without_control_leakage() {
+    let continuous = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "sectd",
+        "\\",
+        "linex360",
+        "\\",
+        "linemod1",
+        "\\",
+        "linecont First",
+        "\\",
+        "par",
+        "\\",
+        "sect",
+        "\\",
+        "sectd",
+        "\\",
+        "linecont Second",
+        "\\",
+        "par}",
+    ]);
+    let section_restart = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "sectd",
+        "\\",
+        "linex360",
+        "\\",
+        "linemod1",
+        "\\",
+        "linecont First",
+        "\\",
+        "par",
+        "\\",
+        "sect",
+        "\\",
+        "sectd",
+        "\\",
+        "linerestart Second",
+        "\\",
+        "par}",
+    ]);
+
+    for (input, expected_second) in [(&continuous, "2Second"), (&section_restart, "1Second")] {
+        let output = convert_rtf_to_pdf(
+            input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::default()
+            },
+        )
+        .unwrap();
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let rendered_text = parsed_pdf
+            .get_pages()
+            .values()
+            .map(|page_id| {
+                let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+                decoded_pdf_text(&content)
+            })
+            .collect::<String>();
+
+        assert!(
+            rendered_text.contains("1First"),
+            "first section should render passive line number text: {rendered_text:?}"
+        );
+        assert!(
+            rendered_text.contains(expected_second),
+            "second section line-number restart mode should render {expected_second:?}: {rendered_text:?}"
+        );
+        for forbidden in [
+            b"linecont".as_slice(),
+            b"linerestart",
+            b"linemod",
+            b"linex",
+            b"sectd",
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Launch",
+            b"/AcroForm",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "line numbering control leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn unicode_alternate_destinations_render_passively_without_fallback_leakage() {
     let input = rtf(&[
         "{",

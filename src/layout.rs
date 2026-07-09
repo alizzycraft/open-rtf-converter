@@ -705,12 +705,21 @@ impl LayoutEngine {
 
         for (block_idx, block) in document.blocks.iter().enumerate() {
             match block {
-                Block::PageBreak => start_new_page(
-                    &mut pages,
-                    &mut cursor_y,
-                    &mut geometry,
-                    &mut current_column,
-                ),
+                Block::PageBreak => {
+                    let previous_page_count = pages.len();
+                    start_new_page(
+                        &mut pages,
+                        &mut cursor_y,
+                        &mut geometry,
+                        &mut current_column,
+                    );
+                    reset_line_numbers_for_page_restart(
+                        Some(&mut line_number_state),
+                        geometry,
+                        previous_page_count,
+                        pages.len(),
+                    );
+                }
                 Block::ContinuousSectionBreak => {
                     layout_endnotes_for_section(
                         &mut pages,
@@ -727,7 +736,12 @@ impl LayoutEngine {
                     );
                     section_number = section_number.saturating_add(1);
                     geometry.section_number = section_number;
-                    line_number_state.reset_for_geometry(geometry);
+                    if !next_block_is_section_settings(document, block_idx) {
+                        reset_line_numbers_for_section_restart(
+                            Some(&mut line_number_state),
+                            geometry,
+                        );
+                    }
                     if let Some(page) = pages.last_mut() {
                         page.section_number = section_number;
                         page.geometry.section_number = section_number;
@@ -749,7 +763,12 @@ impl LayoutEngine {
                     );
                     section_number = section_number.saturating_add(1);
                     geometry.section_number = section_number;
-                    line_number_state.reset_for_geometry(geometry);
+                    if !next_block_is_section_settings(document, block_idx) {
+                        reset_line_numbers_for_section_restart(
+                            Some(&mut line_number_state),
+                            geometry,
+                        );
+                    }
                     start_new_page(
                         &mut pages,
                         &mut cursor_y,
@@ -773,7 +792,12 @@ impl LayoutEngine {
                     );
                     section_number = section_number.saturating_add(1);
                     geometry.section_number = section_number;
-                    line_number_state.reset_for_geometry(geometry);
+                    if !next_block_is_section_settings(document, block_idx) {
+                        reset_line_numbers_for_section_restart(
+                            Some(&mut line_number_state),
+                            geometry,
+                        );
+                    }
                     start_new_page_with_parity(
                         &mut pages,
                         &mut cursor_y,
@@ -798,7 +822,12 @@ impl LayoutEngine {
                     );
                     section_number = section_number.saturating_add(1);
                     geometry.section_number = section_number;
-                    line_number_state.reset_for_geometry(geometry);
+                    if !next_block_is_section_settings(document, block_idx) {
+                        reset_line_numbers_for_section_restart(
+                            Some(&mut line_number_state),
+                            geometry,
+                        );
+                    }
                     start_new_page_with_parity(
                         &mut pages,
                         &mut cursor_y,
@@ -808,11 +837,18 @@ impl LayoutEngine {
                     );
                 }
                 Block::ColumnBreak => {
+                    let previous_page_count = pages.len();
                     advance_column_or_page(
                         &mut pages,
                         &mut cursor_y,
                         &mut geometry,
                         &mut current_column,
+                    );
+                    reset_line_numbers_for_page_restart(
+                        Some(&mut line_number_state),
+                        geometry,
+                        previous_page_count,
+                        pages.len(),
                     );
                 }
                 Block::SectionSettings(settings) => {
@@ -829,7 +865,7 @@ impl LayoutEngine {
                         header_footer_index,
                     );
                     geometry.section_number = section_number;
-                    line_number_state.reset_for_geometry(geometry);
+                    reset_line_numbers_for_section_restart(Some(&mut line_number_state), geometry);
                     if let Some(page) = pages.last_mut()
                         && page.items.is_empty()
                     {
@@ -3721,6 +3757,24 @@ fn reset_line_numbers_for_page_restart(
     {
         state.reset_for_geometry(geometry);
     }
+}
+
+fn reset_line_numbers_for_section_restart(
+    state: Option<&mut LineNumberState>,
+    geometry: PageGeometry,
+) {
+    if geometry.line_numbering.restart == LineNumberRestart::Section
+        && let Some(state) = state
+    {
+        state.reset_for_geometry(geometry);
+    }
+}
+
+fn next_block_is_section_settings(document: &Document, block_idx: usize) -> bool {
+    document
+        .blocks
+        .get(block_idx.saturating_add(1))
+        .is_some_and(|block| matches!(block, Block::SectionSettings(_)))
 }
 
 fn push_passive_line_number(
@@ -12625,6 +12679,66 @@ mod tests {
         assert_eq!(layout.pages.len(), 2);
         assert_eq!(layout_text(&layout.pages[0]), "Before");
         assert_eq!(layout_text(&layout.pages[1]), "After");
+    }
+
+    #[test]
+    fn page_line_numbering_restarts_after_explicit_page_breaks() {
+        let mut document = Document::default();
+        document.page.line_numbering.enabled = true;
+        document.page.line_numbering.restart = LineNumberRestart::Page;
+        document.blocks = vec![
+            paragraph_with_text("First page"),
+            Block::PageBreak,
+            paragraph_with_text("Second page"),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert_eq!(layout.pages.len(), 2);
+        assert_eq!(layout_text(&layout.pages[0]), "1First page");
+        assert_eq!(layout_text(&layout.pages[1]), "1Second page");
+    }
+
+    #[test]
+    fn continuous_line_numbering_survives_later_section_settings() {
+        let mut document = Document::default();
+        document.page.line_numbering.enabled = true;
+        document.page.line_numbering.restart = LineNumberRestart::Continuous;
+        let mut second_section = document.page.clone();
+        second_section.line_numbering.restart = LineNumberRestart::Continuous;
+        document.blocks = vec![
+            paragraph_with_text("First section"),
+            Block::SectionBreak,
+            Block::SectionSettings(second_section),
+            paragraph_with_text("Second section"),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert_eq!(layout.pages.len(), 2);
+        assert_eq!(layout_text(&layout.pages[0]), "1First section");
+        assert_eq!(layout_text(&layout.pages[1]), "2Second section");
+    }
+
+    #[test]
+    fn section_line_numbering_restarts_at_later_section_settings() {
+        let mut document = Document::default();
+        document.page.line_numbering.enabled = true;
+        document.page.line_numbering.restart = LineNumberRestart::Continuous;
+        let mut second_section = document.page.clone();
+        second_section.line_numbering.restart = LineNumberRestart::Section;
+        document.blocks = vec![
+            paragraph_with_text("First section"),
+            Block::SectionBreak,
+            Block::SectionSettings(second_section),
+            paragraph_with_text("Second section"),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert_eq!(layout.pages.len(), 2);
+        assert_eq!(layout_text(&layout.pages[0]), "1First section");
+        assert_eq!(layout_text(&layout.pages[1]), "1Second section");
     }
 
     #[test]
