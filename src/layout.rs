@@ -1641,10 +1641,10 @@ fn layout_shape(
         StaticShapeKind::Line => {
             if let Some(width_points) = stroke_width_points {
                 page.items.push(LayoutItem::Line {
-                    x1: x,
-                    y1: top_y,
-                    x2: right_x,
-                    y2: bottom_y,
+                    x1: shape_point_x(x, width, 0.0, shape.flip_horizontal),
+                    y1: shape_point_y(top_y, height, 0.0, shape.flip_vertical),
+                    x2: shape_point_x(x, width, width, shape.flip_horizontal),
+                    y2: shape_point_y(top_y, height, height, shape.flip_vertical),
                     width: width_points,
                     color,
                     style: stroke_style,
@@ -1661,10 +1661,30 @@ fn layout_shape(
                     let start = points[0];
                     let end = points[1];
                     page.items.push(LayoutItem::Line {
-                        x1: x + (twips_to_points(start.x_twips) * scale_x),
-                        y1: top_y - (twips_to_points(start.y_twips) * scale_y),
-                        x2: x + (twips_to_points(end.x_twips) * scale_x),
-                        y2: top_y - (twips_to_points(end.y_twips) * scale_y),
+                        x1: shape_point_x(
+                            x,
+                            width,
+                            twips_to_points(start.x_twips) * scale_x,
+                            shape.flip_horizontal,
+                        ),
+                        y1: shape_point_y(
+                            top_y,
+                            height,
+                            twips_to_points(start.y_twips) * scale_y,
+                            shape.flip_vertical,
+                        ),
+                        x2: shape_point_x(
+                            x,
+                            width,
+                            twips_to_points(end.x_twips) * scale_x,
+                            shape.flip_horizontal,
+                        ),
+                        y2: shape_point_y(
+                            top_y,
+                            height,
+                            twips_to_points(end.y_twips) * scale_y,
+                            shape.flip_vertical,
+                        ),
                         width: width_points,
                         color,
                         style: stroke_style,
@@ -1685,8 +1705,18 @@ fn layout_shape(
                 .points
                 .iter()
                 .map(|point| LayoutPoint {
-                    x: x + (twips_to_points(point.x_twips) * scale_x),
-                    y: top_y - (twips_to_points(point.y_twips) * scale_y),
+                    x: shape_point_x(
+                        x,
+                        width,
+                        twips_to_points(point.x_twips) * scale_x,
+                        shape.flip_horizontal,
+                    ),
+                    y: shape_point_y(
+                        top_y,
+                        height,
+                        twips_to_points(point.y_twips) * scale_y,
+                        shape.flip_vertical,
+                    ),
                 })
                 .collect::<Vec<_>>();
             page.items.push(LayoutItem::Polygon {
@@ -1807,6 +1837,22 @@ fn layout_shape(
         font_provider,
     );
     *cursor_y -= block_height + 6.0;
+}
+
+fn shape_point_x(left: f32, width: f32, offset_x: f32, flip_horizontal: bool) -> f32 {
+    if flip_horizontal {
+        left + width - offset_x
+    } else {
+        left + offset_x
+    }
+}
+
+fn shape_point_y(top: f32, height: f32, offset_y: f32, flip_vertical: bool) -> f32 {
+    if flip_vertical {
+        top - height + offset_y
+    } else {
+        top - offset_y
+    }
 }
 
 fn layout_shape_text(
@@ -6881,6 +6927,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 30,
             stroke_color: Color {
                 red: 255,
@@ -6932,6 +6980,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 0,
             stroke_color: Color {
                 red: 255,
@@ -6996,6 +7046,8 @@ mod tests {
             top_twips: 720,
             width_twips: 2160,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 0,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
@@ -7067,6 +7119,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dashed,
@@ -7090,6 +7144,41 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_flipped_static_drawing_lines_as_mirrored_passive_geometry() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Shape(StaticShape {
+            kind: StaticShapeKind::Line,
+            left_twips: 360,
+            top_twips: 240,
+            width_twips: 1440,
+            height_twips: 720,
+            flip_horizontal: true,
+            flip_vertical: true,
+            stroke_width_twips: 30,
+            stroke_color: Color::default(),
+            stroke_style: BorderStyle::Single,
+            fill_color: None,
+            text: Vec::new(),
+            points: Vec::new(),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let line = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Line { x1, y1, x2, y2, .. } => Some((*x1, *y1, *x2, *y2)),
+                _ => None,
+            })
+            .expect("flipped line");
+
+        assert!((line.0 - 162.0).abs() < 0.01);
+        assert!((line.1 - 672.0).abs() < 0.01);
+        assert!((line.2 - 90.0).abs() < 0.01);
+        assert!((line.3 - 708.0).abs() < 0.01);
+    }
+
+    #[test]
     fn lays_out_legacy_static_drawing_polylines_as_passive_line_segments() {
         let mut document = Document::default();
         document.blocks = vec![Block::Shape(StaticShape {
@@ -7098,6 +7187,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
@@ -7160,6 +7251,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
@@ -7222,6 +7315,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 20,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
@@ -7267,6 +7362,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,
@@ -7334,6 +7431,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,
@@ -13330,6 +13429,8 @@ mod tests {
             top_twips: 0,
             width_twips: 720,
             height_twips: 360,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 30,
             stroke_color: Color {
                 red: 255,

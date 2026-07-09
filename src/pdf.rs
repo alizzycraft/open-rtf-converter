@@ -4246,6 +4246,8 @@ endobj
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,
@@ -4323,6 +4325,8 @@ endobj
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,

@@ -562,6 +562,8 @@ struct ShapeBuilder {
     top_twips: i32,
     width_twips: i32,
     height_twips: i32,
+    flip_horizontal: bool,
+    flip_vertical: bool,
     stroke_width_twips: i32,
     stroke_color: Color,
     stroke_style: BorderStyle,
@@ -587,6 +589,8 @@ impl Default for ShapeBuilder {
             top_twips: 0,
             width_twips: 0,
             height_twips: 0,
+            flip_horizontal: false,
+            flip_vertical: false,
             stroke_width_twips: 15,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
@@ -8361,6 +8365,8 @@ impl Parser {
                 top_twips,
                 width_twips,
                 height_twips,
+                flip_horizontal: shape.flip_horizontal,
+                flip_vertical: shape.flip_vertical,
                 stroke_width_twips: shape
                     .stroke_width_twips
                     .clamp(0, self.limits().max_shape_stroke_width_twips.max(1)),
@@ -8775,6 +8781,24 @@ impl Parser {
                 {
                     shape.fill_color = None;
                 } else if parse_shape_property_i64(value).is_none() {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "fFlipH" => {
+                if let Some(enabled) = parse_shape_property_i64(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.flip_horizontal = enabled != 0;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "fFlipV" => {
+                if let Some(enabled) = parse_shape_property_i64(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.flip_vertical = enabled != 0;
+                } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
@@ -21792,6 +21816,38 @@ After\par}"#;
         assert_eq!(shape.stroke_style, BorderStyle::Dotted);
         assert!(text.contains("BeforeAfter"));
         for forbidden in ["dpline", "dplinedot", "pFragments", "hostile-payload"] {
+            assert!(!text.contains(forbidden));
+        }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_shape_flip_properties_as_safe_metadata() {
+        let output = parse_rtf(
+            r"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn fFlipH}{\sv 1}}{\sp{\sn fFlipV}{\sv 1}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+        )
+        .unwrap();
+        let shape = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("shape");
+        let text = document_text(&output.document);
+
+        assert_eq!(shape.kind, StaticShapeKind::Line);
+        assert!(shape.flip_horizontal);
+        assert!(shape.flip_vertical);
+        assert!(text.contains("BeforeAfter"));
+        for forbidden in ["fFlipH", "fFlipV", "pFragments", "hostile-payload"] {
             assert!(!text.contains(forbidden));
         }
         assert!(

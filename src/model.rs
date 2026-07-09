@@ -490,6 +490,8 @@ pub struct StaticShape {
     pub top_twips: i32,
     pub width_twips: i32,
     pub height_twips: i32,
+    pub flip_horizontal: bool,
+    pub flip_vertical: bool,
     pub stroke_width_twips: i32,
     pub stroke_color: Color,
     pub stroke_style: BorderStyle,
