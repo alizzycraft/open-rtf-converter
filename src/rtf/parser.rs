@@ -1628,7 +1628,7 @@ impl Parser {
                                 Some(offset),
                             ));
                         }
-                        self.push_passive_field_result(result, offset)?;
+                        self.push_passive_field_result(result, &field_instruction, offset)?;
                     } else {
                         if let Some(name) = field_instruction_name(&field_instruction) {
                             self.diagnostics.push(Diagnostic::warning(
@@ -1783,7 +1783,7 @@ impl Parser {
                                     Some(offset),
                                 ));
                             }
-                            self.push_passive_field_result(result, offset)?;
+                            self.push_passive_field_result(result, &field_instruction, offset)?;
                         }
                     }
                 }
@@ -6152,6 +6152,7 @@ impl Parser {
     fn push_passive_field_result(
         &mut self,
         result: PassiveFieldResult,
+        instruction: &str,
         offset: usize,
     ) -> Result<(), ParseError> {
         let previous_shading = self.state.character.form_field_shading;
@@ -6169,10 +6170,54 @@ impl Parser {
                 self.clamp_font_size(font_size_half_points, offset);
         }
 
-        let result = self.push_text(&result.text, offset);
+        let result = if field_instruction_name(instruction) == Some("EQ") {
+            if let Some(segments) = passive_eq_field_segments(instruction).filter(|segments| {
+                segments
+                    .iter()
+                    .map(|segment| segment.text.as_str())
+                    .collect::<String>()
+                    == result.text
+            }) {
+                self.push_passive_field_segments(&segments, offset)
+            } else {
+                self.push_text(&result.text, offset)
+            }
+        } else {
+            self.push_text(&result.text, offset)
+        };
         self.state.character.font_size_half_points = previous_font_size;
         self.state.character.font_index = previous_font;
         self.state.character.form_field_shading = previous_shading;
+        result
+    }
+
+    fn push_passive_field_segments(
+        &mut self,
+        segments: &[PassiveFieldSegment],
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let previous_baseline_shift = self.state.character.baseline_shift_half_points;
+        let previous_font_size_scale = self.state.character.font_size_scale_percent;
+        let previous_overline = self.state.character.overline;
+        let mut result = Ok(());
+
+        for segment in segments {
+            self.state.character.baseline_shift_half_points = segment
+                .baseline_shift_half_points
+                .unwrap_or(previous_baseline_shift);
+            self.state.character.font_size_scale_percent = segment
+                .font_size_scale_percent
+                .unwrap_or(previous_font_size_scale);
+            self.state.character.overline = previous_overline || segment.overline;
+            result = self.push_text(&segment.text, offset);
+            if result.is_err() {
+                break;
+            }
+        }
+
+        self.state.character.baseline_shift_half_points = previous_baseline_shift;
+        self.state.character.font_size_scale_percent = previous_font_size_scale;
+        self.state.character.overline = previous_overline;
         result
     }
 
@@ -11872,6 +11917,13 @@ struct PassiveFieldResult {
     form_field: bool,
 }
 
+struct PassiveFieldSegment {
+    text: String,
+    baseline_shift_half_points: Option<i32>,
+    font_size_scale_percent: Option<i32>,
+    overline: bool,
+}
+
 struct FieldSequenceInstruction {
     name: String,
     repeat_current: bool,
@@ -12439,6 +12491,20 @@ fn passive_formula_field_result(instruction: &str) -> Option<PassiveFieldResult>
 }
 
 fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    let segments = passive_eq_field_segments(instruction)?;
+    let text = segments
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect::<String>();
+    Some(PassiveFieldResult {
+        text,
+        font_name: None,
+        font_size_half_points: None,
+        form_field: false,
+    })
+}
+
+fn passive_eq_field_segments(instruction: &str) -> Option<Vec<PassiveFieldSegment>> {
     let mut rest = field_rest_after_name(instruction)?.trim_start();
     if let Some(stripped) = rest.strip_prefix("\\f") {
         rest = stripped.trim_start();
@@ -12450,12 +12516,7 @@ fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
         {
             return None;
         }
-        return Some(PassiveFieldResult {
-            text: format!("{numerator}\u{2044}{denominator}"),
-            font_name: None,
-            font_size_half_points: None,
-            form_field: false,
-        });
+        return Some(passive_eq_fraction_segments(numerator, denominator));
     }
     if let Some(stripped) = rest.strip_prefix("\\r") {
         rest = stripped.trim_start();
@@ -12470,17 +12531,7 @@ fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
         {
             return None;
         }
-        let text = if let Some(degree) = degree {
-            format!("{degree}\u{221a}{radicand}")
-        } else {
-            format!("\u{221a}{radicand}")
-        };
-        return Some(PassiveFieldResult {
-            text,
-            font_name: None,
-            font_size_half_points: None,
-            form_field: false,
-        });
+        return Some(passive_eq_root_segments(degree, radicand));
     }
     let (numerator, denominator, remainder) = field_parenthesized_pair(rest)?;
     if !remainder.trim().is_empty() {
@@ -12489,12 +12540,58 @@ fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     if !is_safe_passive_eq_component(&numerator) || !is_safe_passive_eq_component(&denominator) {
         return None;
     }
-    Some(PassiveFieldResult {
-        text: format!("{numerator}\u{2044}{denominator}"),
-        font_name: None,
-        font_size_half_points: None,
-        form_field: false,
-    })
+    Some(passive_eq_fraction_segments(numerator, denominator))
+}
+
+fn passive_eq_fraction_segments(
+    numerator: String,
+    denominator: String,
+) -> Vec<PassiveFieldSegment> {
+    vec![
+        PassiveFieldSegment {
+            text: numerator,
+            baseline_shift_half_points: Some(DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS),
+            font_size_scale_percent: Some(DEFAULT_SCRIPT_FONT_SCALE_PERCENT),
+            overline: false,
+        },
+        PassiveFieldSegment {
+            text: "\u{2044}".to_string(),
+            baseline_shift_half_points: None,
+            font_size_scale_percent: None,
+            overline: false,
+        },
+        PassiveFieldSegment {
+            text: denominator,
+            baseline_shift_half_points: Some(DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS),
+            font_size_scale_percent: Some(DEFAULT_SCRIPT_FONT_SCALE_PERCENT),
+            overline: false,
+        },
+    ]
+}
+
+fn passive_eq_root_segments(degree: Option<String>, radicand: String) -> Vec<PassiveFieldSegment> {
+    let mut segments = Vec::new();
+    if let Some(degree) = degree {
+        segments.push(PassiveFieldSegment {
+            text: degree,
+            baseline_shift_half_points: Some(DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS),
+            font_size_scale_percent: Some(DEFAULT_SCRIPT_FONT_SCALE_PERCENT),
+            overline: false,
+        });
+    }
+    segments.push(PassiveFieldSegment {
+        text: "\u{221a}".to_string(),
+        baseline_shift_half_points: None,
+        font_size_scale_percent: None,
+        overline: false,
+    });
+    segments.push(PassiveFieldSegment {
+        text: radicand,
+        baseline_shift_half_points: None,
+        font_size_scale_percent: None,
+        overline: true,
+    });
+    segments
 }
 
 fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {

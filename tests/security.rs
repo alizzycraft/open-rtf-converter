@@ -7008,6 +7008,22 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
     assert!(rendered_text.contains("Equation 1"));
     assert!(rendered_text.contains("2 and escaped alpha"));
     assert!(rendered_text.contains("beta"));
+    let numerator_position =
+        pdf_first_text_position_for_text(&content, "1").expect("EQ numerator position");
+    let denominator_position =
+        pdf_first_text_position_for_text(&content, "2").expect("EQ denominator position");
+    assert!(
+        numerator_position.1 > denominator_position.1,
+        "EQ fraction numerator should render above denominator: numerator={numerator_position:?}, denominator={denominator_position:?}"
+    );
+    let alpha_position =
+        pdf_first_text_position_for_text(&content, "alpha").expect("escaped EQ numerator position");
+    let beta_position = pdf_first_text_position_for_text(&content, "beta")
+        .expect("escaped EQ denominator position");
+    assert!(
+        alpha_position.1 > beta_position.1,
+        "escaped EQ fraction numerator should render above denominator: numerator={alpha_position:?}, denominator={beta_position:?}"
+    );
     let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
     assert!(
         symbol_bytes.iter().filter(|byte| **byte == 0xa4).count() >= 2,
@@ -7073,17 +7089,34 @@ fn resultless_eq_root_fields_render_passively_without_instruction_leakage() {
     assert!(rendered_text.contains("Roots "));
     assert!(rendered_text.contains("x+1 cube 3"));
     assert!(rendered_text.contains("y"));
+    let degree_position =
+        pdf_first_text_position_for_text(&content, "3").expect("EQ root degree position");
+    let radicand_position =
+        pdf_first_text_position_for_text(&content, "y").expect("EQ root radicand position");
+    assert!(
+        degree_position.1 > radicand_position.1,
+        "EQ indexed root degree should render above radicand: degree={degree_position:?}, radicand={radicand_position:?}"
+    );
     let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
     assert!(
         symbol_bytes.iter().filter(|byte| **byte == 0xd6).count() >= 2,
         "EQ roots should encode radical markers through passive Symbol byte 0xd6; got {symbol_bytes:?}"
     );
+    assert!(
+        content.operations.windows(3).any(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        }),
+        "EQ root radicands should render with passive overbar strokes"
+    );
     for forbidden in [
         b"EQ".as_slice(),
         b"fldinst",
         b"\\r",
-        b"(x+1)",
         b"(3,y)",
+        b"\\r(x+1)",
+        b"\\r(3,y)",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
