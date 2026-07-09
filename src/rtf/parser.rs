@@ -148,6 +148,9 @@ struct ParserState {
     office_math_group_char_capture: bool,
     office_math_group_char_text: String,
     office_math_group_char_pending: OfficeMathGroupCharKind,
+    office_math_function_container_direct: bool,
+    office_math_function_name_direct: bool,
+    office_math_function_name_seen: bool,
     shape_property_capture: Option<ShapePropertyCapture>,
     shape_property_name: String,
     shape_property_value: String,
@@ -253,6 +256,9 @@ impl Default for ParserState {
             office_math_group_char_capture: false,
             office_math_group_char_text: String::new(),
             office_math_group_char_pending: OfficeMathGroupCharKind::None,
+            office_math_function_container_direct: false,
+            office_math_function_name_direct: false,
+            office_math_function_name_seen: false,
             shape_property_capture: None,
             shape_property_name: String::new(),
             shape_property_value: String::new(),
@@ -1190,6 +1196,8 @@ impl Parser {
         child.office_math_accent_property_direct = false;
         child.office_math_group_char_container_direct = false;
         child.office_math_group_char_property_direct = false;
+        child.office_math_function_container_direct = false;
+        child.office_math_function_name_direct = false;
         if parent.metadata_property.is_some() {
             child.metadata_property = None;
             child.metadata_property_text.clear();
@@ -1381,6 +1389,7 @@ impl Parser {
             }
             self.finish_office_math_accent_group(&mut previous, offset)?;
             self.finish_office_math_group_char_group(&mut previous, offset)?;
+            self.finish_office_math_function_group(&mut previous);
             self.finish_shape_property_group(&mut previous, offset)?;
 
             if self.state.inside_field && previous.inside_field {
@@ -1975,6 +1984,13 @@ impl Parser {
                 self.state.office_math_group_char_capture = true;
                 self.state.office_math_group_char_text.clear();
             }
+            "mfunc" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_function_container_direct = true;
+                self.state.office_math_function_name_seen = false;
+            }
+            "mfName" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_function_name_direct = true;
+            }
             "mnary" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_nary_container_direct = true;
                 self.state.office_math_nary_subscript_hidden = false;
@@ -2042,6 +2058,11 @@ impl Parser {
                     }
                     OfficeMathGroupCharKind::None => {}
                 }
+            }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_is_function_with_name() =>
+            {
+                self.push_text(" ", offset)?;
             }
             "msub" if destination_allows_visible_content(&self.state) => {
                 if self.state.office_math_nary_subscript_hidden {
@@ -5173,6 +5194,12 @@ impl Parser {
             .unwrap_or(OfficeMathGroupCharKind::None)
     }
 
+    fn office_math_direct_parent_is_function_with_name(&self) -> bool {
+        self.stack.last().is_some_and(|state| {
+            state.office_math_function_container_direct && state.office_math_function_name_seen
+        })
+    }
+
     fn start_office_math_matrix_row(&mut self, offset: usize) -> Result<(), ParseError> {
         let row_index = self
             .stack
@@ -5362,6 +5389,17 @@ impl Parser {
         }
 
         Ok(())
+    }
+
+    fn finish_office_math_function_group(&self, previous: &mut ParserState) {
+        if self.state.office_math_function_name_direct {
+            previous.office_math_function_name_seen = true;
+        }
+        if self.state.office_math_function_name_seen
+            && !self.state.office_math_function_container_direct
+        {
+            previous.office_math_function_name_seen = true;
+        }
     }
 
     fn finish_shape_property_group(

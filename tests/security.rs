@@ -14576,6 +14576,102 @@ fn office_math_group_characters_render_passive_lines_without_fallback_leakage() 
 }
 
 #[test]
+fn office_math_functions_render_passive_argument_spacing_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mfunc{",
+        "\\",
+        "mfuncPr{",
+        "\\",
+        "mctrlPr}}{",
+        "\\",
+        "mfName{",
+        "\\",
+        "mtext sin}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext x}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before sin x After"),
+        "unexpected function math text: {text:?}"
+    );
+    for forbidden in [
+        "mmath", "moMath", "mfunc", "mfuncPr", "mfName", "mctrlPr", "mtext", "objdata", "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math function content leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math function controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before sin x After"));
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mfunc",
+        b"mfuncPr",
+        b"mfName",
+        b"mctrlPr",
+        b"mtext",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math function content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_hidden_limits_are_stripped_passively() {
     let input = rtf(&[
         "{",
