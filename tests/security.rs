@@ -13808,6 +13808,8 @@ fn office_math_radicals_render_readable_passive_text() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("Before \u{221a}x+1 After"));
+    let radicand_style = run_style_for_text(&parsed.document, "x+1").expect("radicand run");
+    assert!(radicand_style.overline);
     for forbidden in ["mmath", "moMath", "mrad", "me", "mtext"] {
         assert!(
             !text.contains(forbidden),
@@ -13838,6 +13840,14 @@ fn office_math_radicals_render_readable_passive_text() {
     assert!(
         symbol_bytes.contains(&0xd6),
         "square-root marker should encode as Symbol radical byte 0xd6; got {symbol_bytes:?}"
+    );
+    assert!(
+        content.operations.windows(3).any(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        }),
+        "Office math radicand should render with a passive overbar stroke"
     );
     for forbidden in [
         b"mmath".as_slice(),

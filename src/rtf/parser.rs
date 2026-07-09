@@ -1805,6 +1805,7 @@ impl Parser {
             }
             "mrad" if destination_allows_visible_content(&self.state) => {
                 self.push_text("\u{221a}", offset)?;
+                self.state.character.overline = true;
             }
             "me" if destination_allows_visible_content(&self.state)
                 && self.has_pending_office_math_delimiters() =>
