@@ -119,7 +119,7 @@ fn main() {
         }),
     };
 
-    let font_provider = match load_cli_font_provider(&cli.fonts) {
+    let font_provider = match load_cli_font_provider(&cli.fonts, cli.browser_safe) {
         Ok(provider) => provider,
         Err(error) => {
             eprintln!("error: {error}");
@@ -178,12 +178,19 @@ fn build_convert_options(cli: &Cli, font_provider: FontProvider) -> ConvertOptio
     options
 }
 
-fn load_cli_font_provider(specs: &[String]) -> Result<FontProvider, CliFontError> {
+fn load_cli_font_provider(
+    specs: &[String],
+    browser_safe: bool,
+) -> Result<FontProvider, CliFontError> {
+    let mut provider = if browser_safe {
+        FontProvider::browser_safe_defaults()
+    } else {
+        FontProvider::default()
+    };
     if specs.is_empty() {
-        return Ok(FontProvider::default());
+        return Ok(provider);
     }
 
-    let mut provider = FontProvider::default();
     if specs.len() > provider.limits.max_assets {
         return Err(CliFontError::Provider(FontProviderError::TooManyAssets {
             count: specs.len(),
@@ -444,7 +451,7 @@ mod tests {
             "Tuffy,Tuffy Alias:bold=fixtures/fonts/Tuffy.ttf".to_string(),
             "Tuffy,Tuffy Alias:italic=fixtures/fonts/Tuffy.ttf".to_string(),
         ];
-        let provider = load_cli_font_provider(&specs).unwrap();
+        let provider = load_cli_font_provider(&specs, false).unwrap();
 
         assert_eq!(provider.assets.len(), 3);
         assert_eq!(
@@ -566,7 +573,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let specs = vec![format!("{aliases}=fixtures/fonts/Tuffy.ttf")];
-        let error = load_cli_font_provider(&specs).unwrap_err();
+        let error = load_cli_font_provider(&specs, false).unwrap_err();
 
         assert!(matches!(
             error,
@@ -580,11 +587,56 @@ mod tests {
         let path = dir.path().join("hostile-font.ttf");
         std::fs::write(&path, b"not a real font").unwrap();
         let specs = vec![format!("Hostile={}", path.display())];
-        let error = load_cli_font_provider(&specs).unwrap_err();
+        let error = load_cli_font_provider(&specs, false).unwrap_err();
 
         assert!(matches!(
             error,
             CliFontError::Provider(FontProviderError::InvalidAsset { .. })
+        ));
+    }
+
+    #[test]
+    fn browser_safe_cli_uses_stricter_font_provider_limits() {
+        let provider = load_cli_font_provider(&[], true).unwrap();
+
+        assert_eq!(
+            provider.limits.max_assets,
+            FontProvider::browser_safe_defaults().limits.max_assets
+        );
+        assert_eq!(
+            provider.limits.max_total_bytes,
+            FontProvider::browser_safe_defaults().limits.max_total_bytes
+        );
+
+        let aliases = (0..=FontProvider::browser_safe_defaults()
+            .limits
+            .max_family_names_per_asset)
+            .map(|idx| format!("Alias {idx}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let specs = vec![format!("{aliases}=fixtures/fonts/Tuffy.ttf")];
+        let error = load_cli_font_provider(&specs, true).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CliFontError::Provider(FontProviderError::TooManyFamilyNames { .. })
+        ));
+        assert!(
+            load_cli_font_provider(&specs, false).is_ok(),
+            "normal CLI mode should keep the wider default font alias limit"
+        );
+    }
+
+    #[test]
+    fn browser_safe_cli_rejects_too_many_font_assets_before_reading() {
+        let specs = (0..=FontProvider::browser_safe_defaults().limits.max_assets)
+            .map(|idx| format!("Tuffy{idx}=missing-font-{idx}.ttf"))
+            .collect::<Vec<_>>();
+        let error = load_cli_font_provider(&specs, true).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CliFontError::Provider(FontProviderError::TooManyAssets { .. })
         ));
     }
 }
