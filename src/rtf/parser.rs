@@ -131,6 +131,9 @@ struct ParserState {
     office_math_array_row_direct: bool,
     office_math_array_row_cells_seen: usize,
     office_math_limit_container_direct: OfficeMathLimitKind,
+    office_math_radical_container_direct: bool,
+    office_math_radical_degree_hidden: bool,
+    office_math_radical_degree_hide_property_seen: bool,
     shape_property_capture: Option<ShapePropertyCapture>,
     shape_property_name: String,
     shape_property_value: String,
@@ -219,6 +222,9 @@ impl Default for ParserState {
             office_math_array_row_direct: false,
             office_math_array_row_cells_seen: 0,
             office_math_limit_container_direct: OfficeMathLimitKind::None,
+            office_math_radical_container_direct: false,
+            office_math_radical_degree_hidden: false,
+            office_math_radical_degree_hide_property_seen: false,
             shape_property_capture: None,
             shape_property_name: String::new(),
             shape_property_value: String::new(),
@@ -1140,6 +1146,8 @@ impl Parser {
         child.office_math_array_row_direct = false;
         child.office_math_array_row_cells_seen = 0;
         child.office_math_limit_container_direct = OfficeMathLimitKind::None;
+        child.office_math_radical_container_direct = false;
+        child.office_math_radical_degree_hide_property_seen = false;
         if parent.metadata_property.is_some() {
             child.metadata_property = None;
             child.metadata_property_text.clear();
@@ -1312,6 +1320,13 @@ impl Parser {
             }
             if self.state.suppressing_nonshape_picture && !previous.suppressing_nonshape_picture {
                 previous.shape_picture_rendered = false;
+            }
+            if self.state.office_math_radical_degree_hide_property_seen {
+                if !self.state.office_math_radical_container_direct {
+                    previous.office_math_radical_degree_hidden =
+                        self.state.office_math_radical_degree_hidden;
+                    previous.office_math_radical_degree_hide_property_seen = true;
+                }
             }
             self.finish_shape_property_group(&mut previous, offset)?;
 
@@ -1846,8 +1861,24 @@ impl Parser {
                 self.state.office_math_delimiter_text.clear();
             }
             "mrad" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_radical_container_direct = true;
+                self.state.office_math_radical_degree_hidden = false;
                 self.push_text("\u{221a}", offset)?;
                 self.state.character.overline = true;
+            }
+            "mdegHide" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_radical_degree_hidden = control.parameter.unwrap_or(1) != 0;
+                self.state.office_math_radical_degree_hide_property_seen = true;
+            }
+            "mdeg" if destination_allows_visible_content(&self.state) => {
+                if self.state.office_math_radical_degree_hidden {
+                    self.state.character.hidden = true;
+                } else {
+                    self.state.character.baseline_shift_half_points =
+                        DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                    self.state.character.font_size_scale_percent =
+                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                }
             }
             "mphant" if destination_allows_visible_content(&self.state) => {
                 self.state.character.hidden = true;

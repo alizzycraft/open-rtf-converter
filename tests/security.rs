@@ -13870,6 +13870,100 @@ fn office_math_radicals_render_readable_passive_text() {
 }
 
 #[test]
+fn office_math_radical_degrees_render_or_hide_passively() {
+    let visible_input = br"{\rtf1 Before {\mmath{\moMath{\mrad{\mradPr{\mdegHide0}}{\mdeg{\mtext 3}}{\me{\mtext x}}}}} After\par}".to_vec();
+    let visible_parsed = parse_rtf_bytes(&visible_input).unwrap();
+    let visible_text = collect_text(&visible_parsed.document);
+    assert!(
+        visible_text.contains("Before \u{221a}3x After"),
+        "unexpected visible radical degree text: {visible_text:?}"
+    );
+    let visible_degree_style =
+        run_style_for_text(&visible_parsed.document, "3").expect("visible radical degree");
+    assert!(visible_degree_style.baseline_shift_half_points > 0);
+    assert!(visible_degree_style.font_size_scale_percent < 100);
+    let visible_radicand_style =
+        run_style_for_text(&visible_parsed.document, "x").expect("visible radicand");
+    assert!(visible_radicand_style.overline);
+
+    let hidden_input = br"{\rtf1 Before {\mmath{\moMath{\mrad{\mradPr{\mdegHide1}}{\mdeg{\mtext HIDDEN-DEGREE-PAYLOAD}}{\me{\mtext x}}}}} After\par}".to_vec();
+    let hidden_parsed = parse_rtf_bytes(&hidden_input).unwrap();
+    let hidden_text = collect_text(&hidden_parsed.document);
+    assert!(
+        hidden_text.contains("Before \u{221a}x After"),
+        "unexpected hidden radical degree text: {hidden_text:?}"
+    );
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "mrad",
+        "mradPr",
+        "mdegHide",
+        "mdeg",
+        "mtext",
+        "HIDDEN-DEGREE-PAYLOAD",
+    ] {
+        assert!(
+            !hidden_text.contains(forbidden),
+            "Office math radical degree content leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        hidden_parsed
+            .diagnostics
+            .iter()
+            .all(
+                |diagnostic| !diagnostic.message.contains("unknown RTF destination")
+                    && !diagnostic.message.contains("unsupported RTF control")
+            ),
+        "Office math radical degree controls should not be reported as unknown or unsupported: {:?}",
+        hidden_parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &hidden_input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before "));
+    assert!(rendered_text.contains("x After"));
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    assert!(
+        symbol_bytes.contains(&0xd6),
+        "hidden-degree radical should still encode the radical marker through passive Symbol byte 0xd6; got {symbol_bytes:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mrad",
+        b"mradPr",
+        b"mdegHide",
+        b"mdeg",
+        b"mtext",
+        b"HIDDEN-DEGREE-PAYLOAD",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math radical degree content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_overbars_render_readable_passive_text() {
     let input = rtf(&[
         "{",
