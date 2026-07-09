@@ -3,7 +3,7 @@ use std::fs;
 use lopdf::Document as PdfDocument;
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, CharacterEmphasisMark, DOCUMENT_CHARS_MARKER,
+    Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint,
     FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
@@ -13470,7 +13470,10 @@ fn office_math_text_renders_passively_without_math_control_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("Before E=mc^2 After"));
+    assert!(text.contains("Before E=mc2 After"));
+    let superscript_style = run_style_for_text(&parsed.document, "2").expect("superscript run");
+    assert!(superscript_style.baseline_shift_half_points > 0);
+    assert!(superscript_style.font_size_scale_percent < 100);
     for forbidden in ["mmath", "moMath", "mtext", "msup", "mctrlPr"] {
         assert!(
             !text.contains(forbidden),
@@ -13503,7 +13506,13 @@ fn office_math_text_renders_passively_without_math_control_leakage() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
-    assert!(rendered_text.contains("Before E=mc^2 After"));
+    assert!(rendered_text.contains("Before E=mc2 After"));
+    let base_position = pdf_first_text_position_for_text(&content, "E=mc").expect("base text");
+    let script_position = pdf_first_text_position_for_text(&content, "2").expect("script text");
+    assert!(
+        script_position.1 > base_position.1,
+        "Office math superscript should render above the base text: base={base_position:?}, script={script_position:?}"
+    );
     for forbidden in [
         b"mmath".as_slice(),
         b"moMath",
@@ -13617,7 +13626,10 @@ fn office_math_subscripts_render_readable_passive_text() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("Before x_i After"));
+    assert!(text.contains("Before xi After"));
+    let subscript_style = run_style_for_text(&parsed.document, "i").expect("subscript run");
+    assert!(subscript_style.baseline_shift_half_points < 0);
+    assert!(subscript_style.font_size_scale_percent < 100);
     for forbidden in ["mmath", "moMath", "msSub", "msub", "mtext"] {
         assert!(
             !text.contains(forbidden),
@@ -13637,7 +13649,13 @@ fn office_math_subscripts_render_readable_passive_text() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
-    assert!(rendered_text.contains("Before x_i After"));
+    assert!(rendered_text.contains("Before xi After"));
+    let base_position = pdf_first_text_position_for_text(&content, "x").expect("base text");
+    let script_position = pdf_first_text_position_for_text(&content, "i").expect("script text");
+    assert!(
+        script_position.1 < base_position.1,
+        "Office math subscript should render below the base text: base={base_position:?}, script={script_position:?}"
+    );
     for forbidden in [
         b"mmath".as_slice(),
         b"moMath",
@@ -13840,9 +13858,17 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(
-        text.contains("Before \u{2211}_i=1^ni After"),
+        text.contains("Before \u{2211}i=1ni After"),
         "unexpected n-ary math text: {text:?}"
     );
+    let lower_limit_style =
+        run_style_for_text(&parsed.document, "i=1").expect("lower n-ary limit run");
+    assert!(lower_limit_style.baseline_shift_half_points < 0);
+    assert!(lower_limit_style.font_size_scale_percent < 100);
+    let upper_limit_style =
+        run_style_for_text(&parsed.document, "n").expect("upper n-ary limit run");
+    assert!(upper_limit_style.baseline_shift_half_points > 0);
+    assert!(upper_limit_style.font_size_scale_percent < 100);
     for forbidden in [
         "mmath", "moMath", "mnary", "mnaryPr", "mchr", "msubHide", "msupHide", "mtext",
     ] {
@@ -13873,8 +13899,8 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("Before "));
-    assert!(rendered_text.contains("_i=1"));
-    assert!(rendered_text.contains("^ni After"));
+    assert!(rendered_text.contains("i=1"));
+    assert!(rendered_text.contains("ni After"));
     let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
     assert!(
         symbol_bytes.contains(&0xe5),
@@ -13950,9 +13976,17 @@ fn office_math_property_controls_are_passive_structure() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(
-        text.contains("Before \u{00af}\u{221a}x_i^2 After"),
+        text.contains("Before \u{00af}\u{221a}xi2 After"),
         "unexpected property-heavy math text: {text:?}"
     );
+    let property_subscript_style =
+        run_style_for_text(&parsed.document, "i").expect("property subscript run");
+    assert!(property_subscript_style.baseline_shift_half_points < 0);
+    assert!(property_subscript_style.font_size_scale_percent < 100);
+    let property_superscript_style =
+        run_style_for_text(&parsed.document, "2").expect("property superscript run");
+    assert!(property_superscript_style.baseline_shift_half_points > 0);
+    assert!(property_superscript_style.font_size_scale_percent < 100);
     for forbidden in [
         "mmath",
         "moMath",
@@ -13990,7 +14024,7 @@ fn office_math_property_controls_are_passive_structure() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("Before "));
-    assert!(rendered_text.contains("x_i^2 After"));
+    assert!(rendered_text.contains("xi2 After"));
     let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
     assert!(
         symbol_bytes.contains(&0xd6),
@@ -27819,6 +27853,119 @@ fn collect_text(document: &open_rtf_converter::model::Document) -> String {
         }
     }
     text
+}
+
+fn run_style_for_text<'a>(
+    document: &'a open_rtf_converter::model::Document,
+    exact_text: &str,
+) -> Option<&'a CharacterStyle> {
+    for paragraph in &document.header {
+        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+            return Some(style);
+        }
+    }
+    for paragraph in &document.first_page_header {
+        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+            return Some(style);
+        }
+    }
+    for paragraph in &document.even_page_header {
+        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+            return Some(style);
+        }
+    }
+    for paragraph in &document.footer {
+        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+            return Some(style);
+        }
+    }
+    for paragraph in &document.first_page_footer {
+        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+            return Some(style);
+        }
+    }
+    for paragraph in &document.even_page_footer {
+        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+            return Some(style);
+        }
+    }
+    for paragraph in &document.footnotes {
+        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+            return Some(style);
+        }
+    }
+    for paragraph in &document.endnotes {
+        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+            return Some(style);
+        }
+    }
+    for block in &document.blocks {
+        if let Some(style) = block_run_style_for_text(block, exact_text) {
+            return Some(style);
+        }
+    }
+    None
+}
+
+fn block_run_style_for_text<'a>(block: &'a Block, exact_text: &str) -> Option<&'a CharacterStyle> {
+    match block {
+        Block::Paragraph(paragraph) => paragraph_run_style_for_text(paragraph, exact_text),
+        Block::Table(table) => {
+            for row in &table.rows {
+                for cell in &row.cells {
+                    for paragraph in &cell.paragraphs {
+                        if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+                            return Some(style);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Block::Shape(shape) => {
+            for paragraph in &shape.text {
+                if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+                    return Some(style);
+                }
+            }
+            None
+        }
+        Block::SectionSettings(settings) => {
+            for paragraph in settings
+                .header
+                .iter()
+                .chain(&settings.first_page_header)
+                .chain(&settings.even_page_header)
+                .chain(&settings.footer)
+                .chain(&settings.first_page_footer)
+                .chain(&settings.even_page_footer)
+            {
+                if let Some(style) = paragraph_run_style_for_text(paragraph, exact_text) {
+                    return Some(style);
+                }
+            }
+            None
+        }
+        Block::Placeholder(_)
+        | Block::Image(_)
+        | Block::PageBreak
+        | Block::ColumnBreak
+        | Block::ContinuousSectionBreak
+        | Block::SectionBreak
+        | Block::EvenPageSectionBreak
+        | Block::OddPageSectionBreak => None,
+    }
+}
+
+fn paragraph_run_style_for_text<'a>(
+    paragraph: &'a open_rtf_converter::model::Paragraph,
+    exact_text: &str,
+) -> Option<&'a CharacterStyle> {
+    paragraph
+        .runs
+        .iter()
+        .find(|run| run.text == exact_text)
+        .map(|run| &run.style)
 }
 
 fn append_paragraph_text(text: &mut String, paragraph: &open_rtf_converter::model::Paragraph) {

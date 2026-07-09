@@ -1808,10 +1808,14 @@ impl Parser {
                 self.start_office_math_delimited_expression(offset)?;
             }
             "msub" if destination_allows_visible_content(&self.state) => {
-                self.push_text("_", offset)?;
+                self.state.character.baseline_shift_half_points =
+                    DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
+                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
             }
             "msup" if destination_allows_visible_content(&self.state) => {
-                self.push_text("^", offset)?;
+                self.state.character.baseline_shift_half_points =
+                    DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
             }
             name if is_office_math_control(name)
                 && destination_allows_visible_content(&self.state) =>
