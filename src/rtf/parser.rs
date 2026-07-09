@@ -7935,10 +7935,15 @@ impl Parser {
             PictureKind::Wmf => {
                 if let Some(wmf) = parse_wmf_vector_image_data(&picture.bytes) {
                     self.ensure_image_pixels(wmf.width_px, wmf.height_px, offset)?;
-                    self.diagnostics.push(Diagnostic::warning(
-                        "WMF picture rendered as bounded passive vector preview",
-                        Some(offset),
-                    ));
+                    if wmf.skipped_record_count > 0 {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "WMF picture rendered as bounded passive vector preview with {} unsupported record(s) skipped",
+                                wmf.skipped_record_count
+                            ),
+                            Some(offset),
+                        ));
+                    }
                     self.push_static_image(
                         picture.owner_destination,
                         StaticImage {
@@ -14365,6 +14370,7 @@ struct ParsedDib {
 struct ParsedWmfVector {
     width_px: u32,
     height_px: u32,
+    skipped_record_count: usize,
     commands: Vec<StaticImageVectorCommand>,
 }
 
@@ -14797,6 +14803,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut state = WmfDrawingState::default();
     let mut saved_states: Vec<WmfSavedDrawingState> = Vec::new();
     let mut commands = Vec::new();
+    let mut skipped_record_count = 0usize;
     let mut current_point = (0.0f32, 0.0f32);
 
     while pos + 6 <= header.file_end {
@@ -15239,7 +15246,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
-            _ => {}
+            _ => {
+                skipped_record_count = skipped_record_count.checked_add(1)?;
+            }
         }
 
         pos = record_end;
@@ -15252,6 +15261,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     Some(ParsedWmfVector {
         width_px: u32::try_from(window_width.max(1)).ok()?,
         height_px: u32::try_from(window_height.max(1)).ok()?,
+        skipped_record_count,
         commands,
     })
 }

@@ -14,8 +14,8 @@ use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
 };
 use open_rtf_converter::{
-    ActiveContentPolicy, ConvertOptions, FontAsset, FontAssetStyle, FontProvider, PdfLinkPolicy,
-    RtfLimits, RtfParseOptions, convert_rtf_file_to_pdf, convert_rtf_to_pdf,
+    ActiveContentPolicy, ConvertOptions, Diagnostic, FontAsset, FontAssetStyle, FontProvider,
+    PdfLinkPolicy, RtfLimits, RtfParseOptions, convert_rtf_file_to_pdf, convert_rtf_to_pdf,
 };
 use tempfile::tempdir;
 
@@ -17759,11 +17759,7 @@ fn simple_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
             .iter()
             .any(|command| { matches!(command, StaticImageVectorCommand::Ellipse { .. }) })
     );
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in [
         "wmetafile",
         "010009",
@@ -17823,6 +17819,100 @@ fn simple_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_unknown_record_reports_partial_preview_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000032d0000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "070000001b045000b4000a001400",
+        "0700000018045a00be0014006400",
+        "030000009999",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("partial WMF vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Rectangle { .. }) })
+    );
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Ellipse { .. }) })
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in ["wmetafile", "010009", "9999", "dcdcdc"] {
+        assert!(
+            !text.contains(forbidden),
+            "partial WMF internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "supported WMF records should still render as passive PDF paths"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"030000009999",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "partial WMF vector preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003230000000100070000000000",
@@ -17863,11 +17953,7 @@ fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
             } if color.red == 255 && color.green == 0 && color.blue == 0
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in [
         "wmetafile",
         "010009",
@@ -18274,14 +18360,7 @@ fn wmf_window_origin_offsets_are_normalized_before_passive_vector_rendering() {
                 && (*bottom - 70.0).abs() < 0.01
         )
     }));
-    assert!(
-        parsed.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("WMF picture rendered as bounded passive vector preview")
-        }),
-        "origin-offset WMF should stay on passive vector path"
-    );
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
 }
 
 #[test]
@@ -18328,11 +18407,7 @@ fn wmf_line_polyline_and_polygon_render_as_passive_paths_without_payload_leakage
     assert!(image.vector_commands.iter().any(|command| {
         matches!(command, StaticImageVectorCommand::Polygon { points, .. } if points.len() == 3)
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in [
         "wmetafile",
         "010009",
@@ -18438,11 +18513,7 @@ fn wmf_pen_width_renders_passive_stroke_width_without_record_leakage() {
                 && (*stroke_width - 12.0).abs() < 0.01
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "02fa", "0c000000", "ff000000", "JavaScript"] {
         assert!(
             !text.contains(forbidden),
@@ -18536,11 +18607,7 @@ fn wmf_pen_dash_style_renders_passive_dash_pattern_without_record_leakage() {
                 && (*stroke_width - 4.0).abs() < 0.01
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in [
         "wmetafile",
         "02fa",
@@ -18633,11 +18700,7 @@ fn wmf_polyfill_alternate_renders_even_odd_fill_without_record_leakage() {
             } if points.len() == 4
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "0106", "0324", "00ffff", "JavaScript"] {
         assert!(
             !text.contains(forbidden),
@@ -18732,11 +18795,7 @@ fn wmf_polypolygon_renders_multiple_passive_polygons_without_payload_leakage() {
             .iter()
             .all(|(_, fill_color)| matches!(fill_color, Some(color) if color.red == 0 && color.green == 255 && color.blue == 255))
     );
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "0538", "00ffff", "JavaScript", "EmbeddedFile"] {
         assert!(
             !text.contains(forbidden),
@@ -18822,11 +18881,7 @@ fn wmf_deleted_object_handles_are_reused_for_passive_style_selection() {
             } if color.red == 0 && color.green == 0 && color.blue == 255
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -18915,11 +18970,7 @@ fn wmf_patblt_patcopy_renders_passive_brush_rectangle_without_payload_leakage() 
                 && color.blue == 0
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "061d", "00f00021", "ff0000", "JavaScript"] {
         assert!(
             !text.contains(forbidden),
@@ -19015,11 +19066,7 @@ fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
                 && color.blue == 0
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "041f", "ff0000", "JavaScript"] {
         assert!(
             !text.contains(forbidden),
@@ -19124,11 +19171,7 @@ fn wmf_textout_renders_passive_text_without_payload_leakage() {
                 && color.blue == 0
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "0521", "fb02", "ff0000", "JavaScript"] {
         assert!(
             !text.contains(forbidden),
@@ -20071,11 +20114,7 @@ fn wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
                 && color.blue == 0
         )
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "061c", "00ff00", "JavaScript"] {
         assert!(
             !text.contains(forbidden),
@@ -20235,11 +20274,7 @@ fn shape_pib_wmf_picture_renders_passive_vector_preview_without_payload_leakage(
             .iter()
             .any(|command| { matches!(command, StaticImageVectorCommand::Ellipse { .. }) })
     );
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("WMF picture rendered as bounded passive vector preview")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     assert!(
         !parsed
             .diagnostics
@@ -27670,4 +27705,19 @@ fn pdf_operand_number(object: &lopdf::Object) -> Option<f32> {
         lopdf::Object::Real(value) => Some(*value),
         _ => None,
     }
+}
+
+fn has_wmf_preview_warning(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("WMF picture rendered as bounded passive vector preview")
+    })
+}
+
+fn assert_no_wmf_preview_warning(diagnostics: &[Diagnostic]) {
+    assert!(
+        !has_wmf_preview_warning(diagnostics),
+        "fully handled WMF should not be reported as a partial passive preview: {diagnostics:?}"
+    );
 }
