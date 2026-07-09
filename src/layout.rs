@@ -644,6 +644,7 @@ struct PreparedTableRow {
     visual_cells: Vec<VisualTableCell>,
     cell_lines: Vec<Vec<PreparedCellLine>>,
     cell_paddings: Vec<ResolvedCellPadding>,
+    cell_spacings: Vec<ResolvedCellSpacing>,
     row_height: f32,
 }
 
@@ -659,6 +660,14 @@ struct PreparedCellLine {
 
 #[derive(Debug, Copy, Clone)]
 struct ResolvedCellPadding {
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct ResolvedCellSpacing {
     left: f32,
     right: f32,
     top: f32,
@@ -2873,12 +2882,19 @@ fn prepare_table_row(
         .iter()
         .map(|visual_cell| resolve_cell_padding(row, &row.cells[visual_cell.cell_index]))
         .collect::<Vec<_>>();
+    let cell_spacings = visual_cells
+        .iter()
+        .map(|visual_cell| resolve_cell_spacing(&row.cells[visual_cell.cell_index]))
+        .collect::<Vec<_>>();
     let cell_lines = visual_cells
         .iter()
         .zip(cell_paddings.iter())
-        .map(|(visual_cell, padding)| {
+        .zip(cell_spacings.iter())
+        .map(|((visual_cell, padding), spacing)| {
             let cell = &row.cells[visual_cell.cell_index];
-            let cell_content_width = (visual_cell.width - padding.left - padding.right).max(12.0);
+            let cell_content_width =
+                (visual_cell.width - spacing.left - spacing.right - padding.left - padding.right)
+                    .max(12.0);
             cell.paragraphs
                 .iter()
                 .enumerate()
@@ -2951,7 +2967,8 @@ fn prepare_table_row(
     let row_height = cell_lines
         .iter()
         .zip(cell_paddings.iter())
-        .map(|(lines, padding)| {
+        .zip(cell_spacings.iter())
+        .map(|((lines, padding), spacing)| {
             lines
                 .iter()
                 .map(|prepared_line| {
@@ -2962,6 +2979,8 @@ fn prepare_table_row(
                 .sum::<f32>()
                 + padding.top
                 + padding.bottom
+                + spacing.top
+                + spacing.bottom
         })
         .fold(0.0, f32::max)
         .max(14.0);
@@ -2977,6 +2996,7 @@ fn prepare_table_row(
         visual_cells,
         cell_lines,
         cell_paddings,
+        cell_spacings,
         row_height,
     }
 }
@@ -3024,6 +3044,16 @@ fn resolve_cell_padding(row: &TableRow, cell: &TableCell) -> ResolvedCellPadding
     }
 }
 
+fn resolve_cell_spacing(cell: &TableCell) -> ResolvedCellSpacing {
+    let spacing = cell.spacing;
+    ResolvedCellSpacing {
+        left: twips_to_points(spacing.left_twips.unwrap_or(0).max(0)),
+        right: twips_to_points(spacing.right_twips.unwrap_or(0).max(0)),
+        top: twips_to_points(spacing.top_twips.unwrap_or(0).max(0)),
+        bottom: twips_to_points(spacing.bottom_twips.unwrap_or(0).max(0)),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_table_row(
     pages: &mut [LayoutPage],
@@ -3048,20 +3078,25 @@ fn push_table_row(
         if cell.vertical_merge == TableCellVerticalMerge::Continuation {
             continue;
         }
+        let spacing = prepared.cell_spacings[idx];
         let span_height = vertical_span_heights
             .get(idx)
             .copied()
             .unwrap_or(prepared.row_height);
+        let cell_left = row_left + visual_cell.x_offset + spacing.left;
+        let cell_top = top - spacing.top;
+        let cell_width = (visual_cell.width - spacing.left - spacing.right).max(1.0);
+        let cell_height = (span_height - spacing.top - spacing.bottom).max(1.0);
         if let Some(color_index) = cell.shading_color_index
             && color_index > 0
         {
             push_shading_rect(
                 pages,
                 document,
-                row_left + visual_cell.x_offset,
-                top - span_height,
-                visual_cell.width,
-                span_height,
+                cell_left,
+                cell_top - cell_height,
+                cell_width,
+                cell_height,
                 color_index,
                 cell.shading_basis_points,
                 cell.shading_pattern,
@@ -3077,6 +3112,7 @@ fn push_table_row(
     for (idx, lines) in prepared.cell_lines.iter().enumerate() {
         let visual_cell = &prepared.visual_cells[idx];
         let padding = prepared.cell_paddings[idx];
+        let spacing = prepared.cell_spacings[idx];
         let cell = &row.cells[visual_cell.cell_index];
         if cell.vertical_merge == TableCellVerticalMerge::Continuation {
             continue;
@@ -3091,22 +3127,25 @@ fn push_table_row(
                 prepared_line.space_before + prepared_line.line.height + prepared_line.space_after
             })
             .sum::<f32>();
-        let available_height = (span_height - padding.top - padding.bottom).max(0.0);
+        let available_height =
+            (span_height - spacing.top - spacing.bottom - padding.top - padding.bottom).max(0.0);
         let extra_height = (available_height - content_height).max(0.0);
         let vertical_offset = match cell.vertical_align {
             TableCellVerticalAlign::Top => 0.0,
             TableCellVerticalAlign::Center => extra_height / 2.0,
             TableCellVerticalAlign::Bottom => extra_height,
         };
-        let content_bottom = top - span_height + padding.bottom;
-        let mut line_top = top - padding.top - vertical_offset;
+        let content_bottom = top - span_height + spacing.bottom + padding.bottom;
+        let mut line_top = top - spacing.top - padding.top - vertical_offset;
         for prepared_line in lines {
             line_top -= prepared_line.space_before;
             if line_top - prepared_line.line.height < content_bottom {
                 break;
             }
-            let content_left = row_left + visual_cell.x_offset + padding.left;
-            let cell_content_width = (visual_cell.width - padding.left - padding.right).max(1.0);
+            let content_left = row_left + visual_cell.x_offset + spacing.left + padding.left;
+            let cell_content_width =
+                (visual_cell.width - spacing.left - spacing.right - padding.left - padding.right)
+                    .max(1.0);
             if let Some(color_index) = prepared_line.style.shading_color_index
                 && color_index > 0
             {
@@ -3277,19 +3316,22 @@ fn push_table_borders(
 ) {
     let page = pages.last_mut().expect("layout always has a page");
 
-    for visual_cell in &prepared.visual_cells {
+    for (idx, visual_cell) in prepared.visual_cells.iter().enumerate() {
         let Some(cell) = row.cells.get(visual_cell.cell_index) else {
             continue;
         };
-        let x1 = left + visual_cell.x_offset;
-        let x2 = x1 + visual_cell.width;
+        let spacing = prepared.cell_spacings[idx];
+        let x1 = left + visual_cell.x_offset + spacing.left;
+        let x2 = (left + visual_cell.x_offset + visual_cell.width - spacing.right).max(x1 + 1.0);
+        let cell_top = top - spacing.top;
+        let cell_bottom = (bottom + spacing.bottom).min(cell_top - 1.0);
         if cell.borders.top.visible && cell.vertical_merge != TableCellVerticalMerge::Continuation {
             let (width, color, style) = table_border_stroke(&cell.borders.top, document);
             page.items.push(LayoutItem::Line {
                 x1,
-                y1: top,
+                y1: cell_top,
                 x2,
-                y2: top,
+                y2: cell_top,
                 width,
                 color,
                 style,
@@ -3301,9 +3343,9 @@ fn push_table_borders(
             let (width, color, style) = table_border_stroke(&cell.borders.bottom, document);
             page.items.push(LayoutItem::Line {
                 x1,
-                y1: bottom,
+                y1: cell_bottom,
                 x2,
-                y2: bottom,
+                y2: cell_bottom,
                 width,
                 color,
                 style,
@@ -3313,9 +3355,9 @@ fn push_table_borders(
             let (width, color, style) = table_border_stroke(&cell.borders.left, document);
             page.items.push(LayoutItem::Line {
                 x1,
-                y1: top,
+                y1: cell_top,
                 x2: x1,
-                y2: bottom,
+                y2: cell_bottom,
                 width,
                 color,
                 style,
@@ -3325,9 +3367,9 @@ fn push_table_borders(
             let (width, color, style) = table_border_stroke(&cell.borders.right, document);
             page.items.push(LayoutItem::Line {
                 x1: x2,
-                y1: top,
+                y1: cell_top,
                 x2,
-                y2: bottom,
+                y2: cell_bottom,
                 width,
                 color,
                 style,
@@ -3337,9 +3379,9 @@ fn push_table_borders(
             let (width, color, style) = table_border_stroke(&cell.borders.diagonal_down, document);
             page.items.push(LayoutItem::Line {
                 x1,
-                y1: top,
+                y1: cell_top,
                 x2,
-                y2: bottom,
+                y2: cell_bottom,
                 width,
                 color,
                 style,
@@ -3349,9 +3391,9 @@ fn push_table_borders(
             let (width, color, style) = table_border_stroke(&cell.borders.diagonal_up, document);
             page.items.push(LayoutItem::Line {
                 x1,
-                y1: bottom,
+                y1: cell_bottom,
                 x2,
-                y2: top,
+                y2: cell_top,
                 width,
                 color,
                 style,
@@ -6607,7 +6649,7 @@ mod tests {
         Block, Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat,
         PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, Paragraph, Run, StaticShape,
         StaticShapeKind, StaticShapePoint, Table, TableCell, TableCellBorder, TableCellBorders,
-        TableCellPadding, TableCellVerticalMerge, TableRow,
+        TableCellPadding, TableCellSpacing, TableCellVerticalMerge, TableRow,
     };
 
     use super::*;
@@ -7283,6 +7325,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -7301,6 +7344,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -7355,6 +7399,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -7401,6 +7446,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders {
                         left: TableCellBorder {
                             visible: false,
@@ -7455,6 +7501,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders {
                         left: TableCellBorder {
                             visible: false,
@@ -7535,6 +7582,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders {
                         left: TableCellBorder {
                             visible: true,
@@ -7671,6 +7719,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -7761,6 +7810,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -7816,6 +7866,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -7872,6 +7923,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -7915,6 +7967,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -7967,6 +8020,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8038,6 +8092,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8092,6 +8147,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8140,6 +8196,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -8166,6 +8223,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -8217,6 +8275,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8272,6 +8331,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8394,6 +8454,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -8420,6 +8481,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -8484,6 +8546,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8530,6 +8593,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8580,6 +8644,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: true,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8650,6 +8715,7 @@ mod tests {
                         top_twips: Some(240),
                         bottom_twips: Some(120),
                     },
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -8690,6 +8756,103 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_table_cell_spacing_as_passive_border_gaps() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440, 1440],
+            borders_visible: true,
+            rows: vec![TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 0,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![
+                    TableCell {
+                        shading_color_index: None,
+                        shading_basis_points: 10_000,
+                        shading_pattern: crate::model::ShadingPattern::None,
+                        padding: TableCellPadding::default(),
+                        spacing: TableCellSpacing {
+                            left_twips: Some(120),
+                            right_twips: Some(120),
+                            top_twips: Some(60),
+                            bottom_twips: Some(60),
+                        },
+                        borders: TableCellBorders::default(),
+                        fit_text: false,
+                        vertical_align: TableCellVerticalAlign::Top,
+                        horizontal_merge: TableCellHorizontalMerge::None,
+                        vertical_merge: TableCellVerticalMerge::None,
+                        paragraphs: vec![Paragraph {
+                            style: Default::default(),
+                            runs: vec![Run {
+                                text: "Left".to_string(),
+                                style: Default::default(),
+                            }],
+                        }],
+                    },
+                    TableCell {
+                        shading_color_index: None,
+                        shading_basis_points: 10_000,
+                        shading_pattern: crate::model::ShadingPattern::None,
+                        padding: TableCellPadding::default(),
+                        spacing: TableCellSpacing {
+                            left_twips: Some(120),
+                            right_twips: Some(120),
+                            top_twips: Some(60),
+                            bottom_twips: Some(60),
+                        },
+                        borders: TableCellBorders::default(),
+                        fit_text: false,
+                        vertical_align: TableCellVerticalAlign::Top,
+                        horizontal_merge: TableCellHorizontalMerge::None,
+                        vertical_merge: TableCellVerticalMerge::None,
+                        paragraphs: vec![Paragraph {
+                            style: Default::default(),
+                            runs: vec![Run {
+                                text: "Right".to_string(),
+                                style: Default::default(),
+                            }],
+                        }],
+                    },
+                ],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let text_x = |text: &str| {
+            layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text == text => Some(fragment.x),
+                    _ => None,
+                })
+                .expect("cell text")
+        };
+        let mut vertical_borders = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Line { x1, x2, .. } if (*x1 - *x2).abs() < 0.01 => Some(*x1),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        vertical_borders.sort_by(f32::total_cmp);
+
+        assert!((text_x("Left") - 78.0).abs() < 0.01);
+        assert!((text_x("Right") - 150.0).abs() < 0.01);
+        assert!(
+            vertical_borders
+                .windows(2)
+                .any(|pair| (pair[0] - 138.0).abs() < 0.01 && (pair[1] - 150.0).abs() < 0.01),
+            "expected spacing to create a passive gap between adjacent cell borders: {vertical_borders:?}"
+        );
+    }
+
+    #[test]
     fn lays_out_table_cell_vertical_alignment() {
         let mut document = Document::default();
         document.blocks = vec![Block::Table(Table {
@@ -8708,6 +8871,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -8726,6 +8890,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Center,
@@ -8744,6 +8909,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Bottom,
@@ -8798,6 +8964,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -8816,6 +8983,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -8834,6 +9002,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -8899,6 +9068,7 @@ mod tests {
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
+                            spacing: Default::default(),
                             borders: TableCellBorders::default(),
                             fit_text: false,
                             vertical_align: TableCellVerticalAlign::Bottom,
@@ -8917,6 +9087,7 @@ mod tests {
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
+                            spacing: Default::default(),
                             borders: TableCellBorders::default(),
                             fit_text: false,
                             vertical_align: TableCellVerticalAlign::Top,
@@ -8945,6 +9116,7 @@ mod tests {
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
+                            spacing: Default::default(),
                             borders: TableCellBorders::default(),
                             fit_text: false,
                             vertical_align: TableCellVerticalAlign::Top,
@@ -8963,6 +9135,7 @@ mod tests {
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
                             padding: TableCellPadding::default(),
+                            spacing: Default::default(),
                             borders: TableCellBorders::default(),
                             fit_text: false,
                             vertical_align: TableCellVerticalAlign::Top,
@@ -9033,6 +9206,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -10308,6 +10482,7 @@ mod tests {
                     shading_basis_points: 5_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: Default::default(),
@@ -10588,6 +10763,7 @@ mod tests {
                         shading_basis_points: 5_000,
                         shading_pattern: ShadingPattern::Vertical,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -10675,6 +10851,7 @@ mod tests {
                         shading_basis_points: 10_000,
                         shading_pattern: ShadingPattern::DarkCross,
                         padding: TableCellPadding::default(),
+                        spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
                         vertical_align: TableCellVerticalAlign::Top,
@@ -10914,6 +11091,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -11316,6 +11494,7 @@ mod tests {
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
+                    spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
                     vertical_align: TableCellVerticalAlign::Top,

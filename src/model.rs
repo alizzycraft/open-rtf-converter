@@ -543,6 +543,7 @@ pub struct TableCell {
     pub shading_basis_points: i32,
     pub shading_pattern: ShadingPattern,
     pub padding: TableCellPadding,
+    pub spacing: TableCellSpacing,
     pub borders: TableCellBorders,
     pub fit_text: bool,
     pub vertical_align: TableCellVerticalAlign,
@@ -608,6 +609,14 @@ pub enum BorderStyle {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct TableCellPadding {
+    pub left_twips: Option<i32>,
+    pub right_twips: Option<i32>,
+    pub top_twips: Option<i32>,
+    pub bottom_twips: Option<i32>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub struct TableCellSpacing {
     pub left_twips: Option<i32>,
     pub right_twips: Option<i32>,
     pub top_twips: Option<i32>,

@@ -12,8 +12,8 @@ use crate::model::{
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
     StaticImageVectorFillRule, StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER,
     TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellBorders,
-    TableCellHorizontalMerge, TableCellPadding, TableCellVerticalAlign, TableCellVerticalMerge,
-    TableRow, TableRowAlignment, TextRelief, UnderlineStyle,
+    TableCellHorizontalMerge, TableCellPadding, TableCellSpacing, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -388,6 +388,7 @@ struct TableRowBuilder {
     cell_preferred_widths_twips: Vec<Option<i32>>,
     cell_no_wraps: Vec<bool>,
     cell_fit_texts: Vec<bool>,
+    cell_spacings: Vec<TableCellSpacing>,
     cell_text_directions: Vec<TableCellTextDirection>,
     cell_vertical_alignments: Vec<TableCellVerticalAlign>,
     cell_horizontal_merges: Vec<TableCellHorizontalMerge>,
@@ -400,6 +401,8 @@ struct TableRowBuilder {
     current_cell_shading_pattern: ShadingPattern,
     default_cell_padding: TableCellPadding,
     current_cell_padding: TableCellPadding,
+    default_cell_spacing: TableCellSpacing,
+    current_cell_spacing: TableCellSpacing,
     current_cell_borders: TableCellBorders,
     current_cell_border_flags: TableCellBorderFlags,
     current_cell_border_side: Option<TableCellBorderSide>,
@@ -2946,6 +2949,10 @@ impl Parser {
             "trpaddr" => self.set_current_table_row_padding_right(control.parameter, offset),
             "trpaddt" => self.set_current_table_row_padding_top(control.parameter, offset),
             "trpaddb" => self.set_current_table_row_padding_bottom(control.parameter, offset),
+            "trspdl" => self.set_current_table_row_spacing_left(control.parameter, offset),
+            "trspdr" => self.set_current_table_row_spacing_right(control.parameter, offset),
+            "trspdt" => self.set_current_table_row_spacing_top(control.parameter, offset),
+            "trspdb" => self.set_current_table_row_spacing_bottom(control.parameter, offset),
             name if let Some(message) = table_layout_compatibility_control_message(name) => {
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
@@ -2971,6 +2978,10 @@ impl Parser {
             "clpadr" => self.set_current_cell_padding_right(control.parameter, offset),
             "clpadt" => self.set_current_cell_padding_top(control.parameter, offset),
             "clpadb" => self.set_current_cell_padding_bottom(control.parameter, offset),
+            "clspdl" => self.set_current_cell_spacing_left(control.parameter, offset),
+            "clspdr" => self.set_current_cell_spacing_right(control.parameter, offset),
+            "clspdt" => self.set_current_cell_spacing_top(control.parameter, offset),
+            "clspdb" => self.set_current_cell_spacing_bottom(control.parameter, offset),
             "clftsWidth" => self.set_current_cell_preferred_width_unit(control.parameter),
             "clwWidth" => self.set_current_cell_preferred_width(control.parameter),
             "clNoWrap" | "clnowrap" => {
@@ -6712,6 +6723,7 @@ impl Parser {
             cell_preferred_widths_twips: Vec::new(),
             cell_no_wraps: Vec::new(),
             cell_fit_texts: Vec::new(),
+            cell_spacings: Vec::new(),
             cell_text_directions: Vec::new(),
             cell_vertical_alignments: Vec::new(),
             cell_horizontal_merges: Vec::new(),
@@ -6724,6 +6736,8 @@ impl Parser {
             current_cell_shading_pattern: ShadingPattern::None,
             default_cell_padding: TableCellPadding::default(),
             current_cell_padding: TableCellPadding::default(),
+            default_cell_spacing: TableCellSpacing::default(),
+            current_cell_spacing: TableCellSpacing::default(),
             current_cell_borders: TableCellBorders::default(),
             current_cell_border_flags: TableCellBorderFlags::default(),
             current_cell_border_side: None,
@@ -6858,6 +6872,7 @@ impl Parser {
             row.cell_preferred_widths_twips.push(preferred_width_twips);
             row.cell_no_wraps.push(row.current_cell_no_wrap);
             row.cell_fit_texts.push(row.current_cell_fit_text);
+            row.cell_spacings.push(row.current_cell_spacing);
             row.cell_text_directions
                 .push(row.current_cell_text_direction);
             row.cell_vertical_alignments
@@ -6876,6 +6891,7 @@ impl Parser {
             row.current_cell_preferred_width = PreferredTableWidth::default();
             row.current_cell_no_wrap = false;
             row.current_cell_fit_text = false;
+            row.current_cell_spacing = row.default_cell_spacing;
             row.current_cell_text_direction = TableCellTextDirection::LeftToRightTopToBottom;
             row.current_cell_vertical_align = TableCellVerticalAlign::Top;
             row.current_cell_horizontal_merge = TableCellHorizontalMerge::None;
@@ -6961,6 +6977,34 @@ impl Parser {
         }
     }
 
+    fn set_current_cell_spacing_left(&mut self, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, "left", offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.current_cell_spacing.left_twips = Some(spacing);
+        }
+    }
+
+    fn set_current_cell_spacing_right(&mut self, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, "right", offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.current_cell_spacing.right_twips = Some(spacing);
+        }
+    }
+
+    fn set_current_cell_spacing_top(&mut self, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, "top", offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.current_cell_spacing.top_twips = Some(spacing);
+        }
+    }
+
+    fn set_current_cell_spacing_bottom(&mut self, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, "bottom", offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.current_cell_spacing.bottom_twips = Some(spacing);
+        }
+    }
+
     fn set_current_cell_preferred_width_unit(&mut self, value: Option<i32>) {
         if let Some(row) = self.current_table_row.as_mut() {
             row.current_cell_preferred_width.unit = match value.unwrap_or(0) {
@@ -7043,12 +7087,56 @@ impl Parser {
         }
     }
 
+    fn set_current_table_row_spacing_left(&mut self, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, "row left", offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.default_cell_spacing.left_twips = Some(spacing);
+            row.current_cell_spacing.left_twips = Some(spacing);
+        }
+    }
+
+    fn set_current_table_row_spacing_right(&mut self, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, "row right", offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.default_cell_spacing.right_twips = Some(spacing);
+            row.current_cell_spacing.right_twips = Some(spacing);
+        }
+    }
+
+    fn set_current_table_row_spacing_top(&mut self, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, "row top", offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.default_cell_spacing.top_twips = Some(spacing);
+            row.current_cell_spacing.top_twips = Some(spacing);
+        }
+    }
+
+    fn set_current_table_row_spacing_bottom(&mut self, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, "row bottom", offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.default_cell_spacing.bottom_twips = Some(spacing);
+            row.current_cell_spacing.bottom_twips = Some(spacing);
+        }
+    }
+
     fn normalized_cell_padding(&mut self, value: Option<i32>, side: &str, offset: usize) -> i32 {
         let value = value.unwrap_or(0).max(0);
         let clamped = value.min(self.limits().max_table_cell_gap_twips);
         if clamped != value {
             self.diagnostics.push(Diagnostic::warning(
                 format!("table cell {side} padding clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        clamped
+    }
+
+    fn normalized_cell_spacing(&mut self, value: Option<i32>, side: &str, offset: usize) -> i32 {
+        let value = value.unwrap_or(0).max(0);
+        let clamped = value.min(self.limits().max_table_cell_gap_twips);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("table cell {side} spacing clamped from {value} to {clamped} twips"),
                 Some(offset),
             ));
         }
@@ -7557,6 +7645,11 @@ impl Parser {
             .get(cell_index)
             .copied()
             .unwrap_or_default();
+        let spacing = row
+            .cell_spacings
+            .get(cell_index)
+            .copied()
+            .unwrap_or(row.current_cell_spacing);
         let borders = row
             .cell_borders
             .get(cell_index)
@@ -7600,6 +7693,7 @@ impl Parser {
             shading_basis_points,
             shading_pattern,
             padding,
+            spacing,
             borders,
             fit_text,
             vertical_align,
@@ -10561,9 +10655,6 @@ fn table_layout_compatibility_control_message(name: &str) -> Option<&'static str
         | "clpadfb" | "trspdfl" | "trspdfr" | "trspdft" | "trspdfb" | "clspdfl" | "clspdfr"
         | "clspdft" | "clspdfb" => {
             Some("table padding and spacing units interpreted through bounded twip layout")
-        }
-        "trspdl" | "trspdr" | "trspdt" | "trspdb" | "clspdl" | "clspdr" | "clspdt" | "clspdb" => {
-            Some("table cell spacing approximated by passive table padding")
         }
         "tabsnoovrlp" | "tdfrmtxtLeft" | "tdfrmtxtRight" | "tdfrmtxtTop" | "tdfrmtxtBottom"
         | "tphcol" | "tphmrg" | "tphpg" | "tpvmrg" | "tpvpara" | "tpvpg" | "tposx" | "tposnegx"
@@ -17476,6 +17567,30 @@ mod tests {
         assert_eq!(padding.right_twips, Some(120));
         assert_eq!(padding.top_twips, Some(60));
         assert_eq!(padding.bottom_twips, Some(180));
+    }
+
+    #[test]
+    fn normalizes_table_cell_spacing_controls() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\clspdl240\clspdr120\clspdt60\clspdb180\cellx2000 Spaced\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let spacing = table.rows[0].cells[0].spacing;
+
+        assert_eq!(spacing.left_twips, Some(240));
+        assert_eq!(spacing.right_twips, Some(120));
+        assert_eq!(spacing.top_twips, Some(60));
+        assert_eq!(spacing.bottom_twips, Some(180));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]

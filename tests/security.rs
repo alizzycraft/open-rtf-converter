@@ -791,9 +791,24 @@ fn table_padding_unit_and_spacing_controls_warn_without_payload_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
 
     assert!(text.contains("Unit left"));
     assert!(text.contains("Unit right"));
+    assert_eq!(table.rows[0].cells[0].spacing.left_twips, Some(60));
+    assert_eq!(table.rows[0].cells[0].spacing.right_twips, Some(60));
+    assert_eq!(table.rows[0].cells[0].spacing.top_twips, Some(30));
+    assert_eq!(table.rows[0].cells[0].spacing.bottom_twips, Some(30));
+    assert_eq!(table.rows[0].cells[1].spacing.left_twips, Some(120));
+    assert_eq!(table.rows[0].cells[1].spacing.right_twips, Some(120));
     for forbidden in [
         "trpaddfl", "trpaddfr", "trpaddft", "trpaddfb", "trspdl", "trspdfl", "trspdr", "trspdfr",
         "trspdt", "trspdft", "trspdb", "trspdfb", "clpadfl", "clpadfr", "clpadft", "clpadfb",
@@ -817,10 +832,10 @@ fn table_padding_unit_and_spacing_controls_warn_without_payload_leakage() {
             .message
             .contains("table padding and spacing units interpreted through bounded twip layout")
     }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
-            .contains("table cell spacing approximated by passive table padding")
+            .contains("table cell spacing approximated")
     }));
 
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
