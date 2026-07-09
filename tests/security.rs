@@ -14153,6 +14153,120 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn office_math_nary_hidden_limits_are_stripped_passively() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mnary{",
+        "\\",
+        "mnaryPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u8721?}{",
+        "\\",
+        "msubHide1}{",
+        "\\",
+        "msupHide1}}{",
+        "\\",
+        "msub{",
+        "\\",
+        "mtext HIDDEN-SUB-LIMIT}}{",
+        "\\",
+        "msup{",
+        "\\",
+        "mtext HIDDEN-SUP-LIMIT}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext i}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before \u{2211}i After"),
+        "unexpected hidden n-ary limit text: {text:?}"
+    );
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "mnary",
+        "mnaryPr",
+        "msubHide",
+        "msupHide",
+        "msub",
+        "msup",
+        "mtext",
+        "HIDDEN-SUB-LIMIT",
+        "HIDDEN-SUP-LIMIT",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math hidden n-ary limit content leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math hidden n-ary limit controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before "));
+    assert!(rendered_text.contains("i After"));
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    assert!(
+        symbol_bytes.contains(&0xe5),
+        "hidden-limit n-ary operator should encode through passive Symbol byte 0xe5; got {symbol_bytes:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mnary",
+        b"mnaryPr",
+        b"msubHide",
+        b"msupHide",
+        b"mtext",
+        b"HIDDEN-SUB-LIMIT",
+        b"HIDDEN-SUP-LIMIT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math hidden n-ary limit content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_property_controls_are_passive_structure() {
     let input = rtf(&[
         "{",

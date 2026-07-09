@@ -131,6 +131,10 @@ struct ParserState {
     office_math_array_row_direct: bool,
     office_math_array_row_cells_seen: usize,
     office_math_limit_container_direct: OfficeMathLimitKind,
+    office_math_nary_container_direct: bool,
+    office_math_nary_subscript_hidden: bool,
+    office_math_nary_superscript_hidden: bool,
+    office_math_nary_hide_property_seen: bool,
     office_math_radical_container_direct: bool,
     office_math_radical_degree_hidden: bool,
     office_math_radical_degree_hide_property_seen: bool,
@@ -222,6 +226,10 @@ impl Default for ParserState {
             office_math_array_row_direct: false,
             office_math_array_row_cells_seen: 0,
             office_math_limit_container_direct: OfficeMathLimitKind::None,
+            office_math_nary_container_direct: false,
+            office_math_nary_subscript_hidden: false,
+            office_math_nary_superscript_hidden: false,
+            office_math_nary_hide_property_seen: false,
             office_math_radical_container_direct: false,
             office_math_radical_degree_hidden: false,
             office_math_radical_degree_hide_property_seen: false,
@@ -1146,6 +1154,8 @@ impl Parser {
         child.office_math_array_row_direct = false;
         child.office_math_array_row_cells_seen = 0;
         child.office_math_limit_container_direct = OfficeMathLimitKind::None;
+        child.office_math_nary_container_direct = false;
+        child.office_math_nary_hide_property_seen = false;
         child.office_math_radical_container_direct = false;
         child.office_math_radical_degree_hide_property_seen = false;
         if parent.metadata_property.is_some() {
@@ -1320,6 +1330,15 @@ impl Parser {
             }
             if self.state.suppressing_nonshape_picture && !previous.suppressing_nonshape_picture {
                 previous.shape_picture_rendered = false;
+            }
+            if self.state.office_math_nary_hide_property_seen
+                && !self.state.office_math_nary_container_direct
+            {
+                previous.office_math_nary_subscript_hidden =
+                    self.state.office_math_nary_subscript_hidden;
+                previous.office_math_nary_superscript_hidden =
+                    self.state.office_math_nary_superscript_hidden;
+                previous.office_math_nary_hide_property_seen = true;
             }
             if self.state.office_math_radical_degree_hide_property_seen {
                 if !self.state.office_math_radical_container_direct {
@@ -1883,6 +1902,20 @@ impl Parser {
             "mphant" if destination_allows_visible_content(&self.state) => {
                 self.state.character.hidden = true;
             }
+            "mnary" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_nary_container_direct = true;
+                self.state.office_math_nary_subscript_hidden = false;
+                self.state.office_math_nary_superscript_hidden = false;
+            }
+            "msubHide" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_nary_subscript_hidden = control.parameter.unwrap_or(1) != 0;
+                self.state.office_math_nary_hide_property_seen = true;
+            }
+            "msupHide" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_nary_superscript_hidden =
+                    control.parameter.unwrap_or(1) != 0;
+                self.state.office_math_nary_hide_property_seen = true;
+            }
             "mmatrix" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_array(OfficeMathArrayKind::Matrix);
             }
@@ -1921,14 +1954,24 @@ impl Parser {
                 self.start_office_math_limit();
             }
             "msub" if destination_allows_visible_content(&self.state) => {
-                self.state.character.baseline_shift_half_points =
-                    DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
-                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                if self.state.office_math_nary_subscript_hidden {
+                    self.state.character.hidden = true;
+                } else {
+                    self.state.character.baseline_shift_half_points =
+                        DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
+                    self.state.character.font_size_scale_percent =
+                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                }
             }
             "msup" if destination_allows_visible_content(&self.state) => {
-                self.state.character.baseline_shift_half_points =
-                    DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
-                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                if self.state.office_math_nary_superscript_hidden {
+                    self.state.character.hidden = true;
+                } else {
+                    self.state.character.baseline_shift_half_points =
+                        DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                    self.state.character.font_size_scale_percent =
+                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                }
             }
             name if is_office_math_control(name)
                 && destination_allows_visible_content(&self.state) =>
