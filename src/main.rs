@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, ValueEnum};
 use open_rtf_converter::{
-    ConvertOptions, FontAsset, FontAssetStyle, FontProvider, FontProviderError,
-    convert_rtf_file_to_pdf,
+    ActiveContentPolicy, CompatibilityMode, ConvertOptions, FontAsset, FontAssetStyle,
+    FontProvider, FontProviderError, PdfLinkPolicy, convert_rtf_file_to_pdf,
 };
 
 #[derive(Debug, Parser)]
@@ -33,6 +33,22 @@ struct Cli {
     #[arg(long)]
     diagnostics: bool,
 
+    /// Use stricter browser/WASM-oriented conversion limits.
+    #[arg(long)]
+    browser_safe: bool,
+
+    /// Active content handling policy.
+    #[arg(long, value_enum)]
+    active_content_policy: Option<CliActiveContentPolicy>,
+
+    /// PDF link handling policy.
+    #[arg(long, value_enum)]
+    pdf_link_policy: Option<CliPdfLinkPolicy>,
+
+    /// RTF compatibility mode.
+    #[arg(long, value_enum)]
+    compatibility_mode: Option<CliCompatibilityMode>,
+
     /// Caller-provided passive font asset in the form FAMILY[,ALIAS...][:STYLE]=PATH. Repeat for multiple fonts.
     ///
     /// STYLE may be regular, bold, italic, or bold-italic. If omitted, regular is used.
@@ -45,9 +61,58 @@ enum OutputFormat {
     Pdf,
 }
 
+#[derive(Debug, Copy, Clone, ValueEnum)]
+enum CliActiveContentPolicy {
+    Strip,
+    Placeholder,
+    Reject,
+}
+
+impl From<CliActiveContentPolicy> for ActiveContentPolicy {
+    fn from(value: CliActiveContentPolicy) -> Self {
+        match value {
+            CliActiveContentPolicy::Strip => Self::Strip,
+            CliActiveContentPolicy::Placeholder => Self::Placeholder,
+            CliActiveContentPolicy::Reject => Self::Reject,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, ValueEnum)]
+enum CliPdfLinkPolicy {
+    DisableAll,
+    RenderVisibleTextOnly,
+    AllowSanitizedHttpLinks,
+}
+
+impl From<CliPdfLinkPolicy> for PdfLinkPolicy {
+    fn from(value: CliPdfLinkPolicy) -> Self {
+        match value {
+            CliPdfLinkPolicy::DisableAll => Self::DisableAll,
+            CliPdfLinkPolicy::RenderVisibleTextOnly => Self::RenderVisibleTextOnly,
+            CliPdfLinkPolicy::AllowSanitizedHttpLinks => Self::AllowSanitizedHttpLinks,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, ValueEnum)]
+enum CliCompatibilityMode {
+    StrictSpec,
+    WordCompatiblePassive,
+}
+
+impl From<CliCompatibilityMode> for CompatibilityMode {
+    fn from(value: CliCompatibilityMode) -> Self {
+        match value {
+            CliCompatibilityMode::StrictSpec => Self::StrictSpec,
+            CliCompatibilityMode::WordCompatiblePassive => Self::WordCompatiblePassive,
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
-    let output = match cli.output_path.or(cli.output) {
+    let output = match cli.output_path.as_ref().or(cli.output.as_ref()).cloned() {
         Some(path) => path,
         None => cli.input.with_extension(match cli.format {
             OutputFormat::Pdf => "pdf",
@@ -67,11 +132,7 @@ fn main() {
         }
     };
 
-    let options = ConvertOptions {
-        diagnostics: cli.diagnostics,
-        font_provider,
-        ..ConvertOptions::default()
-    };
+    let options = build_convert_options(&cli, font_provider);
 
     match convert_rtf_file_to_pdf(&cli.input, &output, &options) {
         Ok(report) => {
@@ -95,6 +156,26 @@ fn main() {
             });
         }
     }
+}
+
+fn build_convert_options(cli: &Cli, font_provider: FontProvider) -> ConvertOptions {
+    let mut options = if cli.browser_safe {
+        ConvertOptions::browser_safe_defaults()
+    } else {
+        ConvertOptions::default()
+    };
+    options.diagnostics = cli.diagnostics;
+    options.font_provider = font_provider;
+    if let Some(policy) = cli.active_content_policy {
+        options.parse_options.active_content_policy = policy.into();
+    }
+    if let Some(policy) = cli.pdf_link_policy {
+        options.parse_options.pdf_link_policy = policy.into();
+    }
+    if let Some(mode) = cli.compatibility_mode {
+        options.parse_options.compatibility_mode = mode.into();
+    }
+    options
 }
 
 fn load_cli_font_provider(specs: &[String]) -> Result<FontProvider, CliFontError> {
@@ -393,6 +474,89 @@ mod tests {
             provider.coverage_for_char("Tuffy Alias", 'A'),
             open_rtf_converter::FontCoverage::Covered
         );
+    }
+
+    #[test]
+    fn cli_security_policy_switches_override_conversion_defaults() {
+        let cli = Cli::try_parse_from([
+            "open-rtf-converter",
+            "--browser-safe",
+            "--active-content-policy",
+            "reject",
+            "--pdf-link-policy",
+            "disable-all",
+            "--compatibility-mode",
+            "strict-spec",
+            "--diagnostics",
+            "input.rtf",
+            "output.pdf",
+        ])
+        .unwrap();
+        let options = build_convert_options(&cli, FontProvider::default());
+
+        assert!(options.diagnostics);
+        assert_eq!(
+            options.parse_options.active_content_policy,
+            ActiveContentPolicy::Reject
+        );
+        assert_eq!(
+            options.parse_options.pdf_link_policy,
+            PdfLinkPolicy::DisableAll
+        );
+        assert_eq!(
+            options.parse_options.compatibility_mode,
+            CompatibilityMode::StrictSpec
+        );
+        assert_eq!(
+            options.parse_options.limits.max_pdf_output_bytes,
+            20 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn cli_policy_switches_accept_passive_renderer_defaults_explicitly() {
+        let cli = Cli::try_parse_from([
+            "open-rtf-converter",
+            "--active-content-policy",
+            "placeholder",
+            "--pdf-link-policy",
+            "render-visible-text-only",
+            "--compatibility-mode",
+            "word-compatible-passive",
+            "input.rtf",
+        ])
+        .unwrap();
+        let options = build_convert_options(&cli, FontProvider::default());
+
+        assert_eq!(
+            options.parse_options.active_content_policy,
+            ActiveContentPolicy::Placeholder
+        );
+        assert_eq!(
+            options.parse_options.pdf_link_policy,
+            PdfLinkPolicy::RenderVisibleTextOnly
+        );
+        assert_eq!(
+            options.parse_options.compatibility_mode,
+            CompatibilityMode::WordCompatiblePassive
+        );
+        assert_eq!(
+            options.parse_options.limits.max_pdf_output_bytes,
+            100 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_cli_security_policy_value() {
+        let error = Cli::try_parse_from([
+            "open-rtf-converter",
+            "--active-content-policy",
+            "execute",
+            "input.rtf",
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
     }
 
     #[test]
