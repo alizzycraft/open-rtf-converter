@@ -1865,8 +1865,16 @@ impl Parser {
             {
                 self.state.destination = self.state.unicode_alternate_destination;
             }
+            "mnum" if destination_allows_visible_content(&self.state) => {
+                self.state.character.baseline_shift_half_points =
+                    DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+            }
             "mden" if destination_allows_visible_content(&self.state) => {
                 self.push_text("\u{2044}", offset)?;
+                self.state.character.baseline_shift_half_points =
+                    DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
+                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
             }
             "mbar" if destination_allows_visible_content(&self.state) => {
                 self.state.character.overline = true;

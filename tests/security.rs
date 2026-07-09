@@ -13663,6 +13663,13 @@ fn office_math_fractions_render_readable_passive_text() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("Before x+1\u{2044}y After"));
+    let numerator_style = run_style_for_text(&parsed.document, "x+1").expect("fraction numerator");
+    assert!(numerator_style.baseline_shift_half_points > 0);
+    assert!(numerator_style.font_size_scale_percent < 100);
+    let denominator_style =
+        run_style_for_text(&parsed.document, "y").expect("fraction denominator");
+    assert!(denominator_style.baseline_shift_half_points < 0);
+    assert!(denominator_style.font_size_scale_percent < 100);
     for forbidden in ["mmath", "moMath", "mf", "mnum", "mden", "mtext"] {
         assert!(
             !text.contains(forbidden),
@@ -13684,6 +13691,14 @@ fn office_math_fractions_render_readable_passive_text() {
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("Before x+1"));
     assert!(rendered_text.contains("y After"));
+    let numerator_position =
+        pdf_first_text_position_for_text(&content, "x+1").expect("fraction numerator position");
+    let denominator_position =
+        pdf_first_text_position_for_text(&content, "y").expect("fraction denominator position");
+    assert!(
+        numerator_position.1 > denominator_position.1,
+        "Office math fraction numerator should render above denominator: numerator={numerator_position:?}, denominator={denominator_position:?}"
+    );
     let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
     assert!(
         symbol_bytes.contains(&0xa4),
