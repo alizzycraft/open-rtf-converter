@@ -7,10 +7,10 @@ use crate::model::{
     DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontDef, FontFamilyHint, FontPitch,
     FootnotePlacement, LineNumberRestart, PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings,
     PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticShape, StaticShapeKind,
-    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
-    TableCellHorizontalMerge, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
-    TableRowAlignment, UnderlineStyle,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticShape, StaticShapeArrowhead,
+    StaticShapeKind, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell,
+    TableCellBorder, TableCellHorizontalMerge, TableCellVerticalAlign, TableCellVerticalMerge,
+    TableRow, TableRowAlignment, UnderlineStyle,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -1640,15 +1640,39 @@ fn layout_shape(
     match shape.kind {
         StaticShapeKind::Line => {
             if let Some(width_points) = stroke_width_points {
+                let start = LayoutPoint {
+                    x: shape_point_x(x, width, 0.0, shape.flip_horizontal),
+                    y: shape_point_y(top_y, height, 0.0, shape.flip_vertical),
+                };
+                let end = LayoutPoint {
+                    x: shape_point_x(x, width, width, shape.flip_horizontal),
+                    y: shape_point_y(top_y, height, height, shape.flip_vertical),
+                };
                 page.items.push(LayoutItem::Line {
-                    x1: shape_point_x(x, width, 0.0, shape.flip_horizontal),
-                    y1: shape_point_y(top_y, height, 0.0, shape.flip_vertical),
-                    x2: shape_point_x(x, width, width, shape.flip_horizontal),
-                    y2: shape_point_y(top_y, height, height, shape.flip_vertical),
+                    x1: start.x,
+                    y1: start.y,
+                    x2: end.x,
+                    y2: end.y,
                     width: width_points,
                     color,
                     style: stroke_style,
                 });
+                push_static_shape_arrowhead(
+                    page,
+                    shape.start_arrowhead,
+                    start,
+                    end,
+                    width_points,
+                    color,
+                );
+                push_static_shape_arrowhead(
+                    page,
+                    shape.end_arrowhead,
+                    end,
+                    start,
+                    width_points,
+                    color,
+                );
             }
         }
         StaticShapeKind::Polyline => {
@@ -1657,38 +1681,58 @@ fn layout_shape(
             let scale_x = width / natural_width;
             let scale_y = height / natural_height;
             if let Some(width_points) = stroke_width_points {
-                for points in shape.points.windows(2) {
-                    let start = points[0];
-                    let end = points[1];
+                let points = shape
+                    .points
+                    .iter()
+                    .map(|point| LayoutPoint {
+                        x: shape_point_x(
+                            x,
+                            width,
+                            twips_to_points(point.x_twips) * scale_x,
+                            shape.flip_horizontal,
+                        ),
+                        y: shape_point_y(
+                            top_y,
+                            height,
+                            twips_to_points(point.y_twips) * scale_y,
+                            shape.flip_vertical,
+                        ),
+                    })
+                    .collect::<Vec<_>>();
+                for segment in points.windows(2) {
+                    let start = segment[0];
+                    let end = segment[1];
                     page.items.push(LayoutItem::Line {
-                        x1: shape_point_x(
-                            x,
-                            width,
-                            twips_to_points(start.x_twips) * scale_x,
-                            shape.flip_horizontal,
-                        ),
-                        y1: shape_point_y(
-                            top_y,
-                            height,
-                            twips_to_points(start.y_twips) * scale_y,
-                            shape.flip_vertical,
-                        ),
-                        x2: shape_point_x(
-                            x,
-                            width,
-                            twips_to_points(end.x_twips) * scale_x,
-                            shape.flip_horizontal,
-                        ),
-                        y2: shape_point_y(
-                            top_y,
-                            height,
-                            twips_to_points(end.y_twips) * scale_y,
-                            shape.flip_vertical,
-                        ),
+                        x1: start.x,
+                        y1: start.y,
+                        x2: end.x,
+                        y2: end.y,
                         width: width_points,
                         color,
                         style: stroke_style,
                     });
+                }
+                if let [first, second, ..] = points.as_slice() {
+                    push_static_shape_arrowhead(
+                        page,
+                        shape.start_arrowhead,
+                        *first,
+                        *second,
+                        width_points,
+                        color,
+                    );
+                }
+                if points.len() >= 2 {
+                    let last = points[points.len() - 1];
+                    let previous = points[points.len() - 2];
+                    push_static_shape_arrowhead(
+                        page,
+                        shape.end_arrowhead,
+                        last,
+                        previous,
+                        width_points,
+                        color,
+                    );
                 }
             }
         }
@@ -1852,6 +1896,79 @@ fn shape_point_y(top: f32, height: f32, offset_y: f32, flip_vertical: bool) -> f
         top - height + offset_y
     } else {
         top - offset_y
+    }
+}
+
+fn push_static_shape_arrowhead(
+    page: &mut LayoutPage,
+    arrowhead: StaticShapeArrowhead,
+    tip: LayoutPoint,
+    tail: LayoutPoint,
+    stroke_width: f32,
+    color: PdfColor,
+) {
+    if arrowhead == StaticShapeArrowhead::None {
+        return;
+    }
+    let dx = tip.x - tail.x;
+    let dy = tip.y - tail.y;
+    let length = (dx.mul_add(dx, dy * dy)).sqrt();
+    if length <= 0.01 {
+        return;
+    }
+
+    let unit_x = dx / length;
+    let unit_y = dy / length;
+    let perpendicular_x = -unit_y;
+    let perpendicular_y = unit_x;
+    let arrow_length = (stroke_width * 5.0 + 6.0)
+        .clamp(6.0, 18.0)
+        .min(length * 0.6);
+    let half_width = arrow_length * 0.45;
+    let base = LayoutPoint {
+        x: tip.x - unit_x * arrow_length,
+        y: tip.y - unit_y * arrow_length,
+    };
+    let wing_a = LayoutPoint {
+        x: base.x + perpendicular_x * half_width,
+        y: base.y + perpendicular_y * half_width,
+    };
+    let wing_b = LayoutPoint {
+        x: base.x - perpendicular_x * half_width,
+        y: base.y - perpendicular_y * half_width,
+    };
+
+    match arrowhead {
+        StaticShapeArrowhead::None => {}
+        StaticShapeArrowhead::Open => {
+            page.items.push(LayoutItem::Line {
+                x1: tip.x,
+                y1: tip.y,
+                x2: wing_a.x,
+                y2: wing_a.y,
+                width: stroke_width,
+                color,
+                style: LineStyle::Solid,
+            });
+            page.items.push(LayoutItem::Line {
+                x1: tip.x,
+                y1: tip.y,
+                x2: wing_b.x,
+                y2: wing_b.y,
+                width: stroke_width,
+                color,
+                style: LineStyle::Solid,
+            });
+        }
+        StaticShapeArrowhead::Triangle => {
+            page.items.push(LayoutItem::Polygon {
+                points: vec![tip, wing_a, wing_b],
+                stroke_width,
+                stroke_color: color,
+                stroke_style: LineStyle::Solid,
+                fill_color: Some(color),
+            });
+        }
     }
 }
 
@@ -6929,6 +7046,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 30,
             stroke_color: Color {
                 red: 255,
@@ -6982,6 +7101,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 0,
             stroke_color: Color {
                 red: 255,
@@ -7048,6 +7169,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 0,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
@@ -7121,6 +7244,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dashed,
@@ -7154,6 +7279,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: true,
             flip_vertical: true,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
@@ -7179,6 +7306,57 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_static_drawing_arrowheads_as_passive_geometry() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Shape(StaticShape {
+            kind: StaticShapeKind::Line,
+            left_twips: 360,
+            top_twips: 240,
+            width_twips: 1440,
+            height_twips: 720,
+            flip_horizontal: false,
+            flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::Open,
+            end_arrowhead: StaticShapeArrowhead::Triangle,
+            stroke_width_twips: 30,
+            stroke_color: Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            stroke_style: BorderStyle::Single,
+            fill_color: None,
+            text: Vec::new(),
+            points: Vec::new(),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let lines = layout.pages[0]
+            .items
+            .iter()
+            .filter(|item| matches!(item, LayoutItem::Line { .. }))
+            .count();
+        let arrow_polygon = layout.pages[0].items.iter().find_map(|item| match item {
+            LayoutItem::Polygon {
+                points, fill_color, ..
+            } => Some((points, fill_color)),
+            _ => None,
+        });
+
+        assert_eq!(lines, 3);
+        let (points, fill_color) = arrow_polygon.expect("filled triangle arrowhead");
+        assert_eq!(points.len(), 3);
+        assert_eq!(
+            *fill_color,
+            Some(PdfColor {
+                red: 1.0,
+                green: 0.0,
+                blue: 0.0,
+            })
+        );
+    }
+
+    #[test]
     fn lays_out_legacy_static_drawing_polylines_as_passive_line_segments() {
         let mut document = Document::default();
         document.blocks = vec![Block::Shape(StaticShape {
@@ -7189,6 +7367,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
@@ -7253,6 +7433,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
@@ -7317,6 +7499,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 20,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
@@ -7364,6 +7548,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,
@@ -7433,6 +7619,8 @@ mod tests {
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,
@@ -13431,6 +13619,8 @@ mod tests {
             height_twips: 360,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 30,
             stroke_color: Color {
                 red: 255,

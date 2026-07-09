@@ -10,10 +10,11 @@ use crate::model::{
     PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER,
-    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellBorders,
-    TableCellHorizontalMerge, TableCellPadding, TableCellSpacing, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, TextRelief, UnderlineStyle,
+    StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeKind,
+    StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell,
+    TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
+    TableCellSpacing, TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -564,6 +565,8 @@ struct ShapeBuilder {
     height_twips: i32,
     flip_horizontal: bool,
     flip_vertical: bool,
+    start_arrowhead: StaticShapeArrowhead,
+    end_arrowhead: StaticShapeArrowhead,
     stroke_width_twips: i32,
     stroke_color: Color,
     stroke_style: BorderStyle,
@@ -591,6 +594,8 @@ impl Default for ShapeBuilder {
             height_twips: 0,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 15,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
@@ -8367,6 +8372,8 @@ impl Parser {
                 height_twips,
                 flip_horizontal: shape.flip_horizontal,
                 flip_vertical: shape.flip_vertical,
+                start_arrowhead: shape.start_arrowhead,
+                end_arrowhead: shape.end_arrowhead,
                 stroke_width_twips: shape
                     .stroke_width_twips
                     .clamp(0, self.limits().max_shape_stroke_width_twips.max(1)),
@@ -8769,6 +8776,24 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.stroke_style = style;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineStartArrowhead" => {
+                if let Some(arrowhead) = parse_shape_arrowhead_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.start_arrowhead = arrowhead;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineEndArrowhead" => {
+                if let Some(arrowhead) = parse_shape_arrowhead_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.end_arrowhead = arrowhead;
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
@@ -11431,6 +11456,23 @@ fn parse_shape_line_dashing_property(value: &str) -> Option<BorderStyle> {
         "1" | "dot" | "sysdot" => Some(BorderStyle::Dotted),
         "2" | "3" | "4" | "dash" | "sysdash" | "lgdash" | "longdash" | "dashdot" | "lgdashdot"
         | "dashdotdot" | "lgdashdotdot" => Some(BorderStyle::Dashed),
+        _ => None,
+    }
+}
+
+fn parse_shape_arrowhead_property(value: &str) -> Option<StaticShapeArrowhead> {
+    let normalized = value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "0" | "none" | "noarrow" => Some(StaticShapeArrowhead::None),
+        "open" | "arrow" | "1" => Some(StaticShapeArrowhead::Open),
+        "triangle" | "stealth" | "diamond" | "oval" | "2" | "3" | "4" | "5" => {
+            Some(StaticShapeArrowhead::Triangle)
+        }
         _ => None,
     }
 }
@@ -21904,6 +21946,45 @@ After\par}"#;
         assert_eq!(shape.stroke_style, BorderStyle::Dashed);
         assert!(text.contains("BeforeAfter"));
         for forbidden in ["lineDashing", "dashDot", "pFragments", "hostile-payload"] {
+            assert!(!text.contains(forbidden));
+        }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_shape_arrowhead_properties_as_safe_metadata() {
+        let output = parse_rtf(
+            r"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn lineStartArrowhead}{\sv open}}{\sp{\sn lineEndArrowhead}{\sv triangle}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+        )
+        .unwrap();
+        let shape = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("shape");
+        let text = document_text(&output.document);
+
+        assert_eq!(shape.kind, StaticShapeKind::Line);
+        assert_eq!(shape.start_arrowhead, StaticShapeArrowhead::Open);
+        assert_eq!(shape.end_arrowhead, StaticShapeArrowhead::Triangle);
+        assert!(text.contains("BeforeAfter"));
+        for forbidden in [
+            "lineStartArrowhead",
+            "lineEndArrowhead",
+            "open",
+            "triangle",
+            "pFragments",
+            "hostile-payload",
+        ] {
             assert!(!text.contains(forbidden));
         }
         assert!(

@@ -3639,8 +3639,9 @@ mod tests {
     use crate::model::{
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
         FontPitch, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER, PageSettings, Paragraph,
-        ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticShape, StaticShapeKind,
-        TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder, TableRow, UnderlineStyle,
+        ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticShape, StaticShapeArrowhead,
+        StaticShapeKind, TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder, TableRow,
+        UnderlineStyle,
     };
     use lopdf::{Dictionary, Object};
 
@@ -4248,6 +4249,8 @@ endobj
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,
@@ -4327,6 +4330,8 @@ endobj
             height_twips: 720,
             flip_horizontal: false,
             flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,

@@ -492,6 +492,8 @@ pub struct StaticShape {
     pub height_twips: i32,
     pub flip_horizontal: bool,
     pub flip_vertical: bool,
+    pub start_arrowhead: StaticShapeArrowhead,
+    pub end_arrowhead: StaticShapeArrowhead,
     pub stroke_width_twips: i32,
     pub stroke_color: Color,
     pub stroke_style: BorderStyle,
@@ -508,6 +510,14 @@ pub enum StaticShapeKind {
     Ellipse,
     Polyline,
     Polygon,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum StaticShapeArrowhead {
+    #[default]
+    None,
+    Open,
+    Triangle,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
