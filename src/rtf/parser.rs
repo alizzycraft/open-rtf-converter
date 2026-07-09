@@ -130,6 +130,7 @@ struct ParserState {
     office_math_array_rows_seen: usize,
     office_math_array_row_direct: bool,
     office_math_array_row_cells_seen: usize,
+    office_math_limit_container_direct: OfficeMathLimitKind,
     shape_property_capture: Option<ShapePropertyCapture>,
     shape_property_name: String,
     shape_property_value: String,
@@ -217,6 +218,7 @@ impl Default for ParserState {
             office_math_array_rows_seen: 0,
             office_math_array_row_direct: false,
             office_math_array_row_cells_seen: 0,
+            office_math_limit_container_direct: OfficeMathLimitKind::None,
             shape_property_capture: None,
             shape_property_name: String::new(),
             shape_property_value: String::new(),
@@ -231,6 +233,14 @@ enum OfficeMathArrayKind {
     None,
     Matrix,
     EquationArray,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+enum OfficeMathLimitKind {
+    #[default]
+    None,
+    Lower,
+    Upper,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1129,6 +1139,7 @@ impl Parser {
         child.office_math_array_rows_seen = 0;
         child.office_math_array_row_direct = false;
         child.office_math_array_row_cells_seen = 0;
+        child.office_math_limit_container_direct = OfficeMathLimitKind::None;
         if parent.metadata_property.is_some() {
             child.metadata_property = None;
             child.metadata_property_text.clear();
@@ -1844,6 +1855,12 @@ impl Parser {
             "meqArr" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_array(OfficeMathArrayKind::EquationArray);
             }
+            "mlimLow" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_limit_container_direct = OfficeMathLimitKind::Lower;
+            }
+            "mlimUpp" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_limit_container_direct = OfficeMathLimitKind::Upper;
+            }
             "mr" if destination_allows_visible_content(&self.state)
                 && self.office_math_direct_parent_array_kind() == OfficeMathArrayKind::Matrix =>
             {
@@ -1865,6 +1882,9 @@ impl Parser {
                     == OfficeMathArrayKind::EquationArray =>
             {
                 self.start_office_math_equation_array_row(offset)?;
+            }
+            "mlim" if destination_allows_visible_content(&self.state) => {
+                self.start_office_math_limit();
             }
             "msub" if destination_allows_visible_content(&self.state) => {
                 self.state.character.baseline_shift_half_points =
@@ -4984,6 +5004,27 @@ impl Parser {
         }
         self.state.office_math_array_context = OfficeMathArrayKind::EquationArray;
         Ok(())
+    }
+
+    fn start_office_math_limit(&mut self) {
+        match self
+            .stack
+            .last()
+            .map(|state| state.office_math_limit_container_direct)
+            .unwrap_or(OfficeMathLimitKind::None)
+        {
+            OfficeMathLimitKind::Lower => {
+                self.state.character.baseline_shift_half_points =
+                    DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
+                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+            }
+            OfficeMathLimitKind::Upper => {
+                self.state.character.baseline_shift_half_points =
+                    DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+            }
+            OfficeMathLimitKind::None => {}
+        }
     }
 
     fn start_office_math_delimited_expression(&mut self, offset: usize) -> Result<(), ParseError> {
@@ -10998,6 +11039,7 @@ fn is_office_math_control(name: &str) -> bool {
             | "mgroupChr"
             | "mgroupChrPr"
             | "mgrow"
+            | "mlim"
             | "mlimLow"
             | "mlimLowPr"
             | "mlimLoc"
