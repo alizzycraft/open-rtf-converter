@@ -2844,7 +2844,8 @@ fn prepare_table_row(
             let cell = &row.cells[visual_cell.cell_index];
             cell.paragraphs
                 .iter()
-                .flat_map(|paragraph| {
+                .enumerate()
+                .flat_map(|(paragraph_idx, paragraph)| {
                     let mut lines = wrap_paragraph_with_font_provider(
                         paragraph,
                         (visual_cell.width - padding.left - padding.right).max(12.0),
@@ -2856,10 +2857,26 @@ fn prepare_table_row(
                         line.height = apply_line_spacing(line.height, &paragraph.style);
                     }
                     let line_count = lines.len();
-                    let paragraph_space_before =
-                        twips_to_points(effective_space_before_twips(&paragraph.style));
-                    let paragraph_space_after =
-                        twips_to_points(effective_space_after_twips(&paragraph.style));
+                    let suppress_contextual_space_before = paragraph_idx
+                        .checked_sub(1)
+                        .and_then(|previous_idx| cell.paragraphs.get(previous_idx))
+                        .is_some_and(|previous| {
+                            paragraph_spacing_is_contextual(previous, paragraph)
+                        });
+                    let suppress_contextual_space_after = cell
+                        .paragraphs
+                        .get(paragraph_idx + 1)
+                        .is_some_and(|next| paragraph_spacing_is_contextual(paragraph, next));
+                    let paragraph_space_before = if suppress_contextual_space_before {
+                        0.0
+                    } else {
+                        twips_to_points(effective_space_before_twips(&paragraph.style))
+                    };
+                    let paragraph_space_after = if suppress_contextual_space_after {
+                        0.0
+                    } else {
+                        twips_to_points(effective_space_after_twips(&paragraph.style))
+                    };
                     lines
                         .into_iter()
                         .enumerate()
@@ -7749,6 +7766,83 @@ mod tests {
             .expect("row background");
 
         assert!((height - 45.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn collapses_contextual_spacing_between_table_cell_paragraphs() {
+        let normal_height = table_cell_two_paragraph_height(false);
+        let contextual_height = table_cell_two_paragraph_height(true);
+
+        assert!(
+            (normal_height - contextual_height - 30.0).abs() < 0.01,
+            "contextual spacing should suppress 18pt after + 12pt before inside table cells, normal={normal_height}, contextual={contextual_height}"
+        );
+    }
+
+    fn table_cell_two_paragraph_height(contextual_spacing: bool) -> f32 {
+        let mut document = Document::default();
+        document.colors = vec![
+            Color::default(),
+            Color {
+                red: 240,
+                green: 240,
+                blue: 240,
+            },
+        ];
+        let mut first_style = ParagraphStyle::default();
+        first_style.space_after_twips = 360;
+        first_style.contextual_spacing = contextual_spacing;
+        let mut second_style = ParagraphStyle::default();
+        second_style.space_before_twips = 240;
+        second_style.contextual_spacing = contextual_spacing;
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440],
+            borders_visible: true,
+            rows: vec![TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: Some(1),
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    borders: TableCellBorders::default(),
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![
+                        Paragraph {
+                            style: first_style,
+                            runs: vec![Run {
+                                text: "First".to_string(),
+                                style: Default::default(),
+                            }],
+                        },
+                        Paragraph {
+                            style: second_style,
+                            runs: vec![Run {
+                                text: "Second".to_string(),
+                                style: Default::default(),
+                            }],
+                        },
+                    ],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Highlight { height, .. } => Some(*height),
+                _ => None,
+            })
+            .expect("row background")
     }
 
     #[test]
