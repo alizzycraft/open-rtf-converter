@@ -12442,6 +12442,45 @@ fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     let mut rest = field_rest_after_name(instruction)?.trim_start();
     if let Some(stripped) = rest.strip_prefix("\\f") {
         rest = stripped.trim_start();
+        let (numerator, denominator, remainder) = field_parenthesized_pair(rest)?;
+        if !remainder.trim().is_empty() {
+            return None;
+        }
+        if !is_safe_passive_eq_component(&numerator) || !is_safe_passive_eq_component(&denominator)
+        {
+            return None;
+        }
+        return Some(PassiveFieldResult {
+            text: format!("{numerator}\u{2044}{denominator}"),
+            font_name: None,
+            font_size_half_points: None,
+            form_field: false,
+        });
+    }
+    if let Some(stripped) = rest.strip_prefix("\\r") {
+        rest = stripped.trim_start();
+        let (degree, radicand, remainder) = field_parenthesized_optional_pair(rest)?;
+        if !remainder.trim().is_empty() {
+            return None;
+        }
+        if !is_safe_passive_eq_component(&radicand)
+            || degree
+                .as_ref()
+                .is_some_and(|degree| !is_safe_passive_eq_component(degree))
+        {
+            return None;
+        }
+        let text = if let Some(degree) = degree {
+            format!("{degree}\u{221a}{radicand}")
+        } else {
+            format!("\u{221a}{radicand}")
+        };
+        return Some(PassiveFieldResult {
+            text,
+            font_name: None,
+            font_size_half_points: None,
+            form_field: false,
+        });
     }
     let (numerator, denominator, remainder) = field_parenthesized_pair(rest)?;
     if !remainder.trim().is_empty() {
@@ -12693,6 +12732,31 @@ fn field_parenthesized_pair(input: &str) -> Option<(String, String, &str)> {
                 let left = rest[..comma_index].trim().to_string();
                 let right = rest[comma_index + 1..index].trim().to_string();
                 return Some((left, right, &rest[index + ch.len_utf8()..]));
+            }
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 && comma_index.is_none() => comma_index = Some(index),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn field_parenthesized_optional_pair(input: &str) -> Option<(Option<String>, String, &str)> {
+    let input = input.trim_start();
+    let rest = input.strip_prefix('(')?;
+    let mut depth = 0usize;
+    let mut comma_index = None;
+    for (index, ch) in rest.char_indices() {
+        match ch {
+            '(' => depth = depth.checked_add(1)?,
+            ')' if depth == 0 => {
+                if let Some(comma_index) = comma_index {
+                    let left = rest[..comma_index].trim().to_string();
+                    let right = rest[comma_index + 1..index].trim().to_string();
+                    return Some((Some(left), right, &rest[index + ch.len_utf8()..]));
+                }
+                let value = rest[..index].trim().to_string();
+                return Some((None, value, &rest[index + ch.len_utf8()..]));
             }
             ')' => depth = depth.saturating_sub(1),
             ',' if depth == 0 && comma_index.is_none() => comma_index = Some(index),

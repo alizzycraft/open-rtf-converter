@@ -7035,6 +7035,71 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
 }
 
 #[test]
+fn resultless_eq_root_fields_render_passively_without_instruction_leakage() {
+    let input =
+        br"{\rtf1 Roots {\field{\*\fldinst EQ \\r(x+1)}} cube {\field{\*\fldinst EQ \\r(3,y)}}\par}"
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Roots \u{221a}x+1 cube 3\u{221a}y"),
+        "normalized EQ root text was {text:?}"
+    );
+    for forbidden in ["EQ", "fldinst", "\\r", "(x+1)", "(3,y)", "[Field removed"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden EQ root field content leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive field EQ without executing field instruction")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Roots "));
+    assert!(rendered_text.contains("x+1 cube 3"));
+    assert!(rendered_text.contains("y"));
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    assert!(
+        symbol_bytes.iter().filter(|byte| **byte == 0xd6).count() >= 2,
+        "EQ roots should encode radical markers through passive Symbol byte 0xd6; got {symbol_bytes:?}"
+    );
+    for forbidden in [
+        b"EQ".as_slice(),
+        b"fldinst",
+        b"\\r",
+        b"(x+1)",
+        b"(3,y)",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden EQ root field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_if_fields_render_passive_branches_without_instruction_leakage() {
     let input = rtf(&[
         "{",
