@@ -14266,6 +14266,101 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn office_math_overline_accents_render_as_passive_strokes_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "macc{",
+        "\\",
+        "maccPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u773?}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext x}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before x After"),
+        "unexpected accent math text: {text:?}"
+    );
+    let overlined_style = run_style_for_text(&parsed.document, "x").expect("accent base run");
+    assert!(overlined_style.overline);
+    for forbidden in ["mmath", "moMath", "macc", "maccPr", "mchr", "mtext"] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math accent control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        !text.contains('?'),
+        "Office math accent fallback text leaked to text: {text:?}"
+    );
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "Office math accent controls should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before x After"));
+    assert!(
+        content.operations.windows(3).any(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        }),
+        "Office math overline accent should render as a passive stroke"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"macc",
+        b"maccPr",
+        b"mchr",
+        b"mtext",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math accent control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_hidden_limits_are_stripped_passively() {
     let input = rtf(&[
         "{",

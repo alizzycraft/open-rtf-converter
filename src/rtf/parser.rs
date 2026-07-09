@@ -138,6 +138,11 @@ struct ParserState {
     office_math_radical_container_direct: bool,
     office_math_radical_degree_hidden: bool,
     office_math_radical_degree_hide_property_seen: bool,
+    office_math_accent_container_direct: bool,
+    office_math_accent_property_direct: bool,
+    office_math_accent_character_capture: bool,
+    office_math_accent_character_text: String,
+    office_math_accent_overline_pending: bool,
     shape_property_capture: Option<ShapePropertyCapture>,
     shape_property_name: String,
     shape_property_value: String,
@@ -233,6 +238,11 @@ impl Default for ParserState {
             office_math_radical_container_direct: false,
             office_math_radical_degree_hidden: false,
             office_math_radical_degree_hide_property_seen: false,
+            office_math_accent_container_direct: false,
+            office_math_accent_property_direct: false,
+            office_math_accent_character_capture: false,
+            office_math_accent_character_text: String::new(),
+            office_math_accent_overline_pending: false,
             shape_property_capture: None,
             shape_property_name: String::new(),
             shape_property_value: String::new(),
@@ -1158,6 +1168,8 @@ impl Parser {
         child.office_math_nary_hide_property_seen = false;
         child.office_math_radical_container_direct = false;
         child.office_math_radical_degree_hide_property_seen = false;
+        child.office_math_accent_container_direct = false;
+        child.office_math_accent_property_direct = false;
         if parent.metadata_property.is_some() {
             child.metadata_property = None;
             child.metadata_property_text.clear();
@@ -1347,6 +1359,7 @@ impl Parser {
                     previous.office_math_radical_degree_hide_property_seen = true;
                 }
             }
+            self.finish_office_math_accent_group(&mut previous, offset)?;
             self.finish_shape_property_group(&mut previous, offset)?;
 
             if self.state.inside_field && previous.inside_field {
@@ -1910,6 +1923,20 @@ impl Parser {
             "mphant" if destination_allows_visible_content(&self.state) => {
                 self.state.character.hidden = true;
             }
+            "macc" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_accent_container_direct = true;
+                self.state.office_math_accent_overline_pending = false;
+            }
+            "maccPr" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_accent_property_direct = true;
+            }
+            "mchr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_accent_property_group() =>
+            {
+                self.state.office_math_accent_character_capture = true;
+                self.state.office_math_accent_character_text.clear();
+            }
             "mnary" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_nary_container_direct = true;
                 self.state.office_math_nary_subscript_hidden = false;
@@ -1960,6 +1987,11 @@ impl Parser {
             }
             "mlim" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_limit();
+            }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_has_overline_accent() =>
+            {
+                self.state.character.overline = true;
             }
             "msub" if destination_allows_visible_content(&self.state) => {
                 if self.state.office_math_nary_subscript_hidden {
@@ -2960,6 +2992,9 @@ impl Parser {
             "u" if self.state.office_math_delimiter_capture.is_some() => {
                 self.push_office_math_delimiter_unicode(control.parameter.unwrap_or(0), offset)?
             }
+            "u" if self.state.office_math_accent_character_capture => {
+                self.push_office_math_accent_unicode(control.parameter.unwrap_or(0), offset)?
+            }
             "u" if self.state.shape_property_capture.is_some() => {
                 self.push_shape_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -3921,6 +3956,9 @@ impl Parser {
         if self.state.office_math_delimiter_capture.is_some() {
             return self.push_office_math_delimiter_text(text, offset);
         }
+        if self.state.office_math_accent_character_capture {
+            return self.push_office_math_accent_text(text, offset);
+        }
         if self.state.destination == Destination::Picture {
             return self.push_picture_hex_text(text, offset);
         }
@@ -4030,6 +4068,9 @@ impl Parser {
         let visible_text = self.decode_direct_text_bytes(bytes);
         if self.state.office_math_delimiter_capture.is_some() {
             return self.push_office_math_delimiter_text(&visible_text, offset);
+        }
+        if self.state.office_math_accent_character_capture {
+            return self.push_office_math_accent_text(&visible_text, offset);
         }
         if self.state.shape_property_capture.is_some() {
             return self.push_shape_property_text(&visible_text, offset);
@@ -4189,6 +4230,10 @@ impl Parser {
         if self.state.office_math_delimiter_capture.is_some() {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_delimiter_text(&ch.to_string(), offset);
+        }
+        if self.state.office_math_accent_character_capture {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_accent_text(&ch.to_string(), offset);
         }
         if self.state.destination == Destination::Picture {
             return self.push_picture_bytes(&[byte], offset);
@@ -5035,6 +5080,20 @@ impl Parser {
             .is_some_and(|state| state.office_math_array_row_direct)
     }
 
+    fn office_math_in_accent_property_group(&self) -> bool {
+        self.state.office_math_accent_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_accent_property_direct)
+    }
+
+    fn office_math_direct_parent_has_overline_accent(&self) -> bool {
+        self.stack.last().is_some_and(|state| {
+            state.office_math_accent_container_direct && state.office_math_accent_overline_pending
+        })
+    }
+
     fn start_office_math_matrix_row(&mut self, offset: usize) -> Result<(), ParseError> {
         let row_index = self
             .stack
@@ -5164,6 +5223,35 @@ impl Parser {
                         self.state.office_math_pending_end_delimiter.clone();
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    fn finish_office_math_accent_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.office_math_accent_character_capture {
+            if previous.office_math_accent_character_capture {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_accent_character_text,
+                    &self.state.office_math_accent_character_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            } else if office_math_accent_is_passive_overline(
+                &self.state.office_math_accent_character_text,
+            ) {
+                previous.office_math_accent_overline_pending = true;
+            }
+        }
+
+        if self.state.office_math_accent_overline_pending
+            && !self.state.office_math_accent_container_direct
+        {
+            previous.office_math_accent_overline_pending = true;
         }
 
         Ok(())
@@ -5557,6 +5645,34 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_delimiter_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_office_math_accent_text(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_accent_character_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_accent_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_accent_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
@@ -11702,6 +11818,14 @@ fn append_office_math_delimiter_text(
     }
     target.push_str(text);
     Ok(())
+}
+
+fn office_math_accent_is_passive_overline(text: &str) -> bool {
+    let normalized = text.trim();
+    matches!(
+        normalized,
+        "\u{00af}" | "\u{0305}" | "\u{033f}" | "\u{203e}"
+    )
 }
 
 fn append_shape_property_text(
