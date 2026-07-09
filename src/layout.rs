@@ -3028,9 +3028,13 @@ fn push_table_row(
             TableCellVerticalAlign::Center => extra_height / 2.0,
             TableCellVerticalAlign::Bottom => extra_height,
         };
+        let content_bottom = top - span_height + padding.bottom;
         let mut line_top = top - padding.top - vertical_offset;
         for prepared_line in lines {
             line_top -= prepared_line.space_before;
+            if line_top - prepared_line.line.height < content_bottom {
+                break;
+            }
             let content_left = row_left + visual_cell.x_offset + padding.left;
             let cell_content_width = (visual_cell.width - padding.left - padding.right).max(1.0);
             if let Some(color_index) = prepared_line.style.shading_color_index
@@ -7667,6 +7671,54 @@ mod tests {
             .expect("row background");
 
         assert!((height - 18.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn clips_table_cell_lines_to_exact_row_height() {
+        let mut document = Document::default();
+        document.colors = vec![
+            Color::default(),
+            Color {
+                red: 240,
+                green: 240,
+                blue: 240,
+            },
+        ];
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440],
+            borders_visible: true,
+            rows: vec![TableRow {
+                height_twips: Some(-360),
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: Some(1),
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    borders: TableCellBorders::default(),
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text: "Visible\nOverflow".to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let text = layout_text(&layout.pages[0]);
+
+        assert!(text.contains("Visible"));
+        assert!(!text.contains("Overflow"));
     }
 
     #[test]

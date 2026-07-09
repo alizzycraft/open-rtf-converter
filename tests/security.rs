@@ -1360,7 +1360,9 @@ fn exact_table_row_height_renders_passively_without_control_leakage() {
         "\\",
         "trcbpat1",
         "\\",
-        "cellx1440 Exact row text",
+        "cellx1440 Visible",
+        "\\",
+        "line Overflow",
         "\\",
         "cell",
         "\\",
@@ -1369,7 +1371,8 @@ fn exact_table_row_height_renders_passively_without_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Exact row text"));
+    assert!(text.contains("Visible"));
+    assert!(text.contains("Overflow"));
     let table = parsed
         .document
         .blocks
@@ -1396,7 +1399,12 @@ fn exact_table_row_height_renders_passively_without_control_leakage() {
     )
     .unwrap();
     let pdf = fs::read(&output_path).unwrap();
-    assert!(PdfDocument::load_mem(&pdf).is_ok());
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Visible"));
+    assert!(!rendered_text.contains("Overflow"));
     for forbidden in [
         b"trrh".as_slice(),
         b"trcbpat",
