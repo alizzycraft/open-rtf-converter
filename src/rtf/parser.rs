@@ -1849,6 +1849,9 @@ impl Parser {
                 self.push_text("\u{221a}", offset)?;
                 self.state.character.overline = true;
             }
+            "mphant" if destination_allows_visible_content(&self.state) => {
+                self.state.character.hidden = true;
+            }
             "mmatrix" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_array(OfficeMathArrayKind::Matrix);
             }
