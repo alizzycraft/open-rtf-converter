@@ -3309,7 +3309,7 @@ fn table_column_widths(table: &Table, column_count: usize, content_width: f32) -
             .map(|width| twips_to_points(*width).max(12.0))
             .collect::<Vec<_>>();
         let total: f32 = widths.iter().sum();
-        if total > content_width {
+        if total > content_width && !table.preserve_authored_widths {
             let scale = content_width / total;
             return widths.into_iter().map(|width| width * scale).collect();
         }
@@ -7334,6 +7334,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440, 1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -7404,11 +7405,31 @@ mod tests {
     }
 
     #[test]
+    fn table_column_widths_preserve_authored_widths_when_autofit_growth_is_disabled() {
+        let mut table = Table {
+            column_widths_twips: vec![4_000, 4_000],
+            borders_visible: true,
+            preserve_authored_widths: false,
+            rows: Vec::new(),
+        };
+
+        let scaled = table_column_widths(&table, 2, 288.0);
+        assert!((scaled.iter().sum::<f32>() - 288.0).abs() < 0.01);
+
+        table.preserve_authored_widths = true;
+        let preserved = table_column_widths(&table, 2, 288.0);
+        assert!((preserved[0] - 200.0).abs() < 0.01);
+        assert!((preserved[1] - 200.0).abs() < 0.01);
+        assert!((preserved.iter().sum::<f32>() - 400.0).abs() < 0.01);
+    }
+
+    #[test]
     fn lays_out_borderless_table_text_without_grid_lines() {
         let mut document = Document::default();
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: false,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -7456,6 +7477,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -7511,6 +7533,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: Some(720),
                 left_offset_twips: 0,
@@ -7592,6 +7615,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -7729,6 +7753,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -7820,6 +7845,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: Some(720),
                 left_offset_twips: 0,
@@ -7876,6 +7902,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: Some(-360),
                 left_offset_twips: 0,
@@ -7933,6 +7960,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: Some(-360),
                 left_offset_twips: 0,
@@ -7977,6 +8005,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8030,6 +8059,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8102,6 +8132,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8157,6 +8188,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 720,
@@ -8205,6 +8237,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![
                 TableRow {
                     height_twips: None,
@@ -8285,6 +8318,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8341,6 +8375,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: Some(489),
                 left_offset_twips: 0,
@@ -8463,6 +8498,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![
                 TableRow {
                     height_twips: None,
@@ -8556,6 +8592,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: false,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8603,6 +8640,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8654,6 +8692,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![720],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8720,6 +8759,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8783,6 +8823,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440, 1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -8880,6 +8921,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440, 1440, 1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: Some(1440),
                 left_offset_twips: 0,
@@ -8973,6 +9015,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440, 1440, 1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -9076,6 +9119,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440, 1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![
                 TableRow {
                     height_twips: Some(720),
@@ -9254,6 +9298,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows,
         })];
 
@@ -10492,6 +10537,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: false,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -10773,6 +10819,7 @@ mod tests {
             Block::Table(Table {
                 column_widths_twips: vec![1440],
                 borders_visible: false,
+                preserve_authored_widths: false,
                 rows: vec![TableRow {
                     height_twips: None,
                     left_offset_twips: 0,
@@ -10861,6 +10908,7 @@ mod tests {
             Block::Table(Table {
                 column_widths_twips: vec![1440],
                 borders_visible: false,
+                preserve_authored_widths: false,
                 rows: vec![TableRow {
                     height_twips: None,
                     left_offset_twips: 0,
@@ -11101,6 +11149,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: false,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
@@ -11504,6 +11553,7 @@ mod tests {
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: false,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,

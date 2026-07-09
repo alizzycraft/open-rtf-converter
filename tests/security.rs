@@ -545,6 +545,83 @@ fn preferred_row_widths_fill_missing_table_geometry_without_control_leakage() {
 }
 
 #[test]
+fn nogrowautofit_preserves_authored_table_widths_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw7200",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "nogrowautofit",
+        "\\",
+        "trowd",
+        "\\",
+        "cellx4000 Wide left",
+        "\\",
+        "cell",
+        "\\",
+        "cellx8000 Wide right",
+        "\\",
+        "cell",
+        "\\",
+        "row}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+
+    assert!(table.preserve_authored_widths);
+    assert_eq!(table.column_widths_twips, vec![4_000, 4_000]);
+    assert!(text.contains("Wide left"));
+    assert!(text.contains("Wide right"));
+    assert!(!text.contains("nogrowautofit"));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("table autofit growth compatibility approximated")
+    }));
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Wide left"));
+    assert!(rendered_text.contains("Wide right"));
+    for forbidden in [
+        b"nogrowautofit".as_slice(),
+        b"cellx",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden nogrowautofit content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn floating_table_positioning_controls_warn_without_payload_leakage() {
     let input = rtf(&[
         "{",
@@ -14795,7 +14872,6 @@ fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
     for expected in [
         "Japanese text justification approximated by passive line layout",
         "Asian line-breaking rule approximated by passive Unicode line layout",
-        "table autofit growth compatibility approximated by bounded table layout",
         "Word typography compatibility option approximated by passive layout",
     ] {
         assert!(
@@ -14807,6 +14883,11 @@ fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
             parsed.diagnostics
         );
     }
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("table autofit growth compatibility approximated")
+    }));
 
     let output = convert_rtf_to_pdf(
         &input,

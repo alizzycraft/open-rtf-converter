@@ -5095,6 +5095,7 @@ endobj
         document.blocks = vec![Block::Table(Table {
             column_widths_twips: vec![1440],
             borders_visible: true,
+            preserve_authored_widths: false,
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,

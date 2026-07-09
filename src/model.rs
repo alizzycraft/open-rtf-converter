@@ -519,6 +519,7 @@ pub struct Table {
     pub rows: Vec<TableRow>,
     pub column_widths_twips: Vec<i32>,
     pub borders_visible: bool,
+    pub preserve_authored_widths: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

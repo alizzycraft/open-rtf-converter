@@ -344,6 +344,7 @@ struct TableBuilder {
     rows: Vec<TableRow>,
     cell_right_edges_twips: Vec<i32>,
     borders_visible: bool,
+    preserve_authored_widths: bool,
 }
 
 impl Default for TableBuilder {
@@ -352,6 +353,7 @@ impl Default for TableBuilder {
             rows: Vec::new(),
             cell_right_edges_twips: Vec::new(),
             borders_visible: true,
+            preserve_authored_widths: false,
         }
     }
 }
@@ -828,6 +830,7 @@ struct Parser {
     current_color_seen: bool,
     current_table: Option<TableBuilder>,
     current_table_row: Option<TableRowBuilder>,
+    preserve_authored_table_widths: bool,
     table_cell_count: usize,
     pending_list_marker: String,
     pending_list_marker_runs: Vec<Run>,
@@ -944,6 +947,7 @@ impl Parser {
             current_color_seen: false,
             current_table: None,
             current_table_row: None,
+            preserve_authored_table_widths: false,
             table_cell_count: 0,
             pending_list_marker: String::new(),
             pending_list_marker_runs: Vec::new(),
@@ -3709,6 +3713,12 @@ impl Parser {
             "aftnnrlc" => self.document.endnote_number_format = PageNumberFormat::LowerRoman,
             "aftnnauc" => self.document.endnote_number_format = PageNumberFormat::UpperLetter,
             "aftnnalc" => self.document.endnote_number_format = PageNumberFormat::LowerLetter,
+            "nogrowautofit" => {
+                self.preserve_authored_table_widths = control.parameter.unwrap_or(1) != 0;
+                if let Some(table) = self.current_table.as_mut() {
+                    table.preserve_authored_widths = self.preserve_authored_table_widths;
+                }
+            }
             name if let Some(message) = word_layout_compatibility_control_message(name) => {
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
@@ -6736,7 +6746,9 @@ impl Parser {
     fn start_table_row(&mut self) {
         self.finish_paragraph();
         if self.current_table.is_none() {
-            self.current_table = Some(TableBuilder::default());
+            let mut table = TableBuilder::default();
+            table.preserve_authored_widths = self.preserve_authored_table_widths;
+            self.current_table = Some(table);
         }
         self.current_table_row = Some(self.new_table_row_builder());
     }
@@ -7946,6 +7958,7 @@ impl Parser {
             rows: table.rows,
             column_widths_twips,
             borders_visible: table.borders_visible,
+            preserve_authored_widths: table.preserve_authored_widths,
         }));
         self.last_table_row_template = None;
         Ok(())
@@ -10661,9 +10674,6 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
         }
         "asianbrkrule" => {
             Some("Asian line-breaking rule approximated by passive Unicode line layout")
-        }
-        "nogrowautofit" => {
-            Some("table autofit growth compatibility approximated by bounded table layout")
         }
         "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
             Some("section text grid approximated by passive paragraph layout")
@@ -17699,6 +17709,34 @@ mod tests {
                 "row preferred-width control leaked to text: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn nogrowautofit_normalizes_as_safe_table_width_metadata() {
+        let output =
+            parse_rtf(r"{\rtf1\nogrowautofit\trowd\cellx4000 A\cell\cellx8000 B\cell\row}")
+                .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert!(table.preserve_authored_widths);
+        assert_eq!(table.column_widths_twips, vec![4_000, 4_000]);
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("table autofit growth compatibility approximated")
+        }));
+
+        let output =
+            parse_rtf(r"{\rtf1\nogrowautofit0\trowd\cellx4000 A\cell\cellx8000 B\cell\row}")
+                .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        assert!(!table.preserve_authored_widths);
     }
 
     #[test]
