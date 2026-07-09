@@ -125,31 +125,34 @@ impl FontProvider {
     }
 
     pub fn glyph_metrics_for_char(&self, family_name: &str, ch: char) -> Option<FontGlyphMetrics> {
+        self.glyph_metrics_for_char_with_style(family_name, FontAssetStyle::default(), ch)
+    }
+
+    pub fn glyph_metrics_for_char_with_style(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        ch: char,
+    ) -> Option<FontGlyphMetrics> {
         let family_name = normalized_family_name(family_name);
         if family_name.is_empty() {
             return None;
         }
-        for asset in &self.assets {
-            if !asset.matches_family(&family_name) {
-                continue;
-            }
-            let Ok(face) = Face::parse(&asset.bytes, 0) else {
-                continue;
-            };
-            let Some(glyph_id) = face.glyph_index(ch) else {
-                continue;
-            };
-            let Some(advance_units) = face.glyph_hor_advance(glyph_id) else {
-                continue;
-            };
-            return Some(FontGlyphMetrics {
-                units_per_em: face.units_per_em(),
-                advance_units,
-                ascender_units: face.ascender(),
-                descender_units: face.descender(),
-            });
-        }
-        None
+        let asset = self.best_metric_asset_for_family_style_char(&family_name, style, ch)?;
+        glyph_metrics_for_asset(asset, ch)
+    }
+
+    fn best_metric_asset_for_family_style_char(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        ch: char,
+    ) -> Option<&FontAsset> {
+        self.assets
+            .iter()
+            .filter(|asset| asset.matches_family(family_name))
+            .filter(|asset| glyph_metrics_for_asset(asset, ch).is_some())
+            .min_by_key(|asset| supplied_font_style_mismatch_score(asset.style, style))
     }
 }
 
@@ -199,6 +202,25 @@ impl FontGlyphMetrics {
         }
         font_size_points * f32::from(self.advance_units) / f32::from(self.units_per_em)
     }
+}
+
+fn glyph_metrics_for_asset(asset: &FontAsset, ch: char) -> Option<FontGlyphMetrics> {
+    let face = Face::parse(&asset.bytes, 0).ok()?;
+    let glyph_id = face.glyph_index(ch)?;
+    let advance_units = face.glyph_hor_advance(glyph_id)?;
+    Some(FontGlyphMetrics {
+        units_per_em: face.units_per_em(),
+        advance_units,
+        ascender_units: face.ascender(),
+        descender_units: face.descender(),
+    })
+}
+
+fn supplied_font_style_mismatch_score(
+    asset_style: FontAssetStyle,
+    requested: FontAssetStyle,
+) -> u8 {
+    u8::from(asset_style.bold != requested.bold) + u8::from(asset_style.italic != requested.italic)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -407,6 +429,106 @@ mod tests {
             FontCoverage::NoAsset
         );
         assert!(!provider.has_asset_for_family("Greek"));
+    }
+
+    #[test]
+    fn style_aware_metrics_prefer_exact_matching_asset() {
+        let regular = FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        };
+        let bold = FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle {
+                bold: true,
+                italic: false,
+            },
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        };
+        let bold_italic = FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle {
+                bold: true,
+                italic: true,
+            },
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        };
+        let provider = FontProvider {
+            assets: vec![regular, bold, bold_italic],
+            limits: FontProviderLimits::default(),
+        };
+
+        let selected = provider
+            .best_metric_asset_for_family_style_char(
+                "Tuffy",
+                FontAssetStyle {
+                    bold: true,
+                    italic: true,
+                },
+                'A',
+            )
+            .expect("style-matched asset");
+
+        assert_eq!(
+            selected.style,
+            FontAssetStyle {
+                bold: true,
+                italic: true,
+            }
+        );
+        assert!(
+            provider
+                .glyph_metrics_for_char_with_style(
+                    "Tuffy",
+                    FontAssetStyle {
+                        bold: true,
+                        italic: true,
+                    },
+                    'A'
+                )
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn style_aware_metrics_prefer_closest_fallback_asset() {
+        let regular = FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        };
+        let bold = FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle {
+                bold: true,
+                italic: false,
+            },
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        };
+        let provider = FontProvider {
+            assets: vec![regular, bold],
+            limits: FontProviderLimits::default(),
+        };
+
+        let selected = provider
+            .best_metric_asset_for_family_style_char(
+                "Tuffy",
+                FontAssetStyle {
+                    bold: true,
+                    italic: true,
+                },
+                'A',
+            )
+            .expect("closest style asset");
+
+        assert_eq!(
+            selected.style,
+            FontAssetStyle {
+                bold: true,
+                italic: false,
+            }
+        );
     }
 
     #[test]

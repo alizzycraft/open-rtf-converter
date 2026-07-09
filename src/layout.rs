@@ -1,6 +1,6 @@
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 
-use crate::fonts::FontProvider;
+use crate::fonts::{FontAssetStyle, FontProvider};
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
@@ -6537,7 +6537,7 @@ fn measure_text_with_document_font(
         let font_width = font_provider
             .zip(source_font)
             .filter(|_| !matches!(family, PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats))
-            .and_then(|(provider, font)| supplied_font_glyph_metrics(provider, font, ch))
+            .and_then(|(provider, font)| supplied_font_glyph_metrics(provider, font, style, ch))
             .map(|metrics| metrics.advance_points(size));
         width += font_width.unwrap_or_else(|| base14_char_width_points(ch, size, family, style));
     }
@@ -6548,13 +6548,20 @@ fn measure_text_with_document_font(
 fn supplied_font_glyph_metrics(
     provider: &FontProvider,
     font: &FontDef,
+    style: &CharacterStyle,
     ch: char,
 ) -> Option<crate::fonts::FontGlyphMetrics> {
-    provider.glyph_metrics_for_char(&font.name, ch).or_else(|| {
-        font.alternate_name
-            .as_deref()
-            .and_then(|alternate| provider.glyph_metrics_for_char(alternate, ch))
-    })
+    let asset_style = FontAssetStyle {
+        bold: style.bold,
+        italic: style.italic,
+    };
+    provider
+        .glyph_metrics_for_char_with_style(&font.name, asset_style, ch)
+        .or_else(|| {
+            font.alternate_name.as_deref().and_then(|alternate| {
+                provider.glyph_metrics_for_char_with_style(alternate, asset_style, ch)
+            })
+        })
 }
 
 fn base14_char_width_points(
