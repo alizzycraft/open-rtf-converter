@@ -1923,6 +1923,9 @@ impl Parser {
             "mphant" if destination_allows_visible_content(&self.state) => {
                 self.state.character.hidden = true;
             }
+            "mborderBox" if destination_allows_visible_content(&self.state) => {
+                self.state.character.border = passive_office_math_border_box();
+            }
             "macc" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_accent_container_direct = true;
                 self.state.office_math_accent_overline_pending = false;
@@ -11826,6 +11829,16 @@ fn office_math_accent_is_passive_overline(text: &str) -> bool {
         normalized,
         "\u{00af}" | "\u{0305}" | "\u{033f}" | "\u{203e}"
     )
+}
+
+fn passive_office_math_border_box() -> TableCellBorder {
+    TableCellBorder {
+        visible: true,
+        width_twips: 10,
+        spacing_twips: 20,
+        color_index: None,
+        style: BorderStyle::Single,
+    }
 }
 
 fn append_shape_property_text(

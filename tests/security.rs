@@ -14361,6 +14361,99 @@ fn office_math_overline_accents_render_as_passive_strokes_without_control_leakag
 }
 
 #[test]
+fn office_math_border_boxes_render_passive_character_borders_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mborderBox{",
+        "\\",
+        "mborderBoxPr}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext x+1}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before x+1 After"),
+        "unexpected border-box math text: {text:?}"
+    );
+    let boxed_style = run_style_for_text(&parsed.document, "x+1").expect("border-box run");
+    assert!(boxed_style.border.visible);
+    assert_eq!(boxed_style.border.style, BorderStyle::Single);
+    assert!(boxed_style.border.width_twips <= RtfLimits::default().max_table_border_width_twips);
+    for forbidden in ["mmath", "moMath", "mborderBox", "mborderBoxPr", "mtext"] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math border-box control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math border-box controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before x+1 After"));
+    let passive_strokes = content
+        .operations
+        .windows(3)
+        .filter(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        })
+        .count();
+    assert!(
+        passive_strokes >= 4,
+        "Office math border box should render as passive line strokes, got {passive_strokes}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mborderBox",
+        b"mborderBoxPr",
+        b"mtext",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math border-box control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_hidden_limits_are_stripped_passively() {
     let input = rtf(&[
         "{",
