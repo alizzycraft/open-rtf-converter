@@ -6971,7 +6971,7 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
     let text = collect_text(&parsed.document);
 
     assert!(
-        text.contains("Equation 1/2 and escaped alpha/beta"),
+        text.contains("Equation 1\u{2044}2 and escaped alpha\u{2044}beta"),
         "normalized EQ text was {text:?}"
     );
     for forbidden in [
@@ -7005,9 +7005,13 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Equation 1"));
+    assert!(rendered_text.contains("2 and escaped alpha"));
+    assert!(rendered_text.contains("beta"));
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
     assert!(
-        rendered_text.contains("Equation 1/2 and escaped alpha/beta"),
-        "decoded PDF text did not contain passive EQ values: {rendered_text:?}"
+        symbol_bytes.iter().filter(|byte| **byte == 0xa4).count() >= 2,
+        "EQ fractions should encode semantic fraction slashes through passive Symbol byte 0xa4; got {symbol_bytes:?}"
     );
     for forbidden in [
         b"EQ".as_slice(),
@@ -8572,7 +8576,7 @@ visible after\par}"#
 
     assert!(text.contains("Visible before"));
     assert!(text.contains("visible after"));
-    assert!(text.contains("eq 1/2"));
+    assert!(text.contains("eq 1\u{2044}2"));
     assert!(text.contains("go Visible jump"));
     assert_eq!(
         text.matches("[Field removed: no passive result]").count(),
@@ -8618,7 +8622,13 @@ visible after\par}"#
 
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("visible after"));
-    assert!(rendered_text.contains("eq 1/2"));
+    assert!(rendered_text.contains("eq 1"));
+    assert!(rendered_text.contains("2"));
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    assert!(
+        symbol_bytes.contains(&0xa4),
+        "EQ field fraction should encode semantic slash through passive Symbol byte 0xa4; got {symbol_bytes:?}"
+    );
     assert!(rendered_text.contains("go Visible jump"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
     for forbidden in [
@@ -13652,7 +13662,7 @@ fn office_math_fractions_render_readable_passive_text() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("Before x+1/y After"));
+    assert!(text.contains("Before x+1\u{2044}y After"));
     for forbidden in ["mmath", "moMath", "mf", "mnum", "mden", "mtext"] {
         assert!(
             !text.contains(forbidden),
@@ -13672,7 +13682,13 @@ fn office_math_fractions_render_readable_passive_text() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
-    assert!(rendered_text.contains("Before x+1/y After"));
+    assert!(rendered_text.contains("Before x+1"));
+    assert!(rendered_text.contains("y After"));
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    assert!(
+        symbol_bytes.contains(&0xa4),
+        "Office math fraction slash should encode through passive Symbol byte 0xa4; got {symbol_bytes:?}"
+    );
     for forbidden in [
         b"mmath".as_slice(),
         b"moMath",

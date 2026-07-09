@@ -1790,7 +1790,7 @@ impl Parser {
                 self.state.destination = self.state.unicode_alternate_destination;
             }
             "mden" if destination_allows_visible_content(&self.state) => {
-                self.push_text("/", offset)?;
+                self.push_text("\u{2044}", offset)?;
             }
             "mbar" if destination_allows_visible_content(&self.state) => {
                 self.push_text("\u{00af}", offset)?;
@@ -12107,7 +12107,7 @@ fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
         return None;
     }
     Some(PassiveFieldResult {
-        text: format!("{numerator}/{denominator}"),
+        text: format!("{numerator}\u{2044}{denominator}"),
         font_name: None,
         font_size_half_points: None,
         form_field: false,
@@ -19141,7 +19141,7 @@ After\par}"#;
         assert!(text.contains("barcode"));
         assert!(text.contains("display"));
         assert!(text.contains("mergebarcode"));
-        assert!(text.contains("eq 1/2"));
+        assert!(text.contains("eq 1\u{2044}2"));
         assert!(text.contains("embed"));
         assert!(text.contains("go Visible jump"));
         assert!(text.contains("After"));
