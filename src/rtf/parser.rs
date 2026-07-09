@@ -14488,6 +14488,7 @@ const WMF_TA_BASELINE: u16 = 0x0018;
 const WMF_TA_HORIZONTAL_MASK: u16 = 0x0006;
 const WMF_TA_VERTICAL_MASK: u16 = 0x0018;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
+const WMF_ESCAPE_MFCOMMENT: u16 = 0x000f;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
 const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
 
@@ -15246,6 +15247,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
+            0x0626 if wmf_escape_is_non_visual_comment(data) => {}
             _ => {
                 skipped_record_count = skipped_record_count.checked_add(1)?;
             }
@@ -15552,6 +15554,16 @@ fn parse_wmf_setpixel_rect(
         pixel_rect_end(y, max_y),
         color,
     ))
+}
+
+fn wmf_escape_is_non_visual_comment(data: &[u8]) -> bool {
+    if data.len() < 4 || read_le_u16(data, 0) != Some(WMF_ESCAPE_MFCOMMENT) {
+        return false;
+    }
+    let Some(byte_count) = read_le_u16(data, 2).map(usize::from) else {
+        return false;
+    };
+    byte_count <= data.len().saturating_sub(4)
 }
 
 fn parse_wmf_textout(

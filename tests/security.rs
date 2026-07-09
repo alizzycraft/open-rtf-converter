@@ -17913,6 +17913,97 @@ fn wmf_unknown_record_reports_partial_preview_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_mfcomment_escape_is_ignored_as_non_visual_metadata_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000033e0000000100140000000000",
+        "1400000026060f001e00ffffffff040014000000576f72640e004d6963726f736f667420576f7264",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "070000001b045000b4000a001400",
+        "0700000018045a00be0014006400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF MFCOMMENT vector preview image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Rectangle { .. }) })
+    );
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| { matches!(command, StaticImageVectorCommand::Ellipse { .. }) })
+    );
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in ["wmetafile", "0626", "576f7264", "Word", "Microsoft Word"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF MFCOMMENT metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "WMF MFCOMMENT should not prevent supported records from rendering"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0626",
+        b"576f7264",
+        b"Word",
+        b"Microsoft Word",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF MFCOMMENT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003230000000100070000000000",
