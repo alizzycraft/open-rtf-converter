@@ -72,6 +72,7 @@ struct ParserState {
     skip_bytes: usize,
     destination: Destination,
     last_skipped_active_feature: Option<&'static str>,
+    suppress_skipped_object_payload_diagnostic: bool,
     inside_metadata: bool,
     inside_document_info: bool,
     inside_user_properties: bool,
@@ -153,6 +154,7 @@ impl Default for ParserState {
             skip_bytes: 0,
             destination: Destination::Body,
             last_skipped_active_feature: None,
+            suppress_skipped_object_payload_diagnostic: false,
             inside_metadata: false,
             inside_document_info: false,
             inside_user_properties: false,
@@ -2352,6 +2354,7 @@ impl Parser {
                 self.state.shape_result_seen = true;
                 if self.state.shape_visual_result_rendered {
                     self.state.destination = Destination::Ignored;
+                    self.state.suppress_skipped_object_payload_diagnostic = true;
                     self.diagnostics.push(Diagnostic::warning(
                         "ignoring duplicate shape result fallback after passive primary shape result",
                         Some(offset),
@@ -2621,6 +2624,7 @@ impl Parser {
                 if self.state.inside_shape && self.state.shape_visual_result_rendered {
                     self.handle_duplicate_shape_object_alternate(offset)?;
                     self.state.destination = Destination::Ignored;
+                    self.state.suppress_skipped_object_payload_diagnostic = true;
                 } else {
                     self.handle_active_content("OLE object", offset)?;
                     self.state.inside_object = true;
@@ -2863,7 +2867,13 @@ impl Parser {
                 && skipped_destination_active_feature(name).is_some() =>
             {
                 let feature = skipped_destination_active_feature(name).expect("checked above");
-                self.handle_skipped_destination_active_content(feature, offset)?;
+                if self.state.suppress_skipped_object_payload_diagnostic
+                    && feature == "object payload in skipped destination"
+                {
+                    self.reject_skipped_destination_active_content(feature, offset)?;
+                } else {
+                    self.handle_skipped_destination_active_content(feature, offset)?;
+                }
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
             name if matches!(
@@ -10180,18 +10190,27 @@ impl Parser {
         feature: &'static str,
         offset: usize,
     ) -> Result<(), ParseError> {
-        if self.options.active_content_policy == ActiveContentPolicy::Reject {
-            return Err(ParseError::ActiveContentRejected {
-                feature: feature.to_string(),
-                offset,
-            });
-        }
+        self.reject_skipped_destination_active_content(feature, offset)?;
         if self.state.last_skipped_active_feature != Some(feature) {
             self.diagnostics.push(Diagnostic::warning(
                 format!("active content removed: {feature}"),
                 Some(offset),
             ));
             self.state.last_skipped_active_feature = Some(feature);
+        }
+        Ok(())
+    }
+
+    fn reject_skipped_destination_active_content(
+        &self,
+        feature: &'static str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.options.active_content_policy == ActiveContentPolicy::Reject {
+            return Err(ParseError::ActiveContentRejected {
+                feature: feature.to_string(),
+                offset,
+            });
         }
         Ok(())
     }

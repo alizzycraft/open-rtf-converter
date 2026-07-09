@@ -4564,6 +4564,16 @@ fn shape_result_fallback_is_ignored_after_primary_passive_visual_result() {
             .message
             .contains("rendering safe passive shape text/result")
     }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("ignoring duplicate embedded object alternate after passive shape result")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("object payload in skipped destination")
+    }));
     for forbidden in ["objdata", "shprslt", "wmetafile", "JavaScript"] {
         assert!(
             !text.contains(forbidden),
@@ -4596,6 +4606,11 @@ fn shape_result_fallback_is_ignored_after_primary_passive_visual_result() {
             .message
             .contains("rendering safe passive shape text/result")
     }));
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("object payload in skipped destination")
+    }));
     for forbidden in [
         b"objdata".as_slice(),
         b"shprslt",
@@ -4617,6 +4632,29 @@ fn shape_result_fallback_is_ignored_after_primary_passive_visual_result() {
             String::from_utf8_lossy(forbidden)
         );
     }
+}
+
+#[test]
+fn duplicate_shape_fallback_object_still_rejects_active_payload_in_reject_mode() {
+    let input = concat!(
+        r"{\rtf1 Before {\shp{\*\shpinst",
+        r"{\pict\picwgoal2160\pichgoal720\wmetafile8 01020304}",
+        r"{\shprslt{\object\objw2160\objh720\objemb",
+        r"{\objdata 4142432f4a617661536372697074}",
+        r"{\result{\pict\wmetafile8}}}}",
+        r"}} After\par}",
+    )
+    .as_bytes()
+    .to_vec();
+    let options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(&input, &options),
+        Err(ParseError::ActiveContentRejected { .. })
+    ));
 }
 
 #[test]
