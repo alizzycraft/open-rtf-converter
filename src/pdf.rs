@@ -1077,7 +1077,7 @@ fn supplied_text_encoding_parts(
         .assets
         .iter()
         .enumerate()
-        .filter(|(_, asset)| asset.matches_family(&source_font.name))
+        .filter(|(_, asset)| supplied_font_asset_matches_font(asset, source_font))
         .filter_map(|(asset_index, asset)| {
             let (glyphs, encoded) = encode_text_with_font_asset(&fragment.text, asset)?;
             (!glyphs.is_empty()).then(|| {
@@ -1091,6 +1091,14 @@ fn supplied_text_encoding_parts(
         })
         .min_by_key(|(score, asset_index, _, _)| (*score, *asset_index))
         .map(|(_, asset_index, glyphs, encoded)| (asset_index, glyphs, encoded))
+}
+
+fn supplied_font_asset_matches_font(asset: &FontAsset, font: &crate::model::FontDef) -> bool {
+    asset.matches_family(&font.name)
+        || font
+            .alternate_name
+            .as_deref()
+            .is_some_and(|alternate| asset.matches_family(alternate))
 }
 
 fn supplied_font_style_mismatch_score(

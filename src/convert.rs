@@ -121,7 +121,7 @@ fn passive_font_substitution_diagnostics(
         if font_name_matches_pdf_family(&font.name, family) {
             continue;
         }
-        if font_provider.has_asset_for_family(&font.name) {
+        if font_provider_has_asset_for_font(font_provider, font) {
             continue;
         }
         let key = (font.name.to_ascii_lowercase(), family);
@@ -342,13 +342,22 @@ fn collect_unsupported_glyph_diagnostic_from_run(
         return;
     }
     seen.push(key);
-    let font_name = document
+    let Some(font) = document
         .fonts
         .iter()
         .find(|font| font.index == run.style.font_index)
-        .map(|font| font.name.as_str())
-        .unwrap_or("unknown");
-    let message = match font_provider.coverage_for_char(font_name, sample_char) {
+    else {
+        diagnostics.push(Diagnostic::warning(
+            format!(
+                "{} characters for font 'unknown' need passive font asset support; current PDF base-font fallback may render replacement glyphs",
+                script
+            ),
+            None,
+        ));
+        return;
+    };
+    let font_name = font.name.as_str();
+    let message = match font_provider_coverage_for_font_char(font_provider, font, sample_char) {
         FontCoverage::NoAsset => format!(
             "{} characters for font '{}' need passive font asset support; current PDF base-font fallback may render replacement glyphs",
             script, font_name
@@ -363,6 +372,35 @@ fn collect_unsupported_glyph_diagnostic_from_run(
         ),
     };
     diagnostics.push(Diagnostic::warning(message, None));
+}
+
+fn font_provider_has_asset_for_font(font_provider: &FontProvider, font: &FontDef) -> bool {
+    font_provider.has_asset_for_family(&font.name)
+        || font
+            .alternate_name
+            .as_deref()
+            .is_some_and(|alternate| font_provider.has_asset_for_family(alternate))
+}
+
+fn font_provider_coverage_for_font_char(
+    font_provider: &FontProvider,
+    font: &FontDef,
+    ch: char,
+) -> FontCoverage {
+    let primary = font_provider.coverage_for_char(&font.name, ch);
+    let alternate = font
+        .alternate_name
+        .as_deref()
+        .map(|alternate| font_provider.coverage_for_char(alternate, ch));
+
+    if primary == FontCoverage::Covered || alternate == Some(FontCoverage::Covered) {
+        FontCoverage::Covered
+    } else if primary == FontCoverage::MissingGlyph || alternate == Some(FontCoverage::MissingGlyph)
+    {
+        FontCoverage::MissingGlyph
+    } else {
+        FontCoverage::NoAsset
+    }
 }
 
 fn unsupported_passive_glyph_script(text: &str) -> Option<(&'static str, char)> {

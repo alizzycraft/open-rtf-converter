@@ -6119,12 +6119,24 @@ fn measure_text_with_document_font(
         let font_width = font_provider
             .zip(source_font)
             .filter(|_| !matches!(family, PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats))
-            .and_then(|(provider, font)| provider.glyph_metrics_for_char(&font.name, ch))
+            .and_then(|(provider, font)| supplied_font_glyph_metrics(provider, font, ch))
             .map(|metrics| metrics.advance_points(size));
         width += font_width.unwrap_or_else(|| base14_char_width_points(ch, size, family, style));
     }
     (width + character_spacing_width(text, style) + passive_kerning_width(text, style, family))
         * style.horizontal_scale()
+}
+
+fn supplied_font_glyph_metrics(
+    provider: &FontProvider,
+    font: &FontDef,
+    ch: char,
+) -> Option<crate::fonts::FontGlyphMetrics> {
+    provider.glyph_metrics_for_char(&font.name, ch).or_else(|| {
+        font.alternate_name
+            .as_deref()
+            .and_then(|alternate| provider.glyph_metrics_for_char(alternate, ch))
+    })
 }
 
 fn base14_char_width_points(
