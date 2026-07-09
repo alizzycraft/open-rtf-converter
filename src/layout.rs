@@ -1895,19 +1895,25 @@ fn start_new_page_for_kept_paragraphs(
         return;
     }
 
-    let kept_height =
-        paragraph_block_height(paragraph, content_width, markers, document, font_provider)
-            + next_paragraph
-                .map(|paragraph| {
-                    paragraph_block_height(
-                        paragraph,
-                        content_width,
-                        markers,
-                        document,
-                        font_provider,
-                    )
-                })
-                .unwrap_or(0.0);
+    let kept_height = paragraph_block_height(
+        paragraph,
+        content_width,
+        markers,
+        document,
+        *geometry,
+        font_provider,
+    ) + next_paragraph
+        .map(|paragraph| {
+            paragraph_block_height(
+                paragraph,
+                content_width,
+                markers,
+                document,
+                *geometry,
+                font_provider,
+            )
+        })
+        .unwrap_or(0.0);
     let usable_height = (geometry.height - geometry.margin_top - margin_bottom).max(0.0);
     if kept_height <= usable_height && *cursor_y - kept_height < margin_bottom {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
@@ -1919,6 +1925,7 @@ fn paragraph_block_height(
     content_width: f32,
     markers: &MarkerContext,
     document: &Document,
+    geometry: PageGeometry,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
     let line_height = wrap_paragraph_with_font_provider(
@@ -1929,7 +1936,7 @@ fn paragraph_block_height(
         font_provider,
     )
     .into_iter()
-    .map(|line| apply_line_spacing(line.height, &paragraph.style))
+    .map(|line| apply_line_spacing_with_grid(line.height, &paragraph.style, geometry))
     .sum::<f32>();
     twips_to_points(effective_space_before_twips(&paragraph.style))
         + line_height
@@ -12239,6 +12246,33 @@ mod tests {
         assert!(!layout_text(&layout.pages[0]).contains("Keep next"));
         assert!(layout_text(&layout.pages[1]).contains("Keep next"));
         assert!(layout_text(&layout.pages[1]).contains("Follower"));
+    }
+
+    #[test]
+    fn keep_with_next_preflight_uses_section_line_grid_spacing() {
+        let mut document = small_test_page_document();
+        document.page.text_line_grid_twips = Some(720);
+        let mut keep_next_style = ParagraphStyle::default();
+        keep_next_style.keep_with_next = true;
+        document.blocks = (0..2)
+            .map(|_| paragraph_with_text("Filler"))
+            .chain([
+                Block::Paragraph(Paragraph {
+                    style: keep_next_style,
+                    runs: vec![Run {
+                        text: "Keep next".to_string(),
+                        style: Default::default(),
+                    }],
+                }),
+                paragraph_with_text("Follower"),
+            ])
+            .collect();
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert_eq!(layout.pages.len(), 2);
+        assert_eq!(layout_text(&layout.pages[0]), "FillerFiller");
+        assert_eq!(layout_text(&layout.pages[1]), "Keep nextFollower");
     }
 
     #[test]
