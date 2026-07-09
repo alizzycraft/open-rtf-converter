@@ -3674,6 +3674,18 @@ impl Parser {
                 self.current_section_page.page_number_start = None;
                 self.upsert_current_section_settings();
             }
+            "pgnx" => {
+                self.current_section_page.page_number_x_twips = Some(
+                    self.clamp_page_number_position(control.parameter, "page number x", offset),
+                );
+                self.upsert_current_section_settings();
+            }
+            "pgny" => {
+                self.current_section_page.page_number_y_twips = Some(
+                    self.clamp_page_number_position(control.parameter, "page number y", offset),
+                );
+                self.upsert_current_section_settings();
+            }
             "pgndec" => self.set_page_number_format(PageNumberFormat::Decimal),
             "pgnucrm" => self.set_page_number_format(PageNumberFormat::UpperRoman),
             "pgnlcrm" => self.set_page_number_format(PageNumberFormat::LowerRoman),
@@ -4271,6 +4283,21 @@ impl Parser {
             ));
         }
         clamped
+    }
+
+    fn clamp_page_number_position(
+        &mut self,
+        value: Option<i32>,
+        label: &str,
+        offset: usize,
+    ) -> i32 {
+        self.clamp_page_value(
+            value.unwrap_or(0),
+            0,
+            self.limits().max_page_dimension_twips,
+            label,
+            offset,
+        )
     }
 
     fn set_page_number_format(&mut self, format: PageNumberFormat) {
@@ -10637,9 +10664,6 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
         }
         "nogrowautofit" => {
             Some("table autofit growth compatibility approximated by bounded table layout")
-        }
-        "pgnx" | "pgny" => {
-            Some("page number position approximated by passive header/footer layout")
         }
         "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
             Some("section text grid approximated by passive paragraph layout")
@@ -18048,6 +18072,46 @@ mod tests {
                 format!("Page {PAGE_NUMBER_MARKER}")
             );
         }
+    }
+
+    #[test]
+    fn normalizes_page_number_position_controls_as_safe_metadata() {
+        let output =
+            parse_rtf(r"{\rtf1\pgnx360\pgny1440{\header Page \chpgn\par}Body\par}").unwrap();
+
+        assert_eq!(output.document.page.page_number_x_twips, Some(360));
+        assert_eq!(output.document.page.page_number_y_twips, Some(1_440));
+        assert_eq!(
+            output.document.header[0].runs[0].text,
+            format!("Page {PAGE_NUMBER_MARKER}")
+        );
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("page number position approximated")
+        }));
+    }
+
+    #[test]
+    fn clamps_page_number_position_controls() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_page_dimension_twips: 1_440,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output =
+            parse_rtf_bytes_with_options(br"{\rtf1\pgnx-20\pgny9999 Body\par}", &options).unwrap();
+
+        assert_eq!(output.document.page.page_number_x_twips, Some(0));
+        assert_eq!(output.document.page.page_number_y_twips, Some(1_440));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("page number y clamped"))
+        );
     }
 
     #[test]

@@ -8126,9 +8126,9 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
         "\\",
         "sectd",
         "\\",
-        "pgnx720",
+        "pgnx360",
         "\\",
-        "pgny720",
+        "pgny1440",
         "\\",
         "sectlinegrid360",
         "\\",
@@ -8154,6 +8154,8 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
     let text = collect_text(&parsed.document);
 
     assert_eq!(parsed.document.page.text_line_grid_twips, None);
+    assert_eq!(parsed.document.page.page_number_x_twips, Some(360));
+    assert_eq!(parsed.document.page.page_number_y_twips, Some(1_440));
     assert!(text.contains("Visible section grid"));
     assert!(text.contains(PAGE_NUMBER_MARKER));
     for forbidden in [
@@ -8180,8 +8182,12 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
         "section compatibility controls should not be reported as unsupported: {:?}",
         parsed.diagnostics
     );
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("page number position approximated")
+    }));
     for expected in [
-        "page number position approximated by passive header/footer layout",
         "section line grid applied as bounded passive paragraph line pitch",
         "section text grid approximated by passive paragraph layout",
     ] {
@@ -8209,6 +8215,16 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
     let pdf_text = decoded_pdf_text(&content);
     assert!(pdf_text.contains("Visible section grid"));
     assert!(pdf_text.contains("Page 1"));
+    let page_number_position =
+        pdf_first_text_position_for_text(&content, "Page").expect("page number position");
+    assert!(
+        (page_number_position.0 - 18.0).abs() < 0.01,
+        "expected page number x at 18pt, got {page_number_position:?}"
+    );
+    assert!(
+        (page_number_position.1 - 708.75).abs() < 0.01,
+        "expected page number baseline near 708.75pt, got {page_number_position:?}"
+    );
     for forbidden in [
         b"pgnx".as_slice(),
         b"pgny",

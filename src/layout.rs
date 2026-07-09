@@ -190,6 +190,8 @@ struct PageGeometry {
     page_border_includes_header: bool,
     page_border_includes_footer: bool,
     line_numbering: crate::model::LineNumbering,
+    page_number_x: Option<f32>,
+    page_number_y: Option<f32>,
     text_line_grid_twips: Option<i32>,
     numbering: PageNumbering,
     section_number: usize,
@@ -257,6 +259,8 @@ impl PageGeometry {
             page_border_includes_header: settings.page_border_includes_header,
             page_border_includes_footer: settings.page_border_includes_footer,
             line_numbering: settings.line_numbering,
+            page_number_x: settings.page_number_x_twips.map(twips_to_points),
+            page_number_y: settings.page_number_y_twips.map(twips_to_points),
             text_line_grid_twips: settings.text_line_grid_twips,
             numbering,
             section_number: 1,
@@ -2384,6 +2388,7 @@ fn layout_repeating_header_footer(
         };
 
         for paragraph in paragraphs {
+            let paragraph_contains_page_number = paragraph_contains_page_number_marker(paragraph);
             let lines = wrap_paragraph_with_font_provider(
                 paragraph,
                 geometry.content_width,
@@ -2393,13 +2398,23 @@ fn layout_repeating_header_footer(
             );
             let line_count = lines.len();
             for (line_idx, line) in lines.into_iter().enumerate() {
-                let x = aligned_x(
+                let mut x = aligned_x(
                     geometry.margin_left,
                     geometry.content_width,
                     line.width,
                     &paragraph.style,
                     line_idx == 0,
                 );
+                let mut line_cursor_y = cursor_y;
+                if paragraph_contains_page_number {
+                    if let Some(page_number_x) = geometry.page_number_x {
+                        x = page_number_x.clamp(0.0, geometry.width);
+                    }
+                    if let Some(page_number_y) = geometry.page_number_y {
+                        line_cursor_y =
+                            (geometry.height - page_number_y).clamp(0.0, geometry.height);
+                    }
+                }
                 let word_spacing = justified_word_spacing(
                     &line,
                     &paragraph.style,
@@ -2417,7 +2432,7 @@ fn layout_repeating_header_footer(
                         &mut scratch_pages,
                         document,
                         geometry.margin_left + line_left_indent,
-                        cursor_y - line.height,
+                        line_cursor_y - line.height,
                         paragraph_line_width(
                             geometry.content_width,
                             &paragraph.style,
@@ -2436,7 +2451,7 @@ fn layout_repeating_header_footer(
                     &paragraph.style,
                     line_idx,
                     line_count,
-                    cursor_y,
+                    line_cursor_y,
                     line.height,
                     document,
                     false,
@@ -2445,14 +2460,14 @@ fn layout_repeating_header_footer(
                     &mut scratch_pages,
                     &paragraph.style,
                     x,
-                    cursor_y,
+                    line_cursor_y,
                     line.height,
                 );
                 push_line(
                     &mut scratch_pages,
                     &line,
                     x,
-                    cursor_y,
+                    line_cursor_y,
                     document,
                     word_spacing,
                 );
@@ -4239,6 +4254,13 @@ fn contains_inline_marker(text: &str) -> bool {
         || text.contains(DOCUMENT_WORDS_MARKER)
         || text.contains(DOCUMENT_CHARS_MARKER)
         || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
+}
+
+fn paragraph_contains_page_number_marker(paragraph: &Paragraph) -> bool {
+    paragraph
+        .runs
+        .iter()
+        .any(|run| run.text.contains(PAGE_NUMBER_MARKER))
 }
 
 #[derive(Debug, Default)]
@@ -13456,6 +13478,27 @@ mod tests {
         assert!(layout_text(&layout.pages[1]).contains("Page V"));
         assert!(!layout_text(&layout.pages[0]).contains("Page 4"));
         assert!(!layout_text(&layout.pages[1]).contains("Page 5"));
+    }
+
+    #[test]
+    fn positions_header_page_number_from_safe_page_number_coordinates() {
+        let mut document = Document::default();
+        document.page.page_number_x_twips = Some(360);
+        document.page.page_number_y_twips = Some(1_440);
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Page {PAGE_NUMBER_MARKER}"),
+                style: Default::default(),
+            }],
+        }];
+        document.blocks = vec![paragraph_with_text("Body")];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragment = text_fragment_for(&layout.pages[0], "Page ");
+
+        assert!((fragment.x - 18.0).abs() < 0.01);
+        assert!((fragment.baseline_y - 708.75).abs() < 0.01);
     }
 
     #[test]
