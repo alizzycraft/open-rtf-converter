@@ -125,6 +125,11 @@ struct ParserState {
     office_math_pending_end_delimiter: String,
     office_math_active_end_delimiter: String,
     office_math_consumed_delimiter: bool,
+    office_math_array_context: OfficeMathArrayKind,
+    office_math_array_container_direct: OfficeMathArrayKind,
+    office_math_array_rows_seen: usize,
+    office_math_array_row_direct: bool,
+    office_math_array_row_cells_seen: usize,
     shape_property_capture: Option<ShapePropertyCapture>,
     shape_property_name: String,
     shape_property_value: String,
@@ -207,12 +212,25 @@ impl Default for ParserState {
             office_math_pending_end_delimiter: String::new(),
             office_math_active_end_delimiter: String::new(),
             office_math_consumed_delimiter: false,
+            office_math_array_context: OfficeMathArrayKind::None,
+            office_math_array_container_direct: OfficeMathArrayKind::None,
+            office_math_array_rows_seen: 0,
+            office_math_array_row_direct: false,
+            office_math_array_row_cells_seen: 0,
             shape_property_capture: None,
             shape_property_name: String::new(),
             shape_property_value: String::new(),
             at_group_start: false,
         }
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+enum OfficeMathArrayKind {
+    #[default]
+    None,
+    Matrix,
+    EquationArray,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1107,6 +1125,10 @@ impl Parser {
         child.at_group_start = true;
         child.office_math_active_end_delimiter.clear();
         child.office_math_consumed_delimiter = false;
+        child.office_math_array_container_direct = OfficeMathArrayKind::None;
+        child.office_math_array_rows_seen = 0;
+        child.office_math_array_row_direct = false;
+        child.office_math_array_row_cells_seen = 0;
         if parent.metadata_property.is_some() {
             child.metadata_property = None;
             child.metadata_property_text.clear();
@@ -1816,10 +1838,33 @@ impl Parser {
                 self.push_text("\u{221a}", offset)?;
                 self.state.character.overline = true;
             }
+            "mmatrix" if destination_allows_visible_content(&self.state) => {
+                self.start_office_math_array(OfficeMathArrayKind::Matrix);
+            }
+            "meqArr" if destination_allows_visible_content(&self.state) => {
+                self.start_office_math_array(OfficeMathArrayKind::EquationArray);
+            }
+            "mr" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_array_kind() == OfficeMathArrayKind::Matrix =>
+            {
+                self.start_office_math_matrix_row(offset)?;
+            }
+            "marg"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_matrix_row() =>
+            {
+                self.start_office_math_matrix_cell(offset)?;
+            }
             "me" if destination_allows_visible_content(&self.state)
                 && self.has_pending_office_math_delimiters() =>
             {
                 self.start_office_math_delimited_expression(offset)?;
+            }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_array_kind()
+                    == OfficeMathArrayKind::EquationArray =>
+            {
+                self.start_office_math_equation_array_row(offset)?;
             }
             "msub" if destination_allows_visible_content(&self.state) => {
                 self.state.character.baseline_shift_half_points =
@@ -4862,6 +4907,83 @@ impl Parser {
     fn has_pending_office_math_delimiters(&self) -> bool {
         !self.state.office_math_pending_begin_delimiter.is_empty()
             || !self.state.office_math_pending_end_delimiter.is_empty()
+    }
+
+    fn start_office_math_array(&mut self, kind: OfficeMathArrayKind) {
+        self.state.office_math_array_context = kind;
+        self.state.office_math_array_container_direct = kind;
+        self.state.office_math_array_rows_seen = 0;
+        self.state.office_math_array_row_direct = false;
+        self.state.office_math_array_row_cells_seen = 0;
+    }
+
+    fn office_math_direct_parent_array_kind(&self) -> OfficeMathArrayKind {
+        self.stack
+            .last()
+            .map(|state| state.office_math_array_container_direct)
+            .unwrap_or(OfficeMathArrayKind::None)
+    }
+
+    fn office_math_direct_parent_is_matrix_row(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_array_row_direct)
+    }
+
+    fn start_office_math_matrix_row(&mut self, offset: usize) -> Result<(), ParseError> {
+        let row_index = self
+            .stack
+            .last_mut()
+            .map(|parent| {
+                let row_index = parent.office_math_array_rows_seen;
+                parent.office_math_array_rows_seen =
+                    parent.office_math_array_rows_seen.saturating_add(1);
+                row_index
+            })
+            .unwrap_or(0);
+        if row_index > 0 {
+            self.push_text("\n", offset)?;
+        }
+        self.state.office_math_array_context = OfficeMathArrayKind::Matrix;
+        self.state.office_math_array_row_direct = true;
+        self.state.office_math_array_row_cells_seen = 0;
+        Ok(())
+    }
+
+    fn start_office_math_matrix_cell(&mut self, offset: usize) -> Result<(), ParseError> {
+        let cell_index = self
+            .stack
+            .last_mut()
+            .map(|parent| {
+                let cell_index = parent.office_math_array_row_cells_seen;
+                parent.office_math_array_row_cells_seen =
+                    parent.office_math_array_row_cells_seen.saturating_add(1);
+                cell_index
+            })
+            .unwrap_or(0);
+        if cell_index > 0 {
+            self.push_text("\t", offset)?;
+        }
+        self.state.office_math_array_context = OfficeMathArrayKind::Matrix;
+        Ok(())
+    }
+
+    fn start_office_math_equation_array_row(&mut self, offset: usize) -> Result<(), ParseError> {
+        let row_index = self
+            .stack
+            .last_mut()
+            .map(|parent| {
+                let row_index = parent.office_math_array_rows_seen;
+                parent.office_math_array_rows_seen =
+                    parent.office_math_array_rows_seen.saturating_add(1);
+                row_index
+            })
+            .unwrap_or(0);
+        if row_index > 0 {
+            self.push_text("\n", offset)?;
+        }
+        self.state.office_math_array_context = OfficeMathArrayKind::EquationArray;
+        Ok(())
     }
 
     fn start_office_math_delimited_expression(&mut self, offset: usize) -> Result<(), ParseError> {

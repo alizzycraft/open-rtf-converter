@@ -14270,6 +14270,200 @@ fn office_math_delimiters_render_passive_text_without_control_leakage() {
 }
 
 #[test]
+fn office_math_matrices_render_passive_rows_and_cells() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mmatrix{",
+        "\\",
+        "mr{",
+        "\\",
+        "marg{",
+        "\\",
+        "mtext A1}}{",
+        "\\",
+        "marg{",
+        "\\",
+        "mtext B2}}}{",
+        "\\",
+        "mr{",
+        "\\",
+        "marg{",
+        "\\",
+        "mtext C3}}{",
+        "\\",
+        "marg{",
+        "\\",
+        "mtext D4}}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before A1\tB2\nC3\tD4 After"),
+        "unexpected matrix math text: {text:?}"
+    );
+    for forbidden in ["mmath", "moMath", "mmatrix", "mr", "marg", "mtext"] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math matrix control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math matrix controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for visible in ["Before A1", "B2", "C3", "D4 After"] {
+        assert!(
+            rendered_text.contains(visible),
+            "matrix visible text missing from PDF text: {visible}; got {rendered_text:?}"
+        );
+    }
+    let a1_position = pdf_first_text_position_for_text(&content, "A1").expect("A1 position");
+    let b2_position = pdf_first_text_position_for_text(&content, "B2").expect("B2 position");
+    let c3_position = pdf_first_text_position_for_text(&content, "C3").expect("C3 position");
+    assert!(
+        b2_position.0 > a1_position.0,
+        "Office math matrix cells should advance horizontally: A1={a1_position:?}, B2={b2_position:?}"
+    );
+    assert!(
+        c3_position.1 < a1_position.1,
+        "Office math matrix rows should render below prior rows: A1={a1_position:?}, C3={c3_position:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mmatrix",
+        b"marg",
+        b"mtext",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math matrix control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn office_math_equation_arrays_render_passive_rows() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "meqArr{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext X=1}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext Y=2}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before X=1\nY=2 After"),
+        "unexpected equation-array math text: {text:?}"
+    );
+    for forbidden in ["mmath", "moMath", "meqArr", "me", "mtext"] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math equation-array control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math equation-array controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for visible in ["Before X=1", "Y=2 After"] {
+        assert!(
+            rendered_text.contains(visible),
+            "equation-array visible text missing from PDF text: {visible}; got {rendered_text:?}"
+        );
+    }
+    let x_position = pdf_first_text_position_for_text(&content, "X=1").expect("X=1 position");
+    let y_position = pdf_first_text_position_for_text(&content, "Y=2").expect("Y=2 position");
+    assert!(
+        y_position.1 < x_position.1,
+        "Office math equation-array rows should render below prior rows: X=1={x_position:?}, Y=2={y_position:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"meqArr",
+        b"mtext",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math equation-array control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn legacy_code_page_hex_escapes_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
