@@ -653,6 +653,8 @@ struct PreparedCellLine {
     style: ParagraphStyle,
     is_first_line: bool,
     is_last_line: bool,
+    space_before: f32,
+    space_after: f32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -2843,14 +2845,21 @@ fn prepare_table_row(
             cell.paragraphs
                 .iter()
                 .flat_map(|paragraph| {
-                    let lines = wrap_paragraph_with_font_provider(
+                    let mut lines = wrap_paragraph_with_font_provider(
                         paragraph,
                         (visual_cell.width - padding.left - padding.right).max(12.0),
                         markers,
                         document,
                         font_provider,
                     );
+                    for line in &mut lines {
+                        line.height = apply_line_spacing(line.height, &paragraph.style);
+                    }
                     let line_count = lines.len();
+                    let paragraph_space_before =
+                        twips_to_points(effective_space_before_twips(&paragraph.style));
+                    let paragraph_space_after =
+                        twips_to_points(effective_space_after_twips(&paragraph.style));
                     lines
                         .into_iter()
                         .enumerate()
@@ -2859,6 +2868,16 @@ fn prepare_table_row(
                             style: paragraph.style.clone(),
                             is_first_line: idx == 0,
                             is_last_line: idx + 1 == line_count,
+                            space_before: if idx == 0 {
+                                paragraph_space_before
+                            } else {
+                                0.0
+                            },
+                            space_after: if idx + 1 == line_count {
+                                paragraph_space_after
+                            } else {
+                                0.0
+                            },
                         })
                 })
                 .collect::<Vec<_>>()
@@ -2871,7 +2890,11 @@ fn prepare_table_row(
         .map(|(lines, padding)| {
             lines
                 .iter()
-                .map(|prepared_line| prepared_line.line.height)
+                .map(|prepared_line| {
+                    prepared_line.space_before
+                        + prepared_line.line.height
+                        + prepared_line.space_after
+                })
                 .sum::<f32>()
                 + padding.top
                 + padding.bottom
@@ -2977,7 +3000,9 @@ fn push_table_row(
             .unwrap_or(prepared.row_height);
         let content_height = lines
             .iter()
-            .map(|prepared_line| prepared_line.line.height)
+            .map(|prepared_line| {
+                prepared_line.space_before + prepared_line.line.height + prepared_line.space_after
+            })
             .sum::<f32>();
         let available_height = (span_height - padding.top - padding.bottom).max(0.0);
         let extra_height = (available_height - content_height).max(0.0);
@@ -2988,6 +3013,7 @@ fn push_table_row(
         };
         let mut line_top = top - padding.top - vertical_offset;
         for prepared_line in lines {
+            line_top -= prepared_line.space_before;
             let content_left = row_left + visual_cell.x_offset + padding.left;
             let cell_content_width = (visual_cell.width - padding.left - padding.right).max(1.0);
             if let Some(color_index) = prepared_line.style.shading_color_index
@@ -3061,7 +3087,7 @@ fn push_table_row(
                 document,
                 word_spacing,
             );
-            line_top -= prepared_line.line.height;
+            line_top -= prepared_line.line.height + prepared_line.space_after;
         }
     }
 
@@ -7624,6 +7650,105 @@ mod tests {
             .expect("row background");
 
         assert!((height - 18.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn lays_out_table_cell_paragraph_line_spacing() {
+        let mut document = Document::default();
+        let mut paragraph_style = ParagraphStyle::default();
+        paragraph_style.line_spacing_twips = Some(-480);
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440],
+            borders_visible: true,
+            rows: vec![TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    borders: TableCellBorders::default(),
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: paragraph_style,
+                        runs: vec![Run {
+                            text: "First\nSecond".to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let baselines = text_baselines(&layout.pages[0]);
+
+        assert_eq!(baselines.len(), 2);
+        assert!((baselines[0] - baselines[1] - 24.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn lays_out_table_cell_paragraph_spacing_in_row_height() {
+        let mut document = Document::default();
+        document.colors = vec![
+            Color::default(),
+            Color {
+                red: 240,
+                green: 240,
+                blue: 240,
+            },
+        ];
+        let mut paragraph_style = ParagraphStyle::default();
+        paragraph_style.space_before_twips = 240;
+        paragraph_style.space_after_twips = 360;
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440],
+            borders_visible: true,
+            rows: vec![TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: Some(1),
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    borders: TableCellBorders::default(),
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: paragraph_style,
+                        runs: vec![Run {
+                            text: "Spaced".to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let height = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Highlight { height, .. } => Some(*height),
+                _ => None,
+            })
+            .expect("row background");
+
+        assert!((height - 45.0).abs() < 0.01);
     }
 
     #[test]
