@@ -143,6 +143,11 @@ struct ParserState {
     office_math_accent_character_capture: bool,
     office_math_accent_character_text: String,
     office_math_accent_overline_pending: bool,
+    office_math_group_char_container_direct: bool,
+    office_math_group_char_property_direct: bool,
+    office_math_group_char_capture: bool,
+    office_math_group_char_text: String,
+    office_math_group_char_pending: OfficeMathGroupCharKind,
     shape_property_capture: Option<ShapePropertyCapture>,
     shape_property_name: String,
     shape_property_value: String,
@@ -243,6 +248,11 @@ impl Default for ParserState {
             office_math_accent_character_capture: false,
             office_math_accent_character_text: String::new(),
             office_math_accent_overline_pending: false,
+            office_math_group_char_container_direct: false,
+            office_math_group_char_property_direct: false,
+            office_math_group_char_capture: false,
+            office_math_group_char_text: String::new(),
+            office_math_group_char_pending: OfficeMathGroupCharKind::None,
             shape_property_capture: None,
             shape_property_name: String::new(),
             shape_property_value: String::new(),
@@ -265,6 +275,14 @@ enum OfficeMathLimitKind {
     None,
     Lower,
     Upper,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+enum OfficeMathGroupCharKind {
+    #[default]
+    None,
+    Over,
+    Under,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1170,6 +1188,8 @@ impl Parser {
         child.office_math_radical_degree_hide_property_seen = false;
         child.office_math_accent_container_direct = false;
         child.office_math_accent_property_direct = false;
+        child.office_math_group_char_container_direct = false;
+        child.office_math_group_char_property_direct = false;
         if parent.metadata_property.is_some() {
             child.metadata_property = None;
             child.metadata_property_text.clear();
@@ -1360,6 +1380,7 @@ impl Parser {
                 }
             }
             self.finish_office_math_accent_group(&mut previous, offset)?;
+            self.finish_office_math_group_char_group(&mut previous, offset)?;
             self.finish_shape_property_group(&mut previous, offset)?;
 
             if self.state.inside_field && previous.inside_field {
@@ -1940,6 +1961,20 @@ impl Parser {
                 self.state.office_math_accent_character_capture = true;
                 self.state.office_math_accent_character_text.clear();
             }
+            "mgroupChr" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_group_char_container_direct = true;
+                self.state.office_math_group_char_pending = OfficeMathGroupCharKind::None;
+            }
+            "mgroupChrPr" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_group_char_property_direct = true;
+            }
+            "mchr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_group_char_property_group() =>
+            {
+                self.state.office_math_group_char_capture = true;
+                self.state.office_math_group_char_text.clear();
+            }
             "mnary" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_nary_container_direct = true;
                 self.state.office_math_nary_subscript_hidden = false;
@@ -1995,6 +2030,18 @@ impl Parser {
                 && self.office_math_direct_parent_has_overline_accent() =>
             {
                 self.state.character.overline = true;
+            }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_group_char_kind()
+                    != OfficeMathGroupCharKind::None =>
+            {
+                match self.office_math_direct_parent_group_char_kind() {
+                    OfficeMathGroupCharKind::Over => self.state.character.overline = true,
+                    OfficeMathGroupCharKind::Under => {
+                        self.state.character.underline = UnderlineStyle::Single;
+                    }
+                    OfficeMathGroupCharKind::None => {}
+                }
             }
             "msub" if destination_allows_visible_content(&self.state) => {
                 if self.state.office_math_nary_subscript_hidden {
@@ -2998,6 +3045,9 @@ impl Parser {
             "u" if self.state.office_math_accent_character_capture => {
                 self.push_office_math_accent_unicode(control.parameter.unwrap_or(0), offset)?
             }
+            "u" if self.state.office_math_group_char_capture => {
+                self.push_office_math_group_char_unicode(control.parameter.unwrap_or(0), offset)?
+            }
             "u" if self.state.shape_property_capture.is_some() => {
                 self.push_shape_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -3962,6 +4012,9 @@ impl Parser {
         if self.state.office_math_accent_character_capture {
             return self.push_office_math_accent_text(text, offset);
         }
+        if self.state.office_math_group_char_capture {
+            return self.push_office_math_group_char_text(text, offset);
+        }
         if self.state.destination == Destination::Picture {
             return self.push_picture_hex_text(text, offset);
         }
@@ -4074,6 +4127,9 @@ impl Parser {
         }
         if self.state.office_math_accent_character_capture {
             return self.push_office_math_accent_text(&visible_text, offset);
+        }
+        if self.state.office_math_group_char_capture {
+            return self.push_office_math_group_char_text(&visible_text, offset);
         }
         if self.state.shape_property_capture.is_some() {
             return self.push_shape_property_text(&visible_text, offset);
@@ -4237,6 +4293,10 @@ impl Parser {
         if self.state.office_math_accent_character_capture {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_accent_text(&ch.to_string(), offset);
+        }
+        if self.state.office_math_group_char_capture {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_group_char_text(&ch.to_string(), offset);
         }
         if self.state.destination == Destination::Picture {
             return self.push_picture_bytes(&[byte], offset);
@@ -5097,6 +5157,22 @@ impl Parser {
         })
     }
 
+    fn office_math_in_group_char_property_group(&self) -> bool {
+        self.state.office_math_group_char_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_group_char_property_direct)
+    }
+
+    fn office_math_direct_parent_group_char_kind(&self) -> OfficeMathGroupCharKind {
+        self.stack
+            .last()
+            .filter(|state| state.office_math_group_char_container_direct)
+            .map(|state| state.office_math_group_char_pending)
+            .unwrap_or(OfficeMathGroupCharKind::None)
+    }
+
     fn start_office_math_matrix_row(&mut self, offset: usize) -> Result<(), ParseError> {
         let row_index = self
             .stack
@@ -5255,6 +5331,34 @@ impl Parser {
             && !self.state.office_math_accent_container_direct
         {
             previous.office_math_accent_overline_pending = true;
+        }
+
+        Ok(())
+    }
+
+    fn finish_office_math_group_char_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.office_math_group_char_capture {
+            if previous.office_math_group_char_capture {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_group_char_text,
+                    &self.state.office_math_group_char_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            } else {
+                previous.office_math_group_char_pending =
+                    office_math_group_char_kind(&self.state.office_math_group_char_text);
+            }
+        }
+
+        if self.state.office_math_group_char_pending != OfficeMathGroupCharKind::None
+            && !self.state.office_math_group_char_container_direct
+        {
+            previous.office_math_group_char_pending = self.state.office_math_group_char_pending;
         }
 
         Ok(())
@@ -5676,6 +5780,34 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_accent_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_office_math_group_char_text(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_group_char_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_group_char_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_group_char_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
@@ -11838,6 +11970,16 @@ fn passive_office_math_border_box() -> TableCellBorder {
         spacing_twips: 20,
         color_index: None,
         style: BorderStyle::Single,
+    }
+}
+
+fn office_math_group_char_kind(text: &str) -> OfficeMathGroupCharKind {
+    match text.trim() {
+        "\u{23b4}" | "\u{23dc}" | "\u{23de}" | "\u{23e0}" | "\u{fe35}" | "\u{fe37}"
+        | "\u{fe3f}" => OfficeMathGroupCharKind::Over,
+        "\u{23b5}" | "\u{23dd}" | "\u{23df}" | "\u{23e1}" | "\u{fe36}" | "\u{fe38}"
+        | "\u{fe40}" => OfficeMathGroupCharKind::Under,
+        _ => OfficeMathGroupCharKind::None,
     }
 }
 

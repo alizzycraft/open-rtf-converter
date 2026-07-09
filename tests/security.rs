@@ -14454,6 +14454,128 @@ fn office_math_border_boxes_render_passive_character_borders_without_control_lea
 }
 
 #[test]
+fn office_math_group_characters_render_passive_lines_without_fallback_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mgroupChr{",
+        "\\",
+        "mgroupChrPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u9182?}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext x+1}}}}} and {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mgroupChr{",
+        "\\",
+        "mgroupChrPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u9183?}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext y}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before x+1 and y After"),
+        "unexpected group-character math text: {text:?}"
+    );
+    let over_style = run_style_for_text(&parsed.document, "x+1").expect("over group run");
+    assert!(over_style.overline);
+    let under_style = run_style_for_text(&parsed.document, "y").expect("under group run");
+    assert_eq!(under_style.underline, UnderlineStyle::Single);
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "mgroupChr",
+        "mgroupChrPr",
+        "mchr",
+        "mtext",
+        "?",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math group-character content leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math group-character controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before x+1 and y After"));
+    let passive_strokes = content
+        .operations
+        .windows(3)
+        .filter(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        })
+        .count();
+    assert!(
+        passive_strokes >= 2,
+        "Office math group characters should render as passive line strokes, got {passive_strokes}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mgroupChr",
+        b"mgroupChrPr",
+        b"mchr",
+        b"mtext",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math group-character control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_hidden_limits_are_stripped_passively() {
     let input = rtf(&[
         "{",
