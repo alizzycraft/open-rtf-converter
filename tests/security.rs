@@ -14306,6 +14306,129 @@ fn office_math_overbars_render_readable_passive_text() {
 }
 
 #[test]
+fn office_math_bar_positions_render_passively_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mbar{",
+        "\\",
+        "mbarPr{",
+        "\\",
+        "mpos bot}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext UnderBar}}}}} and {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mbar{",
+        "\\",
+        "mbarPr{",
+        "\\",
+        "mpos top}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext OverBar}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before UnderBar and OverBar After"),
+        "unexpected bar-position math text: {text:?}"
+    );
+    let under_style = run_style_for_text(&parsed.document, "UnderBar").expect("underbar run");
+    assert!(!under_style.overline);
+    assert_eq!(under_style.underline, UnderlineStyle::Single);
+    let over_style = run_style_for_text(&parsed.document, "OverBar").expect("overbar run");
+    assert!(over_style.overline);
+    assert_eq!(over_style.underline, UnderlineStyle::None);
+    for forbidden in [
+        "mmath", "moMath", "mbar", "mbarPr", "mpos", "bot", "top", "mtext", "objdata", "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math bar-position metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math bar-position controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before UnderBar and OverBar After"));
+    let passive_strokes = content
+        .operations
+        .windows(3)
+        .filter(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        })
+        .count();
+    assert!(
+        passive_strokes >= 2,
+        "Office math top/bottom bars should render as passive strokes, got {passive_strokes}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mbar",
+        b"mbarPr",
+        b"mpos",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math bar-position metadata or payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_operators_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

@@ -135,6 +135,11 @@ struct ParserState {
     office_math_fraction_type_capture: bool,
     office_math_fraction_type_text: String,
     office_math_fraction_kind: OfficeMathFractionKind,
+    office_math_bar_container_direct: bool,
+    office_math_bar_property_direct: bool,
+    office_math_bar_position_capture: bool,
+    office_math_bar_position_text: String,
+    office_math_bar_position: OfficeMathBarPosition,
     office_math_limit_container_direct: OfficeMathLimitKind,
     office_math_nary_container_direct: bool,
     office_math_nary_property_direct: bool,
@@ -263,6 +268,11 @@ impl Default for ParserState {
             office_math_fraction_type_capture: false,
             office_math_fraction_type_text: String::new(),
             office_math_fraction_kind: OfficeMathFractionKind::Bar,
+            office_math_bar_container_direct: false,
+            office_math_bar_property_direct: false,
+            office_math_bar_position_capture: false,
+            office_math_bar_position_text: String::new(),
+            office_math_bar_position: OfficeMathBarPosition::Top,
             office_math_limit_container_direct: OfficeMathLimitKind::None,
             office_math_nary_container_direct: false,
             office_math_nary_property_direct: false,
@@ -347,6 +357,13 @@ enum OfficeMathNaryLimitLocation {
     #[default]
     SubSup,
     UnderOver,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+enum OfficeMathBarPosition {
+    #[default]
+    Top,
+    Bottom,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1264,6 +1281,9 @@ impl Parser {
         child.office_math_fraction_container_direct = false;
         child.office_math_fraction_property_direct = false;
         child.office_math_fraction_type_capture = false;
+        child.office_math_bar_container_direct = false;
+        child.office_math_bar_property_direct = false;
+        child.office_math_bar_position_capture = false;
         child.office_math_limit_container_direct = OfficeMathLimitKind::None;
         child.office_math_nary_container_direct = false;
         child.office_math_nary_property_direct = false;
@@ -1487,6 +1507,7 @@ impl Parser {
             self.finish_office_math_accent_group(&mut previous, offset)?;
             self.finish_office_math_group_char_group(&mut previous, offset)?;
             self.finish_office_math_fraction_group(&mut previous, offset)?;
+            self.finish_office_math_bar_group(&mut previous, offset)?;
             self.finish_office_math_function_group(&mut previous);
             self.finish_office_math_style_group(&mut previous, offset)?;
             self.finish_office_math_matrix_property_group(&mut previous, offset)?;
@@ -2049,7 +2070,22 @@ impl Parser {
                 }
             }
             "mbar" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_bar_container_direct = true;
+                self.state.office_math_bar_position = OfficeMathBarPosition::Top;
                 self.state.character.overline = true;
+            }
+            "mbarPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_bar() =>
+            {
+                self.state.office_math_bar_property_direct = true;
+            }
+            "mpos"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_bar_property_group() =>
+            {
+                self.state.office_math_bar_position_capture = true;
+                self.state.office_math_bar_position_text.clear();
             }
             "mbegChr" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_delimiter_capture = Some(OfficeMathDelimiterCapture::Begin);
@@ -3255,6 +3291,9 @@ impl Parser {
             "u" if self.state.office_math_fraction_type_capture => {
                 self.push_office_math_fraction_type_unicode(control.parameter.unwrap_or(0), offset)?
             }
+            "u" if self.state.office_math_bar_position_capture => {
+                self.push_office_math_bar_position_unicode(control.parameter.unwrap_or(0), offset)?
+            }
             "u" if self.state.office_math_nary_limit_location_capture => self
                 .push_office_math_nary_limit_location_unicode(
                     control.parameter.unwrap_or(0),
@@ -4238,6 +4277,9 @@ impl Parser {
         if self.state.office_math_fraction_type_capture {
             return self.push_office_math_fraction_type_text(text, offset);
         }
+        if self.state.office_math_bar_position_capture {
+            return self.push_office_math_bar_position_text(text, offset);
+        }
         if self.state.office_math_nary_limit_location_capture {
             return self.push_office_math_nary_limit_location_text(text, offset);
         }
@@ -4365,6 +4407,9 @@ impl Parser {
         }
         if self.state.office_math_fraction_type_capture {
             return self.push_office_math_fraction_type_text(&visible_text, offset);
+        }
+        if self.state.office_math_bar_position_capture {
+            return self.push_office_math_bar_position_text(&visible_text, offset);
         }
         if self.state.office_math_nary_limit_location_capture {
             return self.push_office_math_nary_limit_location_text(&visible_text, offset);
@@ -4545,6 +4590,10 @@ impl Parser {
         if self.state.office_math_fraction_type_capture {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_fraction_type_text(&ch.to_string(), offset);
+        }
+        if self.state.office_math_bar_position_capture {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_bar_position_text(&ch.to_string(), offset);
         }
         if self.state.office_math_nary_limit_location_capture {
             let ch = self.decode_text_hex_byte(byte);
@@ -5403,6 +5452,12 @@ impl Parser {
             .is_some_and(|state| state.office_math_fraction_container_direct)
     }
 
+    fn office_math_direct_parent_is_bar(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_bar_container_direct)
+    }
+
     fn office_math_direct_parent_fraction_kind(&self) -> OfficeMathFractionKind {
         self.stack
             .last()
@@ -5477,6 +5532,14 @@ impl Parser {
                 .stack
                 .last()
                 .is_some_and(|state| state.office_math_fraction_property_direct)
+    }
+
+    fn office_math_in_bar_property_group(&self) -> bool {
+        self.state.office_math_bar_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_bar_property_direct)
     }
 
     fn office_math_in_nary_property_group(&self) -> bool {
@@ -5735,6 +5798,40 @@ impl Parser {
             && previous.office_math_fraction_container_direct
         {
             previous.office_math_fraction_kind = self.state.office_math_fraction_kind;
+        }
+
+        Ok(())
+    }
+
+    fn finish_office_math_bar_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.office_math_bar_position_capture {
+            if previous.office_math_bar_position_capture {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_bar_position_text,
+                    &self.state.office_math_bar_position_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            } else if let Some(position) =
+                office_math_bar_position(&self.state.office_math_bar_position_text)
+            {
+                previous.office_math_bar_position = position;
+                if previous.office_math_bar_container_direct {
+                    apply_office_math_bar_position(&mut previous.character, position);
+                }
+            }
+        } else if self.state.office_math_bar_position != OfficeMathBarPosition::Top
+            && previous.office_math_bar_container_direct
+        {
+            previous.office_math_bar_position = self.state.office_math_bar_position;
+            apply_office_math_bar_position(
+                &mut previous.character,
+                self.state.office_math_bar_position,
+            );
         }
 
         Ok(())
@@ -6306,6 +6403,34 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_fraction_type_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_office_math_bar_position_text(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_bar_position_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_bar_position_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_bar_position_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
@@ -12014,6 +12139,7 @@ fn is_office_math_control(name: &str) -> bool {
             | "mopEmu"
             | "mphant"
             | "mphantPr"
+            | "mpos"
             | "mrad"
             | "mradPr"
             | "msepChr"
@@ -12576,6 +12702,32 @@ fn office_math_fraction_kind(text: &str) -> Option<OfficeMathFractionKind> {
         "lin" | "linear" => Some(OfficeMathFractionKind::Linear),
         "skw" | "skewed" => Some(OfficeMathFractionKind::Skewed),
         _ => None,
+    }
+}
+
+fn office_math_bar_position(text: &str) -> Option<OfficeMathBarPosition> {
+    let normalized = text
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "top" => Some(OfficeMathBarPosition::Top),
+        "bot" | "bottom" => Some(OfficeMathBarPosition::Bottom),
+        _ => None,
+    }
+}
+
+fn apply_office_math_bar_position(style: &mut CharacterStyle, position: OfficeMathBarPosition) {
+    match position {
+        OfficeMathBarPosition::Top => {
+            style.overline = true;
+        }
+        OfficeMathBarPosition::Bottom => {
+            style.overline = false;
+            style.underline = UnderlineStyle::Single;
+        }
     }
 }
 
