@@ -147,6 +147,10 @@ struct ParserState {
     office_math_radical_container_direct: bool,
     office_math_radical_degree_hidden: bool,
     office_math_radical_degree_hide_property_seen: bool,
+    office_math_phantom_container_direct: bool,
+    office_math_phantom_property_direct: bool,
+    office_math_phantom_hidden: bool,
+    office_math_phantom_show_property_seen: bool,
     office_math_accent_container_direct: bool,
     office_math_accent_property_direct: bool,
     office_math_accent_character_capture: bool,
@@ -271,6 +275,10 @@ impl Default for ParserState {
             office_math_radical_container_direct: false,
             office_math_radical_degree_hidden: false,
             office_math_radical_degree_hide_property_seen: false,
+            office_math_phantom_container_direct: false,
+            office_math_phantom_property_direct: false,
+            office_math_phantom_hidden: true,
+            office_math_phantom_show_property_seen: false,
             office_math_accent_container_direct: false,
             office_math_accent_property_direct: false,
             office_math_accent_character_capture: false,
@@ -1263,6 +1271,9 @@ impl Parser {
         child.office_math_nary_hide_property_seen = false;
         child.office_math_radical_container_direct = false;
         child.office_math_radical_degree_hide_property_seen = false;
+        child.office_math_phantom_container_direct = false;
+        child.office_math_phantom_property_direct = false;
+        child.office_math_phantom_show_property_seen = false;
         child.office_math_accent_container_direct = false;
         child.office_math_accent_property_direct = false;
         child.office_math_group_char_container_direct = false;
@@ -1462,6 +1473,15 @@ impl Parser {
                     previous.office_math_radical_degree_hidden =
                         self.state.office_math_radical_degree_hidden;
                     previous.office_math_radical_degree_hide_property_seen = true;
+                }
+            }
+            if self.state.office_math_phantom_show_property_seen
+                && !self.state.office_math_phantom_container_direct
+            {
+                previous.office_math_phantom_hidden = self.state.office_math_phantom_hidden;
+                previous.office_math_phantom_show_property_seen = true;
+                if previous.office_math_phantom_container_direct {
+                    previous.character.hidden = self.state.office_math_phantom_hidden;
                 }
             }
             self.finish_office_math_accent_group(&mut previous, offset)?;
@@ -2060,7 +2080,23 @@ impl Parser {
                 }
             }
             "mphant" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_phantom_container_direct = true;
+                self.state.office_math_phantom_hidden = true;
                 self.state.character.hidden = true;
+            }
+            "mphantPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_phantom() =>
+            {
+                self.state.office_math_phantom_property_direct = true;
+            }
+            "mshow"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_phantom_property_group() =>
+            {
+                self.state.office_math_phantom_hidden = control.parameter.unwrap_or(1) == 0;
+                self.state.office_math_phantom_show_property_seen = true;
+                self.state.character.hidden = self.state.office_math_phantom_hidden;
             }
             "mborderBox" if destination_allows_visible_content(&self.state) => {
                 self.state.character.border = passive_office_math_border_box();
@@ -5381,6 +5417,12 @@ impl Parser {
             .is_some_and(|state| state.office_math_nary_container_direct)
     }
 
+    fn office_math_direct_parent_is_phantom(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_phantom_container_direct)
+    }
+
     fn office_math_direct_parent_nary_limit_location(&self) -> OfficeMathNaryLimitLocation {
         self.stack
             .last()
@@ -5443,6 +5485,14 @@ impl Parser {
                 .stack
                 .last()
                 .is_some_and(|state| state.office_math_nary_property_direct)
+    }
+
+    fn office_math_in_phantom_property_group(&self) -> bool {
+        self.state.office_math_phantom_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_phantom_property_direct)
     }
 
     fn office_math_in_matrix_property_group(&self) -> bool {
@@ -11969,6 +12019,7 @@ fn is_office_math_control(name: &str) -> bool {
             | "msepChr"
             | "msPre"
             | "msPrePr"
+            | "mshow"
             | "msSub"
             | "msSubPr"
             | "msSubSup"

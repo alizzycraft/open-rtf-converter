@@ -15985,6 +15985,125 @@ fn office_math_phantoms_are_stripped_from_passive_output() {
 }
 
 #[test]
+fn office_math_phantom_mshow_renders_visible_content_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mphant{",
+        "\\",
+        "mphantPr{",
+        "\\",
+        "mshow1}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext VisiblePhantom}}}}} After",
+        "\\",
+        "par {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mphant{",
+        "\\",
+        "mphantPr{",
+        "\\",
+        "mshow0}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext HIDDEN-PHANTOM-PAYLOAD}}}}}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before VisiblePhantom After"),
+        "visible Office math phantom content should render when mshow is enabled: {text:?}"
+    );
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "mphant",
+        "mphantPr",
+        "mshow",
+        "mtext",
+        "objdata",
+        "414243",
+        "HIDDEN-PHANTOM-PAYLOAD",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math phantom metadata or hidden payload leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math phantom mshow controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Before VisiblePhantom After"),
+        "visible Office math phantom content missing from PDF text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mphant",
+        b"mphantPr",
+        b"mshow",
+        b"mtext",
+        b"objdata",
+        b"414243",
+        b"HIDDEN-PHANTOM-PAYLOAD",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math phantom metadata or payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn legacy_code_page_hex_escapes_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
