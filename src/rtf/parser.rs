@@ -137,6 +137,10 @@ struct ParserState {
     office_math_fraction_kind: OfficeMathFractionKind,
     office_math_limit_container_direct: OfficeMathLimitKind,
     office_math_nary_container_direct: bool,
+    office_math_nary_property_direct: bool,
+    office_math_nary_limit_location_capture: bool,
+    office_math_nary_limit_location_text: String,
+    office_math_nary_limit_location: OfficeMathNaryLimitLocation,
     office_math_nary_subscript_hidden: bool,
     office_math_nary_superscript_hidden: bool,
     office_math_nary_hide_property_seen: bool,
@@ -253,6 +257,10 @@ impl Default for ParserState {
             office_math_fraction_kind: OfficeMathFractionKind::Bar,
             office_math_limit_container_direct: OfficeMathLimitKind::None,
             office_math_nary_container_direct: false,
+            office_math_nary_property_direct: false,
+            office_math_nary_limit_location_capture: false,
+            office_math_nary_limit_location_text: String::new(),
+            office_math_nary_limit_location: OfficeMathNaryLimitLocation::SubSup,
             office_math_nary_subscript_hidden: false,
             office_math_nary_superscript_hidden: false,
             office_math_nary_hide_property_seen: false,
@@ -316,6 +324,13 @@ enum OfficeMathLimitKind {
     None,
     Lower,
     Upper,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+enum OfficeMathNaryLimitLocation {
+    #[default]
+    SubSup,
+    UnderOver,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -1227,6 +1242,8 @@ impl Parser {
         child.office_math_fraction_type_capture = false;
         child.office_math_limit_container_direct = OfficeMathLimitKind::None;
         child.office_math_nary_container_direct = false;
+        child.office_math_nary_property_direct = false;
+        child.office_math_nary_limit_location_capture = false;
         child.office_math_nary_hide_property_seen = false;
         child.office_math_radical_container_direct = false;
         child.office_math_radical_degree_hide_property_seen = false;
@@ -1420,6 +1437,7 @@ impl Parser {
                     self.state.office_math_nary_superscript_hidden;
                 previous.office_math_nary_hide_property_seen = true;
             }
+            self.finish_office_math_nary_property_group(&mut previous, offset)?;
             if self.state.office_math_radical_degree_hide_property_seen {
                 if !self.state.office_math_radical_container_direct {
                     previous.office_math_radical_degree_hidden =
@@ -2064,8 +2082,22 @@ impl Parser {
             }
             "mnary" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_nary_container_direct = true;
+                self.state.office_math_nary_limit_location = OfficeMathNaryLimitLocation::SubSup;
                 self.state.office_math_nary_subscript_hidden = false;
                 self.state.office_math_nary_superscript_hidden = false;
+            }
+            "mnaryPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_nary() =>
+            {
+                self.state.office_math_nary_property_direct = true;
+            }
+            "mlimLoc"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_nary_property_group() =>
+            {
+                self.state.office_math_nary_limit_location_capture = true;
+                self.state.office_math_nary_limit_location_text.clear();
             }
             "msubHide" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_nary_subscript_hidden = control.parameter.unwrap_or(1) != 0;
@@ -2154,7 +2186,7 @@ impl Parser {
                     self.state.character.hidden = true;
                 } else {
                     self.state.character.baseline_shift_half_points =
-                        DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
+                        self.office_math_direct_parent_nary_limit_shift(true);
                     self.state.character.font_size_scale_percent =
                         DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
                 }
@@ -2164,7 +2196,7 @@ impl Parser {
                     self.state.character.hidden = true;
                 } else {
                     self.state.character.baseline_shift_half_points =
-                        DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                        self.office_math_direct_parent_nary_limit_shift(false);
                     self.state.character.font_size_scale_percent =
                         DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
                 }
@@ -3157,6 +3189,11 @@ impl Parser {
             "u" if self.state.office_math_fraction_type_capture => {
                 self.push_office_math_fraction_type_unicode(control.parameter.unwrap_or(0), offset)?
             }
+            "u" if self.state.office_math_nary_limit_location_capture => self
+                .push_office_math_nary_limit_location_unicode(
+                    control.parameter.unwrap_or(0),
+                    offset,
+                )?,
             "u" if self.state.office_math_matrix_separator_capture => self
                 .push_office_math_matrix_separator_unicode(
                     control.parameter.unwrap_or(0),
@@ -4132,6 +4169,9 @@ impl Parser {
         if self.state.office_math_fraction_type_capture {
             return self.push_office_math_fraction_type_text(text, offset);
         }
+        if self.state.office_math_nary_limit_location_capture {
+            return self.push_office_math_nary_limit_location_text(text, offset);
+        }
         if self.state.office_math_matrix_separator_capture {
             return self.push_office_math_matrix_separator_text(text, offset);
         }
@@ -4253,6 +4293,9 @@ impl Parser {
         }
         if self.state.office_math_fraction_type_capture {
             return self.push_office_math_fraction_type_text(&visible_text, offset);
+        }
+        if self.state.office_math_nary_limit_location_capture {
+            return self.push_office_math_nary_limit_location_text(&visible_text, offset);
         }
         if self.state.office_math_matrix_separator_capture {
             return self.push_office_math_matrix_separator_text(&visible_text, offset);
@@ -4427,6 +4470,10 @@ impl Parser {
         if self.state.office_math_fraction_type_capture {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_fraction_type_text(&ch.to_string(), offset);
+        }
+        if self.state.office_math_nary_limit_location_capture {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_nary_limit_location_text(&ch.to_string(), offset);
         }
         if self.state.office_math_matrix_separator_capture {
             let ch = self.decode_text_hex_byte(byte);
@@ -5285,6 +5332,32 @@ impl Parser {
             .unwrap_or(OfficeMathFractionKind::Bar)
     }
 
+    fn office_math_direct_parent_is_nary(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_nary_container_direct)
+    }
+
+    fn office_math_direct_parent_nary_limit_location(&self) -> OfficeMathNaryLimitLocation {
+        self.stack
+            .last()
+            .filter(|state| state.office_math_nary_container_direct)
+            .map(|state| state.office_math_nary_limit_location)
+            .unwrap_or(OfficeMathNaryLimitLocation::SubSup)
+    }
+
+    fn office_math_direct_parent_nary_limit_shift(&self, lower: bool) -> i32 {
+        let shift = if lower {
+            DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS
+        } else {
+            DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS
+        };
+        match self.office_math_direct_parent_nary_limit_location() {
+            OfficeMathNaryLimitLocation::SubSup => shift,
+            OfficeMathNaryLimitLocation::UnderOver => shift.saturating_mul(2),
+        }
+    }
+
     fn office_math_direct_parent_is_matrix_row(&self) -> bool {
         self.stack
             .last()
@@ -5319,6 +5392,14 @@ impl Parser {
                 .stack
                 .last()
                 .is_some_and(|state| state.office_math_fraction_property_direct)
+    }
+
+    fn office_math_in_nary_property_group(&self) -> bool {
+        self.state.office_math_nary_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_nary_property_direct)
     }
 
     fn office_math_in_matrix_property_group(&self) -> bool {
@@ -5561,6 +5642,33 @@ impl Parser {
             && previous.office_math_fraction_container_direct
         {
             previous.office_math_fraction_kind = self.state.office_math_fraction_kind;
+        }
+
+        Ok(())
+    }
+
+    fn finish_office_math_nary_property_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.office_math_nary_limit_location_capture {
+            if previous.office_math_nary_limit_location_capture {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_nary_limit_location_text,
+                    &self.state.office_math_nary_limit_location_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            } else if let Some(location) =
+                office_math_nary_limit_location(&self.state.office_math_nary_limit_location_text)
+            {
+                previous.office_math_nary_limit_location = location;
+            }
+        } else if self.state.office_math_nary_limit_location != OfficeMathNaryLimitLocation::SubSup
+            && previous.office_math_nary_container_direct
+        {
+            previous.office_math_nary_limit_location = self.state.office_math_nary_limit_location;
         }
 
         Ok(())
@@ -6077,6 +6185,34 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_fraction_type_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_office_math_nary_limit_location_text(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_nary_limit_location_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_nary_limit_location_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_nary_limit_location_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
@@ -12292,6 +12428,20 @@ fn office_math_fraction_kind(text: &str) -> Option<OfficeMathFractionKind> {
         "nobar" => Some(OfficeMathFractionKind::NoBar),
         "lin" | "linear" => Some(OfficeMathFractionKind::Linear),
         "skw" | "skewed" => Some(OfficeMathFractionKind::Skewed),
+        _ => None,
+    }
+}
+
+fn office_math_nary_limit_location(text: &str) -> Option<OfficeMathNaryLimitLocation> {
+    let normalized = text
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "subsup" => Some(OfficeMathNaryLimitLocation::SubSup),
+        "undovr" | "underover" => Some(OfficeMathNaryLimitLocation::UnderOver),
         _ => None,
     }
 }

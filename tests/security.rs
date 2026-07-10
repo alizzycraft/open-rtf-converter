@@ -14418,6 +14418,168 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mnary{",
+        "\\",
+        "mnaryPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u8721?}{",
+        "\\",
+        "mlimLoc undOvr}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "msub{",
+        "\\",
+        "mtext lowA}}{",
+        "\\",
+        "msup{",
+        "\\",
+        "mtext upA}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext bodyA}}}}} and {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mnary{",
+        "\\",
+        "mnaryPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u8721?}{",
+        "\\",
+        "mlimLoc calc.exe}}{",
+        "\\",
+        "msub{",
+        "\\",
+        "mtext lowB}}{",
+        "\\",
+        "msup{",
+        "\\",
+        "mtext upB}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext bodyB}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before \u{2211}lowAupAbodyA and \u{2211}lowBupBbodyB After"),
+        "unexpected n-ary limit-location text: {text:?}"
+    );
+    let under_over_lower =
+        run_style_for_text(&parsed.document, "lowA").expect("under-over lower limit");
+    let default_lower = run_style_for_text(&parsed.document, "lowB").expect("default lower limit");
+    assert!(
+        under_over_lower.baseline_shift_half_points < default_lower.baseline_shift_half_points,
+        "under-over lower limit should use a stronger passive downward shift"
+    );
+    let under_over_upper =
+        run_style_for_text(&parsed.document, "upA").expect("under-over upper limit");
+    let default_upper = run_style_for_text(&parsed.document, "upB").expect("default upper limit");
+    assert!(
+        under_over_upper.baseline_shift_half_points > default_upper.baseline_shift_half_points,
+        "under-over upper limit should use a stronger passive upward shift"
+    );
+    for forbidden in [
+        "mmath", "moMath", "mnary", "mnaryPr", "mchr", "mlimLoc", "undOvr", "calc.exe", "objdata",
+        "414243", "mtext",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math n-ary limit-location metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math n-ary limit-location controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for visible in ["Before ", "lowA", "upAbodyA and ", "lowB", "upBbodyB After"] {
+        assert!(
+            rendered_text.contains(visible),
+            "n-ary limit-location visible text missing from PDF text: {visible}; got {rendered_text:?}"
+        );
+    }
+    let under_over_base = pdf_first_text_position_for_text(&content, "bodyA").expect("base bodyA");
+    let under_over_lower_pos =
+        pdf_first_text_position_for_text(&content, "lowA").expect("under-over lower position");
+    let default_base = pdf_first_text_position_for_text(&content, "bodyB").expect("base bodyB");
+    let default_lower_pos =
+        pdf_first_text_position_for_text(&content, "lowB").expect("default lower position");
+    assert!(
+        (under_over_base.1 - under_over_lower_pos.1) > (default_base.1 - default_lower_pos.1),
+        "under-over lower limit should render farther below its base than default sub/sup mode"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mnary",
+        b"mnaryPr",
+        b"mchr",
+        b"mlimLoc",
+        b"undOvr",
+        b"calc.exe",
+        b"objdata",
+        b"414243",
+        b"mtext",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math n-ary limit-location metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_overline_accents_render_as_passive_strokes_without_control_leakage() {
     let input = rtf(&[
         "{",
