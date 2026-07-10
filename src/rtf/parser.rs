@@ -2065,6 +2065,9 @@ impl Parser {
             "mborderBox" if destination_allows_visible_content(&self.state) => {
                 self.state.character.border = passive_office_math_border_box();
             }
+            "mbrk" if destination_allows_visible_content(&self.state) => {
+                self.push_text("\n", offset)?;
+            }
             "macc" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_accent_container_direct = true;
                 self.state.office_math_accent_overline_pending = false;
@@ -11929,6 +11932,7 @@ fn is_office_math_control(name: &str) -> bool {
             | "mborderBoxPr"
             | "mbox"
             | "mboxPr"
+            | "mbrk"
             | "mchr"
             | "md"
             | "mdegHide"

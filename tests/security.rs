@@ -14843,6 +14843,76 @@ fn office_math_border_boxes_render_passive_character_borders_without_control_lea
 }
 
 #[test]
+fn office_math_manual_breaks_render_passive_line_breaks_without_control_leakage() {
+    let input = br"{\rtf1 Before {\mmath{\moMath{\mbox{\mboxPr{\mbrk0 }{\*\unknown{\object\objdata 414243}}}{\me{\mtext First}}}{\mtext Second}}} After\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before \nFirstSecond After"),
+        "unexpected Office math manual-break text: {text:?}"
+    );
+    for forbidden in [
+        "mmath", "moMath", "mbox", "mboxPr", "mbrk", "mtext", "objdata", "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math manual-break control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math manual-break controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before "));
+    assert!(rendered_text.contains("FirstSecond After"));
+    let before_pos = pdf_first_text_position_for_text(&content, "Before").expect("before position");
+    let first_pos = pdf_first_text_position_for_text(&content, "First").expect("first position");
+    assert!(
+        first_pos.1 < before_pos.1,
+        "Office math manual break should render following text below the prior line: before={before_pos:?}, first={first_pos:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mbox",
+        b"mboxPr",
+        b"mbrk",
+        b"mtext",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math manual-break content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_group_characters_render_passive_lines_without_fallback_leakage() {
     let input = rtf(&[
         "{",
