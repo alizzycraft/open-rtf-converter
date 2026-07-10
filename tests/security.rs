@@ -15536,6 +15536,15 @@ fn office_math_functions_render_passive_argument_spacing_without_control_leakage
         "mfunc{",
         "\\",
         "mfuncPr{",
+        "calc.exe http://example.invalid/payload {",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}",
         "\\",
         "mctrlPr}}{",
         "\\",
@@ -15564,7 +15573,17 @@ fn office_math_functions_render_passive_argument_spacing_without_control_leakage
         "unexpected function math text: {text:?}"
     );
     for forbidden in [
-        "mmath", "moMath", "mfunc", "mfuncPr", "mfName", "mctrlPr", "mtext", "objdata", "414243",
+        "mmath",
+        "moMath",
+        "mfunc",
+        "mfuncPr",
+        "mfName",
+        "mctrlPr",
+        "mtext",
+        "calc.exe",
+        "example.invalid",
+        "objdata",
+        "414243",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -15601,6 +15620,8 @@ fn office_math_functions_render_passive_argument_spacing_without_control_leakage
         b"mfName",
         b"mctrlPr",
         b"mtext",
+        b"calc.exe",
+        b"example.invalid",
         b"objdata",
         b"414243",
         b"/JavaScript",

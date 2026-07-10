@@ -2260,6 +2260,12 @@ impl Parser {
                 self.state.office_math_function_container_direct = true;
                 self.state.office_math_function_name_seen = false;
             }
+            "mfuncPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_function() =>
+            {
+                self.state.destination = Destination::Ignored;
+            }
             "mfName" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_function_name_direct = true;
             }
@@ -5749,6 +5755,12 @@ impl Parser {
         self.stack.last().is_some_and(|state| {
             state.office_math_function_container_direct && state.office_math_function_name_seen
         })
+    }
+
+    fn office_math_direct_parent_is_function(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_function_container_direct)
     }
 
     fn start_office_math_matrix_row(&mut self, offset: usize) -> Result<(), ParseError> {
