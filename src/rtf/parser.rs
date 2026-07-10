@@ -170,6 +170,8 @@ struct ParserState {
     office_math_accent_character_capture: bool,
     office_math_accent_character_text: String,
     office_math_accent_overline_pending: bool,
+    office_math_accent_text_pending: Option<char>,
+    office_math_accent_content_seen: bool,
     office_math_group_char_container_direct: bool,
     office_math_group_char_property_direct: bool,
     office_math_group_char_capture: bool,
@@ -312,6 +314,8 @@ impl Default for ParserState {
             office_math_accent_character_capture: false,
             office_math_accent_character_text: String::new(),
             office_math_accent_overline_pending: false,
+            office_math_accent_text_pending: None,
+            office_math_accent_content_seen: false,
             office_math_group_char_container_direct: false,
             office_math_group_char_property_direct: false,
             office_math_group_char_capture: false,
@@ -1320,6 +1324,9 @@ impl Parser {
         child.office_math_phantom_show_property_seen = false;
         child.office_math_accent_container_direct = false;
         child.office_math_accent_property_direct = false;
+        child.office_math_accent_character_capture = false;
+        child.office_math_accent_text_pending = None;
+        child.office_math_accent_content_seen = false;
         child.office_math_group_char_container_direct = false;
         child.office_math_group_char_property_direct = false;
         child.office_math_function_container_direct = false;
@@ -2200,8 +2207,13 @@ impl Parser {
             "macc" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_accent_container_direct = true;
                 self.state.office_math_accent_overline_pending = false;
+                self.state.office_math_accent_text_pending = None;
+                self.state.office_math_accent_content_seen = false;
             }
-            "maccPr" if destination_allows_visible_content(&self.state) => {
+            "maccPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_accent() =>
+            {
                 self.state.office_math_accent_property_direct = true;
             }
             "mchr"
@@ -2332,9 +2344,9 @@ impl Parser {
                 self.start_office_math_limit();
             }
             "me" if destination_allows_visible_content(&self.state)
-                && self.office_math_direct_parent_has_overline_accent() =>
+                && self.office_math_direct_parent_has_accent() =>
             {
-                self.state.character.overline = true;
+                self.start_office_math_accent_expression();
             }
             "me" if destination_allows_visible_content(&self.state)
                 && self.office_math_direct_parent_group_char_kind()
@@ -5561,6 +5573,12 @@ impl Parser {
             .is_some_and(|state| state.office_math_phantom_container_direct)
     }
 
+    fn office_math_direct_parent_is_accent(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_accent_container_direct)
+    }
+
     fn office_math_direct_parent_nary_limit_location(&self) -> OfficeMathNaryLimitLocation {
         self.stack
             .last()
@@ -5595,9 +5613,11 @@ impl Parser {
                 .is_some_and(|state| state.office_math_accent_property_direct)
     }
 
-    fn office_math_direct_parent_has_overline_accent(&self) -> bool {
+    fn office_math_direct_parent_has_accent(&self) -> bool {
         self.stack.last().is_some_and(|state| {
-            state.office_math_accent_container_direct && state.office_math_accent_overline_pending
+            state.office_math_accent_container_direct
+                && (state.office_math_accent_overline_pending
+                    || state.office_math_accent_text_pending.is_some())
         })
     }
 
@@ -5797,6 +5817,20 @@ impl Parser {
         Ok(())
     }
 
+    fn start_office_math_accent_expression(&mut self) {
+        let overline = self
+            .stack
+            .last_mut()
+            .map(|parent| {
+                parent.office_math_accent_content_seen = true;
+                parent.office_math_accent_overline_pending
+            })
+            .unwrap_or(false);
+        if overline {
+            self.state.character.overline = true;
+        }
+    }
+
     fn finish_office_math_delimiter_group(
         &mut self,
         previous: &mut ParserState,
@@ -5889,6 +5923,10 @@ impl Parser {
                 &self.state.office_math_accent_character_text,
             ) {
                 previous.office_math_accent_overline_pending = true;
+            } else if let Some(accent) =
+                office_math_passive_text_accent(&self.state.office_math_accent_character_text)
+            {
+                previous.office_math_accent_text_pending = Some(accent);
             }
         }
 
@@ -5896,6 +5934,17 @@ impl Parser {
             && !self.state.office_math_accent_container_direct
         {
             previous.office_math_accent_overline_pending = true;
+        }
+        if let Some(accent) = self.state.office_math_accent_text_pending
+            && !self.state.office_math_accent_container_direct
+        {
+            previous.office_math_accent_text_pending = Some(accent);
+        }
+        if self.state.office_math_accent_container_direct
+            && self.state.office_math_accent_content_seen
+            && let Some(accent) = self.state.office_math_accent_text_pending
+        {
+            self.push_text(&accent.to_string(), offset)?;
         }
 
         Ok(())
@@ -12842,6 +12891,19 @@ fn office_math_accent_is_passive_overline(text: &str) -> bool {
         normalized,
         "\u{00af}" | "\u{0305}" | "\u{033f}" | "\u{203e}"
     )
+}
+
+fn office_math_passive_text_accent(text: &str) -> Option<char> {
+    let normalized = text.trim();
+    match normalized {
+        "^" | "\u{0302}" | "\u{02c6}" | "\u{2038}" => Some('^'),
+        "~" | "\u{0303}" | "\u{02dc}" => Some('~'),
+        "." | "\u{0307}" | "\u{02d9}" => Some('.'),
+        "\u{00a8}" | "\u{0308}" => Some('"'),
+        "\u{00b4}" | "\u{0301}" | "\u{02ca}" => Some('\''),
+        "`" | "\u{0300}" | "\u{02cb}" => Some('`'),
+        _ => None,
+    }
 }
 
 fn passive_office_math_border_box() -> TableCellBorder {

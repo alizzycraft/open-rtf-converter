@@ -14873,6 +14873,116 @@ fn office_math_overline_accents_render_as_passive_strokes_without_control_leakag
 }
 
 #[test]
+fn office_math_text_accents_render_passively_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "macc{",
+        "\\",
+        "maccPr{",
+        "\\",
+        "mchr ^}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext x}}}}} and {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "macc{",
+        "\\",
+        "maccPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u732?}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext y}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before x^ and y~ After"),
+        "unexpected text-accent math text: {text:?}"
+    );
+    for forbidden in [
+        "mmath", "moMath", "macc", "maccPr", "mchr", "mtext", "objdata", "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math text-accent metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math text-accent controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Before x^ and y~ After"),
+        "Office math text accents missing from PDF text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"macc",
+        b"maccPr",
+        b"mchr",
+        b"mtext",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math text-accent metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_border_boxes_render_passive_character_borders_without_control_leakage() {
     let input = rtf(&[
         "{",
