@@ -2298,6 +2298,11 @@ impl Parser {
                     control.parameter.unwrap_or(1) != 0;
                 self.state.office_math_nary_hide_property_seen = true;
             }
+            "msPrePr" | "msSubPr" | "msSubSupPr" | "msSupPr"
+                if destination_allows_visible_content(&self.state) =>
+            {
+                self.state.destination = Destination::Ignored;
+            }
             "mmatrix" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_array(OfficeMathArrayKind::Matrix);
             }

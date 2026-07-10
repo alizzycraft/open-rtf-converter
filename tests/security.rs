@@ -16021,6 +16021,161 @@ fn office_math_property_controls_are_passive_structure() {
 }
 
 #[test]
+fn office_math_script_property_groups_strip_passive_metadata_payloads() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "msSubSup{",
+        "\\",
+        "msSubSupPr calc.exe {",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext x}}{",
+        "\\",
+        "msub{",
+        "\\",
+        "msSubPr launch.exe}{",
+        "\\",
+        "mtext i}}{",
+        "\\",
+        "msup{",
+        "\\",
+        "msSupPr https://example.com/payload}{",
+        "\\",
+        "mtext 2}}}}} Pre {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "msPre{",
+        "\\",
+        "msPrePr HIDDEN-PRE-PROPERTY}{",
+        "\\",
+        "msub{",
+        "\\",
+        "mtext a}}{",
+        "\\",
+        "msup{",
+        "\\",
+        "mtext b}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext X}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before xi2 Pre abX After"),
+        "unexpected script-property math text: {text:?}"
+    );
+    let subscript_style = run_style_for_text(&parsed.document, "i").expect("subscript run");
+    assert!(subscript_style.baseline_shift_half_points < 0);
+    assert!(subscript_style.font_size_scale_percent < 100);
+    let superscript_style = run_style_for_text(&parsed.document, "2").expect("superscript run");
+    assert!(superscript_style.baseline_shift_half_points > 0);
+    assert!(superscript_style.font_size_scale_percent < 100);
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "msSubSup",
+        "msSubSupPr",
+        "msSubPr",
+        "msSupPr",
+        "msPre",
+        "msPrePr",
+        "msub",
+        "msup",
+        "mtext",
+        "calc.exe",
+        "launch.exe",
+        "https://example.com/payload",
+        "HIDDEN-PRE-PROPERTY",
+        "objdata",
+        "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math script property payload leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math script property controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Before xi2 Pre abX After"),
+        "Office math script-property text missing from PDF: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"msSubSup",
+        b"msSubSupPr",
+        b"msSubPr",
+        b"msSupPr",
+        b"msPre",
+        b"msPrePr",
+        b"msub",
+        b"msup",
+        b"mtext",
+        b"calc.exe",
+        b"launch.exe",
+        b"https://example.com/payload",
+        b"HIDDEN-PRE-PROPERTY",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math script property payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_delimiters_render_passive_text_without_control_leakage() {
     let input = br"{\rtf1 Before {\mmath{\moMath{\md{\mdPr{\mbegChr (}{\mendChr )}}{\me{\mtext x+1}}}}} After\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
