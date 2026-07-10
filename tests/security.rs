@@ -13824,6 +13824,158 @@ fn office_math_fractions_render_readable_passive_text() {
 }
 
 #[test]
+fn office_math_fraction_types_are_bounded_passive_metadata() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mf{",
+        "\\",
+        "mfPr{",
+        "\\",
+        "mtype noBar}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "mnum{",
+        "\\",
+        "mtext A}}{",
+        "\\",
+        "mden{",
+        "\\",
+        "mtext B}}}}} and {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mf{",
+        "\\",
+        "mfPr{",
+        "\\",
+        "mtype calc.exe}}{",
+        "\\",
+        "mnum{",
+        "\\",
+        "mtext C}}{",
+        "\\",
+        "mden{",
+        "\\",
+        "mtext D}}}}} and {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mf{",
+        "\\",
+        "mfPr{",
+        "\\",
+        "mtype lin}}{",
+        "\\",
+        "mnum{",
+        "\\",
+        "mtext E}}{",
+        "\\",
+        "mden{",
+        "\\",
+        "mtext F}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before AB and C\u{2044}D and E\u{2044}F After"),
+        "unexpected fraction type text: {text:?}"
+    );
+    let no_bar_denominator_style =
+        run_style_for_text(&parsed.document, "B").expect("no-bar denominator");
+    assert!(no_bar_denominator_style.baseline_shift_half_points < 0);
+    assert!(no_bar_denominator_style.font_size_scale_percent < 100);
+    for forbidden in [
+        "mmath", "moMath", "mfPr", "mtype", "mtext", "noBar", "calc.exe", "objdata", "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math fraction type metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math fraction type controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for visible in ["Before AB", "C", "D", "E", "F After"] {
+        assert!(
+            rendered_text.contains(visible),
+            "fraction type visible text missing from PDF text: {visible}; got {rendered_text:?}"
+        );
+    }
+    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
+    assert!(
+        symbol_bytes.contains(&0xa4),
+        "bar/linear fraction slash should encode through passive Symbol byte 0xa4; got {symbol_bytes:?}"
+    );
+    let e_position = pdf_first_text_position_for_text(&content, "E").expect("linear numerator");
+    let f_position = pdf_first_text_position_for_text(&content, "F").expect("linear denominator");
+    assert!(
+        (e_position.1 - f_position.1).abs() < 0.5,
+        "linear Office math fraction should render numerator and denominator on one baseline: E={e_position:?}, F={f_position:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mfPr",
+        b"mtype",
+        b"mtext",
+        b"noBar",
+        b"calc.exe",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math fraction type metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_subscripts_render_readable_passive_text() {
     let input = rtf(&[
         "{",

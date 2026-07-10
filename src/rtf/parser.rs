@@ -130,6 +130,11 @@ struct ParserState {
     office_math_array_rows_seen: usize,
     office_math_array_row_direct: bool,
     office_math_array_row_cells_seen: usize,
+    office_math_fraction_container_direct: bool,
+    office_math_fraction_property_direct: bool,
+    office_math_fraction_type_capture: bool,
+    office_math_fraction_type_text: String,
+    office_math_fraction_kind: OfficeMathFractionKind,
     office_math_limit_container_direct: OfficeMathLimitKind,
     office_math_nary_container_direct: bool,
     office_math_nary_subscript_hidden: bool,
@@ -241,6 +246,11 @@ impl Default for ParserState {
             office_math_array_rows_seen: 0,
             office_math_array_row_direct: false,
             office_math_array_row_cells_seen: 0,
+            office_math_fraction_container_direct: false,
+            office_math_fraction_property_direct: false,
+            office_math_fraction_type_capture: false,
+            office_math_fraction_type_text: String::new(),
+            office_math_fraction_kind: OfficeMathFractionKind::Bar,
             office_math_limit_container_direct: OfficeMathLimitKind::None,
             office_math_nary_container_direct: false,
             office_math_nary_subscript_hidden: false,
@@ -279,6 +289,25 @@ enum OfficeMathArrayKind {
     None,
     Matrix,
     EquationArray,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+enum OfficeMathFractionKind {
+    #[default]
+    Bar,
+    NoBar,
+    Linear,
+    Skewed,
+}
+
+impl OfficeMathFractionKind {
+    fn uses_slash(self) -> bool {
+        !matches!(self, Self::NoBar)
+    }
+
+    fn uses_stacked_scripts(self) -> bool {
+        matches!(self, Self::Bar | Self::NoBar)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -1193,6 +1222,9 @@ impl Parser {
         child.office_math_array_rows_seen = 0;
         child.office_math_array_row_direct = false;
         child.office_math_array_row_cells_seen = 0;
+        child.office_math_fraction_container_direct = false;
+        child.office_math_fraction_property_direct = false;
+        child.office_math_fraction_type_capture = false;
         child.office_math_limit_container_direct = OfficeMathLimitKind::None;
         child.office_math_nary_container_direct = false;
         child.office_math_nary_hide_property_seen = false;
@@ -1397,6 +1429,7 @@ impl Parser {
             }
             self.finish_office_math_accent_group(&mut previous, offset)?;
             self.finish_office_math_group_char_group(&mut previous, offset)?;
+            self.finish_office_math_fraction_group(&mut previous, offset)?;
             self.finish_office_math_function_group(&mut previous);
             self.finish_office_math_matrix_property_group(&mut previous, offset)?;
             self.finish_shape_property_group(&mut previous, offset)?;
@@ -1917,16 +1950,45 @@ impl Parser {
             {
                 self.state.destination = self.state.unicode_alternate_destination;
             }
+            "mf" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_fraction_container_direct = true;
+                self.state.office_math_fraction_kind = OfficeMathFractionKind::Bar;
+            }
+            "mfPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_fraction() =>
+            {
+                self.state.office_math_fraction_property_direct = true;
+            }
+            "mtype"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_fraction_property_group() =>
+            {
+                self.state.office_math_fraction_type_capture = true;
+                self.state.office_math_fraction_type_text.clear();
+            }
             "mnum" if destination_allows_visible_content(&self.state) => {
-                self.state.character.baseline_shift_half_points =
-                    DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
-                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                if self
+                    .office_math_direct_parent_fraction_kind()
+                    .uses_stacked_scripts()
+                {
+                    self.state.character.baseline_shift_half_points =
+                        DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                    self.state.character.font_size_scale_percent =
+                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                }
             }
             "mden" if destination_allows_visible_content(&self.state) => {
-                self.push_text("\u{2044}", offset)?;
-                self.state.character.baseline_shift_half_points =
-                    DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
-                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                let fraction_kind = self.office_math_direct_parent_fraction_kind();
+                if fraction_kind.uses_slash() {
+                    self.push_text("\u{2044}", offset)?;
+                }
+                if fraction_kind.uses_stacked_scripts() {
+                    self.state.character.baseline_shift_half_points =
+                        DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
+                    self.state.character.font_size_scale_percent =
+                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                }
             }
             "mbar" if destination_allows_visible_content(&self.state) => {
                 self.state.character.overline = true;
@@ -3092,6 +3154,9 @@ impl Parser {
             "u" if self.state.office_math_group_char_capture => {
                 self.push_office_math_group_char_unicode(control.parameter.unwrap_or(0), offset)?
             }
+            "u" if self.state.office_math_fraction_type_capture => {
+                self.push_office_math_fraction_type_unicode(control.parameter.unwrap_or(0), offset)?
+            }
             "u" if self.state.office_math_matrix_separator_capture => self
                 .push_office_math_matrix_separator_unicode(
                     control.parameter.unwrap_or(0),
@@ -4064,6 +4129,9 @@ impl Parser {
         if self.state.office_math_group_char_capture {
             return self.push_office_math_group_char_text(text, offset);
         }
+        if self.state.office_math_fraction_type_capture {
+            return self.push_office_math_fraction_type_text(text, offset);
+        }
         if self.state.office_math_matrix_separator_capture {
             return self.push_office_math_matrix_separator_text(text, offset);
         }
@@ -4182,6 +4250,9 @@ impl Parser {
         }
         if self.state.office_math_group_char_capture {
             return self.push_office_math_group_char_text(&visible_text, offset);
+        }
+        if self.state.office_math_fraction_type_capture {
+            return self.push_office_math_fraction_type_text(&visible_text, offset);
         }
         if self.state.office_math_matrix_separator_capture {
             return self.push_office_math_matrix_separator_text(&visible_text, offset);
@@ -4352,6 +4423,10 @@ impl Parser {
         if self.state.office_math_group_char_capture {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_group_char_text(&ch.to_string(), offset);
+        }
+        if self.state.office_math_fraction_type_capture {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_fraction_type_text(&ch.to_string(), offset);
         }
         if self.state.office_math_matrix_separator_capture {
             let ch = self.decode_text_hex_byte(byte);
@@ -5196,6 +5271,20 @@ impl Parser {
             .unwrap_or(OfficeMathArrayKind::None)
     }
 
+    fn office_math_direct_parent_is_fraction(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_fraction_container_direct)
+    }
+
+    fn office_math_direct_parent_fraction_kind(&self) -> OfficeMathFractionKind {
+        self.stack
+            .last()
+            .filter(|state| state.office_math_fraction_container_direct)
+            .map(|state| state.office_math_fraction_kind)
+            .unwrap_or(OfficeMathFractionKind::Bar)
+    }
+
     fn office_math_direct_parent_is_matrix_row(&self) -> bool {
         self.stack
             .last()
@@ -5222,6 +5311,14 @@ impl Parser {
                 .stack
                 .last()
                 .is_some_and(|state| state.office_math_group_char_property_direct)
+    }
+
+    fn office_math_in_fraction_property_group(&self) -> bool {
+        self.state.office_math_fraction_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_fraction_property_direct)
     }
 
     fn office_math_in_matrix_property_group(&self) -> bool {
@@ -5437,6 +5534,33 @@ impl Parser {
             && !self.state.office_math_group_char_container_direct
         {
             previous.office_math_group_char_pending = self.state.office_math_group_char_pending;
+        }
+
+        Ok(())
+    }
+
+    fn finish_office_math_fraction_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.office_math_fraction_type_capture {
+            if previous.office_math_fraction_type_capture {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_fraction_type_text,
+                    &self.state.office_math_fraction_type_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            } else if let Some(kind) =
+                office_math_fraction_kind(&self.state.office_math_fraction_type_text)
+            {
+                previous.office_math_fraction_kind = kind;
+            }
+        } else if self.state.office_math_fraction_kind != OfficeMathFractionKind::Bar
+            && previous.office_math_fraction_container_direct
+        {
+            previous.office_math_fraction_kind = self.state.office_math_fraction_kind;
         }
 
         Ok(())
@@ -5925,6 +6049,34 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_group_char_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_office_math_fraction_type_text(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_fraction_type_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_fraction_type_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_fraction_type_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
@@ -12125,6 +12277,22 @@ fn office_math_group_char_kind(text: &str) -> OfficeMathGroupCharKind {
         "\u{23b5}" | "\u{23dd}" | "\u{23df}" | "\u{23e1}" | "\u{fe36}" | "\u{fe38}"
         | "\u{fe40}" => OfficeMathGroupCharKind::Under,
         _ => OfficeMathGroupCharKind::None,
+    }
+}
+
+fn office_math_fraction_kind(text: &str) -> Option<OfficeMathFractionKind> {
+    let normalized = text
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "bar" => Some(OfficeMathFractionKind::Bar),
+        "nobar" => Some(OfficeMathFractionKind::NoBar),
+        "lin" | "linear" => Some(OfficeMathFractionKind::Linear),
+        "skw" | "skewed" => Some(OfficeMathFractionKind::Skewed),
+        _ => None,
     }
 }
 
