@@ -15720,6 +15720,141 @@ fn office_math_delimiters_render_passive_text_without_control_leakage() {
 }
 
 #[test]
+fn office_math_delimiter_separators_render_between_arguments_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "md{",
+        "\\",
+        "mdPr{",
+        "\\",
+        "mbegChr [}{",
+        "\\",
+        "msepChr ;}{",
+        "\\",
+        "mendChr ]}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext A}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext B}}}}} After",
+        "\\",
+        "par Unsafe {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "md{",
+        "\\",
+        "mdPr{",
+        "\\",
+        "mbegChr (}{",
+        "\\",
+        "msepChr calc.exe}{",
+        "\\",
+        "mendChr )}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext C}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext D}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before [A;B] After"),
+        "unexpected delimiter separator text: {text:?}"
+    );
+    assert!(
+        text.contains("Unsafe (C\tD) After"),
+        "multi-character delimiter separator should fall back to a passive tab: {text:?}"
+    );
+    for forbidden in [
+        "mmath", "moMath", "mdPr", "mbegChr", "msepChr", "mendChr", "mtext", "objdata", "414243",
+        "calc.exe",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math delimiter separator metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math delimiter separator controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before [A;B] After"));
+    assert!(
+        rendered_text.contains("Unsafe (C\tD) After")
+            || rendered_text.contains("Unsafe (CD) After"),
+        "multi-character delimiter separator should not leak payload text in PDF: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mdPr",
+        b"mbegChr",
+        b"msepChr",
+        b"mendChr",
+        b"mtext",
+        b"objdata",
+        b"414243",
+        b"calc.exe",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math delimiter separator metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_matrices_render_passive_rows_and_cells() {
     let input = rtf(&[
         "{",

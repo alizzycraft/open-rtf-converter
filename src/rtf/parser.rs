@@ -123,8 +123,12 @@ struct ParserState {
     office_math_delimiter_text: String,
     office_math_pending_begin_delimiter: String,
     office_math_pending_end_delimiter: String,
+    office_math_pending_separator_delimiter: String,
     office_math_active_end_delimiter: String,
     office_math_consumed_delimiter: bool,
+    office_math_delimiter_container_direct: bool,
+    office_math_delimiter_property_direct: bool,
+    office_math_delimiter_argument_seen: bool,
     office_math_array_context: OfficeMathArrayKind,
     office_math_array_container_direct: OfficeMathArrayKind,
     office_math_array_rows_seen: usize,
@@ -256,8 +260,12 @@ impl Default for ParserState {
             office_math_delimiter_text: String::new(),
             office_math_pending_begin_delimiter: String::new(),
             office_math_pending_end_delimiter: String::new(),
+            office_math_pending_separator_delimiter: String::new(),
             office_math_active_end_delimiter: String::new(),
             office_math_consumed_delimiter: false,
+            office_math_delimiter_container_direct: false,
+            office_math_delimiter_property_direct: false,
+            office_math_delimiter_argument_seen: false,
             office_math_array_context: OfficeMathArrayKind::None,
             office_math_array_container_direct: OfficeMathArrayKind::None,
             office_math_array_rows_seen: 0,
@@ -424,6 +432,7 @@ enum UnicodeAlternateBranch {
 enum OfficeMathDelimiterCapture {
     Begin,
     End,
+    Separator,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1274,6 +1283,8 @@ impl Parser {
         child.at_group_start = true;
         child.office_math_active_end_delimiter.clear();
         child.office_math_consumed_delimiter = false;
+        child.office_math_delimiter_container_direct = false;
+        child.office_math_delimiter_property_direct = false;
         child.office_math_array_container_direct = OfficeMathArrayKind::None;
         child.office_math_array_rows_seen = 0;
         child.office_math_array_row_direct = false;
@@ -2095,6 +2106,19 @@ impl Parser {
                 self.state.office_math_delimiter_capture = Some(OfficeMathDelimiterCapture::End);
                 self.state.office_math_delimiter_text.clear();
             }
+            "md" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_delimiter_container_direct = true;
+                self.state.office_math_pending_begin_delimiter.clear();
+                self.state.office_math_pending_end_delimiter.clear();
+                self.state.office_math_pending_separator_delimiter.clear();
+                self.state.office_math_delimiter_argument_seen = false;
+            }
+            "mdPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_delimiter() =>
+            {
+                self.state.office_math_delimiter_property_direct = true;
+            }
             "mrad" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_radical_container_direct = true;
                 self.state.office_math_radical_degree_hidden = false;
@@ -2226,6 +2250,14 @@ impl Parser {
             {
                 self.state.office_math_matrix_separator_capture = true;
                 self.state.office_math_matrix_separator_text.clear();
+            }
+            "msepChr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_delimiter_property_group() =>
+            {
+                self.state.office_math_delimiter_capture =
+                    Some(OfficeMathDelimiterCapture::Separator);
+                self.state.office_math_delimiter_text.clear();
             }
             "meqArr" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_array(OfficeMathArrayKind::EquationArray);
@@ -5429,6 +5461,7 @@ impl Parser {
     fn has_pending_office_math_delimiters(&self) -> bool {
         !self.state.office_math_pending_begin_delimiter.is_empty()
             || !self.state.office_math_pending_end_delimiter.is_empty()
+            || self.office_math_direct_parent_is_delimiter()
     }
 
     fn start_office_math_array(&mut self, kind: OfficeMathArrayKind) {
@@ -5444,6 +5477,12 @@ impl Parser {
             .last()
             .map(|state| state.office_math_array_container_direct)
             .unwrap_or(OfficeMathArrayKind::None)
+    }
+
+    fn office_math_direct_parent_is_delimiter(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_delimiter_container_direct)
     }
 
     fn office_math_direct_parent_is_fraction(&self) -> bool {
@@ -5532,6 +5571,14 @@ impl Parser {
                 .stack
                 .last()
                 .is_some_and(|state| state.office_math_fraction_property_direct)
+    }
+
+    fn office_math_in_delimiter_property_group(&self) -> bool {
+        self.state.office_math_delimiter_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_delimiter_property_direct)
     }
 
     fn office_math_in_bar_property_group(&self) -> bool {
@@ -5663,13 +5710,22 @@ impl Parser {
     }
 
     fn start_office_math_delimited_expression(&mut self, offset: usize) -> Result<(), ParseError> {
-        let begin = self.state.office_math_pending_begin_delimiter.clone();
-        let end = self.state.office_math_pending_end_delimiter.clone();
-        self.state.office_math_pending_begin_delimiter.clear();
-        self.state.office_math_pending_end_delimiter.clear();
-        self.state.office_math_active_end_delimiter = end;
+        let prefix = if self.state.office_math_delimiter_argument_seen {
+            if self
+                .state
+                .office_math_pending_separator_delimiter
+                .is_empty()
+            {
+                "\t".to_string()
+            } else {
+                self.state.office_math_pending_separator_delimiter.clone()
+            }
+        } else {
+            self.state.office_math_pending_begin_delimiter.clone()
+        };
+        self.state.office_math_delimiter_argument_seen = true;
         self.state.office_math_consumed_delimiter = true;
-        self.push_text(&begin, offset)
+        self.push_text(&prefix, offset)
     }
 
     fn finish_office_math_delimiter_group(
@@ -5677,14 +5733,27 @@ impl Parser {
         previous: &mut ParserState,
         offset: usize,
     ) -> Result<(), ParseError> {
+        if self.state.office_math_delimiter_container_direct
+            && self.state.office_math_delimiter_argument_seen
+        {
+            let end = self.state.office_math_pending_end_delimiter.clone();
+            if !end.is_empty() {
+                self.push_text(&end, offset)?;
+            }
+        }
+
         let end = self.state.office_math_active_end_delimiter.clone();
         if !end.is_empty() {
             self.push_text(&end, offset)?;
         }
 
         if self.state.office_math_consumed_delimiter {
-            previous.office_math_pending_begin_delimiter.clear();
-            previous.office_math_pending_end_delimiter.clear();
+            previous.office_math_delimiter_argument_seen = true;
+            if !previous.office_math_delimiter_container_direct {
+                previous.office_math_pending_begin_delimiter.clear();
+                previous.office_math_pending_end_delimiter.clear();
+                previous.office_math_pending_separator_delimiter.clear();
+            }
         }
 
         match self.state.office_math_delimiter_capture {
@@ -5704,14 +5773,29 @@ impl Parser {
                 previous.office_math_pending_end_delimiter =
                     self.state.office_math_delimiter_text.clone();
             }
+            Some(OfficeMathDelimiterCapture::Separator) => {
+                previous.office_math_pending_separator_delimiter =
+                    office_math_single_separator(&self.state.office_math_delimiter_text)
+                        .unwrap_or_else(|| "\t".to_string());
+            }
             None => {
-                if !self.state.office_math_pending_begin_delimiter.is_empty() {
-                    previous.office_math_pending_begin_delimiter =
-                        self.state.office_math_pending_begin_delimiter.clone();
-                }
-                if !self.state.office_math_pending_end_delimiter.is_empty() {
-                    previous.office_math_pending_end_delimiter =
-                        self.state.office_math_pending_end_delimiter.clone();
+                if !self.state.office_math_delimiter_container_direct {
+                    if !self.state.office_math_pending_begin_delimiter.is_empty() {
+                        previous.office_math_pending_begin_delimiter =
+                            self.state.office_math_pending_begin_delimiter.clone();
+                    }
+                    if !self.state.office_math_pending_end_delimiter.is_empty() {
+                        previous.office_math_pending_end_delimiter =
+                            self.state.office_math_pending_end_delimiter.clone();
+                    }
+                    if !self
+                        .state
+                        .office_math_pending_separator_delimiter
+                        .is_empty()
+                    {
+                        previous.office_math_pending_separator_delimiter =
+                            self.state.office_math_pending_separator_delimiter.clone();
+                    }
                 }
             }
         }
