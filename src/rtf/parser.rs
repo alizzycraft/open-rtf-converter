@@ -177,6 +177,9 @@ struct ParserState {
     office_math_group_char_capture: bool,
     office_math_group_char_text: String,
     office_math_group_char_pending: OfficeMathGroupCharKind,
+    office_math_group_char_position_capture: bool,
+    office_math_group_char_position_text: String,
+    office_math_group_char_position: Option<OfficeMathBarPosition>,
     office_math_function_container_direct: bool,
     office_math_function_name_direct: bool,
     office_math_function_name_seen: bool,
@@ -321,6 +324,9 @@ impl Default for ParserState {
             office_math_group_char_capture: false,
             office_math_group_char_text: String::new(),
             office_math_group_char_pending: OfficeMathGroupCharKind::None,
+            office_math_group_char_position_capture: false,
+            office_math_group_char_position_text: String::new(),
+            office_math_group_char_position: None,
             office_math_function_container_direct: false,
             office_math_function_name_direct: false,
             office_math_function_name_seen: false,
@@ -1329,6 +1335,8 @@ impl Parser {
         child.office_math_accent_content_seen = false;
         child.office_math_group_char_container_direct = false;
         child.office_math_group_char_property_direct = false;
+        child.office_math_group_char_capture = false;
+        child.office_math_group_char_position_capture = false;
         child.office_math_function_container_direct = false;
         child.office_math_function_name_direct = false;
         child.office_math_control_property_direct = false;
@@ -2226,8 +2234,12 @@ impl Parser {
             "mgroupChr" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_group_char_container_direct = true;
                 self.state.office_math_group_char_pending = OfficeMathGroupCharKind::None;
+                self.state.office_math_group_char_position = None;
             }
-            "mgroupChrPr" if destination_allows_visible_content(&self.state) => {
+            "mgroupChrPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_group_char() =>
+            {
                 self.state.office_math_group_char_property_direct = true;
             }
             "mchr"
@@ -2236,6 +2248,13 @@ impl Parser {
             {
                 self.state.office_math_group_char_capture = true;
                 self.state.office_math_group_char_text.clear();
+            }
+            "mpos"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_group_char_property_group() =>
+            {
+                self.state.office_math_group_char_position_capture = true;
+                self.state.office_math_group_char_position_text.clear();
             }
             "mfunc" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_function_container_direct = true;
@@ -3370,6 +3389,11 @@ impl Parser {
             "u" if self.state.office_math_group_char_capture => {
                 self.push_office_math_group_char_unicode(control.parameter.unwrap_or(0), offset)?
             }
+            "u" if self.state.office_math_group_char_position_capture => self
+                .push_office_math_group_char_position_unicode(
+                    control.parameter.unwrap_or(0),
+                    offset,
+                )?,
             "u" if self.state.office_math_fraction_type_capture => {
                 self.push_office_math_fraction_type_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -4356,6 +4380,9 @@ impl Parser {
         if self.state.office_math_group_char_capture {
             return self.push_office_math_group_char_text(text, offset);
         }
+        if self.state.office_math_group_char_position_capture {
+            return self.push_office_math_group_char_position_text(text, offset);
+        }
         if self.state.office_math_fraction_type_capture {
             return self.push_office_math_fraction_type_text(text, offset);
         }
@@ -4486,6 +4513,9 @@ impl Parser {
         }
         if self.state.office_math_group_char_capture {
             return self.push_office_math_group_char_text(&visible_text, offset);
+        }
+        if self.state.office_math_group_char_position_capture {
+            return self.push_office_math_group_char_position_text(&visible_text, offset);
         }
         if self.state.office_math_fraction_type_capture {
             return self.push_office_math_fraction_type_text(&visible_text, offset);
@@ -4668,6 +4698,10 @@ impl Parser {
         if self.state.office_math_group_char_capture {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_group_char_text(&ch.to_string(), offset);
+        }
+        if self.state.office_math_group_char_position_capture {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_group_char_position_text(&ch.to_string(), offset);
         }
         if self.state.office_math_fraction_type_capture {
             let ch = self.decode_text_hex_byte(byte);
@@ -5579,6 +5613,12 @@ impl Parser {
             .is_some_and(|state| state.office_math_accent_container_direct)
     }
 
+    fn office_math_direct_parent_is_group_char(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_group_char_container_direct)
+    }
+
     fn office_math_direct_parent_nary_limit_location(&self) -> OfficeMathNaryLimitLocation {
         self.stack
             .last()
@@ -5686,11 +5726,18 @@ impl Parser {
     }
 
     fn office_math_direct_parent_group_char_kind(&self) -> OfficeMathGroupCharKind {
-        self.stack
+        let Some(state) = self
+            .stack
             .last()
             .filter(|state| state.office_math_group_char_container_direct)
-            .map(|state| state.office_math_group_char_pending)
-            .unwrap_or(OfficeMathGroupCharKind::None)
+        else {
+            return OfficeMathGroupCharKind::None;
+        };
+        match state.office_math_group_char_position {
+            Some(OfficeMathBarPosition::Top) => OfficeMathGroupCharKind::Over,
+            Some(OfficeMathBarPosition::Bottom) => OfficeMathGroupCharKind::Under,
+            None => state.office_math_group_char_pending,
+        }
     }
 
     fn office_math_direct_parent_is_function_with_name(&self) -> bool {
@@ -5968,11 +6015,34 @@ impl Parser {
                     office_math_group_char_kind(&self.state.office_math_group_char_text);
             }
         }
+        if self.state.office_math_group_char_position_capture {
+            if previous.office_math_group_char_position_capture {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_group_char_position_text,
+                    &self.state.office_math_group_char_position_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            } else if let Some(position) =
+                office_math_bar_position(&self.state.office_math_group_char_position_text)
+            {
+                previous.office_math_group_char_position = Some(position);
+            }
+        } else if self.state.office_math_group_char_position.is_some()
+            && previous.office_math_group_char_container_direct
+        {
+            previous.office_math_group_char_position = self.state.office_math_group_char_position;
+        }
 
         if self.state.office_math_group_char_pending != OfficeMathGroupCharKind::None
             && !self.state.office_math_group_char_container_direct
         {
             previous.office_math_group_char_pending = self.state.office_math_group_char_pending;
+        }
+        if self.state.office_math_group_char_position.is_some()
+            && !self.state.office_math_group_char_container_direct
+        {
+            previous.office_math_group_char_position = self.state.office_math_group_char_position;
         }
 
         Ok(())
@@ -6599,6 +6669,34 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_group_char_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_office_math_group_char_position_text(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_group_char_position_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_group_char_position_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_group_char_position_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())

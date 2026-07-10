@@ -15377,6 +15377,152 @@ fn office_math_group_characters_render_passive_lines_without_fallback_leakage() 
 }
 
 #[test]
+fn office_math_group_character_positions_render_passively_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mgroupChr{",
+        "\\",
+        "mgroupChrPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u9182?}{",
+        "\\",
+        "mpos bot}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext x+1}}}}} Unsafe {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mgroupChr{",
+        "\\",
+        "mgroupChrPr{",
+        "\\",
+        "mchr ",
+        "\\",
+        "u9183?}{",
+        "\\",
+        "mpos calc.exe}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext y}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before x+1 Unsafe y After"),
+        "unexpected group-character position text: {text:?}"
+    );
+    let bottom_style = run_style_for_text(&parsed.document, "x+1").expect("bottom group run");
+    assert!(!bottom_style.overline);
+    assert_eq!(bottom_style.underline, UnderlineStyle::Single);
+    let invalid_position_style =
+        run_style_for_text(&parsed.document, "y").expect("invalid-position group run");
+    assert_eq!(invalid_position_style.underline, UnderlineStyle::Single);
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "mgroupChr",
+        "mgroupChrPr",
+        "mchr",
+        "mpos",
+        "bot",
+        "calc.exe",
+        "mtext",
+        "objdata",
+        "414243",
+        "?",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math group-character position metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math group-character position controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before x+1 Unsafe y After"));
+    let passive_strokes = content
+        .operations
+        .windows(3)
+        .filter(|operations| {
+            operations[0].operator == "m"
+                && operations[1].operator == "l"
+                && operations[2].operator == "S"
+        })
+        .count();
+    assert!(
+        passive_strokes >= 2,
+        "Office math group-character positions should render as passive line strokes, got {passive_strokes}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mgroupChr",
+        b"mgroupChrPr",
+        b"mchr",
+        b"mpos",
+        b"bot",
+        b"calc.exe",
+        b"mtext",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math group-character position metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_functions_render_passive_argument_spacing_without_control_leakage() {
     let input = rtf(&[
         "{",
