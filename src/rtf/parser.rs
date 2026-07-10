@@ -151,6 +151,9 @@ struct ParserState {
     office_math_function_container_direct: bool,
     office_math_function_name_direct: bool,
     office_math_function_name_seen: bool,
+    office_math_matrix_property_direct: bool,
+    office_math_matrix_separator_capture: bool,
+    office_math_matrix_separator_text: String,
     shape_property_capture: Option<ShapePropertyCapture>,
     shape_property_name: String,
     shape_property_value: String,
@@ -259,6 +262,9 @@ impl Default for ParserState {
             office_math_function_container_direct: false,
             office_math_function_name_direct: false,
             office_math_function_name_seen: false,
+            office_math_matrix_property_direct: false,
+            office_math_matrix_separator_capture: false,
+            office_math_matrix_separator_text: String::new(),
             shape_property_capture: None,
             shape_property_name: String::new(),
             shape_property_value: String::new(),
@@ -1198,6 +1204,8 @@ impl Parser {
         child.office_math_group_char_property_direct = false;
         child.office_math_function_container_direct = false;
         child.office_math_function_name_direct = false;
+        child.office_math_matrix_property_direct = false;
+        child.office_math_matrix_separator_capture = false;
         if parent.metadata_property.is_some() {
             child.metadata_property = None;
             child.metadata_property_text.clear();
@@ -1390,6 +1398,7 @@ impl Parser {
             self.finish_office_math_accent_group(&mut previous, offset)?;
             self.finish_office_math_group_char_group(&mut previous, offset)?;
             self.finish_office_math_function_group(&mut previous);
+            self.finish_office_math_matrix_property_group(&mut previous, offset)?;
             self.finish_shape_property_group(&mut previous, offset)?;
 
             if self.state.inside_field && previous.inside_field {
@@ -2007,6 +2016,20 @@ impl Parser {
             }
             "mmatrix" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_array(OfficeMathArrayKind::Matrix);
+            }
+            "mmatrixPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_array_kind()
+                        == OfficeMathArrayKind::Matrix =>
+            {
+                self.state.office_math_matrix_property_direct = true;
+            }
+            "msepChr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_matrix_property_group() =>
+            {
+                self.state.office_math_matrix_separator_capture = true;
+                self.state.office_math_matrix_separator_text.clear();
             }
             "meqArr" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_array(OfficeMathArrayKind::EquationArray);
@@ -3069,6 +3092,11 @@ impl Parser {
             "u" if self.state.office_math_group_char_capture => {
                 self.push_office_math_group_char_unicode(control.parameter.unwrap_or(0), offset)?
             }
+            "u" if self.state.office_math_matrix_separator_capture => self
+                .push_office_math_matrix_separator_unicode(
+                    control.parameter.unwrap_or(0),
+                    offset,
+                )?,
             "u" if self.state.shape_property_capture.is_some() => {
                 self.push_shape_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -4036,6 +4064,9 @@ impl Parser {
         if self.state.office_math_group_char_capture {
             return self.push_office_math_group_char_text(text, offset);
         }
+        if self.state.office_math_matrix_separator_capture {
+            return self.push_office_math_matrix_separator_text(text, offset);
+        }
         if self.state.destination == Destination::Picture {
             return self.push_picture_hex_text(text, offset);
         }
@@ -4151,6 +4182,9 @@ impl Parser {
         }
         if self.state.office_math_group_char_capture {
             return self.push_office_math_group_char_text(&visible_text, offset);
+        }
+        if self.state.office_math_matrix_separator_capture {
+            return self.push_office_math_matrix_separator_text(&visible_text, offset);
         }
         if self.state.shape_property_capture.is_some() {
             return self.push_shape_property_text(&visible_text, offset);
@@ -4318,6 +4352,10 @@ impl Parser {
         if self.state.office_math_group_char_capture {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_group_char_text(&ch.to_string(), offset);
+        }
+        if self.state.office_math_matrix_separator_capture {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_matrix_separator_text(&ch.to_string(), offset);
         }
         if self.state.destination == Destination::Picture {
             return self.push_picture_bytes(&[byte], offset);
@@ -5186,6 +5224,14 @@ impl Parser {
                 .is_some_and(|state| state.office_math_group_char_property_direct)
     }
 
+    fn office_math_in_matrix_property_group(&self) -> bool {
+        self.state.office_math_matrix_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_matrix_property_direct)
+    }
+
     fn office_math_direct_parent_group_char_kind(&self) -> OfficeMathGroupCharKind {
         self.stack
             .last()
@@ -5221,18 +5267,23 @@ impl Parser {
     }
 
     fn start_office_math_matrix_cell(&mut self, offset: usize) -> Result<(), ParseError> {
-        let cell_index = self
+        let (cell_index, separator) = self
             .stack
             .last_mut()
             .map(|parent| {
                 let cell_index = parent.office_math_array_row_cells_seen;
                 parent.office_math_array_row_cells_seen =
                     parent.office_math_array_row_cells_seen.saturating_add(1);
-                cell_index
+                let separator = if parent.office_math_matrix_separator_text.is_empty() {
+                    "\t".to_string()
+                } else {
+                    parent.office_math_matrix_separator_text.clone()
+                };
+                (cell_index, separator)
             })
-            .unwrap_or(0);
+            .unwrap_or((0, "\t".to_string()));
         if cell_index > 0 {
-            self.push_text("\t", offset)?;
+            self.push_text(&separator, offset)?;
         }
         self.state.office_math_array_context = OfficeMathArrayKind::Matrix;
         Ok(())
@@ -5400,6 +5451,34 @@ impl Parser {
         {
             previous.office_math_function_name_seen = true;
         }
+    }
+
+    fn finish_office_math_matrix_property_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.office_math_matrix_separator_capture {
+            if previous.office_math_matrix_separator_capture {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_matrix_separator_text,
+                    &self.state.office_math_matrix_separator_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            } else if let Some(separator) =
+                office_math_single_separator(&self.state.office_math_matrix_separator_text)
+            {
+                previous.office_math_matrix_separator_text = separator;
+            }
+        } else if !self.state.office_math_matrix_separator_text.is_empty()
+            && previous.office_math_array_container_direct == OfficeMathArrayKind::Matrix
+        {
+            previous.office_math_matrix_separator_text =
+                self.state.office_math_matrix_separator_text.clone();
+        }
+
+        Ok(())
     }
 
     fn finish_shape_property_group(
@@ -5846,6 +5925,34 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_group_char_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_office_math_matrix_separator_text(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_matrix_separator_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_matrix_separator_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_matrix_separator_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
@@ -12018,6 +12125,16 @@ fn office_math_group_char_kind(text: &str) -> OfficeMathGroupCharKind {
         "\u{23b5}" | "\u{23dd}" | "\u{23df}" | "\u{23e1}" | "\u{fe36}" | "\u{fe38}"
         | "\u{fe40}" => OfficeMathGroupCharKind::Under,
         _ => OfficeMathGroupCharKind::None,
+    }
+}
+
+fn office_math_single_separator(text: &str) -> Option<String> {
+    let mut chars = text.trim().chars();
+    let ch = chars.next()?;
+    if chars.next().is_none() && !ch.is_control() {
+        Some(ch.to_string())
+    } else {
+        None
     }
 }
 

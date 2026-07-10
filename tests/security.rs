@@ -14672,6 +14672,147 @@ fn office_math_functions_render_passive_argument_spacing_without_control_leakage
 }
 
 #[test]
+fn office_math_matrix_separators_render_between_cells_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mmatrix{",
+        "\\",
+        "mmatrixPr{",
+        "\\",
+        "msepChr ;}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "mr{",
+        "\\",
+        "marg{",
+        "\\",
+        "mtext A}}{",
+        "\\",
+        "marg{",
+        "\\",
+        "mtext B}}}}}} After",
+        "\\",
+        "par ",
+        "Unsafe {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mmatrix{",
+        "\\",
+        "mmatrixPr{",
+        "\\",
+        "msepChr calc.exe}}{",
+        "\\",
+        "mr{",
+        "\\",
+        "marg{",
+        "\\",
+        "mtext C}}{",
+        "\\",
+        "marg{",
+        "\\",
+        "mtext D}}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before A;B After"),
+        "unexpected matrix separator text: {text:?}"
+    );
+    assert!(
+        !text.contains("Before ;A"),
+        "matrix separator leaked before the first cell: {text:?}"
+    );
+    assert!(
+        text.contains("Unsafe C\tD After"),
+        "multi-character matrix separator should fall back to a passive tab: {text:?}"
+    );
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "mmatrix",
+        "mmatrixPr",
+        "msepChr",
+        "mtext",
+        "objdata",
+        "414243",
+        "calc.exe",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math matrix separator content leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math matrix separator controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before A;B After"));
+    assert!(
+        !rendered_text.contains("Before ;A"),
+        "matrix separator leaked before the first PDF cell: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mmatrix",
+        b"mmatrixPr",
+        b"msepChr",
+        b"mtext",
+        b"objdata",
+        b"414243",
+        b"calc.exe",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math matrix separator content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_hidden_limits_are_stripped_passively() {
     let input = rtf(&[
         "{",
