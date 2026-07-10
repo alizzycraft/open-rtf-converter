@@ -160,6 +160,10 @@ struct ParserState {
     office_math_function_container_direct: bool,
     office_math_function_name_direct: bool,
     office_math_function_name_seen: bool,
+    office_math_control_property_direct: bool,
+    office_math_style_capture: bool,
+    office_math_style_text: String,
+    office_math_style_pending: Option<OfficeMathTextStyle>,
     office_math_matrix_property_direct: bool,
     office_math_matrix_separator_capture: bool,
     office_math_matrix_separator_text: String,
@@ -280,6 +284,10 @@ impl Default for ParserState {
             office_math_function_container_direct: false,
             office_math_function_name_direct: false,
             office_math_function_name_seen: false,
+            office_math_control_property_direct: false,
+            office_math_style_capture: false,
+            office_math_style_text: String::new(),
+            office_math_style_pending: None,
             office_math_matrix_property_direct: false,
             office_math_matrix_separator_capture: false,
             office_math_matrix_separator_text: String::new(),
@@ -331,6 +339,14 @@ enum OfficeMathNaryLimitLocation {
     #[default]
     SubSup,
     UnderOver,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum OfficeMathTextStyle {
+    Plain,
+    Bold,
+    Italic,
+    BoldItalic,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -1253,6 +1269,9 @@ impl Parser {
         child.office_math_group_char_property_direct = false;
         child.office_math_function_container_direct = false;
         child.office_math_function_name_direct = false;
+        child.office_math_control_property_direct = false;
+        child.office_math_style_capture = false;
+        child.office_math_style_pending = None;
         child.office_math_matrix_property_direct = false;
         child.office_math_matrix_separator_capture = false;
         if parent.metadata_property.is_some() {
@@ -1449,6 +1468,7 @@ impl Parser {
             self.finish_office_math_group_char_group(&mut previous, offset)?;
             self.finish_office_math_fraction_group(&mut previous, offset)?;
             self.finish_office_math_function_group(&mut previous);
+            self.finish_office_math_style_group(&mut previous, offset)?;
             self.finish_office_math_matrix_property_group(&mut previous, offset)?;
             self.finish_shape_property_group(&mut previous, offset)?;
 
@@ -2079,6 +2099,13 @@ impl Parser {
             }
             "mfName" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_function_name_direct = true;
+            }
+            "mctrlPr" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_control_property_direct = true;
+            }
+            "msty" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_style_capture = true;
+                self.state.office_math_style_text.clear();
             }
             "mnary" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_nary_container_direct = true;
@@ -3194,6 +3221,9 @@ impl Parser {
                     control.parameter.unwrap_or(0),
                     offset,
                 )?,
+            "u" if self.state.office_math_style_capture => {
+                self.push_office_math_style_unicode(control.parameter.unwrap_or(0), offset)?
+            }
             "u" if self.state.office_math_matrix_separator_capture => self
                 .push_office_math_matrix_separator_unicode(
                     control.parameter.unwrap_or(0),
@@ -4172,6 +4202,9 @@ impl Parser {
         if self.state.office_math_nary_limit_location_capture {
             return self.push_office_math_nary_limit_location_text(text, offset);
         }
+        if self.state.office_math_style_capture {
+            return self.push_office_math_style_text(text, offset);
+        }
         if self.state.office_math_matrix_separator_capture {
             return self.push_office_math_matrix_separator_text(text, offset);
         }
@@ -4296,6 +4329,9 @@ impl Parser {
         }
         if self.state.office_math_nary_limit_location_capture {
             return self.push_office_math_nary_limit_location_text(&visible_text, offset);
+        }
+        if self.state.office_math_style_capture {
+            return self.push_office_math_style_text(&visible_text, offset);
         }
         if self.state.office_math_matrix_separator_capture {
             return self.push_office_math_matrix_separator_text(&visible_text, offset);
@@ -4474,6 +4510,10 @@ impl Parser {
         if self.state.office_math_nary_limit_location_capture {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_nary_limit_location_text(&ch.to_string(), offset);
+        }
+        if self.state.office_math_style_capture {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_office_math_style_text(&ch.to_string(), offset);
         }
         if self.state.office_math_matrix_separator_capture {
             let ch = self.decode_text_hex_byte(byte);
@@ -5685,6 +5725,34 @@ impl Parser {
         }
     }
 
+    fn finish_office_math_style_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.office_math_style_capture {
+            if previous.office_math_style_capture {
+                append_office_math_delimiter_text(
+                    &mut previous.office_math_style_text,
+                    &self.state.office_math_style_text,
+                    self.limits().max_text_run_len,
+                    offset,
+                )?;
+            } else if let Some(style) = office_math_text_style(&self.state.office_math_style_text) {
+                apply_office_math_text_style(&mut previous.character, style);
+                if previous.office_math_control_property_direct {
+                    previous.office_math_style_pending = Some(style);
+                }
+            }
+        } else if self.state.office_math_control_property_direct
+            && let Some(style) = self.state.office_math_style_pending
+        {
+            apply_office_math_text_style(&mut previous.character, style);
+        }
+
+        Ok(())
+    }
+
     fn finish_office_math_matrix_property_group(
         &mut self,
         previous: &mut ParserState,
@@ -6213,6 +6281,30 @@ impl Parser {
             take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
         {
             self.push_office_math_nary_limit_location_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
+    fn push_office_math_style_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        let limit = self.limits().max_text_run_len;
+        append_office_math_delimiter_text(
+            &mut self.state.office_math_style_text,
+            text,
+            limit,
+            offset,
+        )
+    }
+
+    fn push_office_math_style_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_office_math_style_text(&ch.to_string(), offset)?;
         }
         self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
@@ -12443,6 +12535,43 @@ fn office_math_nary_limit_location(text: &str) -> Option<OfficeMathNaryLimitLoca
         "subsup" => Some(OfficeMathNaryLimitLocation::SubSup),
         "undovr" | "underover" => Some(OfficeMathNaryLimitLocation::UnderOver),
         _ => None,
+    }
+}
+
+fn office_math_text_style(text: &str) -> Option<OfficeMathTextStyle> {
+    let normalized = text
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "p" | "plain" | "regular" => Some(OfficeMathTextStyle::Plain),
+        "b" | "bold" => Some(OfficeMathTextStyle::Bold),
+        "i" | "italic" => Some(OfficeMathTextStyle::Italic),
+        "bi" | "bolditalic" | "bolditalics" => Some(OfficeMathTextStyle::BoldItalic),
+        _ => None,
+    }
+}
+
+fn apply_office_math_text_style(style: &mut CharacterStyle, math_style: OfficeMathTextStyle) {
+    match math_style {
+        OfficeMathTextStyle::Plain => {
+            style.bold = false;
+            style.italic = false;
+        }
+        OfficeMathTextStyle::Bold => {
+            style.bold = true;
+            style.italic = false;
+        }
+        OfficeMathTextStyle::Italic => {
+            style.bold = false;
+            style.italic = true;
+        }
+        OfficeMathTextStyle::BoldItalic => {
+            style.bold = true;
+            style.italic = true;
+        }
     }
 }
 

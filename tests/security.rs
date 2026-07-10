@@ -14580,6 +14580,81 @@ fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
 }
 
 #[test]
+fn office_math_style_metadata_is_bounded_and_passive() {
+    let input = br"{\rtf1 Before {\mmath{\moMath{\mtext{\msty bi}Styled}}} and {\mmath{\moMath{\mtext{{\mctrlPr{\msty i}}Wrapped}}}} and {\mmath{\moMath{\mtext{\msty calc.exe{\*\unknown{\object\objdata 414243}}}Plain}}} After\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before Styled and Wrapped and Plain After"),
+        "unexpected Office math style text: {text:?}"
+    );
+    let styled = run_style_for_text(&parsed.document, "Styled").expect("styled math run");
+    assert!(styled.bold);
+    assert!(styled.italic);
+    let wrapped = run_style_for_text(&parsed.document, "Wrapped").expect("wrapped math run");
+    assert!(!wrapped.bold);
+    assert!(wrapped.italic);
+    let plain = run_style_for_text(&parsed.document, " and Plain After").expect("plain math run");
+    assert!(!plain.bold);
+    assert!(!plain.italic);
+    for forbidden in [
+        "mmath", "moMath", "mtext", "mctrlPr", "msty", "bi", "calc.exe", "objdata", "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math style metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math style metadata controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Before Styled and Wrapped and Plain After"),
+        "Office math style visible text missing from PDF text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mtext",
+        b"mctrlPr",
+        b"msty",
+        b"calc.exe",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math style metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_overline_accents_render_as_passive_strokes_without_control_leakage() {
     let input = rtf(&[
         "{",
