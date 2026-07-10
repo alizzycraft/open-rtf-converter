@@ -16514,6 +16514,8 @@ fn office_math_equation_arrays_render_passive_rows() {
         "\\",
         "meqArr{",
         "\\",
+        "meqArrPr calc.exe objdata 414243}{",
+        "\\",
         "me{",
         "\\",
         "mtext X=1}}{",
@@ -16530,7 +16532,9 @@ fn office_math_equation_arrays_render_passive_rows() {
         text.contains("Before X=1\nY=2 After"),
         "unexpected equation-array math text: {text:?}"
     );
-    for forbidden in ["mmath", "moMath", "meqArr", "me", "mtext"] {
+    for forbidden in [
+        "mmath", "moMath", "meqArr", "meqArrPr", "me", "mtext", "calc.exe", "objdata", "414243",
+    ] {
         assert!(
             !text.contains(forbidden),
             "Office math equation-array control leaked to text: {forbidden}"
@@ -16573,7 +16577,11 @@ fn office_math_equation_arrays_render_passive_rows() {
         b"mmath".as_slice(),
         b"moMath",
         b"meqArr",
+        b"meqArrPr",
         b"mtext",
+        b"calc.exe",
+        b"objdata",
+        b"414243",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -16602,6 +16610,8 @@ fn office_math_limits_render_passive_lower_and_upper_scripts() {
         "\\",
         "mlimLow{",
         "\\",
+        "mlimLowPr calc.exe objdata 414243}{",
+        "\\",
         "me{",
         "\\",
         "mtext lim}}{",
@@ -16611,6 +16621,8 @@ fn office_math_limits_render_passive_lower_and_upper_scripts() {
         "mtext x=0}}}{",
         "\\",
         "mlimUpp{",
+        "\\",
+        "mlimUppPr https://example.com/payload objdata 444546}{",
         "\\",
         "me{",
         "\\",
@@ -16634,7 +16646,21 @@ fn office_math_limits_render_passive_lower_and_upper_scripts() {
     let upper_limit_style = run_style_for_text(&parsed.document, "n").expect("upper limit run");
     assert!(upper_limit_style.baseline_shift_half_points > 0);
     assert!(upper_limit_style.font_size_scale_percent < 100);
-    for forbidden in ["mmath", "moMath", "mlimLow", "mlimUpp", "mlim", "mtext"] {
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "mlimLow",
+        "mlimLowPr",
+        "mlimUpp",
+        "mlimUppPr",
+        "mlim",
+        "mtext",
+        "calc.exe",
+        "example.com/payload",
+        "objdata",
+        "414243",
+        "444546",
+    ] {
         assert!(
             !text.contains(forbidden),
             "Office math limit control leaked to text: {forbidden}"
@@ -16678,9 +16704,16 @@ fn office_math_limits_render_passive_lower_and_upper_scripts() {
         b"mmath".as_slice(),
         b"moMath",
         b"mlimLow",
+        b"mlimLowPr",
         b"mlimUpp",
+        b"mlimUppPr",
         b"mlim",
         b"mtext",
+        b"calc.exe",
+        b"example.com/payload",
+        b"objdata",
+        b"414243",
+        b"444546",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

@@ -2337,11 +2337,32 @@ impl Parser {
             "meqArr" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_array(OfficeMathArrayKind::EquationArray);
             }
+            "meqArrPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_array_kind()
+                        == OfficeMathArrayKind::EquationArray =>
+            {
+                self.state.destination = Destination::Ignored;
+            }
             "mlimLow" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_limit_container_direct = OfficeMathLimitKind::Lower;
             }
+            "mlimLowPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_limit_kind()
+                        == OfficeMathLimitKind::Lower =>
+            {
+                self.state.destination = Destination::Ignored;
+            }
             "mlimUpp" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_limit_container_direct = OfficeMathLimitKind::Upper;
+            }
+            "mlimUppPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_limit_kind()
+                        == OfficeMathLimitKind::Upper =>
+            {
+                self.state.destination = Destination::Ignored;
             }
             "mr" if destination_allows_visible_content(&self.state)
                 && self.office_math_direct_parent_array_kind() == OfficeMathArrayKind::Matrix =>
@@ -5572,6 +5593,13 @@ impl Parser {
             .last()
             .map(|state| state.office_math_array_container_direct)
             .unwrap_or(OfficeMathArrayKind::None)
+    }
+
+    fn office_math_direct_parent_limit_kind(&self) -> OfficeMathLimitKind {
+        self.stack
+            .last()
+            .map(|state| state.office_math_limit_container_direct)
+            .unwrap_or(OfficeMathLimitKind::None)
     }
 
     fn office_math_direct_parent_is_delimiter(&self) -> bool {
