@@ -139,6 +139,11 @@ struct ParserState {
     office_math_fraction_type_capture: bool,
     office_math_fraction_type_text: String,
     office_math_fraction_kind: OfficeMathFractionKind,
+    office_math_box_container_direct: bool,
+    office_math_box_property_direct: bool,
+    office_math_box_operator_emulator: bool,
+    office_math_box_operator_property_seen: bool,
+    office_math_box_content_seen: bool,
     office_math_bar_container_direct: bool,
     office_math_bar_property_direct: bool,
     office_math_bar_position_capture: bool,
@@ -276,6 +281,11 @@ impl Default for ParserState {
             office_math_fraction_type_capture: false,
             office_math_fraction_type_text: String::new(),
             office_math_fraction_kind: OfficeMathFractionKind::Bar,
+            office_math_box_container_direct: false,
+            office_math_box_property_direct: false,
+            office_math_box_operator_emulator: false,
+            office_math_box_operator_property_seen: false,
+            office_math_box_content_seen: false,
             office_math_bar_container_direct: false,
             office_math_bar_property_direct: false,
             office_math_bar_position_capture: false,
@@ -1292,6 +1302,9 @@ impl Parser {
         child.office_math_fraction_container_direct = false;
         child.office_math_fraction_property_direct = false;
         child.office_math_fraction_type_capture = false;
+        child.office_math_box_container_direct = false;
+        child.office_math_box_property_direct = false;
+        child.office_math_box_operator_property_seen = false;
         child.office_math_bar_container_direct = false;
         child.office_math_bar_property_direct = false;
         child.office_math_bar_position_capture = false;
@@ -1518,6 +1531,7 @@ impl Parser {
             self.finish_office_math_accent_group(&mut previous, offset)?;
             self.finish_office_math_group_char_group(&mut previous, offset)?;
             self.finish_office_math_fraction_group(&mut previous, offset)?;
+            self.finish_office_math_box_group(&mut previous, offset)?;
             self.finish_office_math_bar_group(&mut previous, offset)?;
             self.finish_office_math_function_group(&mut previous);
             self.finish_office_math_style_group(&mut previous, offset)?;
@@ -2161,6 +2175,25 @@ impl Parser {
             "mborderBox" if destination_allows_visible_content(&self.state) => {
                 self.state.character.border = passive_office_math_border_box();
             }
+            "mbox" if destination_allows_visible_content(&self.state) => {
+                self.state.office_math_box_container_direct = true;
+                self.state.office_math_box_operator_emulator = false;
+                self.state.office_math_box_operator_property_seen = false;
+                self.state.office_math_box_content_seen = false;
+            }
+            "mboxPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_box() =>
+            {
+                self.state.office_math_box_property_direct = true;
+            }
+            "mopEmu"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_box_property_group() =>
+            {
+                self.state.office_math_box_operator_emulator = control.parameter.unwrap_or(1) != 0;
+                self.state.office_math_box_operator_property_seen = true;
+            }
             "mbrk" if destination_allows_visible_content(&self.state) => {
                 self.push_text("\n", offset)?;
             }
@@ -2283,6 +2316,11 @@ impl Parser {
                 && self.has_pending_office_math_delimiters() =>
             {
                 self.start_office_math_delimited_expression(offset)?;
+            }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_is_box() =>
+            {
+                self.start_office_math_box_expression(offset)?;
             }
             "me" if destination_allows_visible_content(&self.state)
                 && self.office_math_direct_parent_array_kind()
@@ -5491,6 +5529,12 @@ impl Parser {
             .is_some_and(|state| state.office_math_fraction_container_direct)
     }
 
+    fn office_math_direct_parent_is_box(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_box_container_direct)
+    }
+
     fn office_math_direct_parent_is_bar(&self) -> bool {
         self.stack
             .last()
@@ -5579,6 +5623,14 @@ impl Parser {
                 .stack
                 .last()
                 .is_some_and(|state| state.office_math_delimiter_property_direct)
+    }
+
+    fn office_math_in_box_property_group(&self) -> bool {
+        self.state.office_math_box_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_box_property_direct)
     }
 
     fn office_math_in_bar_property_group(&self) -> bool {
@@ -5726,6 +5778,23 @@ impl Parser {
         self.state.office_math_delimiter_argument_seen = true;
         self.state.office_math_consumed_delimiter = true;
         self.push_text(&prefix, offset)
+    }
+
+    fn start_office_math_box_expression(&mut self, offset: usize) -> Result<(), ParseError> {
+        let needs_operator_space = self
+            .stack
+            .last_mut()
+            .map(|parent| {
+                let needs_space = parent.office_math_box_operator_emulator
+                    && !parent.office_math_box_content_seen;
+                parent.office_math_box_content_seen = true;
+                needs_space
+            })
+            .unwrap_or(false);
+        if needs_operator_space {
+            self.push_text(" ", offset)?;
+        }
+        Ok(())
     }
 
     fn finish_office_math_delimiter_group(
@@ -5882,6 +5951,28 @@ impl Parser {
             && previous.office_math_fraction_container_direct
         {
             previous.office_math_fraction_kind = self.state.office_math_fraction_kind;
+        }
+
+        Ok(())
+    }
+
+    fn finish_office_math_box_group(
+        &mut self,
+        previous: &mut ParserState,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.office_math_box_operator_property_seen
+            && !self.state.office_math_box_container_direct
+        {
+            previous.office_math_box_operator_emulator =
+                self.state.office_math_box_operator_emulator;
+            previous.office_math_box_operator_property_seen = true;
+        }
+        if self.state.office_math_box_container_direct
+            && self.state.office_math_box_operator_emulator
+            && self.state.office_math_box_content_seen
+        {
+            self.push_text(" ", offset)?;
         }
 
         Ok(())

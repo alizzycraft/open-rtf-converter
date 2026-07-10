@@ -15036,6 +15036,115 @@ fn office_math_manual_breaks_render_passive_line_breaks_without_control_leakage(
 }
 
 #[test]
+fn office_math_box_operator_emulation_adds_passive_spacing_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 A{",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mbox{",
+        "\\",
+        "mboxPr{",
+        "\\",
+        "mopEmu1}{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext +}}}}}B ",
+        "C{",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mbox{",
+        "\\",
+        "mboxPr{",
+        "\\",
+        "mopEmu0}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext -}}}}}D",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("A + B C-D"),
+        "unexpected Office math box operator-emulation text: {text:?}"
+    );
+    for forbidden in [
+        "mmath", "moMath", "mbox", "mboxPr", "mopEmu", "mtext", "objdata", "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Office math box operator-emulation metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "Office math box operator-emulation controls should not be reported as unknown or unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("A + B C-D"),
+        "Office math operator-emulation spacing missing from PDF text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mbox",
+        b"mboxPr",
+        b"mopEmu",
+        b"mtext",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office math box operator-emulation metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_group_characters_render_passive_lines_without_fallback_leakage() {
     let input = rtf(&[
         "{",
