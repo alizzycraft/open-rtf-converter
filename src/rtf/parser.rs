@@ -3476,6 +3476,9 @@ impl Parser {
             "u" if self.office_math_in_accent_property_group() => {
                 self.count_skipped_destination_bytes(1, offset)?
             }
+            "u" if self.office_math_in_group_char_property_group() => {
+                self.count_skipped_destination_bytes(1, offset)?
+            }
             "u" if self.state.shape_property_capture.is_some() => {
                 self.push_shape_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -4483,6 +4486,9 @@ impl Parser {
         if self.office_math_in_accent_property_group() {
             return self.count_skipped_destination_bytes(text.len(), offset);
         }
+        if self.office_math_in_group_char_property_group() {
+            return self.count_skipped_destination_bytes(text.len(), offset);
+        }
         if self.state.destination == Destination::Picture {
             return self.push_picture_hex_text(text, offset);
         }
@@ -4633,6 +4639,9 @@ impl Parser {
             return self.count_skipped_destination_bytes(bytes.len(), offset);
         }
         if self.office_math_in_accent_property_group() {
+            return self.count_skipped_destination_bytes(bytes.len(), offset);
+        }
+        if self.office_math_in_group_char_property_group() {
             return self.count_skipped_destination_bytes(bytes.len(), offset);
         }
         if self.state.shape_property_capture.is_some() {
@@ -4842,6 +4851,9 @@ impl Parser {
             return self.count_skipped_destination_bytes(1, offset);
         }
         if self.office_math_in_accent_property_group() {
+            return self.count_skipped_destination_bytes(1, offset);
+        }
+        if self.office_math_in_group_char_property_group() {
             return self.count_skipped_destination_bytes(1, offset);
         }
         if self.state.destination == Destination::Picture {
