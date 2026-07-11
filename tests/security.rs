@@ -14136,7 +14136,7 @@ fn office_math_radicals_render_readable_passive_text() {
 
 #[test]
 fn office_math_radical_degrees_render_or_hide_passively() {
-    let visible_input = br"{\rtf1 Before {\mmath{\moMath{\mrad{\mradPr{\mdegHide0}}{\mdeg{\mtext 3}}{\me{\mtext x}}}}} After\par}".to_vec();
+    let visible_input = br"{\rtf1 Before {\mmath{\moMath{\mrad{\mradPr calc.exe objdata 414243 \u65?\'42{\mdegHide0}}{\mdeg{\mtext 3}}{\me{\mtext x}}}}} After\par}".to_vec();
     let visible_parsed = parse_rtf_bytes(&visible_input).unwrap();
     let visible_text = collect_text(&visible_parsed.document);
     assert!(
@@ -14150,8 +14150,14 @@ fn office_math_radical_degrees_render_or_hide_passively() {
     let visible_radicand_style =
         run_style_for_text(&visible_parsed.document, "x").expect("visible radicand");
     assert!(visible_radicand_style.overline);
+    for forbidden in ["calc.exe", "objdata", "414243", "AB"] {
+        assert!(
+            !visible_text.contains(forbidden),
+            "Office math visible radical property payload leaked to text: {forbidden}"
+        );
+    }
 
-    let hidden_input = br"{\rtf1 Before {\mmath{\moMath{\mrad{\mradPr{\mdegHide1}}{\mdeg{\mtext HIDDEN-DEGREE-PAYLOAD}}{\me{\mtext x}}}}} After\par}".to_vec();
+    let hidden_input = br"{\rtf1 Before {\mmath{\moMath{\mrad{\mradPr launch.exe https://example.com/payload objdata 444546 \u67?\'44{\mdegHide1}}{\mdeg{\mtext HIDDEN-DEGREE-PAYLOAD}}{\me{\mtext x}}}}} After\par}".to_vec();
     let hidden_parsed = parse_rtf_bytes(&hidden_input).unwrap();
     let hidden_text = collect_text(&hidden_parsed.document);
     assert!(
@@ -14166,6 +14172,10 @@ fn office_math_radical_degrees_render_or_hide_passively() {
         "mdegHide",
         "mdeg",
         "mtext",
+        "launch.exe",
+        "example.com/payload",
+        "objdata",
+        "444546",
         "HIDDEN-DEGREE-PAYLOAD",
     ] {
         assert!(
@@ -14212,6 +14222,10 @@ fn office_math_radical_degrees_render_or_hide_passively() {
         b"mdegHide",
         b"mdeg",
         b"mtext",
+        b"launch.exe",
+        b"example.com/payload",
+        b"objdata",
+        b"444546",
         b"HIDDEN-DEGREE-PAYLOAD",
         b"/JavaScript",
         b"/EmbeddedFile",

@@ -159,6 +159,7 @@ struct ParserState {
     office_math_nary_superscript_hidden: bool,
     office_math_nary_hide_property_seen: bool,
     office_math_radical_container_direct: bool,
+    office_math_radical_property_direct: bool,
     office_math_radical_degree_hidden: bool,
     office_math_radical_degree_hide_property_seen: bool,
     office_math_phantom_container_direct: bool,
@@ -306,6 +307,7 @@ impl Default for ParserState {
             office_math_nary_superscript_hidden: false,
             office_math_nary_hide_property_seen: false,
             office_math_radical_container_direct: false,
+            office_math_radical_property_direct: false,
             office_math_radical_degree_hidden: false,
             office_math_radical_degree_hide_property_seen: false,
             office_math_phantom_container_direct: false,
@@ -1324,6 +1326,7 @@ impl Parser {
         child.office_math_nary_limit_location_capture = false;
         child.office_math_nary_hide_property_seen = false;
         child.office_math_radical_container_direct = false;
+        child.office_math_radical_property_direct = false;
         child.office_math_radical_degree_hide_property_seen = false;
         child.office_math_phantom_container_direct = false;
         child.office_math_phantom_property_direct = false;
@@ -2154,7 +2157,16 @@ impl Parser {
                 self.push_text("\u{221a}", offset)?;
                 self.state.character.overline = true;
             }
-            "mdegHide" if destination_allows_visible_content(&self.state) => {
+            "mradPr"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_direct_parent_is_radical() =>
+            {
+                self.state.office_math_radical_property_direct = true;
+            }
+            "mdegHide"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_radical_property_group() =>
+            {
                 self.state.office_math_radical_degree_hidden = control.parameter.unwrap_or(1) != 0;
                 self.state.office_math_radical_degree_hide_property_seen = true;
             }
@@ -3445,6 +3457,9 @@ impl Parser {
                     control.parameter.unwrap_or(0),
                     offset,
                 )?,
+            "u" if self.office_math_in_radical_property_group() => {
+                self.count_skipped_destination_bytes(1, offset)?
+            }
             "u" if self.state.shape_property_capture.is_some() => {
                 self.push_shape_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -4430,6 +4445,9 @@ impl Parser {
         if self.state.office_math_matrix_separator_capture {
             return self.push_office_math_matrix_separator_text(text, offset);
         }
+        if self.office_math_in_radical_property_group() {
+            return self.count_skipped_destination_bytes(text.len(), offset);
+        }
         if self.state.destination == Destination::Picture {
             return self.push_picture_hex_text(text, offset);
         }
@@ -4563,6 +4581,9 @@ impl Parser {
         }
         if self.state.office_math_matrix_separator_capture {
             return self.push_office_math_matrix_separator_text(&visible_text, offset);
+        }
+        if self.office_math_in_radical_property_group() {
+            return self.count_skipped_destination_bytes(bytes.len(), offset);
         }
         if self.state.shape_property_capture.is_some() {
             return self.push_shape_property_text(&visible_text, offset);
@@ -4754,6 +4775,9 @@ impl Parser {
         if self.state.office_math_matrix_separator_capture {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_office_math_matrix_separator_text(&ch.to_string(), offset);
+        }
+        if self.office_math_in_radical_property_group() {
+            return self.count_skipped_destination_bytes(1, offset);
         }
         if self.state.destination == Destination::Picture {
             return self.push_picture_bytes(&[byte], offset);
@@ -5746,6 +5770,20 @@ impl Parser {
                 .stack
                 .last()
                 .is_some_and(|state| state.office_math_nary_property_direct)
+    }
+
+    fn office_math_direct_parent_is_radical(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|state| state.office_math_radical_container_direct)
+    }
+
+    fn office_math_in_radical_property_group(&self) -> bool {
+        self.state.office_math_radical_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_radical_property_direct)
     }
 
     fn office_math_in_phantom_property_group(&self) -> bool {
