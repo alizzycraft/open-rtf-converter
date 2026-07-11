@@ -2449,7 +2449,8 @@ impl Parser {
                 }
             }
             name if is_office_math_control(name)
-                && destination_allows_visible_content(&self.state) =>
+                && destination_allows_visible_content(&self.state)
+                && !is_office_math_delimiter_metadata_control(name) =>
             {
                 if name == "mmath" || name == "moMath" {
                     self.diagnostics.push(Diagnostic::warning(
@@ -3469,6 +3470,9 @@ impl Parser {
             "u" if self.office_math_in_fraction_property_group() => {
                 self.count_skipped_destination_bytes(1, offset)?
             }
+            "u" if self.office_math_in_delimiter_property_group() => {
+                self.count_skipped_destination_bytes(1, offset)?
+            }
             "u" if self.state.shape_property_capture.is_some() => {
                 self.push_shape_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -4392,6 +4396,10 @@ impl Parser {
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
             }
+            name if is_office_math_delimiter_metadata_control(name) => {
+                self.count_skipped_destination_bytes(name.len(), offset)?;
+                self.state.destination = Destination::Ignored;
+            }
             name if is_known_ignored_control(name) => {}
             name if self.state.destination == Destination::Ignored => {
                 self.count_skipped_destination_bytes(name.len(), offset)?;
@@ -4464,6 +4472,9 @@ impl Parser {
             return self.count_skipped_destination_bytes(text.len(), offset);
         }
         if self.office_math_in_fraction_property_group() {
+            return self.count_skipped_destination_bytes(text.len(), offset);
+        }
+        if self.office_math_in_delimiter_property_group() {
             return self.count_skipped_destination_bytes(text.len(), offset);
         }
         if self.state.destination == Destination::Picture {
@@ -4610,6 +4621,9 @@ impl Parser {
             return self.count_skipped_destination_bytes(bytes.len(), offset);
         }
         if self.office_math_in_fraction_property_group() {
+            return self.count_skipped_destination_bytes(bytes.len(), offset);
+        }
+        if self.office_math_in_delimiter_property_group() {
             return self.count_skipped_destination_bytes(bytes.len(), offset);
         }
         if self.state.shape_property_capture.is_some() {
@@ -4813,6 +4827,9 @@ impl Parser {
             return self.count_skipped_destination_bytes(1, offset);
         }
         if self.office_math_in_fraction_property_group() {
+            return self.count_skipped_destination_bytes(1, offset);
+        }
+        if self.office_math_in_delimiter_property_group() {
             return self.count_skipped_destination_bytes(1, offset);
         }
         if self.state.destination == Destination::Picture {
@@ -6036,11 +6053,13 @@ impl Parser {
             }
             Some(OfficeMathDelimiterCapture::Begin) => {
                 previous.office_math_pending_begin_delimiter =
-                    self.state.office_math_delimiter_text.clone();
+                    office_math_single_separator(&self.state.office_math_delimiter_text)
+                        .unwrap_or_default();
             }
             Some(OfficeMathDelimiterCapture::End) => {
                 previous.office_math_pending_end_delimiter =
-                    self.state.office_math_delimiter_text.clone();
+                    office_math_single_separator(&self.state.office_math_delimiter_text)
+                        .unwrap_or_default();
             }
             Some(OfficeMathDelimiterCapture::Separator) => {
                 previous.office_math_pending_separator_delimiter =
@@ -12604,6 +12623,10 @@ fn is_office_math_control(name: &str) -> bool {
             | "mtype"
             | "msty"
     )
+}
+
+fn is_office_math_delimiter_metadata_control(name: &str) -> bool {
+    matches!(name, "mbegChr" | "msepChr" | "mendChr")
 }
 
 fn is_nested_table_structural_control(name: &str) -> bool {
