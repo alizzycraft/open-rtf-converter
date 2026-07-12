@@ -14780,7 +14780,7 @@ fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
 
 #[test]
 fn office_math_style_metadata_is_bounded_and_passive() {
-    let input = br"{\rtf1 Before {\mmath{\moMath{\mtext{\msty bi}Styled}}} and {\mmath{\moMath{\mtext{{\mctrlPr{\msty i}}Wrapped}}}} and {\mmath{\moMath{\mtext{\msty calc.exe{\*\unknown{\object\objdata 414243}}}Plain}}} After\par}".to_vec();
+    let input = br"{\rtf1 Before {\mmath{\moMath{\mtext{\msty bi}Styled}}} and {\mmath{\moMath{\mtext{{\mctrlPr calc.exe objdata 444546 \u67?\'44{\*\unknown{\object\objdata 454647}}{\msty i}}Wrapped}}}} and {\mmath{\moMath{\mtext{\msty calc.exe{\*\unknown{\object\objdata 414243}}}Plain}}} After\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(
@@ -14798,6 +14798,7 @@ fn office_math_style_metadata_is_bounded_and_passive() {
     assert!(!plain.italic);
     for forbidden in [
         "mmath", "moMath", "mtext", "mctrlPr", "msty", "bi", "calc.exe", "objdata", "414243",
+        "444546", "454647",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -14838,6 +14839,8 @@ fn office_math_style_metadata_is_bounded_and_passive() {
         b"calc.exe",
         b"objdata",
         b"414243",
+        b"444546",
+        b"454647",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

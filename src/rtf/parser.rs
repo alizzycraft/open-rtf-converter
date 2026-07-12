@@ -3498,6 +3498,9 @@ impl Parser {
             "u" if self.office_math_in_border_box_property_group() => {
                 self.count_skipped_destination_bytes(1, offset)?
             }
+            "u" if self.office_math_in_control_property_group() => {
+                self.count_skipped_destination_bytes(1, offset)?
+            }
             "u" if self.state.shape_property_capture.is_some() => {
                 self.push_shape_property_unicode(control.parameter.unwrap_or(0), offset)?
             }
@@ -4514,6 +4517,9 @@ impl Parser {
         if self.office_math_in_border_box_property_group() {
             return self.count_skipped_destination_bytes(text.len(), offset);
         }
+        if self.office_math_in_control_property_group() {
+            return self.count_skipped_destination_bytes(text.len(), offset);
+        }
         if self.state.destination == Destination::Picture {
             return self.push_picture_hex_text(text, offset);
         }
@@ -4673,6 +4679,9 @@ impl Parser {
             return self.count_skipped_destination_bytes(bytes.len(), offset);
         }
         if self.office_math_in_border_box_property_group() {
+            return self.count_skipped_destination_bytes(bytes.len(), offset);
+        }
+        if self.office_math_in_control_property_group() {
             return self.count_skipped_destination_bytes(bytes.len(), offset);
         }
         if self.state.shape_property_capture.is_some() {
@@ -4891,6 +4900,9 @@ impl Parser {
             return self.count_skipped_destination_bytes(1, offset);
         }
         if self.office_math_in_border_box_property_group() {
+            return self.count_skipped_destination_bytes(1, offset);
+        }
+        if self.office_math_in_control_property_group() {
             return self.count_skipped_destination_bytes(1, offset);
         }
         if self.state.destination == Destination::Picture {
@@ -5882,6 +5894,14 @@ impl Parser {
                 .stack
                 .last()
                 .is_some_and(|state| state.office_math_border_box_property_direct)
+    }
+
+    fn office_math_in_control_property_group(&self) -> bool {
+        self.state.office_math_control_property_direct
+            || self
+                .stack
+                .last()
+                .is_some_and(|state| state.office_math_control_property_direct)
     }
 
     fn office_math_in_bar_property_group(&self) -> bool {
