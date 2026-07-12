@@ -15097,7 +15097,19 @@ fn office_math_border_boxes_render_passive_character_borders_without_control_lea
         "\\",
         "mborderBox{",
         "\\",
-        "mborderBoxPr}{",
+        "mborderBoxPr{calc.exe objdata 414243 ",
+        "\\",
+        "u65?",
+        "\\",
+        "'42{",
+        "\\",
+        "*",
+        "\\",
+        "unknown{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 444546}}}}{",
         "\\",
         "me{",
         "\\",
@@ -15115,7 +15127,17 @@ fn office_math_border_boxes_render_passive_character_borders_without_control_lea
     assert!(boxed_style.border.visible);
     assert_eq!(boxed_style.border.style, BorderStyle::Single);
     assert!(boxed_style.border.width_twips <= RtfLimits::default().max_table_border_width_twips);
-    for forbidden in ["mmath", "moMath", "mborderBox", "mborderBoxPr", "mtext"] {
+    for forbidden in [
+        "mmath",
+        "moMath",
+        "mborderBox",
+        "mborderBoxPr",
+        "mtext",
+        "calc.exe",
+        "objdata",
+        "414243",
+        "444546",
+    ] {
         assert!(
             !text.contains(forbidden),
             "Office math border-box control leaked to text: {forbidden}"
@@ -15162,6 +15184,10 @@ fn office_math_border_boxes_render_passive_character_borders_without_control_lea
         b"mborderBox",
         b"mborderBoxPr",
         b"mtext",
+        b"calc.exe",
+        b"objdata",
+        b"414243",
+        b"444546",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
