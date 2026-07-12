@@ -15712,7 +15712,11 @@ fn office_math_functions_render_passive_argument_spacing_without_control_leakage
         "mfunc{",
         "\\",
         "mfuncPr{",
-        "calc.exe http://example.invalid/payload {",
+        "calc.exe http://example.invalid/payload objdata 444546 ",
+        "\\",
+        "u65?",
+        "\\",
+        "'42{",
         "\\",
         "*",
         "\\",
@@ -15760,6 +15764,7 @@ fn office_math_functions_render_passive_argument_spacing_without_control_leakage
         "example.invalid",
         "objdata",
         "414243",
+        "444546",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -15800,6 +15805,7 @@ fn office_math_functions_render_passive_argument_spacing_without_control_leakage
         b"example.invalid",
         b"objdata",
         b"414243",
+        b"444546",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
