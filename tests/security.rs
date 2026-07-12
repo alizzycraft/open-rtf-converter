@@ -15179,7 +15179,7 @@ fn office_math_border_boxes_render_passive_character_borders_without_control_lea
 
 #[test]
 fn office_math_manual_breaks_render_passive_line_breaks_without_control_leakage() {
-    let input = br"{\rtf1 Before {\mmath{\moMath{\mbox{\mboxPr{\mbrk0 }{\*\unknown{\object\objdata 414243}}}{\me{\mtext First}}}{\mtext Second}}} After\par}".to_vec();
+    let input = br"{\rtf1 Before {\mmath{\moMath{\mbox{\mboxPr{\mbrk0 calc.exe objdata 414243 \u65?\'42 }{\*\unknown{\object\objdata 444546}}}{\me{\mtext First}}}{\mtext Second}}} After\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(
@@ -15187,7 +15187,8 @@ fn office_math_manual_breaks_render_passive_line_breaks_without_control_leakage(
         "unexpected Office math manual-break text: {text:?}"
     );
     for forbidden in [
-        "mmath", "moMath", "mbox", "mboxPr", "mbrk", "mtext", "objdata", "414243",
+        "mmath", "moMath", "mbox", "mboxPr", "mbrk", "mtext", "calc.exe", "objdata", "414243",
+        "444546",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -15230,8 +15231,10 @@ fn office_math_manual_breaks_render_passive_line_breaks_without_control_leakage(
         b"mboxPr",
         b"mbrk",
         b"mtext",
+        b"calc.exe",
         b"objdata",
         b"414243",
+        b"444546",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -15262,7 +15265,9 @@ fn office_math_box_operator_emulation_adds_passive_spacing_without_payload_leaka
         "\\",
         "mboxPr{",
         "\\",
-        "mopEmu1}{",
+        "mopEmu1 launch.exe objdata 444546 ",
+        "\\",
+        "u67?'44}{",
         "\\",
         "*",
         "\\",
@@ -15285,7 +15290,9 @@ fn office_math_box_operator_emulation_adds_passive_spacing_without_payload_leaka
         "\\",
         "mboxPr{",
         "\\",
-        "mopEmu0}}{",
+        "mopEmu0 https://example.com/payload objdata 454647 ",
+        "\\",
+        "u72?'49}}{",
         "\\",
         "me{",
         "\\",
@@ -15300,7 +15307,18 @@ fn office_math_box_operator_emulation_adds_passive_spacing_without_payload_leaka
         "unexpected Office math box operator-emulation text: {text:?}"
     );
     for forbidden in [
-        "mmath", "moMath", "mbox", "mboxPr", "mopEmu", "mtext", "objdata", "414243",
+        "mmath",
+        "moMath",
+        "mbox",
+        "mboxPr",
+        "mopEmu",
+        "mtext",
+        "launch.exe",
+        "example.com/payload",
+        "objdata",
+        "414243",
+        "444546",
+        "454647",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -15339,8 +15357,12 @@ fn office_math_box_operator_emulation_adds_passive_spacing_without_payload_leaka
         b"mboxPr",
         b"mopEmu",
         b"mtext",
+        b"launch.exe",
+        b"example.com/payload",
         b"objdata",
         b"414243",
+        b"444546",
+        b"454647",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
