@@ -5765,6 +5765,60 @@ fn docproperty_fields_render_custom_properties_without_leaking_linked_or_active_
 }
 
 #[test]
+fn linked_custom_property_values_are_never_rendered_or_preserved() {
+    let input = br#"{\rtf1{\*\userprops{\propname Client Name}{\proptype30}{\staticval Contoso}{\linkval C:\\secret\\linked-source.docm /JavaScript /EmbeddedFile}}Client {\field{\*\fldinst DOCPROPERTY "Client Name"}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Client Contoso"));
+    for forbidden in [
+        b"linked-source.docm".as_slice(),
+        b"secret",
+        b"linkval",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "linked custom property value leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+    for linked_property_input in [
+        br"{\rtf1{\linkval C:\\secret\\linked-source.docm} visible\par}".as_slice(),
+        br"{\rtf1{\*\userprops{\propname Client}{\linkval C:\\secret\\linked-source.docm}} visible\par}",
+        br"{\rtf1{\*\unknown{\linkval C:\\secret\\linked-source.docm}} visible\par}",
+    ] {
+        assert!(matches!(
+            parse_rtf_bytes_with_options(linked_property_input, &reject_options),
+            Err(ParseError::ActiveContentRejected { feature, .. })
+                if feature == "linked custom property value"
+        ));
+    }
+}
+
+#[test]
 fn docvariable_fields_render_metadata_without_leaking_nested_active_content() {
     let input = br#"{\rtf1{\*\docvar {Client Name}{Contoso {\field{\*\fldinst HYPERLINK "https://example.com/docvar"}{\fldrslt Hidden link}} tail}}Client {\field{\*\fldinst DOCVARIABLE "Client Name"}} missing {\field{\*\fldinst DOCVARIABLE Missing}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();

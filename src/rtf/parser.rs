@@ -13486,6 +13486,7 @@ fn opaque_metadata_payload_feature(name: &str) -> Option<&'static str> {
         "xmlattrname" | "xmlattrns" | "xmlattrvalue" => Some("custom XML attribute metadata"),
         "xmlnstbl" => Some("custom XML namespace table"),
         "datafield" => Some("form field data payload"),
+        "linkval" => Some("linked custom property value"),
         _ => None,
     }
 }
@@ -13532,6 +13533,7 @@ fn is_metadata_destination(name: &str) -> bool {
             | "aftncn"
             | "userprops"
             | "docvar"
+            | "linkval"
             | "revtbl"
             | "rsidtbl"
             | "xmlattrname"
