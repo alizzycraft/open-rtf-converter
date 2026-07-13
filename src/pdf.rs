@@ -592,6 +592,10 @@ pub fn render_pdf_with_font_provider(
                     content.fill_nonzero();
                 }
                 LayoutItem::Text(fragment) => {
+                    if text_fragment_renders_as_passive_vector_only(fragment) {
+                        draw_passive_vector_only_dingbat_text(&mut content, fragment);
+                        continue;
+                    }
                     let supplied_encoding = encode_supplied_text_fragment(
                         fragment,
                         layout,
@@ -968,6 +972,9 @@ fn collect_used_font_indexes_for_page(
     for item in &page.items {
         match item {
             LayoutItem::Text(fragment) => {
+                if text_fragment_renders_as_passive_vector_only(fragment) {
+                    continue;
+                }
                 if font_provider
                     .and_then(|provider| supplied_text_encoding_parts(fragment, layout, provider))
                     .is_some()
@@ -3053,6 +3060,101 @@ fn draw_passive_text_overlays(content: &mut Content, fragment: &TextFragment) {
     draw_passive_dingbat_overlays(content, fragment);
 }
 
+fn text_fragment_renders_as_passive_vector_only(fragment: &TextFragment) -> bool {
+    if fragment.font_family != PdfFontFamily::ZapfDingbats
+        || fragment.style.shadow
+        || fragment.style.outline
+        || fragment.style.relief != TextRelief::None
+        || fragment.text.is_empty()
+    {
+        return false;
+    }
+
+    let mut has_passive_content = false;
+    for ch in fragment
+        .text
+        .chars()
+        .filter(|ch| !is_zero_width_pdf_char(*ch))
+    {
+        if ch.is_whitespace() {
+            has_passive_content = true;
+            continue;
+        }
+        if is_passive_vector_only_dingbat_char(ch) {
+            has_passive_content = true;
+        } else {
+            return false;
+        }
+    }
+    has_passive_content
+}
+
+fn is_passive_vector_only_dingbat_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{25a1}'
+            | '\u{2610}'
+            | '\u{2611}'
+            | '\u{2612}'
+            | '\u{263a}'
+            | '\u{2713}'
+            | '\u{2714}'
+            | '\u{2717}'
+            | '\u{2751}'
+    )
+}
+
+fn draw_passive_vector_only_dingbat_text(content: &mut Content, fragment: &TextFragment) {
+    let font_size = fragment.style.font_size_points();
+    let horizontal_scale = fragment.style.horizontal_scale();
+    let character_spacing = twips_to_points(fragment.style.character_spacing_twips);
+    let visible_count = fragment
+        .text
+        .chars()
+        .filter(|ch| !is_zero_width_pdf_char(*ch))
+        .count();
+    let mut visible_index = 0usize;
+    let mut cursor = fragment.x;
+
+    content.save_state();
+    set_stroke_color(content, fragment.color);
+    set_fill_color(content, fragment.color);
+    content.set_line_width((font_size * 0.075).clamp(0.5, 1.25));
+    for ch in fragment.text.chars() {
+        match ch {
+            '\u{25a1}' | '\u{2610}' | '\u{2751}' => {
+                draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size)
+            }
+            '\u{2611}' => {
+                draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size);
+                draw_passive_checkbox_tick(content, cursor, fragment.baseline_y, font_size);
+            }
+            '\u{2612}' => {
+                draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size);
+                draw_passive_checkbox_x(content, cursor, fragment.baseline_y, font_size);
+            }
+            '\u{2713}' | '\u{2714}' => {
+                draw_passive_checkbox_tick(content, cursor, fragment.baseline_y, font_size)
+            }
+            '\u{2717}' => draw_passive_checkbox_x(content, cursor, fragment.baseline_y, font_size),
+            '\u{263a}' => draw_passive_smiley(content, cursor, fragment.baseline_y, font_size),
+            _ => {}
+        }
+        if !is_zero_width_pdf_char(ch) {
+            visible_index += 1;
+            let mut advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            if ch == ' ' || ch == '\u{00a0}' {
+                advance += fragment.word_spacing;
+            }
+            if visible_index < visible_count {
+                advance += character_spacing;
+            }
+            cursor += advance * horizontal_scale;
+        }
+    }
+    content.restore_state();
+}
+
 fn draw_passive_emphasis_marks(content: &mut Content, fragment: &TextFragment) {
     if fragment.style.emphasis_mark == CharacterEmphasisMark::None {
         return;
@@ -3192,6 +3294,15 @@ fn draw_passive_checkbox_tick(
     content.move_to(left + box_size * 0.22, bottom + box_size * 0.48);
     content.line_to(left + box_size * 0.42, bottom + box_size * 0.25);
     content.line_to(left + box_size * 0.82, bottom + box_size * 0.78);
+    content.stroke();
+}
+
+fn draw_passive_checkbox_box(content: &mut Content, glyph_x: f32, baseline_y: f32, font_size: f32) {
+    let box_size = font_size * 0.62;
+    let left = glyph_x + font_size * 0.04;
+    let bottom = baseline_y + font_size * 0.04;
+
+    content.rect(left, bottom, box_size, box_size);
     content.stroke();
 }
 
@@ -4120,7 +4231,7 @@ mod tests {
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
-                    text: "\u{2611}".to_string(),
+                    text: "\u{03b1}".to_string(),
                     style: Default::default(),
                 }],
             }),
@@ -4132,19 +4243,19 @@ mod tests {
         let second_page_fonts = page_font_resource_names(&pdf, 1);
 
         assert!(first_page_fonts.iter().any(|name| name == b"F1"));
-        assert!(!first_page_fonts.iter().any(|name| name == b"F14"));
-        assert!(second_page_fonts.iter().any(|name| name == b"F14"));
+        assert!(!first_page_fonts.iter().any(|name| name == b"F13"));
+        assert!(second_page_fonts.iter().any(|name| name == b"F13"));
         assert!(!second_page_fonts.iter().any(|name| name == b"F1"));
         assert!(
-            pdf.windows(b"/BaseFont /ZapfDingbats".len())
-                .any(|window| window == b"/BaseFont /ZapfDingbats"),
+            pdf.windows(b"/BaseFont /Symbol".len())
+                .any(|window| window == b"/BaseFont /Symbol"),
             "shared font object should still be emitted when used by any page"
         );
         audit_passive_pdf_bytes(&pdf).unwrap();
     }
 
     #[test]
-    fn symbol_and_dingbat_fonts_include_passive_to_unicode_maps() {
+    fn symbol_font_includes_passive_to_unicode_map_while_checkboxes_render_as_vectors() {
         let mut document = Document::default();
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
@@ -4156,20 +4267,24 @@ mod tests {
 
         let layout = LayoutEngine::layout(&document);
         let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
 
         assert!(
             pdf.windows(b"/BaseFont /Symbol".len())
                 .any(|window| window == b"/BaseFont /Symbol")
         );
         assert!(
-            pdf.windows(b"/BaseFont /ZapfDingbats".len())
-                .any(|window| window == b"/BaseFont /ZapfDingbats")
+            !pdf.windows(b"/BaseFont /ZapfDingbats".len())
+                .any(|window| window == b"/BaseFont /ZapfDingbats"),
+            "passive checkbox vector path should not require a ZapfDingbats font resource"
         );
         assert!(
             pdf.windows(b"/ToUnicode".len())
                 .filter(|window| *window == b"/ToUnicode")
                 .count()
-                >= 2
+                >= 1
         );
         assert!(
             pdf.windows(b"<61> <03B1>".len())
@@ -4177,15 +4292,45 @@ mod tests {
             "Symbol alpha byte must map back to Unicode alpha"
         );
         assert!(
-            pdf.windows(b"<71> <2610>".len())
-                .any(|window| window == b"<71> <2610>"),
-            "Zapf box byte must map back to a passive Unicode checkbox box"
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "checkbox should render as passive vector geometry"
+        );
+    }
+
+    #[test]
+    fn smiley_dingbat_can_render_as_passive_vector_without_zapf_font_resource() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "\u{263a}".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+
+        assert!(
+            !pdf.windows(b"/BaseFont /ZapfDingbats".len())
+                .any(|window| window == b"/BaseFont /ZapfDingbats"),
+            "vector-only smiley should not require a viewer ZapfDingbats font"
         );
         assert!(
-            pdf.windows(b"<33> <2713>".len())
-                .any(|window| window == b"<33> <2713>"),
-            "Zapf checkmark byte must map back to Unicode checkmark"
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "c"),
+            "vector-only smiley should draw passive Bezier paths"
         );
+        assert!(content_bytes_for_font(&content, b"F14").is_empty());
+        audit_passive_pdf_bytes(&pdf).unwrap();
     }
 
     #[test]
@@ -6281,7 +6426,7 @@ endstream
     }
 
     #[test]
-    fn writes_zapf_dingbats_checkbox_glyphs() {
+    fn writes_checkbox_dingbats_as_passive_vectors() {
         let mut document = Document::default();
         document.fonts = vec![
             FontDef {
@@ -6320,25 +6465,35 @@ endstream
         let content = parsed.get_and_decode_page_content(page_id).unwrap();
 
         assert!(
-            pdf.windows(b"/BaseFont /ZapfDingbats".len())
-                .any(|window| window == b"/BaseFont /ZapfDingbats")
+            !pdf.windows(b"/BaseFont /ZapfDingbats".len())
+                .any(|window| window == b"/BaseFont /ZapfDingbats"),
+            "supported checkbox dingbats should not require a viewer ZapfDingbats font"
         );
-        assert_eq!(content_bytes(&content), b"qqqq37");
-        assert_eq!(
+        assert!(content_bytes_for_font(&content, b"F14").is_empty());
+        assert!(
+            content
+                .operations
+                .iter()
+                .filter(|operation| operation.operator == "re")
+                .count()
+                >= 4,
+            "checkbox boxes should render as passive rectangles"
+        );
+        assert!(
             content
                 .operations
                 .iter()
                 .filter(|operation| operation.operator == "m")
-                .count(),
-            3
+                .count()
+                >= 3
         );
-        assert_eq!(
+        assert!(
             content
                 .operations
                 .iter()
                 .filter(|operation| operation.operator == "l")
-                .count(),
-            4
+                .count()
+                >= 4
         );
         assert!(
             content

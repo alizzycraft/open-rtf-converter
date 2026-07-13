@@ -72,6 +72,7 @@ struct ParserState {
     pending_unicode_high_surrogate: Option<u16>,
     skip_bytes: usize,
     destination: Destination,
+    pending_ignorable_destination: bool,
     last_skipped_active_feature: Option<&'static str>,
     suppress_skipped_object_payload_diagnostic: bool,
     inside_metadata: bool,
@@ -222,6 +223,7 @@ impl Default for ParserState {
             pending_unicode_high_surrogate: None,
             skip_bytes: 0,
             destination: Destination::Body,
+            pending_ignorable_destination: false,
             last_skipped_active_feature: None,
             suppress_skipped_object_payload_diagnostic: false,
             inside_metadata: false,
@@ -1306,6 +1308,8 @@ impl Parser {
         }
         let mut parent = self.state.clone();
         let mut child = self.state.clone();
+        parent.pending_ignorable_destination = false;
+        child.pending_ignorable_destination = false;
         child.at_group_start = true;
         child.office_math_active_end_delimiter.clear();
         child.office_math_consumed_delimiter = false;
@@ -2034,6 +2038,8 @@ impl Parser {
     fn apply_control(&mut self, control: &Control, offset: usize) -> Result<(), ParseError> {
         let control_starts_group = self.state.at_group_start;
         self.state.at_group_start = false;
+        let control_follows_ignorable_destination_marker = self.state.pending_ignorable_destination;
+        self.state.pending_ignorable_destination = false;
         if self.state.skip_bytes > 0 && control.name != "u" {
             return Ok(());
         }
@@ -2045,6 +2051,20 @@ impl Parser {
         }
         if self.handle_nested_table_control(control, offset)? {
             return Ok(());
+        }
+        if control_follows_ignorable_destination_marker
+            && control.name != "*"
+            && ignorable_destination_marker_applies_to_control(
+                control.name.as_str(),
+                control_starts_group,
+            )
+        {
+            self.state.destination = Destination::Ignored;
+        } else if control_follows_ignorable_destination_marker && control.name != "*" {
+            self.diagnostics.push(Diagnostic::warning(
+                "ignorable destination marker before a non-destination control was ignored",
+                Some(offset),
+            ));
         }
 
         match control.name.as_str() {
@@ -2070,7 +2090,7 @@ impl Parser {
             "mac" => self.state.code_page = CodePage::MacRoman,
             "pc" => self.state.code_page = CodePage::Ibm437,
             "pca" => self.state.code_page = CodePage::Ibm850,
-            "*" => self.state.destination = Destination::Ignored,
+            "*" => self.state.pending_ignorable_destination = true,
             "upr" if destination_allows_visible_content(&self.state) => {
                 self.state.unicode_alternate_branch = UnicodeAlternateBranch::Container;
                 self.state.unicode_alternate_child_count = 0;
@@ -4553,6 +4573,13 @@ impl Parser {
 
     fn apply_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         self.state.at_group_start = false;
+        if self.state.pending_ignorable_destination {
+            self.state.pending_ignorable_destination = false;
+            self.diagnostics.push(Diagnostic::warning(
+                "ignorable destination marker without a following destination control was ignored",
+                Some(offset),
+            ));
+        }
         if self.state.skip_bytes > 0 {
             let skip = self.state.skip_bytes.min(text.chars().count());
             self.state.skip_bytes -= skip;
@@ -4933,6 +4960,13 @@ impl Parser {
 
     fn apply_hex_byte(&mut self, byte: u8, offset: usize) -> Result<(), ParseError> {
         self.state.at_group_start = false;
+        if self.state.pending_ignorable_destination {
+            self.state.pending_ignorable_destination = false;
+            self.diagnostics.push(Diagnostic::warning(
+                "ignorable destination marker without a following destination control was ignored",
+                Some(offset),
+            ));
+        }
         if self.state.skip_bytes > 0 {
             self.state.skip_bytes -= 1;
             return Ok(());
@@ -5112,6 +5146,13 @@ impl Parser {
 
     fn apply_binary(&mut self, bytes: &[u8], offset: usize) -> Result<(), ParseError> {
         self.state.at_group_start = false;
+        if self.state.pending_ignorable_destination {
+            self.state.pending_ignorable_destination = false;
+            self.diagnostics.push(Diagnostic::warning(
+                "ignorable destination marker without a following destination control was ignored",
+                Some(offset),
+            ));
+        }
         self.state.pending_unicode_high_surrogate = None;
         if self.state.destination == Destination::Picture {
             return self.push_picture_bytes(bytes, offset);
@@ -13278,6 +13319,74 @@ fn skipped_destination_active_feature(name: &str) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+fn ignorable_destination_marker_applies_to_control(name: &str, control_starts_group: bool) -> bool {
+    control_starts_group || !is_visible_non_destination_control(name)
+}
+
+fn is_visible_non_destination_control(name: &str) -> bool {
+    matches!(
+        name,
+        "b" | "i"
+            | "ul"
+            | "ul0"
+            | "ulnone"
+            | "strike"
+            | "strike0"
+            | "striked"
+            | "striked0"
+            | "scaps"
+            | "scaps0"
+            | "caps"
+            | "caps0"
+            | "v"
+            | "v0"
+            | "fs"
+            | "f"
+            | "cf"
+            | "cb"
+            | "highlight"
+            | "super"
+            | "sub"
+            | "nosupersub"
+            | "plain"
+            | "pard"
+            | "ql"
+            | "qr"
+            | "qc"
+            | "qj"
+            | "li"
+            | "ri"
+            | "fi"
+            | "sb"
+            | "sa"
+            | "sl"
+            | "slmult"
+            | "tx"
+            | "tab"
+            | "par"
+            | "line"
+            | "page"
+            | "column"
+            | "emdash"
+            | "endash"
+            | "bullet"
+            | "lquote"
+            | "rquote"
+            | "ldblquote"
+            | "rdblquote"
+            | "u"
+            | "uc"
+            | "bin"
+            | "chpgn"
+            | "sectnum"
+            | "chftn"
+            | "chdate"
+            | "chtime"
+            | "chdpa"
+            | "chdpl"
+    )
 }
 
 fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {

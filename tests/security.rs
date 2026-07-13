@@ -7981,10 +7981,10 @@ fn empty_stored_symbol_result_falls_back_to_passive_symbol_rendering() {
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
     assert!(
-        zapf_bytes.contains(&b'J'),
-        "empty-result Wingdings SYMBOL field should be emitted as passive ZapfDingbats text bytes, got {zapf_bytes:?}"
+        !pdf.windows(b"/BaseFont /ZapfDingbats".len())
+            .any(|window| window == b"/BaseFont /ZapfDingbats"),
+        "empty-result Wingdings smiley should not require a viewer ZapfDingbats font"
     );
     assert!(
         content
@@ -8043,13 +8043,15 @@ fn unquoted_symbol_font_switch_renders_passive_dingbat_without_metadata_leakage(
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
-    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
 
     assert!(rendered_text.contains("Before"));
     assert!(rendered_text.contains("After"));
     assert!(
-        zapf_bytes.contains(&b'J'),
-        "unquoted Wingdings SYMBOL should use passive ZapfDingbats bytes, got {zapf_bytes:?}"
+        !output
+            .pdf
+            .windows(b"/BaseFont /ZapfDingbats".len())
+            .any(|window| window == b"/BaseFont /ZapfDingbats"),
+        "unquoted Wingdings smiley should not require a viewer ZapfDingbats font"
     );
     assert!(
         content
@@ -10359,19 +10361,12 @@ fn resultless_form_checkbox_renders_passively_without_metadata_or_pdf_form() {
         .count();
 
     assert!(rendered_text.contains("Before "));
-    assert!(
-        rendered_text.contains("q"),
-        "checked checkbox should render a passive ZapfDingbats box glyph; got {rendered_text:?}"
-    );
     assert!(rendered_text.contains(" After"));
     assert!(
         stroke_count >= 1,
-        "checked checkbox should add a passive vector check overlay"
+        "checked checkbox should draw vector strokes"
     );
-    assert!(
-        pdf.windows(b"/BaseFont /ZapfDingbats".len())
-            .any(|window| window == b"/BaseFont /ZapfDingbats")
-    );
+    assert_passive_checkbox_vectors_without_zapf(&pdf, &content, "checked form checkbox");
     for forbidden in [
         b"FORMCHECKBOX".as_slice(),
         b"HiddenName",
@@ -10468,15 +10463,8 @@ fn unchecked_form_checkbox_renders_passive_font_glyph_without_pdf_form() {
     let rendered_text = decoded_pdf_text(&content);
 
     assert!(rendered_text.contains("Before "));
-    assert!(
-        rendered_text.contains("q"),
-        "unchecked checkbox should render a passive ZapfDingbats box glyph; got {rendered_text:?}"
-    );
     assert!(rendered_text.contains(" After"));
-    assert!(
-        pdf.windows(b"/BaseFont /ZapfDingbats".len())
-            .any(|window| window == b"/BaseFont /ZapfDingbats")
-    );
+    assert_passive_checkbox_vectors_without_zapf(&pdf, &content, "unchecked form checkbox");
     for forbidden in [
         b"FORMCHECKBOX".as_slice(),
         b"HiddenUnchecked",
@@ -11687,17 +11675,7 @@ fn wingdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
-    assert!(
-        zapf_bytes
-            .windows(b"q q 3 7".len())
-            .any(|window| window == b"q q 3 7"),
-        "Wingdings checkbox glyphs should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
-    );
-    assert!(
-        pdf.windows(b"/BaseFont /ZapfDingbats".len())
-            .any(|window| window == b"/BaseFont /ZapfDingbats")
-    );
+    assert_passive_checkbox_vectors_without_zapf(&pdf, &content, "Wingdings checkbox glyphs");
     for forbidden in [
         b"Wingdings".as_slice(),
         b"fonttbl",
@@ -11754,34 +11732,21 @@ fn associated_font_checkbox_glyphs_render_passively_without_font_payload_leakage
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
-    assert!(
-        zapf_bytes
-            .windows(b"q q 3 7".len())
-            .any(|window| window == b"q q 3 7"),
-        "associated font checkbox glyphs should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
-    );
-    assert!(
-        output
-            .pdf
-            .windows(b"/BaseFont /ZapfDingbats".len())
-            .any(|window| window == b"/BaseFont /ZapfDingbats")
-    );
     assert!(
         content.operations.iter().any(|operation| {
-            operation.operator == "Tf"
+            operation.operator == "re"
                 && operation
                     .operands
-                    .first()
-                    .and_then(|operand| operand.as_name().ok())
-                    == Some(b"F14".as_slice())
-                && operation
-                    .operands
-                    .get(1)
+                    .get(2)
                     .and_then(pdf_operand_number)
-                    .is_some_and(|size| (size - 36.0).abs() < 0.01)
+                    .is_some_and(|size| size > 18.0)
         }),
-        "associated font size should emit 36pt passive ZapfDingbats text"
+        "associated font size should render large passive checkbox vector boxes"
+    );
+    assert_passive_checkbox_vectors_without_zapf(
+        &output.pdf,
+        &content,
+        "associated-font checkbox glyphs",
     );
     for forbidden in [
         b"Wingdings".as_slice(),
@@ -11990,20 +11955,7 @@ fn wingdings2_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
-    assert!(
-        zapf_bytes
-            .windows(b"7 3 q q q q".len())
-            .any(|window| window == b"7 3 q q q q")
-            && zapf_bytes.contains(&b'q'),
-        "Wingdings 2 checkbox glyphs should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
-    );
-    assert!(
-        output
-            .pdf
-            .windows(b"/BaseFont /ZapfDingbats".len())
-            .any(|window| window == b"/BaseFont /ZapfDingbats")
-    );
+    assert_passive_checkbox_vectors_without_zapf(&output.pdf, &content, "Wingdings 2 checkboxes");
     for forbidden in [
         b"Wingdings 2".as_slice(),
         b"fonttbl",
@@ -12111,20 +12063,7 @@ fn webdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
-    assert!(
-        zapf_bytes
-            .windows(b"q 3 q".len())
-            .any(|window| window == b"q 3 q")
-            && zapf_bytes.contains(&b'q'),
-        "Webdings checkbox glyphs should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
-    );
-    assert!(
-        output
-            .pdf
-            .windows(b"/BaseFont /ZapfDingbats".len())
-            .any(|window| window == b"/BaseFont /ZapfDingbats")
-    );
+    assert_passive_checkbox_vectors_without_zapf(&output.pdf, &content, "Webdings checkboxes");
     for forbidden in [
         b"Webdings".as_slice(),
         b"fonttbl",
@@ -12194,19 +12133,7 @@ fn unicode_checkbox_glyphs_use_passive_checkbox_font_without_embedding_source_fo
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
-    assert!(
-        zapf_bytes
-            .windows(b"qq37".len())
-            .any(|window| window == b"qq37"),
-        "Unicode checkbox glyphs should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
-    );
-    assert!(
-        output
-            .pdf
-            .windows(b"/BaseFont /ZapfDingbats".len())
-            .any(|window| window == b"/BaseFont /ZapfDingbats")
-    );
+    assert_passive_checkbox_vectors_without_zapf(&output.pdf, &content, "Unicode checkboxes");
     for forbidden in [
         b"Segoe UI Symbol".as_slice(),
         b"fonttbl",
@@ -12254,16 +12181,12 @@ fn segoe_ui_symbol_latin_text_stays_readable_while_checkboxes_use_passive_font()
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
     let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
-    let zapf_bytes = pdf_text_bytes_for_font(&content, b"F14");
 
     assert!(
         String::from_utf8_lossy(&helvetica_bytes).contains("Label "),
         "Segoe UI Symbol Latin text should use passive Helvetica bytes, got {helvetica_bytes:?}"
     );
-    assert!(
-        zapf_bytes.contains(&b'q'),
-        "Segoe UI Symbol checkbox should encode through passive ZapfDingbats bytes, got {zapf_bytes:?}"
-    );
+    assert_passive_checkbox_vectors_without_zapf(&output.pdf, &content, "Segoe UI Symbol checkbox");
     assert!(
         symbol_bytes.is_empty(),
         "Segoe UI Symbol Latin text should not be emitted through PDF Symbol, got {symbol_bytes:?}"
@@ -29356,11 +29279,27 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
     ));
     assert!(matches!(
         parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\template https://example.com/direct-template.dotm} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "external template in skipped destination"
+    ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
             br"{\rtf1{\*\unknown{\mmdatasource https://example.com/data.csv}} visible\par}",
             &reject_options
         ),
         Err(ParseError::ActiveContentRejected { feature, .. })
             if feature == "mail merge data source in skipped destination"
+    ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\objdata 414243} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "object payload in skipped destination"
     ));
     assert!(matches!(
         parse_rtf_bytes_with_options(
@@ -29373,12 +29312,14 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
 
     let parsed =
         parse_rtf_bytes(
-            br"{\rtf1{\*\unknown{\object\objdata 414243}{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}}{\template https://example.com/template.dotm}{\mmdatasource https://example.com/data.csv}{\annotation hidden comment}} visible\par}"
+            br"{\rtf1{\*\unknown{\object\objdata 414243}{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}}{\template https://example.com/template.dotm}{\mmdatasource https://example.com/data.csv}{\annotation hidden comment}}{\*\template https://example.com/direct-template.dotm}{\*\objdata 444546} visible\par}"
         ).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("visible"));
     assert!(!text.contains("414243"));
+    assert!(!text.contains("444546"));
     assert!(!text.contains("template.dotm"));
+    assert!(!text.contains("direct-template.dotm"));
     assert!(!text.contains("data.csv"));
     assert!(!text.contains("hidden comment"));
     assert!(!text.contains("HOSTILE-FONT-PAYLOAD"));
@@ -29397,6 +29338,107 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
                 .any(|diagnostic| diagnostic.message.contains(expected)),
             "missing skipped active-content diagnostic {expected:?}: {:?}",
             parsed.diagnostics
+        );
+    }
+}
+
+#[test]
+fn inline_ignorable_marker_does_not_suppress_following_visible_content() {
+    let input = br"{\rtf1 Before \*After {\*\unknown Hidden {\object\objdata 414243}} visible\par}";
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(text.contains("visible"));
+    assert!(!text.contains("Hidden"));
+    assert!(!text.contains("414243"));
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    for forbidden in [
+        b"Hidden".as_slice(),
+        b"414243",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "inline ignorable marker allowed hidden payload into PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn ignorable_marker_before_formatting_control_does_not_hide_visible_text() {
+    let input = br"{\rtf1 Before {\*\b Bold {\*\i italic}} After {\*\unknown Hidden {\object\objdata 414243}} visible\par}";
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("Bold"));
+    assert!(text.contains("italic"));
+    assert!(text.contains("After"));
+    assert!(text.contains("visible"));
+    assert!(!text.contains("Hidden"));
+    assert!(!text.contains("414243"));
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "ignorable destination marker before a non-destination control was ignored",
+            )
+        }),
+        "missing non-destination ignorable marker diagnostic: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("Bold"));
+    assert!(rendered_text.contains("italic"));
+    assert!(rendered_text.contains("After"));
+    assert!(rendered_text.contains("visible"));
+    for forbidden in [
+        b"Hidden".as_slice(),
+        b"414243",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "non-destination ignorable marker leaked hidden payload to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
         );
     }
 }
@@ -32341,6 +32383,36 @@ fn collect_text(document: &open_rtf_converter::model::Document) -> String {
         }
     }
     text
+}
+
+fn assert_passive_checkbox_vectors_without_zapf(
+    pdf: &[u8],
+    content: &lopdf::content::Content,
+    context: &str,
+) {
+    assert!(
+        !pdf.windows(b"/BaseFont /ZapfDingbats".len())
+            .any(|window| window == b"/BaseFont /ZapfDingbats"),
+        "{context} should not require a viewer ZapfDingbats font"
+    );
+    assert!(
+        pdf_text_bytes_for_font(content, b"F14").is_empty(),
+        "{context} should not emit checkbox glyphs as ZapfDingbats text bytes"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "{context} should render checkbox boxes as passive vector rectangles"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "{context} should render checkbox marks as passive stroked vector paths"
+    );
 }
 
 fn run_style_for_text<'a>(
