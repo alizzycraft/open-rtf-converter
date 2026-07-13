@@ -3348,6 +3348,12 @@ impl Parser {
                 self.state.destination = Destination::Body
             }
             "passwordhash" => {
+                if self.options.active_content_policy == ActiveContentPolicy::Reject {
+                    return Err(ParseError::ActiveContentRejected {
+                        feature: "document protection password hash".to_string(),
+                        offset,
+                    });
+                }
                 self.state.skip_password_hash_payload = true;
                 self.diagnostics.push(Diagnostic::warning(
                     "document protection password hash stripped before normalization",

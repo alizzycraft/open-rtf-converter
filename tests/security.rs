@@ -10507,6 +10507,31 @@ fn document_protection_metadata_does_not_reach_text_or_pdf() {
 }
 
 #[test]
+fn document_protection_password_hash_obeys_reject_policy() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "passwordhash AABBCCDDEEFF",
+        "\\",
+        "par Visible protected body",
+        "\\",
+        "par}",
+    ]);
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(&input, &reject_options),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "document protection password hash"
+    ));
+}
+
+#[test]
 fn dynamic_date_time_controls_do_not_evaluate_or_leak_to_pdf() {
     let input = rtf(&[
         "{",
