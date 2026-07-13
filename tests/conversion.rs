@@ -71,6 +71,12 @@ fn browser_safe_defaults_use_stricter_resource_table_limits() {
     assert_eq!(browser_limits.max_fonts, 256);
     assert_eq!(browser_limits.max_colors, 2_048);
     assert_eq!(browser_limits.max_styles, 2_048);
+    assert_eq!(default_limits.max_notes, 10_000);
+    assert_eq!(browser_limits.max_notes, 2_048);
+    assert_eq!(default_limits.max_bookmarks, 10_000);
+    assert_eq!(browser_limits.max_bookmarks, 2_048);
+    assert_eq!(default_limits.max_field_instruction_chars, 64 * 1024);
+    assert_eq!(browser_limits.max_field_instruction_chars, 16 * 1024);
 }
 
 #[test]

@@ -1235,8 +1235,8 @@ impl Parser {
 
         self.finish_table(self.last_offset)?;
         self.finish_paragraph();
-        self.finish_footnote_paragraph();
-        self.finish_endnote_paragraph();
+        self.finish_footnote_paragraph(self.last_offset)?;
+        self.finish_endnote_paragraph(self.last_offset)?;
         self.resolve_unmatched_note_reference_markers();
         self.normalize_page_orientation();
         self.emit_deferred_note_diagnostics();
@@ -1414,10 +1414,10 @@ impl Parser {
                 self.finish_footer_paragraph();
             }
             if self.state.destination == Destination::Footnote {
-                self.finish_footnote_paragraph();
+                self.finish_footnote_paragraph(offset)?;
             }
             if self.state.destination == Destination::Endnote {
-                self.finish_endnote_paragraph();
+                self.finish_endnote_paragraph(offset)?;
             }
             if self.state.destination == Destination::Picture {
                 self.finish_picture(offset)?;
@@ -1616,7 +1616,7 @@ impl Parser {
                 merge_child_field_instruction(
                     &mut previous.field_instruction,
                     &self.state.field_instruction,
-                    self.limits().max_text_run_len,
+                    self.limits().max_field_instruction_chars,
                     offset,
                 )?;
             } else if self.state.inside_field && !previous.inside_field {
@@ -2977,7 +2977,7 @@ impl Parser {
             "shp" | "do" if destination_allows_visible_content(&self.state) => {
                 let owner_destination = self.state.destination;
                 self.finish_table(offset)?;
-                self.finish_current_paragraph_for_destination(offset);
+                self.finish_current_paragraph_for_destination(offset)?;
                 self.state.inside_shape = true;
                 self.state.shape_result_seen = false;
                 self.state.shape_visual_result_rendered = false;
@@ -3607,7 +3607,7 @@ impl Parser {
             {
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
-            "par" => self.finish_current_paragraph_for_destination(offset),
+            "par" => self.finish_current_paragraph_for_destination(offset)?,
             "line" => self.push_text("\n", offset)?,
             "chpgn" => self.push_text(PAGE_NUMBER_MARKER, offset)?,
             "sectnum" => self.push_text(SECTION_NUMBER_MARKER, offset)?,
@@ -6819,7 +6819,7 @@ impl Parser {
 
     fn push_field_instruction_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes(text.len(), offset)?;
-        let limit = self.limits().max_text_run_len;
+        let limit = self.limits().max_field_instruction_chars;
         append_field_instruction(&mut self.state.field_instruction, text, limit, offset)
     }
 
@@ -7153,7 +7153,7 @@ impl Parser {
             return Ok(Some(bookmark.id));
         }
 
-        if self.bookmark_captures.len() >= self.limits().max_styles {
+        if self.bookmark_state_len() >= self.limits().max_bookmarks {
             return Err(ParseError::ResourceLimitExceeded {
                 resource: "bookmarks".to_string(),
                 offset,
@@ -7263,7 +7263,7 @@ impl Parser {
         {
             return Ok(Some(bookmark.id));
         }
-        if self.bookmark_captures.len() >= self.limits().max_styles {
+        if self.bookmark_state_len() >= self.limits().max_bookmarks {
             return Err(ParseError::ResourceLimitExceeded {
                 resource: "bookmarks".to_string(),
                 offset,
@@ -7283,6 +7283,12 @@ impl Parser {
             active: false,
         });
         Ok(Some(id))
+    }
+
+    fn bookmark_state_len(&self) -> usize {
+        self.bookmark_captures
+            .len()
+            .saturating_add(self.field_bookmark_values.len())
     }
 
     fn push_form_default_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
@@ -8141,7 +8147,7 @@ impl Parser {
             return Ok(());
         }
 
-        if self.field_bookmark_values.len() >= self.limits().max_styles {
+        if self.bookmark_state_len() >= self.limits().max_bookmarks {
             return Err(ParseError::ResourceLimitExceeded {
                 resource: "field bookmark values".to_string(),
                 offset,
@@ -8344,7 +8350,10 @@ impl Parser {
         }
     }
 
-    fn finish_current_paragraph_for_destination(&mut self, offset: usize) {
+    fn finish_current_paragraph_for_destination(
+        &mut self,
+        offset: usize,
+    ) -> Result<(), ParseError> {
         let advance_next_style = match self.state.destination {
             Destination::Body => {
                 self.finish_paragraph();
@@ -8359,11 +8368,11 @@ impl Parser {
                 true
             }
             Destination::Footnote => {
-                self.finish_footnote_paragraph();
+                self.finish_footnote_paragraph(offset)?;
                 true
             }
             Destination::Endnote => {
-                self.finish_endnote_paragraph();
+                self.finish_endnote_paragraph(offset)?;
                 true
             }
             Destination::ShapeText => {
@@ -8379,6 +8388,7 @@ impl Parser {
         if advance_next_style {
             self.apply_next_style_after_paragraph(offset);
         }
+        Ok(())
     }
 
     fn finish_header_paragraph(&mut self) {
@@ -8453,8 +8463,9 @@ impl Parser {
         }
     }
 
-    fn finish_footnote_paragraph(&mut self) {
+    fn finish_footnote_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
         if !self.current_footnote_paragraph.runs.is_empty() {
+            self.ensure_note_capacity(1, offset)?;
             let paragraph = std::mem::replace(
                 &mut self.current_footnote_paragraph,
                 Paragraph {
@@ -8464,10 +8475,12 @@ impl Parser {
             );
             self.document.footnotes.push(paragraph);
         }
+        Ok(())
     }
 
-    fn finish_endnote_paragraph(&mut self) {
+    fn finish_endnote_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
         if !self.current_endnote_paragraph.runs.is_empty() {
+            self.ensure_note_capacity(1, offset)?;
             let paragraph = std::mem::replace(
                 &mut self.current_endnote_paragraph,
                 Paragraph {
@@ -8483,6 +8496,32 @@ impl Parser {
                 .endnote_placements
                 .push(self.document.endnote_placement);
         }
+        Ok(())
+    }
+
+    fn ensure_note_capacity(&self, additional: usize, offset: usize) -> Result<(), ParseError> {
+        let current = self
+            .document
+            .footnotes
+            .len()
+            .checked_add(self.document.endnotes.len())
+            .ok_or(ParseError::ResourceLimitExceeded {
+                resource: "notes".to_string(),
+                offset,
+            })?;
+        let next = current
+            .checked_add(additional)
+            .ok_or(ParseError::ResourceLimitExceeded {
+                resource: "notes".to_string(),
+                offset,
+            })?;
+        if next > self.limits().max_notes {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "notes".to_string(),
+                offset,
+            });
+        }
+        Ok(())
     }
 
     fn finish_shape_text_paragraph(&mut self) {
@@ -8536,7 +8575,7 @@ impl Parser {
                 let previous_destination = self.state.destination;
                 self.state.destination = destination;
                 self.push_text(&text, offset)?;
-                self.finish_current_paragraph_for_destination(offset);
+                self.finish_current_paragraph_for_destination(offset)?;
                 self.state.destination = previous_destination;
                 Ok(())
             }
@@ -8544,7 +8583,7 @@ impl Parser {
                 let previous_destination = self.state.destination;
                 self.state.destination = destination;
                 self.push_text(&text, offset)?;
-                self.finish_current_paragraph_for_destination(offset);
+                self.finish_current_paragraph_for_destination(offset)?;
                 self.state.destination = previous_destination;
                 Ok(())
             }
@@ -10267,9 +10306,11 @@ impl Parser {
                 }
             }
         } else if destination == Destination::Footnote {
+            self.ensure_note_capacity(paragraphs.len(), offset)?;
             self.document.footnotes.extend(paragraphs);
         } else if destination == Destination::Endnote {
             let count = paragraphs.len();
+            self.ensure_note_capacity(count, offset)?;
             self.document.endnotes.extend(paragraphs);
             self.document
                 .endnote_section_indices
@@ -12193,7 +12234,7 @@ impl Parser {
             }),
             ActiveContentPolicy::Strip | ActiveContentPolicy::Placeholder => {
                 self.diagnostics.push(Diagnostic::warning(
-                    format!("active content removed: {feature}"),
+                    format!("active content removed: {feature} before safe model normalization"),
                     Some(offset),
                 ));
                 Ok(())
@@ -12209,7 +12250,7 @@ impl Parser {
         self.reject_skipped_destination_active_content(feature, offset)?;
         if self.state.last_skipped_active_feature != Some(feature) {
             self.diagnostics.push(Diagnostic::warning(
-                format!("active content removed: {feature}"),
+                format!("active content removed: {feature} before safe model normalization"),
                 Some(offset),
             ));
             self.state.last_skipped_active_feature = Some(feature);
@@ -20450,6 +20491,27 @@ mod tests {
     }
 
     #[test]
+    fn note_count_limit_bounds_combined_footnotes_and_endnotes() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_notes: 1,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let result = parse_rtf_bytes_with_options(
+            br"{\rtf1 Body\chftn{\footnote First footnote\par} End\chftn{\endnote Second endnote\par}\par}",
+            &options,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "notes"
+        ));
+    }
+
+    #[test]
     fn fet1_normalizes_legacy_footnote_groups_as_endnotes() {
         let output =
             parse_rtf(r"{\rtf1\fet1 Body\chftn{\footnote \chftn Legacy endnote\par}\par}").unwrap();
@@ -20788,7 +20850,7 @@ mod tests {
     fn resultless_set_fields_obey_value_count_bounds() {
         let options = RtfParseOptions {
             limits: RtfLimits {
-                max_styles: 0,
+                max_bookmarks: 0,
                 ..RtfLimits::default()
             },
             ..RtfParseOptions::default()
@@ -20803,6 +20865,58 @@ mod tests {
                 result,
                 Err(ParseError::ResourceLimitExceeded { ref resource, .. })
                     if resource == "field bookmark values"
+            ),
+            "unexpected result: {result:?}"
+        );
+    }
+
+    #[test]
+    fn bookmark_limit_bounds_captured_and_field_reference_targets() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_bookmarks: 1,
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let result = parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\bkmkstart One}Text{\*\bkmkend One}{\field{\*\fldinst PAGEREF Two}}\par}",
+            &options,
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ResourceLimitExceeded { ref resource, .. })
+                    if resource == "bookmarks"
+            ),
+            "unexpected result: {result:?}"
+        );
+    }
+
+    #[test]
+    fn field_bookmark_values_share_bookmark_limit_with_page_refs() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_bookmarks: 1,
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let result = parse_rtf_bytes_with_options(
+            br#"{\rtf1{\field{\*\fldinst SET One "Alpha"}}{\field{\*\fldinst PAGEREF Two}}\par}"#,
+            &options,
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ResourceLimitExceeded { ref resource, .. })
+                    if resource == "bookmarks"
             ),
             "unexpected result: {result:?}"
         );
@@ -22052,7 +22166,7 @@ After\par}"#;
     fn field_instruction_growth_is_bounded() {
         let options = RtfParseOptions {
             limits: RtfLimits {
-                max_text_run_len: 4,
+                max_field_instruction_chars: 4,
                 ..RtfLimits::default()
             },
             ..RtfParseOptions::default()
@@ -22063,6 +22177,26 @@ After\par}"#;
                 br"{\rtf1{\field{\*\fldinst PAG\~EL}}}",
                 &options,
             ),
+            Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "field instruction"
+        ));
+    }
+
+    #[test]
+    fn field_instruction_limit_is_independent_from_visible_text_runs() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_text_run_len: 64,
+                max_field_instruction_chars: 4,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let visible = parse_rtf_bytes_with_options(br"{\rtf1 abcdefgh\par}", &options).unwrap();
+        assert!(document_text(&visible.document).contains("abcdefgh"));
+
+        assert!(matches!(
+            parse_rtf_bytes_with_options(br"{\rtf1{\field{\*\fldinst HYPERLINK}}}", &options),
             Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "field instruction"
         ));
     }

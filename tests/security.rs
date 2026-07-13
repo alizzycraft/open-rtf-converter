@@ -4411,12 +4411,11 @@ fn active_object_data_is_placeholdered_or_rejected_and_never_normalized() {
     let text = collect_text(&parsed.document);
     assert!(text.contains("[Embedded object removed]"));
     assert!(!text.contains(payload_hex()));
-    assert!(
-        parsed
-            .diagnostics
-            .iter()
-            .any(|diagnostic| { diagnostic.message.contains("active content removed") })
-    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("active content removed: OLE object before safe model normalization")
+    }));
 
     let reject_options = RtfParseOptions {
         active_content_policy: ActiveContentPolicy::Reject,
@@ -28513,7 +28512,7 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
             .iter()
             .filter(|diagnostic| diagnostic
                 .message
-                .contains("active content removed: object payload in skipped destination"))
+                .contains("active content removed: object payload in skipped destination before safe model normalization"))
             .count(),
         1,
         "one skipped object should produce one object-payload diagnostic: {:?}",

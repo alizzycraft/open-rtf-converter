@@ -216,6 +216,7 @@ const PASSIVE_ZAPF_DINGBATS_TO_UNICODE: &[(u8, char)] = &[
 
 const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/3D", "/3D"),
+    (b"/A", "/A"),
     (b"/AA", "/AA"),
     (b"/AF", "/AF"),
     (b"/AFRelationship", "/AFRelationship"),
@@ -242,6 +243,7 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/Movie", "/Movie"),
     (b"/Names", "/Names"),
     (b"/Named", "/Named"),
+    (b"/Next", "/Next"),
     (b"/ObjStm", "/ObjStm"),
     (b"/OpenAction", "/OpenAction"),
     (b"/Perms", "/Perms"),
@@ -3970,6 +3972,7 @@ endobj
         );
         assert!(error.issues.iter().any(|issue| issue.token == "/Annots"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Widget"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/A"));
         assert!(error.issues.iter().any(|issue| issue.token == "/URI"));
         assert!(error.issues.iter().any(|issue| issue.token == "/AF"));
         assert!(
@@ -4001,6 +4004,7 @@ endobj
         );
         assert!(error.issues.iter().any(|issue| issue.token == "/GoTo"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Named"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/Next"));
         assert!(error.issues.iter().any(|issue| issue.token == "/ObjStm"));
         assert!(error.issues.iter().any(|issue| issue.token == "/XRef"));
         assert!(error.issues.iter().any(|issue| issue.token == "/ResetForm"));
@@ -4011,7 +4015,7 @@ endobj
     fn passive_pdf_audit_decodes_escaped_active_names_outside_streams() {
         let pdf = b"%PDF-1.7
 1 0 obj
-<< /Type /Catalog /Open#41ction << /S /Java#53cript /J#53 (app.alert) >> >>
+<< /Type /Catalog /Open#41ction << /#41 << /S /Java#53cript /J#53 (app.alert) >> /#4Eext << /S /Named >> >> >>
 endobj
 2 0 obj
 << /Names << /Embedded#46iles [(payload.bin) 3 0 R] >> /#45F << /F 3 0 R >> >>
@@ -4026,8 +4030,10 @@ endobj
 
         for expected in [
             "/OpenAction",
+            "/A",
             "/JavaScript",
             "/JS",
+            "/Next",
             "/EmbeddedFiles",
             "/EF",
             "/EmbeddedFile",
@@ -4112,7 +4118,7 @@ endobj
 1 0 obj
 << /Length 54 >>
 stream
-BT (/JavaScript /Launch /URI /Annots /Widget /ObjStm /XRef) Tj ET
+BT (/A /Next /JavaScript /Launch /URI /Annots /Widget /ObjStm /XRef) Tj ET
 endstream
 endobj
 %%EOF";
