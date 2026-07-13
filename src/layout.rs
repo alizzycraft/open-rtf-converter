@@ -3109,7 +3109,7 @@ fn should_split_tall_table_row(
     geometry: PageGeometry,
     margin_bottom: f32,
 ) -> bool {
-    if row.keep_together || row.repeat_header || row.height_twips.is_some() {
+    if row.keep_together || row.repeat_header || row.height_twips.is_some_and(|height| height < 0) {
         return false;
     }
     if prepared
@@ -3121,7 +3121,8 @@ fn should_split_tall_table_row(
         return false;
     }
     let usable_height = (geometry.height - geometry.margin_top - margin_bottom).max(14.0);
-    prepared.row_height > usable_height && prepared_table_row_has_lines(prepared)
+    let content_height = prepared_table_row_content_height(prepared);
+    content_height > usable_height && prepared_table_row_has_lines(prepared)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -10331,6 +10332,65 @@ mod tests {
                 "split-row continuation page should repeat table header"
             );
         }
+    }
+
+    #[test]
+    fn splits_tall_positive_minimum_height_table_rows_across_pages() {
+        fn row(text: String, height_twips: Option<i32>) -> TableRow {
+            TableRow {
+                height_twips,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    spacing: Default::default(),
+                    borders: TableCellBorders::default(),
+                    fit_text: false,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text,
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }
+        }
+
+        let tall_text = (0..14)
+            .map(|idx| format!("Line {idx:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut document = small_test_page_document();
+        document.blocks = vec![Block::Table(Table {
+            rows: vec![row(tall_text, Some(720))],
+            column_widths_twips: vec![2_880],
+            borders_visible: true,
+            preserve_authored_widths: false,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let first_page_text = layout_text(&layout.pages[0]);
+        let later_page_text = layout
+            .pages
+            .iter()
+            .skip(1)
+            .map(layout_text)
+            .collect::<String>();
+
+        assert!(layout.pages.len() > 1);
+        assert!(first_page_text.contains("Line 00"));
+        assert!(!first_page_text.contains("Line 13"));
+        assert!(later_page_text.contains("Line 13"));
     }
 
     #[test]

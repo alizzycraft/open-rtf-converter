@@ -1460,7 +1460,7 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
         "{\\object\\objemb\\objdata 4142432f4a6176615363726970742f456d62656464656446696c65{\\result Safe object fallback\\par}}",
     );
     input.push_str("\\trowd\\trhdr\\cellx9000 Split header\\cell\\row");
-    input.push_str("\\trowd\\cellx9000 ");
+    input.push_str("\\trowd\\trrh720\\cellx9000 ");
     for idx in 0..120 {
         input.push_str(&format!("Split row line {idx:03}\\line "));
     }
@@ -1479,6 +1479,7 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
         "JavaScript",
         "EmbeddedFile",
         "trhdr",
+        "trrh",
         "cellx",
         "trowd",
     ] {
@@ -1528,6 +1529,7 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
         b"JavaScript",
         b"EmbeddedFile",
         b"trhdr",
+        b"trrh",
         b"cellx",
         b"trowd",
         b"/OpenAction",
