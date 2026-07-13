@@ -61,6 +61,13 @@ struct Cli {
     /// Directory of passive .ttf/.otf font assets to load by metadata family names. Non-recursive.
     #[arg(long = "font-dir", value_name = "PATH")]
     font_dirs: Vec<PathBuf>,
+
+    /// Substitute a missing RTF font family with a font family found in --font-dir, in the form REQUESTED[,ALIAS...]=INSTALLED.
+    #[arg(
+        long = "font-substitute",
+        value_name = "REQUESTED[,ALIAS...]=INSTALLED"
+    )]
+    font_substitutes: Vec<String>,
 }
 
 #[derive(Debug, Copy, Clone, ValueEnum)]
@@ -145,6 +152,7 @@ fn main() {
     let font_provider = match load_cli_font_provider(
         &cli.fonts,
         &cli.font_dirs,
+        &cli.font_substitutes,
         &requested_font_families,
         cli.browser_safe,
     ) {
@@ -239,6 +247,7 @@ fn requested_font_families_for_font_dirs(cli: &Cli) -> Result<Vec<String>, CliIn
 fn load_cli_font_provider(
     specs: &[String],
     font_dirs: &[PathBuf],
+    font_substitutes: &[String],
     requested_font_families: &[String],
     browser_safe: bool,
 ) -> Result<FontProvider, CliFontError> {
@@ -247,9 +256,10 @@ fn load_cli_font_provider(
     } else {
         FontProvider::default()
     };
-    if specs.is_empty() && font_dirs.is_empty() {
+    if specs.is_empty() && font_dirs.is_empty() && font_substitutes.is_empty() {
         return Ok(provider);
     }
+    let substitutions = parse_font_substitutions(font_substitutes)?;
 
     let requested_asset_count =
         specs
@@ -280,6 +290,7 @@ fn load_cli_font_provider(
         total_bytes = load_cli_font_dir(
             font_dir,
             requested_font_families,
+            &substitutions,
             &mut provider,
             total_bytes,
         )?;
@@ -304,6 +315,32 @@ fn parse_font_spec(spec: &str) -> Result<(Vec<String>, FontAssetStyle, &Path), C
     Ok((family, style, Path::new(path)))
 }
 
+fn parse_font_substitutions(specs: &[String]) -> Result<Vec<FontSubstitution>, CliFontError> {
+    specs
+        .iter()
+        .map(|spec| parse_font_substitution_spec(spec))
+        .collect()
+}
+
+fn parse_font_substitution_spec(spec: &str) -> Result<FontSubstitution, CliFontError> {
+    let Some((requested, installed)) = spec.split_once('=') else {
+        return Err(CliFontError::MalformedFontSubstitutionSpec {
+            spec: spec.to_string(),
+        });
+    };
+    let requested_names = parse_font_family_aliases(requested);
+    let installed_family = installed.trim();
+    if requested_names.is_empty() || installed_family.is_empty() || installed_family == "*" {
+        return Err(CliFontError::MalformedFontSubstitutionSpec {
+            spec: spec.to_string(),
+        });
+    }
+    Ok(FontSubstitution {
+        requested_names,
+        installed_family: installed_family.to_string(),
+    })
+}
+
 fn parse_font_family_aliases_and_style(
     families: &str,
     spec: &str,
@@ -313,18 +350,22 @@ fn parse_font_family_aliases_and_style(
     } else {
         (families, FontAssetStyle::default())
     };
-    let parsed = families
-        .split(',')
-        .map(str::trim)
-        .filter(|family| !family.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    let parsed = parse_font_family_aliases(families);
     if parsed.is_empty() {
         return Err(CliFontError::MalformedFontSpec {
             spec: spec.to_string(),
         });
     }
     Ok((parsed, style))
+}
+
+fn parse_font_family_aliases(families: &str) -> Vec<String> {
+    families
+        .split(',')
+        .map(str::trim)
+        .filter(|family| !family.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>()
 }
 
 fn parse_font_asset_style(style: &str, spec: &str) -> Result<FontAssetStyle, CliFontError> {
@@ -391,6 +432,7 @@ fn read_bounded_font_file(path: &Path, limit: usize) -> Result<Vec<u8>, CliFontE
 fn load_cli_font_dir(
     dir: &Path,
     requested_font_families: &[String],
+    substitutions: &[FontSubstitution],
     provider: &mut FontProvider,
     mut total_bytes: usize,
 ) -> Result<usize, CliFontError> {
@@ -411,11 +453,16 @@ fn load_cli_font_dir(
             continue;
         }
         let bytes = read_bounded_font_file(&path, provider.limits.max_asset_bytes)?;
-        let (family_names, style) = cli_font_metadata(&bytes, &path)?;
-        if !requested_font_families.is_empty()
-            && !font_metadata_matches_requested_families(&family_names, requested_font_families)
-        {
+        let (mut family_names, style) = cli_font_metadata(&bytes, &path)?;
+        let substitute_aliases =
+            substitute_aliases_for_font(&family_names, requested_font_families, substitutions);
+        let direct_match = requested_font_families.is_empty()
+            || font_metadata_matches_requested_families(&family_names, requested_font_families);
+        if !direct_match && substitute_aliases.is_empty() {
             continue;
+        }
+        for alias in substitute_aliases {
+            push_unique_font_family_name(&mut family_names, alias);
         }
         if provider.assets.len() >= provider.limits.max_assets {
             return Err(CliFontError::Provider(FontProviderError::TooManyAssets {
@@ -431,6 +478,33 @@ fn load_cli_font_dir(
         });
     }
     Ok(total_bytes)
+}
+
+fn substitute_aliases_for_font(
+    family_names: &[String],
+    requested_font_families: &[String],
+    substitutions: &[FontSubstitution],
+) -> Vec<String> {
+    let mut aliases = Vec::new();
+    for substitution in substitutions {
+        if !family_names
+            .iter()
+            .any(|family| cli_font_family_names_match(family, &substitution.installed_family))
+        {
+            continue;
+        }
+        for requested_name in &substitution.requested_names {
+            if !requested_font_families.is_empty()
+                && !requested_font_families
+                    .iter()
+                    .any(|requested| cli_font_family_names_match(requested, requested_name))
+            {
+                continue;
+            }
+            push_unique_font_family_name(&mut aliases, requested_name.clone());
+        }
+    }
+    aliases
 }
 
 fn cli_font_dir_file_exceeds_asset_limit(path: &Path, limit: usize) -> Result<bool, CliFontError> {
@@ -569,9 +643,18 @@ fn cli_font_name_to_string(name: &ttf_parser::name::Name<'_>) -> Option<String> 
     String::from_utf16(&utf16).ok()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FontSubstitution {
+    requested_names: Vec<String>,
+    installed_family: String,
+}
+
 #[derive(Debug)]
 enum CliFontError {
     MalformedFontSpec {
+        spec: String,
+    },
+    MalformedFontSubstitutionSpec {
         spec: String,
     },
     ReadFont {
@@ -607,6 +690,10 @@ impl fmt::Display for CliFontError {
             Self::MalformedFontSpec { spec } => write!(
                 formatter,
                 "font asset must use FAMILY[,ALIAS...][:STYLE]=PATH syntax, got {spec:?}"
+            ),
+            Self::MalformedFontSubstitutionSpec { spec } => write!(
+                formatter,
+                "font substitute must use REQUESTED[,ALIAS...]=INSTALLED syntax, got {spec:?}"
             ),
             Self::ReadFont { path, .. } => {
                 write!(formatter, "failed to read font asset {}", path.display())
@@ -761,13 +848,37 @@ mod tests {
     }
 
     #[test]
+    fn parses_font_substitution_specs() {
+        let substitution =
+            parse_font_substitution_spec("Arial Narrow,Helvetica Narrow=Arial").unwrap();
+
+        assert_eq!(
+            substitution,
+            FontSubstitution {
+                requested_names: vec!["Arial Narrow".to_string(), "Helvetica Narrow".to_string()],
+                installed_family: "Arial".to_string(),
+            }
+        );
+
+        for spec in ["Arial", "Arial=", "=Arial", "Arial=*"] {
+            assert!(
+                matches!(
+                    parse_font_substitution_spec(spec),
+                    Err(CliFontError::MalformedFontSubstitutionSpec { .. })
+                ),
+                "{spec}"
+            );
+        }
+    }
+
+    #[test]
     fn loads_valid_cli_font_provider_without_system_fonts() {
         let specs = vec![
             "Tuffy,Tuffy Alias=fixtures/fonts/Tuffy.ttf".to_string(),
             "Tuffy,Tuffy Alias:bold=fixtures/fonts/Tuffy.ttf".to_string(),
             "Tuffy,Tuffy Alias:italic=fixtures/fonts/Tuffy.ttf".to_string(),
         ];
-        let provider = load_cli_font_provider(&specs, &[], &[], false).unwrap();
+        let provider = load_cli_font_provider(&specs, &[], &[], &[], false).unwrap();
 
         assert_eq!(provider.assets.len(), 3);
         assert_eq!(
@@ -808,6 +919,7 @@ mod tests {
         let provider = load_cli_font_provider(
             &[],
             &[dir.path().to_path_buf()],
+            &[],
             &["Tuffy".to_string()],
             false,
         )
@@ -836,6 +948,7 @@ mod tests {
         let provider = load_cli_font_provider(
             &[],
             &[dir.path().to_path_buf()],
+            &[],
             &["Missing Word Font".to_string()],
             false,
         )
@@ -863,6 +976,7 @@ mod tests {
         let provider = load_cli_font_provider(
             &[],
             &[dir.path().to_path_buf()],
+            &[],
             &["Tuffy".to_string()],
             false,
         )
@@ -883,6 +997,7 @@ mod tests {
         let provider = load_cli_font_provider(
             &[],
             &[dir.path().to_path_buf()],
+            &[],
             &["Tuffy Cyr".to_string()],
             false,
         )
@@ -896,6 +1011,33 @@ mod tests {
     }
 
     #[test]
+    fn cli_font_directory_substitutes_requested_missing_family_with_installed_family() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::copy("fixtures/fonts/Tuffy.ttf", dir.path().join("Tuffy.ttf")).unwrap();
+        let substitutions = vec!["Missing Word Font,Missing Alias=Tuffy".to_string()];
+
+        let provider = load_cli_font_provider(
+            &[],
+            &[dir.path().to_path_buf()],
+            &substitutions,
+            &["Missing Word Font".to_string()],
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(provider.assets.len(), 1);
+        assert_eq!(
+            provider.coverage_for_char("Missing Word Font", 'A'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Missing Alias", 'A'),
+            open_rtf_converter::FontCoverage::NoAsset,
+            "aliases not requested by the document should not be added"
+        );
+    }
+
+    #[test]
     fn explicit_cli_font_aliases_and_directory_fonts_can_be_combined() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::copy("fixtures/fonts/Tuffy.ttf", dir.path().join("Tuffy.ttf")).unwrap();
@@ -904,6 +1046,7 @@ mod tests {
         let provider = load_cli_font_provider(
             &specs,
             &[dir.path().to_path_buf()],
+            &[],
             &["Tuffy".to_string()],
             false,
         )
@@ -1010,7 +1153,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let specs = vec![format!("{aliases}=fixtures/fonts/Tuffy.ttf")];
-        let error = load_cli_font_provider(&specs, &[], &[], false).unwrap_err();
+        let error = load_cli_font_provider(&specs, &[], &[], &[], false).unwrap_err();
 
         assert!(matches!(
             error,
@@ -1024,7 +1167,7 @@ mod tests {
         let path = dir.path().join("hostile-font.ttf");
         std::fs::write(&path, b"not a real font").unwrap();
         let specs = vec![format!("Hostile={}", path.display())];
-        let error = load_cli_font_provider(&specs, &[], &[], false).unwrap_err();
+        let error = load_cli_font_provider(&specs, &[], &[], &[], false).unwrap_err();
 
         assert!(matches!(
             error,
@@ -1034,7 +1177,7 @@ mod tests {
 
     #[test]
     fn browser_safe_cli_uses_stricter_font_provider_limits() {
-        let provider = load_cli_font_provider(&[], &[], &[], true).unwrap();
+        let provider = load_cli_font_provider(&[], &[], &[], &[], true).unwrap();
 
         assert_eq!(
             provider.limits.max_assets,
@@ -1052,14 +1195,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let specs = vec![format!("{aliases}=fixtures/fonts/Tuffy.ttf")];
-        let error = load_cli_font_provider(&specs, &[], &[], true).unwrap_err();
+        let error = load_cli_font_provider(&specs, &[], &[], &[], true).unwrap_err();
 
         assert!(matches!(
             error,
             CliFontError::Provider(FontProviderError::TooManyFamilyNames { .. })
         ));
         assert!(
-            load_cli_font_provider(&specs, &[], &[], false).is_ok(),
+            load_cli_font_provider(&specs, &[], &[], &[], false).is_ok(),
             "normal CLI mode should keep the wider default font alias limit"
         );
     }
@@ -1069,7 +1212,7 @@ mod tests {
         let specs = (0..=FontProvider::browser_safe_defaults().limits.max_assets)
             .map(|idx| format!("Tuffy{idx}=missing-font-{idx}.ttf"))
             .collect::<Vec<_>>();
-        let error = load_cli_font_provider(&specs, &[], &[], true).unwrap_err();
+        let error = load_cli_font_provider(&specs, &[], &[], &[], true).unwrap_err();
 
         assert!(matches!(
             error,
@@ -1082,7 +1225,7 @@ mod tests {
         let font_dirs = (0..=FontProvider::browser_safe_defaults().limits.max_assets)
             .map(|idx| PathBuf::from(format!("missing-font-dir-{idx}")))
             .collect::<Vec<_>>();
-        let error = load_cli_font_provider(&[], &font_dirs, &[], true).unwrap_err();
+        let error = load_cli_font_provider(&[], &font_dirs, &[], &[], true).unwrap_err();
 
         assert!(matches!(
             error,
