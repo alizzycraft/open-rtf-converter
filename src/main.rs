@@ -7,6 +7,7 @@ use open_rtf_converter::{
     ActiveContentPolicy, CompatibilityMode, ConvertOptions, FontAsset, FontAssetStyle,
     FontProvider, FontProviderError, PdfLinkPolicy, convert_rtf_file_to_pdf,
 };
+use ttf_parser::{Face, name_id};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -55,6 +56,10 @@ struct Cli {
     /// STYLE may be regular, bold, italic, or bold-italic. If omitted, regular is used.
     #[arg(long = "font", value_name = "FAMILY[,ALIAS...][:STYLE]=PATH")]
     fonts: Vec<String>,
+
+    /// Directory of passive .ttf/.otf font assets to load by metadata family names. Non-recursive.
+    #[arg(long = "font-dir", value_name = "PATH")]
+    font_dirs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Copy, Clone, ValueEnum)]
@@ -120,7 +125,7 @@ fn main() {
         }),
     };
 
-    let font_provider = match load_cli_font_provider(&cli.fonts, cli.browser_safe) {
+    let font_provider = match load_cli_font_provider(&cli.fonts, &cli.font_dirs, cli.browser_safe) {
         Ok(provider) => provider,
         Err(error) => {
             eprintln!("error: {error}");
@@ -181,6 +186,7 @@ fn build_convert_options(cli: &Cli, font_provider: FontProvider) -> ConvertOptio
 
 fn load_cli_font_provider(
     specs: &[String],
+    font_dirs: &[PathBuf],
     browser_safe: bool,
 ) -> Result<FontProvider, CliFontError> {
     let mut provider = if browser_safe {
@@ -188,13 +194,21 @@ fn load_cli_font_provider(
     } else {
         FontProvider::default()
     };
-    if specs.is_empty() {
+    if specs.is_empty() && font_dirs.is_empty() {
         return Ok(provider);
     }
 
-    if specs.len() > provider.limits.max_assets {
+    let requested_asset_count =
+        specs
+            .len()
+            .checked_add(font_dirs.len())
+            .ok_or(CliFontError::Provider(FontProviderError::TooManyAssets {
+                count: usize::MAX,
+                limit: provider.limits.max_assets,
+            }))?;
+    if requested_asset_count > provider.limits.max_assets {
         return Err(CliFontError::Provider(FontProviderError::TooManyAssets {
-            count: specs.len(),
+            count: requested_asset_count,
             limit: provider.limits.max_assets,
         }));
     }
@@ -202,24 +216,15 @@ fn load_cli_font_provider(
     for spec in specs {
         let (families, style, path) = parse_font_spec(spec)?;
         let bytes = read_bounded_font_file(path, provider.limits.max_asset_bytes)?;
-        total_bytes =
-            total_bytes
-                .checked_add(bytes.len())
-                .ok_or(CliFontError::TotalFontBytesTooLarge {
-                    size: usize::MAX,
-                    limit: provider.limits.max_total_bytes,
-                })?;
-        if total_bytes > provider.limits.max_total_bytes {
-            return Err(CliFontError::TotalFontBytesTooLarge {
-                size: total_bytes,
-                limit: provider.limits.max_total_bytes,
-            });
-        }
+        total_bytes = checked_add_font_asset_bytes(total_bytes, bytes.len(), &provider)?;
         provider.assets.push(FontAsset {
             family_names: families,
             style,
             bytes,
         });
+    }
+    for font_dir in font_dirs {
+        total_bytes = load_cli_font_dir(font_dir, &mut provider, total_bytes)?;
     }
     provider.validate().map_err(CliFontError::Provider)?;
     Ok(provider)
@@ -325,6 +330,137 @@ fn read_bounded_font_file(path: &Path, limit: usize) -> Result<Vec<u8>, CliFontE
     Ok(bytes)
 }
 
+fn load_cli_font_dir(
+    dir: &Path,
+    provider: &mut FontProvider,
+    mut total_bytes: usize,
+) -> Result<usize, CliFontError> {
+    let entries = std::fs::read_dir(dir).map_err(|source| CliFontError::ReadFontDir {
+        path: dir.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| CliFontError::ReadFontDir {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        if !is_supported_cli_font_path(&path) {
+            continue;
+        }
+        if provider.assets.len() >= provider.limits.max_assets {
+            return Err(CliFontError::Provider(FontProviderError::TooManyAssets {
+                count: provider.assets.len() + 1,
+                limit: provider.limits.max_assets,
+            }));
+        }
+        let bytes = read_bounded_font_file(&path, provider.limits.max_asset_bytes)?;
+        let (family_names, style) = cli_font_metadata(&bytes, &path)?;
+        total_bytes = checked_add_font_asset_bytes(total_bytes, bytes.len(), provider)?;
+        provider.assets.push(FontAsset {
+            family_names,
+            style,
+            bytes,
+        });
+    }
+    Ok(total_bytes)
+}
+
+fn is_supported_cli_font_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            let normalized = extension.to_ascii_lowercase();
+            normalized == "ttf" || normalized == "otf"
+        })
+        .unwrap_or(false)
+}
+
+fn checked_add_font_asset_bytes(
+    total_bytes: usize,
+    asset_bytes: usize,
+    provider: &FontProvider,
+) -> Result<usize, CliFontError> {
+    let total_bytes =
+        total_bytes
+            .checked_add(asset_bytes)
+            .ok_or(CliFontError::TotalFontBytesTooLarge {
+                size: usize::MAX,
+                limit: provider.limits.max_total_bytes,
+            })?;
+    if total_bytes > provider.limits.max_total_bytes {
+        return Err(CliFontError::TotalFontBytesTooLarge {
+            size: total_bytes,
+            limit: provider.limits.max_total_bytes,
+        });
+    }
+    Ok(total_bytes)
+}
+
+fn cli_font_metadata(
+    bytes: &[u8],
+    path: &Path,
+) -> Result<(Vec<String>, FontAssetStyle), CliFontError> {
+    let face = Face::parse(bytes, 0).map_err(|source| CliFontError::InvalidFontMetadata {
+        path: path.to_path_buf(),
+        reason: source.to_string(),
+    })?;
+    let mut family_names = Vec::new();
+    for name_id in [
+        name_id::TYPOGRAPHIC_FAMILY,
+        name_id::FAMILY,
+        name_id::FULL_NAME,
+    ] {
+        for name in face.names() {
+            if name.name_id != name_id {
+                continue;
+            }
+            let Some(value) = cli_font_name_to_string(&name) else {
+                continue;
+            };
+            push_unique_font_family_name(&mut family_names, value);
+        }
+    }
+    if family_names.is_empty() {
+        return Err(CliFontError::MissingFontMetadata {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok((
+        family_names,
+        FontAssetStyle {
+            bold: face.is_bold(),
+            italic: face.is_italic(),
+        },
+    ))
+}
+
+fn push_unique_font_family_name(family_names: &mut Vec<String>, value: String) {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if family_names
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+    {
+        return;
+    }
+    family_names.push(trimmed.to_string());
+}
+
+fn cli_font_name_to_string(name: &ttf_parser::name::Name<'_>) -> Option<String> {
+    if !name.is_unicode() || name.name.len() % 2 != 0 {
+        return None;
+    }
+    let utf16 = name
+        .name
+        .chunks_exact(2)
+        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&utf16).ok()
+}
+
 #[derive(Debug)]
 enum CliFontError {
     MalformedFontSpec {
@@ -333,6 +469,17 @@ enum CliFontError {
     ReadFont {
         path: PathBuf,
         source: std::io::Error,
+    },
+    ReadFontDir {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    InvalidFontMetadata {
+        path: PathBuf,
+        reason: String,
+    },
+    MissingFontMetadata {
+        path: PathBuf,
     },
     FontTooLarge {
         path: PathBuf,
@@ -356,6 +503,23 @@ impl fmt::Display for CliFontError {
             Self::ReadFont { path, .. } => {
                 write!(formatter, "failed to read font asset {}", path.display())
             }
+            Self::ReadFontDir { path, .. } => {
+                write!(
+                    formatter,
+                    "failed to read font directory {}",
+                    path.display()
+                )
+            }
+            Self::InvalidFontMetadata { path, reason } => write!(
+                formatter,
+                "failed to read font metadata from {}: {reason}",
+                path.display()
+            ),
+            Self::MissingFontMetadata { path } => write!(
+                formatter,
+                "font asset {} does not contain a usable family name",
+                path.display()
+            ),
             Self::FontTooLarge { path, size, limit } => write!(
                 formatter,
                 "font asset {} exceeded configured limit: {size} bytes > {limit} bytes",
@@ -374,6 +538,7 @@ impl std::error::Error for CliFontError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::ReadFont { source, .. } => Some(source),
+            Self::ReadFontDir { source, .. } => Some(source),
             Self::Provider(error) => Some(error),
             _ => None,
         }
@@ -461,7 +626,7 @@ mod tests {
             "Tuffy,Tuffy Alias:bold=fixtures/fonts/Tuffy.ttf".to_string(),
             "Tuffy,Tuffy Alias:italic=fixtures/fonts/Tuffy.ttf".to_string(),
         ];
-        let provider = load_cli_font_provider(&specs, false).unwrap();
+        let provider = load_cli_font_provider(&specs, &[], false).unwrap();
 
         assert_eq!(provider.assets.len(), 3);
         assert_eq!(
@@ -489,6 +654,48 @@ mod tests {
         );
         assert_eq!(
             provider.coverage_for_char("Tuffy Alias", 'A'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+    }
+
+    #[test]
+    fn loads_cli_font_directory_from_bounded_metadata_names() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::copy("fixtures/fonts/Tuffy.ttf", dir.path().join("Tuffy.ttf")).unwrap();
+        std::fs::write(dir.path().join("ignore.txt"), b"not a font").unwrap();
+
+        let provider = load_cli_font_provider(&[], &[dir.path().to_path_buf()], false).unwrap();
+
+        assert_eq!(provider.assets.len(), 1);
+        assert!(
+            provider.assets[0]
+                .family_names
+                .iter()
+                .any(|name| name == "Tuffy"),
+            "metadata family names were {:?}",
+            provider.assets[0].family_names
+        );
+        assert_eq!(
+            provider.coverage_for_char("Tuffy", 'A'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+    }
+
+    #[test]
+    fn explicit_cli_font_aliases_and_directory_fonts_can_be_combined() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::copy("fixtures/fonts/Tuffy.ttf", dir.path().join("Tuffy.ttf")).unwrap();
+        let specs = vec!["Word Alias=fixtures/fonts/Tuffy.ttf".to_string()];
+
+        let provider = load_cli_font_provider(&specs, &[dir.path().to_path_buf()], false).unwrap();
+
+        assert_eq!(provider.assets.len(), 2);
+        assert_eq!(
+            provider.coverage_for_char("Word Alias", 'A'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Tuffy", 'A'),
             open_rtf_converter::FontCoverage::Covered
         );
     }
@@ -583,7 +790,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let specs = vec![format!("{aliases}=fixtures/fonts/Tuffy.ttf")];
-        let error = load_cli_font_provider(&specs, false).unwrap_err();
+        let error = load_cli_font_provider(&specs, &[], false).unwrap_err();
 
         assert!(matches!(
             error,
@@ -597,7 +804,7 @@ mod tests {
         let path = dir.path().join("hostile-font.ttf");
         std::fs::write(&path, b"not a real font").unwrap();
         let specs = vec![format!("Hostile={}", path.display())];
-        let error = load_cli_font_provider(&specs, false).unwrap_err();
+        let error = load_cli_font_provider(&specs, &[], false).unwrap_err();
 
         assert!(matches!(
             error,
@@ -607,7 +814,7 @@ mod tests {
 
     #[test]
     fn browser_safe_cli_uses_stricter_font_provider_limits() {
-        let provider = load_cli_font_provider(&[], true).unwrap();
+        let provider = load_cli_font_provider(&[], &[], true).unwrap();
 
         assert_eq!(
             provider.limits.max_assets,
@@ -625,14 +832,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let specs = vec![format!("{aliases}=fixtures/fonts/Tuffy.ttf")];
-        let error = load_cli_font_provider(&specs, true).unwrap_err();
+        let error = load_cli_font_provider(&specs, &[], true).unwrap_err();
 
         assert!(matches!(
             error,
             CliFontError::Provider(FontProviderError::TooManyFamilyNames { .. })
         ));
         assert!(
-            load_cli_font_provider(&specs, false).is_ok(),
+            load_cli_font_provider(&specs, &[], false).is_ok(),
             "normal CLI mode should keep the wider default font alias limit"
         );
     }
@@ -642,7 +849,20 @@ mod tests {
         let specs = (0..=FontProvider::browser_safe_defaults().limits.max_assets)
             .map(|idx| format!("Tuffy{idx}=missing-font-{idx}.ttf"))
             .collect::<Vec<_>>();
-        let error = load_cli_font_provider(&specs, true).unwrap_err();
+        let error = load_cli_font_provider(&specs, &[], true).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CliFontError::Provider(FontProviderError::TooManyAssets { .. })
+        ));
+    }
+
+    #[test]
+    fn browser_safe_cli_rejects_too_many_font_directories_before_reading() {
+        let font_dirs = (0..=FontProvider::browser_safe_defaults().limits.max_assets)
+            .map(|idx| PathBuf::from(format!("missing-font-dir-{idx}")))
+            .collect::<Vec<_>>();
+        let error = load_cli_font_provider(&[], &font_dirs, true).unwrap_err();
 
         assert!(matches!(
             error,
