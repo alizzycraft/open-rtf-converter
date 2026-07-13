@@ -2869,6 +2869,27 @@ impl Parser {
             "brdrdb" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Double);
             }
+            name if word_double_border_variant_control(name)
+                && self.is_parsing_list_level_definition() =>
+            {
+                self.set_current_list_level_border_style_approximation(
+                    name,
+                    BorderStyle::Double,
+                    offset,
+                );
+            }
+            name if word_single_border_variant_control(name)
+                && self.is_parsing_list_level_definition() =>
+            {
+                self.set_current_list_level_border_style_approximation(
+                    name,
+                    BorderStyle::Single,
+                    offset,
+                );
+            }
+            "brdrsh" if self.is_parsing_list_level_definition() => {
+                self.warn_border_effect_approximation("brdrsh", offset);
+            }
             "brdrdot" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Dotted);
             }
@@ -3799,6 +3820,15 @@ impl Parser {
             "brdrth" => self.set_current_border_style(BorderStyle::Thick),
             "brdrhair" => self.set_current_border_style(BorderStyle::Hairline),
             "brdrdb" => self.set_current_border_style(BorderStyle::Double),
+            name if word_double_border_variant_control(name) => {
+                self.set_current_border_style_approximation(name, BorderStyle::Double, offset);
+            }
+            name if word_single_border_variant_control(name) => {
+                self.set_current_border_style_approximation(name, BorderStyle::Single, offset);
+            }
+            "brdrsh" => {
+                self.warn_border_effect_approximation("brdrsh", offset);
+            }
             "brdrdot" => self.set_current_border_style(BorderStyle::Dotted),
             "brdrdash" | "brdrdashsm" | "brdrdashd" | "brdrdashdd" | "brdrdashdot"
             | "brdrdashdotstr" | "brdrdashdotdot" => {
@@ -9464,6 +9494,38 @@ impl Parser {
         }
     }
 
+    fn set_current_border_style_approximation(
+        &mut self,
+        control_name: &str,
+        style: BorderStyle,
+        offset: usize,
+    ) {
+        self.set_current_border_style(style);
+        self.warn_border_style_approximation(control_name, style, offset);
+    }
+
+    fn warn_border_style_approximation(
+        &mut self,
+        control_name: &str,
+        style: BorderStyle,
+        offset: usize,
+    ) {
+        self.diagnostics.push(Diagnostic::warning(
+            format!(
+                "Word border style \\{control_name} approximated as passive {} border",
+                passive_border_style_label(style)
+            ),
+            Some(offset),
+        ));
+    }
+
+    fn warn_border_effect_approximation(&mut self, control_name: &str, offset: usize) {
+        self.diagnostics.push(Diagnostic::warning(
+            format!("Word border effect \\{control_name} flattened for passive static PDF output"),
+            Some(offset),
+        ));
+    }
+
     fn set_current_border_visible(&mut self, visible: bool) {
         if !self.set_current_cell_border_visible(visible)
             && !self.update_current_table_row_border(|border| {
@@ -11958,6 +12020,16 @@ impl Parser {
         });
     }
 
+    fn set_current_list_level_border_style_approximation(
+        &mut self,
+        control_name: &str,
+        border_style: BorderStyle,
+        offset: usize,
+    ) {
+        self.set_current_list_level_border_style(border_style);
+        self.warn_border_style_approximation(control_name, border_style, offset);
+    }
+
     fn set_current_list_level_border_width(&mut self, value: Option<i32>, offset: usize) {
         let value = value
             .unwrap_or(TableCellBorder::default().width_twips)
@@ -12540,10 +12612,47 @@ fn table_row_shading_pattern_control(name: &str) -> Option<ShadingPattern> {
     }
 }
 
+fn word_double_border_variant_control(name: &str) -> bool {
+    matches!(
+        name,
+        "brdrtriple"
+            | "brdrtnthsg"
+            | "brdrthtnsg"
+            | "brdrtnthtnsg"
+            | "brdrtnthmg"
+            | "brdrthtnmg"
+            | "brdrtnthtnmg"
+            | "brdrtnthlg"
+            | "brdrthtnlg"
+            | "brdrtnthtnlg"
+    )
+}
+
+fn word_single_border_variant_control(name: &str) -> bool {
+    matches!(
+        name,
+        "brdrinset" | "brdroutset" | "brdrengrave" | "brdremboss"
+    )
+}
+
+fn passive_border_style_label(style: BorderStyle) -> &'static str {
+    match style {
+        BorderStyle::Single => "single",
+        BorderStyle::Thick => "thick",
+        BorderStyle::Hairline => "hairline",
+        BorderStyle::Double => "double",
+        BorderStyle::Dotted => "dotted",
+        BorderStyle::Dashed => "dashed",
+        BorderStyle::Wavy => "wavy",
+    }
+}
+
 fn is_known_ignored_control(name: &str) -> bool {
     paragraph_shading_pattern_control(name).is_some()
         || table_cell_shading_pattern_control(name).is_some()
         || table_row_shading_pattern_control(name).is_some()
+        || word_double_border_variant_control(name)
+        || word_single_border_variant_control(name)
         || matches!(
             name,
             "ansicpg"
@@ -12961,6 +13070,7 @@ fn is_nested_table_structural_control(name: &str) -> bool {
                 | "brdrdashdotdot"
                 | "brdrwavy"
                 | "brdrwavydb"
+                | "brdrsh"
                 | "brdrw"
                 | "brsp"
                 | "brdrcf"
@@ -26595,7 +26705,7 @@ After\par}"#;
     #[test]
     fn normalizes_extended_word_border_style_controls() {
         let output = parse_rtf(
-            r"{\rtf1\box\brdrhair Hairline paragraph\par\pard\brdrb\brdrdashdot Dash dot paragraph\par\trowd\clbrdrl\brdrdashdd\cellx1440 dashdd\cell\row}",
+            r"{\rtf1\box\brdrhair Hairline paragraph\par\pard\brdrb\brdrdashdot Dash dot paragraph\par\pard\brdrt\brdrtriple Triple paragraph\par\pard\brdrl\brdrinset Inset paragraph\par\pard\brdrr\brdrs\brdrsh Shadow paragraph\par\trowd\clbrdrl\brdrdashdd\cellx1440 dashdd\cell\row}",
         )
         .unwrap();
         let first = match &output.document.blocks[0] {
@@ -26606,7 +26716,19 @@ After\par}"#;
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected paragraph"),
         };
-        let table = match &output.document.blocks[2] {
+        let third = match &output.document.blocks[2] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let fourth = match &output.document.blocks[3] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let fifth = match &output.document.blocks[4] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let table = match &output.document.blocks[5] {
             Block::Table(table) => table,
             _ => panic!("expected table"),
         };
@@ -26616,9 +26738,34 @@ After\par}"#;
         assert_eq!(first.style.borders.top.style, BorderStyle::Hairline);
         assert_eq!(first.style.borders.bottom.style, BorderStyle::Hairline);
         assert_eq!(second.style.borders.bottom.style, BorderStyle::Dashed);
+        assert_eq!(third.style.borders.top.style, BorderStyle::Double);
+        assert_eq!(fourth.style.borders.left.style, BorderStyle::Single);
+        assert_eq!(fifth.style.borders.right.style, BorderStyle::Single);
         assert_eq!(
             table.rows[0].cells[0].borders.left.style,
             BorderStyle::Dashed
+        );
+        for expected in [
+            "Word border style \\brdrtriple approximated as passive double border",
+            "Word border style \\brdrinset approximated as passive single border",
+            "Word border effect \\brdrsh flattened for passive static PDF output",
+        ] {
+            assert!(
+                output
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.contains(expected)),
+                "missing diagnostic: {expected}; diagnostics were {:?}",
+                output.diagnostics
+            );
+        }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+            "extended border variants should not be unsupported: {:?}",
+            output.diagnostics
         );
     }
 

@@ -26799,6 +26799,32 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         "\\",
         "par ",
         "\\",
+        "pard",
+        "\\",
+        "brdrl",
+        "\\",
+        "brdrtriple triple paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "pard",
+        "\\",
+        "brdrr",
+        "\\",
+        "brdrinset inset paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "pard",
+        "\\",
+        "brdrb",
+        "\\",
+        "brdrs",
+        "\\",
+        "brdrsh shadow paragraph",
+        "\\",
+        "par ",
+        "\\",
         "trowd",
         "\\",
         "clbrdrl",
@@ -26817,8 +26843,41 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
     assert!(text.contains("hairline paragraph"));
     assert!(text.contains("dashed paragraph"));
     assert!(text.contains("wavy paragraph"));
+    assert!(text.contains("triple paragraph"));
+    assert!(text.contains("inset paragraph"));
+    assert!(text.contains("shadow paragraph"));
     assert!(text.contains("cell border"));
-    for forbidden in ["brdrhair", "brdrdashdot", "brdrwavy", "brdrdashdd"] {
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "extended Word border variants should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for expected in [
+        "Word border style \\brdrtriple approximated as passive double border",
+        "Word border style \\brdrinset approximated as passive single border",
+        "Word border effect \\brdrsh flattened for passive static PDF output",
+    ] {
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing diagnostic: {expected}; diagnostics were {:?}",
+            parsed.diagnostics
+        );
+    }
+    for forbidden in [
+        "brdrhair",
+        "brdrdashdot",
+        "brdrwavy",
+        "brdrtriple",
+        "brdrinset",
+        "brdrsh",
+        "brdrdashdd",
+    ] {
         assert!(
             !text.contains(forbidden),
             "forbidden extended border control leaked to text: {forbidden}"
@@ -26844,6 +26903,9 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         b"brdrhair".as_slice(),
         b"brdrdashdot",
         b"brdrwavy",
+        b"brdrtriple",
+        b"brdrinset",
+        b"brdrsh",
         b"brdrdashdd",
         b"/JavaScript",
         b"/EmbeddedFile",
