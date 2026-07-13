@@ -11176,6 +11176,80 @@ fn review_bookmark_and_annotation_payloads_do_not_reach_text_or_pdf() {
 }
 
 #[test]
+fn character_animation_controls_render_static_text_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "animtext5 Animated text",
+        "\\",
+        "animtext0 Static text",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Animated textStatic text"));
+    assert!(!text.contains("animtext"));
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("character animation stripped for passive static PDF output")),
+        "missing character animation diagnostic: {:?}",
+        parsed.diagnostics
+    );
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "animtext should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("character animation stripped for passive static PDF output")),
+        "conversion diagnostics should include character animation warning: {:?}",
+        output.diagnostics
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Animated textStatic text"));
+    for forbidden in [
+        b"animtext".as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden character animation content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn annotation_metadata_obeys_reject_policy() {
     let reject_options = RtfParseOptions {
         active_content_policy: ActiveContentPolicy::Reject,

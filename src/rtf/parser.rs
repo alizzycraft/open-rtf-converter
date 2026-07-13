@@ -3941,6 +3941,14 @@ impl Parser {
             "scaps" | "ascaps" => {
                 self.state.character.small_caps = control.parameter.unwrap_or(1) != 0
             }
+            "animtext" => {
+                if control.parameter.unwrap_or(0) != 0 {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "character animation stripped for passive static PDF output",
+                        Some(offset),
+                    ));
+                }
+            }
             "v" | "vanish" | "webhidden" => {
                 self.state.character.hidden = control.parameter.unwrap_or(1) != 0
             }
@@ -24817,6 +24825,28 @@ After\par}"#;
             .expect("down run");
         assert_eq!(down.style.baseline_shift_half_points, -6);
         assert_eq!(down.style.font_size_scale_percent, 100);
+    }
+
+    #[test]
+    fn character_animation_controls_are_static_passive_approximations() {
+        let output = parse_rtf(r"{\rtf1\animtext5 Animated \animtext0 Plain\par}").unwrap();
+
+        assert_eq!(document_text(&output.document), "Animated Plain");
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("character animation stripped for passive static PDF output")),
+            "missing character animation diagnostic: {:?}",
+            output.diagnostics
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+            "animtext should not be reported as unsupported: {:?}",
+            output.diagnostics
+        );
     }
 
     #[test]
