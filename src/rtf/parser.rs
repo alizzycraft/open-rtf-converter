@@ -3979,6 +3979,13 @@ impl Parser {
                     ));
                 }
             }
+            "rtlch" => {
+                self.diagnostics.push(Diagnostic::warning(
+                    "right-to-left character direction approximated by passive logical text order",
+                    Some(offset),
+                ));
+            }
+            "ltrch" => {}
             "v" | "vanish" | "webhidden" => {
                 self.state.character.hidden = control.parameter.unwrap_or(1) != 0
             }
@@ -25804,6 +25811,29 @@ After\par}"#;
         assert_eq!(paragraph(1).style.alignment, Alignment::Left);
         assert_eq!(paragraph(2).style.alignment, Alignment::Right);
         assert_eq!(paragraph(3).style.alignment, Alignment::Left);
+    }
+
+    #[test]
+    fn right_to_left_character_direction_is_explicit_passive_approximation() {
+        let output = parse_rtf(r"{\rtf1 Normal {\rtlch RTL text} {\ltrch LTR text}\par}").unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(text, "Normal RTL text LTR text");
+        assert!(!text.contains("rtlch"));
+        assert!(!text.contains("ltrch"));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("right-to-left character direction approximated")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+            "character direction controls should not be unsupported: {:?}",
+            output.diagnostics
+        );
     }
 
     #[test]

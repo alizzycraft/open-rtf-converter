@@ -25487,6 +25487,75 @@ fn paragraph_direction_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn character_direction_controls_are_explicit_passive_approximations_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Normal {",
+        "\\",
+        "rtlch RTL text} {",
+        "\\",
+        "ltrch LTR text}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Normal RTL text LTR text"));
+    for forbidden in ["rtlch", "ltrch"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden character direction control leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("right-to-left character direction approximated")
+    }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "character direction controls should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("right-to-left character direction approximated")
+    }));
+
+    for forbidden in [
+        b"rtlch".as_slice(),
+        b"ltrch",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden character direction content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn word_paragraph_indent_aliases_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
