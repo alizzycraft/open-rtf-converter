@@ -370,9 +370,15 @@ fn font_family_names_match(left: &str, right: &str) -> bool {
     let right = normalized_family_name(right);
     !left.is_empty()
         && !right.is_empty()
-        && (left == right
+        && (is_wildcard_font_family_alias(&left)
+            || is_wildcard_font_family_alias(&right)
+            || left == right
             || canonical_word_charset_family_name(&left)
                 == canonical_word_charset_family_name(&right))
+}
+
+fn is_wildcard_font_family_alias(value: &str) -> bool {
+    value == "*"
 }
 
 #[cfg(test)]
@@ -429,6 +435,35 @@ mod tests {
             FontCoverage::NoAsset
         );
         assert!(!provider.has_asset_for_family("Greek"));
+    }
+
+    #[test]
+    fn wildcard_family_alias_matches_any_requested_font() {
+        let provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["*".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: FontProviderLimits {
+                max_asset_bytes: 256 * 1024,
+                max_total_bytes: 256 * 1024,
+                ..FontProviderLimits::default()
+            },
+        };
+        provider.validate().unwrap();
+
+        for family in ["Book Antiqua", "Arial Narrow", "Unknown Word Font"] {
+            assert!(provider.has_asset_for_family(family), "{family}");
+            assert_eq!(
+                provider.coverage_for_char(family, 'A'),
+                FontCoverage::Covered
+            );
+            assert!(
+                provider.glyph_metrics_for_char(family, 'A').is_some(),
+                "{family}"
+            );
+        }
     }
 
     #[test]

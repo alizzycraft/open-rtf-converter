@@ -51,6 +51,7 @@ struct Cli {
 
     /// Caller-provided passive font asset in the form FAMILY[,ALIAS...][:STYLE]=PATH. Repeat for multiple fonts.
     ///
+    /// Use * as a family alias to apply a vetted fallback font to otherwise unmatched Word font names.
     /// STYLE may be regular, bold, italic, or bold-italic. If omitted, regular is used.
     #[arg(long = "font", value_name = "FAMILY[,ALIAS...][:STYLE]=PATH")]
     fonts: Vec<String>,
@@ -399,6 +400,15 @@ mod tests {
             parse_font_spec("Times New Roman,Arial,Book Antiqua=fixtures/fonts/Tuffy.ttf").unwrap();
 
         assert_eq!(families, vec!["Times New Roman", "Arial", "Book Antiqua"]);
+        assert_eq!(style, FontAssetStyle::default());
+        assert_eq!(path, Path::new("fixtures/fonts/Tuffy.ttf"));
+    }
+
+    #[test]
+    fn parses_font_spec_with_wildcard_fallback_alias() {
+        let (families, style, path) = parse_font_spec("*=fixtures/fonts/Tuffy.ttf").unwrap();
+
+        assert_eq!(families, vec!["*"]);
         assert_eq!(style, FontAssetStyle::default());
         assert_eq!(path, Path::new("fixtures/fonts/Tuffy.ttf"));
     }

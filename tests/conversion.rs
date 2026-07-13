@@ -536,6 +536,81 @@ fn caller_font_asset_aliases_embed_passive_font_for_multiple_word_names() {
 }
 
 #[test]
+fn caller_wildcard_font_asset_embeds_unmatched_word_font_without_system_fonts() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f7\froman Unknown Word Serif;}}\f7 Wildcard AB\par}";
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["*".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected wildcard passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("Unknown Word Serif")
+            || !diagnostic.message.contains("substituted")),
+        "wildcard caller font should suppress base-font substitution diagnostics: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"Unknown Word Serif".as_slice(),
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/Launch",
+        b"/EmbeddedFile",
+        b"/Filespec",
+        b"/RichMedia",
+        b"/XFA",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active PDF or source font marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn caller_font_asset_matches_rtf_alternate_font_name_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Mystery Sans{\*\falt Tuffy;};}}\f0 Alternate AB\par}";
     let provider = FontProvider {
