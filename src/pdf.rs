@@ -509,7 +509,7 @@ pub fn render_pdf_with_font_provider(
     let first_page_id = 3;
     let first_content_id = first_page_id + layout.pages.len() as i32;
     let first_font_id = first_content_id + layout.pages.len() as i32;
-    let page_used_font_indexes = collect_page_used_font_indexes(layout);
+    let page_used_font_indexes = collect_page_used_font_indexes(layout, font_provider);
     let used_font_indexes = collect_used_font_indexes(&page_used_font_indexes);
     let mut next_object_id = first_font_id;
     let mut font_refs = [None; 14];
@@ -938,11 +938,14 @@ fn next_ref(next_object_id: &mut i32) -> Ref {
     reference
 }
 
-fn collect_page_used_font_indexes(layout: &LayoutDocument) -> Vec<Vec<usize>> {
+fn collect_page_used_font_indexes(
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+) -> Vec<Vec<usize>> {
     layout
         .pages
         .iter()
-        .map(collect_used_font_indexes_for_page)
+        .map(|page| collect_used_font_indexes_for_page(layout, page, font_provider))
         .collect()
 }
 
@@ -956,11 +959,21 @@ fn collect_used_font_indexes(page_used_font_indexes: &[Vec<usize>]) -> Vec<usize
     used_font_index_list(&used)
 }
 
-fn collect_used_font_indexes_for_page(page: &crate::layout::LayoutPage) -> Vec<usize> {
+fn collect_used_font_indexes_for_page(
+    layout: &LayoutDocument,
+    page: &crate::layout::LayoutPage,
+    font_provider: Option<&FontProvider>,
+) -> Vec<usize> {
     let mut used = [false; 14];
     for item in &page.items {
         match item {
             LayoutItem::Text(fragment) => {
+                if font_provider
+                    .and_then(|provider| supplied_text_encoding_parts(fragment, layout, provider))
+                    .is_some()
+                {
+                    continue;
+                }
                 mark_used_font_resource(
                     &mut used,
                     font_resource_for_style(fragment.font_family, &fragment.style),
@@ -1109,12 +1122,7 @@ fn supplied_text_encoding_parts(
     layout: &LayoutDocument,
     font_provider: &FontProvider,
 ) -> Option<(usize, Vec<SuppliedGlyph>, Vec<u8>)> {
-    if fragment.text.is_empty()
-        || matches!(
-            fragment.font_family,
-            PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats
-        )
-    {
+    if fragment.text.is_empty() {
         return None;
     }
     let source_font = layout
@@ -6061,6 +6069,124 @@ endstream
         );
         assert_eq!(content_bytes_for_font(&content, b"F13"), b"ab ");
         assert_eq!(content_bytes_for_font(&content, b"F1"), b"\x95");
+    }
+
+    #[test]
+    fn supplied_font_assets_can_cover_symbol_family_text() {
+        let mut document = Document::default();
+        document.fonts = vec![
+            FontDef {
+                index: 0,
+                name: "Helvetica".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Default,
+            },
+            FontDef {
+                index: 1,
+                name: "Symbol".to_string(),
+                alternate_name: None,
+                charset: Some(2),
+                code_page: None,
+                family: FontFamilyHint::Tech,
+                pitch: FontPitch::Default,
+            },
+        ];
+        let mut style = CharacterStyle::default();
+        style.font_index = 1;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "\u{03b1}\u{03b2} ".to_string(),
+                style,
+            }],
+        })];
+        let provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["Symbol".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: Default::default(),
+        };
+
+        let layout = LayoutEngine::layout_with_font_provider(&document, Some(&provider));
+        let pdf = render_pdf_with_font_provider(&layout, Some(&provider));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+        let page_fonts = page_font_resource_names(&pdf, 0);
+
+        assert!(
+            pdf.windows(b"/Subtype /Type0".len())
+                .any(|window| window == b"/Subtype /Type0")
+        );
+        assert!(
+            pdf.windows(b"/FontFile2".len())
+                .any(|window| window == b"/FontFile2")
+        );
+        assert!(!content_bytes_for_font(&content, b"TF1").is_empty());
+        assert!(content_bytes_for_font(&content, b"F13").is_empty());
+        assert!(page_fonts.iter().any(|name| name == b"TF1"));
+        assert!(!page_fonts.iter().any(|name| name == b"F13"));
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn supplied_font_assets_can_cover_zapf_dingbats_family_text() {
+        let mut document = Document::default();
+        document.fonts = vec![
+            FontDef {
+                index: 0,
+                name: "Helvetica".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Default,
+            },
+            FontDef {
+                index: 1,
+                name: "ZapfDingbats".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Tech,
+                pitch: FontPitch::Default,
+            },
+        ];
+        let mut style = CharacterStyle::default();
+        style.font_index = 1;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "ABC".to_string(),
+                style,
+            }],
+        })];
+        let provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["ZapfDingbats".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: Default::default(),
+        };
+
+        let layout = LayoutEngine::layout_with_font_provider(&document, Some(&provider));
+        let pdf = render_pdf_with_font_provider(&layout, Some(&provider));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+        let page_fonts = page_font_resource_names(&pdf, 0);
+
+        assert!(!content_bytes_for_font(&content, b"TF1").is_empty());
+        assert!(content_bytes_for_font(&content, b"F14").is_empty());
+        assert!(page_fonts.iter().any(|name| name == b"TF1"));
+        assert!(!page_fonts.iter().any(|name| name == b"F14"));
+        audit_passive_pdf_bytes(&pdf).unwrap();
     }
 
     #[test]
