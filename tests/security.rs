@@ -28499,25 +28499,67 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
         Err(ParseError::ActiveContentRejected { feature, .. })
             if feature == "field instruction in skipped destination"
     ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\unknown{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "embedded font payload in skipped destination"
+    ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\unknown{\template https://example.com/template.dotm}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "external template in skipped destination"
+    ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\unknown{\mmdatasource https://example.com/data.csv}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "mail merge data source in skipped destination"
+    ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\unknown{\annotation hidden comment}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "annotation metadata in skipped destination"
+    ));
 
     let parsed =
-        parse_rtf_bytes(br"{\rtf1{\*\unknown{\object\objdata 414243}} visible\par}").unwrap();
+        parse_rtf_bytes(
+            br"{\rtf1{\*\unknown{\object\objdata 414243}{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}}{\template https://example.com/template.dotm}{\mmdatasource https://example.com/data.csv}{\annotation hidden comment}} visible\par}"
+        ).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("visible"));
     assert!(!text.contains("414243"));
+    assert!(!text.contains("template.dotm"));
+    assert!(!text.contains("data.csv"));
+    assert!(!text.contains("hidden comment"));
+    assert!(!text.contains("HOSTILE-FONT-PAYLOAD"));
     assert!(!text.contains("[Embedded object removed]"));
-    assert_eq!(
-        parsed
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic
-                .message
-                .contains("active content removed: object payload in skipped destination before safe model normalization"))
-            .count(),
-        1,
-        "one skipped object should produce one object-payload diagnostic: {:?}",
-        parsed.diagnostics
-    );
+    for expected in [
+        "active content removed: object payload in skipped destination before safe model normalization",
+        "active content removed: embedded font payload in skipped destination before safe model normalization",
+        "active content removed: external template in skipped destination before safe model normalization",
+        "active content removed: mail merge data source in skipped destination before safe model normalization",
+        "active content removed: annotation metadata in skipped destination before safe model normalization",
+    ] {
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing skipped active-content diagnostic {expected:?}: {:?}",
+            parsed.diagnostics
+        );
+    }
 }
 
 #[test]

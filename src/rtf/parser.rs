@@ -2513,20 +2513,25 @@ impl Parser {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
-            "fontemb" | "fontfile" if destination_allows_safe_structural_content(&self.state) => {
+            "fontemb" | "fontfile"
+                if destination_allows_safe_structural_content(&self.state)
+                    && self.state.destination != Destination::Ignored =>
+            {
                 self.handle_active_content("embedded font payload", offset)?;
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
             name if is_mail_merge_destination(name)
-                && destination_allows_safe_structural_content(&self.state) =>
+                && destination_allows_safe_structural_content(&self.state)
+                && self.state.destination != Destination::Ignored =>
             {
                 self.handle_active_content("mail merge data source", offset)?;
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
             name if is_annotation_destination(name)
-                && destination_allows_safe_structural_content(&self.state) =>
+                && destination_allows_safe_structural_content(&self.state)
+                && self.state.destination != Destination::Ignored =>
             {
                 self.handle_active_content("annotation metadata", offset)?;
                 self.state.destination = Destination::Metadata;
@@ -13068,7 +13073,14 @@ fn skipped_destination_active_feature(name: &str) -> Option<&'static str> {
             Some("object payload in skipped destination")
         }
         "field" | "fldinst" => Some("field instruction in skipped destination"),
+        "template" => Some("external template in skipped destination"),
         "fontemb" | "fontfile" => Some("embedded font payload in skipped destination"),
+        name if is_mail_merge_destination(name) => {
+            Some("mail merge data source in skipped destination")
+        }
+        name if is_annotation_destination(name) => {
+            Some("annotation metadata in skipped destination")
+        }
         _ => None,
     }
 }
