@@ -259,7 +259,7 @@ fn load_cli_font_provider(
     if specs.is_empty() && font_dirs.is_empty() && font_substitutes.is_empty() {
         return Ok(provider);
     }
-    let substitutions = parse_font_substitutions(font_substitutes)?;
+    let substitutions = effective_font_substitutions(font_substitutes)?;
 
     let requested_asset_count =
         specs
@@ -320,6 +320,31 @@ fn parse_font_substitutions(specs: &[String]) -> Result<Vec<FontSubstitution>, C
         .iter()
         .map(|spec| parse_font_substitution_spec(spec))
         .collect()
+}
+
+fn effective_font_substitutions(specs: &[String]) -> Result<Vec<FontSubstitution>, CliFontError> {
+    let mut substitutions = parse_font_substitutions(specs)?;
+    for (requested_names, installed_family) in builtin_cli_font_substitutions() {
+        substitutions.push(FontSubstitution {
+            requested_names: requested_names
+                .iter()
+                .map(|requested| (*requested).to_string())
+                .collect(),
+            installed_family: (*installed_family).to_string(),
+        });
+    }
+    Ok(substitutions)
+}
+
+fn builtin_cli_font_substitutions() -> &'static [(&'static [&'static str], &'static str)] {
+    &[
+        (&["Arial Narrow", "Helvetica Narrow"], "Arial"),
+        (&["Arial Unicode"], "Arial"),
+        (&["Book Antiqua"], "Times New Roman"),
+        (&["Courier"], "Courier New"),
+        (&["MS Serif"], "Times New Roman"),
+        (&["MS Sans Serif"], "Microsoft Sans Serif"),
+    ]
 }
 
 fn parse_font_substitution_spec(spec: &str) -> Result<FontSubstitution, CliFontError> {
@@ -894,6 +919,72 @@ mod tests {
                 "{spec}"
             );
         }
+    }
+
+    #[test]
+    fn effective_font_substitutions_include_legacy_word_aliases() {
+        let substitutions = effective_font_substitutions(&[]).unwrap();
+
+        assert!(
+            substitutions.iter().any(|substitution| {
+                substitution.installed_family == "Courier New"
+                    && substitution
+                        .requested_names
+                        .iter()
+                        .any(|requested| requested == "Courier")
+            }),
+            "{substitutions:?}"
+        );
+        assert!(
+            substitutions.iter().any(|substitution| {
+                substitution.installed_family == "Microsoft Sans Serif"
+                    && substitution
+                        .requested_names
+                        .iter()
+                        .any(|requested| requested == "MS Sans Serif")
+            }),
+            "{substitutions:?}"
+        );
+        assert!(
+            substitutions.iter().any(|substitution| {
+                substitution.installed_family == "Times New Roman"
+                    && substitution
+                        .requested_names
+                        .iter()
+                        .any(|requested| requested == "MS Serif")
+            }),
+            "{substitutions:?}"
+        );
+    }
+
+    #[test]
+    fn builtin_legacy_word_aliases_apply_to_matching_metadata_fonts() {
+        let substitutions = effective_font_substitutions(&[]).unwrap();
+
+        assert_eq!(
+            substitute_aliases_for_font(
+                &["Courier New".to_string()],
+                &["Courier".to_string()],
+                &substitutions,
+            ),
+            vec!["Courier".to_string()]
+        );
+        assert_eq!(
+            substitute_aliases_for_font(
+                &["Microsoft Sans Serif".to_string()],
+                &["MS Sans Serif".to_string()],
+                &substitutions,
+            ),
+            vec!["MS Sans Serif".to_string()]
+        );
+        assert_eq!(
+            substitute_aliases_for_font(
+                &["Times New Roman".to_string()],
+                &["MS Serif".to_string()],
+                &substitutions,
+            ),
+            vec!["MS Serif".to_string()]
+        );
     }
 
     #[test]
