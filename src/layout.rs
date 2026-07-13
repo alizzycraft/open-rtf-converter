@@ -2953,6 +2953,29 @@ fn layout_table(
             font_provider,
         );
 
+        if should_split_tall_table_row(row, &prepared, *geometry, margin_bottom) {
+            if *cursor_y - 14.0 < margin_bottom {
+                advance_column_or_page(pages, cursor_y, geometry, current_column);
+                margin_left = geometry.body_left(*current_column);
+            }
+            push_split_table_row(
+                pages,
+                cursor_y,
+                row,
+                prepared,
+                content_width,
+                margin_left,
+                table_width,
+                margin_bottom,
+                geometry,
+                current_column,
+                document,
+                table.borders_visible,
+                next_row,
+            );
+            continue;
+        }
+
         if *cursor_y - prepared.row_height < margin_bottom {
             advance_column_or_page(pages, cursor_y, geometry, current_column);
             margin_left = geometry.body_left(*current_column);
@@ -3024,6 +3047,153 @@ fn layout_table(
     }
 
     *cursor_y -= 6.0;
+}
+
+fn should_split_tall_table_row(
+    row: &TableRow,
+    prepared: &PreparedTableRow,
+    geometry: PageGeometry,
+    margin_bottom: f32,
+) -> bool {
+    if row.keep_together || row.repeat_header || row.height_twips.is_some() {
+        return false;
+    }
+    if prepared
+        .visual_cells
+        .iter()
+        .filter_map(|visual_cell| row.cells.get(visual_cell.cell_index))
+        .any(|cell| cell.vertical_merge != TableCellVerticalMerge::None)
+    {
+        return false;
+    }
+    let usable_height = (geometry.height - geometry.margin_top - margin_bottom).max(14.0);
+    prepared.row_height > usable_height && prepared_table_row_has_lines(prepared)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_split_table_row(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    row: &TableRow,
+    mut remaining: PreparedTableRow,
+    content_width: f32,
+    mut margin_left: f32,
+    table_width: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    current_column: &mut usize,
+    document: &Document,
+    borders_visible: bool,
+    next_row: Option<&TableRow>,
+) {
+    while prepared_table_row_has_lines(&remaining) {
+        let available_height = (*cursor_y - margin_bottom).max(14.0);
+        let Some(fragment) = split_prepared_table_row_fragment(&mut remaining, available_height)
+        else {
+            break;
+        };
+        let is_final_fragment = !prepared_table_row_has_lines(&remaining);
+        let vertical_span_heights = vec![fragment.row_height; fragment.visual_cells.len()];
+        push_table_row(
+            pages,
+            cursor_y,
+            row,
+            &fragment,
+            &vertical_span_heights,
+            content_width,
+            margin_left,
+            table_width,
+            document,
+            borders_visible,
+            is_final_fragment.then_some(()).and(next_row),
+        );
+        if !is_final_fragment {
+            advance_column_or_page(pages, cursor_y, geometry, current_column);
+            margin_left = geometry.body_left(*current_column);
+        }
+    }
+}
+
+fn split_prepared_table_row_fragment(
+    remaining: &mut PreparedTableRow,
+    max_height: f32,
+) -> Option<PreparedTableRow> {
+    if !prepared_table_row_has_lines(remaining) {
+        return None;
+    }
+
+    let mut fragment = PreparedTableRow {
+        visual_cells: remaining.visual_cells.clone(),
+        cell_lines: Vec::with_capacity(remaining.cell_lines.len()),
+        cell_paddings: remaining.cell_paddings.clone(),
+        cell_spacings: remaining.cell_spacings.clone(),
+        row_height: 14.0,
+    };
+    let mut consumed = Vec::with_capacity(remaining.cell_lines.len());
+    for (idx, lines) in remaining.cell_lines.iter().enumerate() {
+        let fixed = remaining
+            .cell_paddings
+            .get(idx)
+            .zip(remaining.cell_spacings.get(idx))
+            .map(|(padding, spacing)| padding.top + padding.bottom + spacing.top + spacing.bottom)
+            .unwrap_or(0.0);
+        let capacity = (max_height - fixed).max(0.0);
+        let mut used = 0.0;
+        let mut take = 0usize;
+        for line in lines {
+            let height = prepared_cell_line_height(line);
+            if take == 0 || used + height <= capacity {
+                take += 1;
+                used += height;
+            } else {
+                break;
+            }
+        }
+        consumed.push(take.min(lines.len()));
+    }
+
+    if consumed.iter().all(|count| *count == 0)
+        && let Some((idx, _)) = remaining
+            .cell_lines
+            .iter()
+            .enumerate()
+            .find(|(_, lines)| !lines.is_empty())
+    {
+        consumed[idx] = 1;
+    }
+
+    for (idx, take) in consumed.into_iter().enumerate() {
+        let fragment_lines = remaining.cell_lines[idx].drain(..take).collect::<Vec<_>>();
+        fragment.cell_lines.push(fragment_lines);
+    }
+    fragment.row_height = prepared_table_row_content_height(&fragment);
+    remaining.row_height = prepared_table_row_content_height(remaining);
+    Some(fragment)
+}
+
+fn prepared_table_row_has_lines(prepared: &PreparedTableRow) -> bool {
+    prepared.cell_lines.iter().any(|lines| !lines.is_empty())
+}
+
+fn prepared_table_row_content_height(prepared: &PreparedTableRow) -> f32 {
+    prepared
+        .cell_lines
+        .iter()
+        .zip(prepared.cell_paddings.iter())
+        .zip(prepared.cell_spacings.iter())
+        .map(|((lines, padding), spacing)| {
+            lines.iter().map(prepared_cell_line_height).sum::<f32>()
+                + padding.top
+                + padding.bottom
+                + spacing.top
+                + spacing.bottom
+        })
+        .fold(0.0, f32::max)
+        .max(14.0)
+}
+
+fn prepared_cell_line_height(line: &PreparedCellLine) -> f32 {
+    line.space_before + line.line.height + line.space_after
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3184,14 +3354,7 @@ fn prepare_table_row(
         .zip(cell_paddings.iter())
         .zip(cell_spacings.iter())
         .map(|((lines, padding), spacing)| {
-            lines
-                .iter()
-                .map(|prepared_line| {
-                    prepared_line.space_before
-                        + prepared_line.line.height
-                        + prepared_line.space_after
-                })
-                .sum::<f32>()
+            lines.iter().map(prepared_cell_line_height).sum::<f32>()
                 + padding.top
                 + padding.bottom
                 + spacing.top
@@ -3336,12 +3499,7 @@ fn push_table_row(
             .get(idx)
             .copied()
             .unwrap_or(prepared.row_height);
-        let content_height = lines
-            .iter()
-            .map(|prepared_line| {
-                prepared_line.space_before + prepared_line.line.height + prepared_line.space_after
-            })
-            .sum::<f32>();
+        let content_height = lines.iter().map(prepared_cell_line_height).sum::<f32>();
         let available_height =
             (span_height - spacing.top - spacing.bottom - padding.top - padding.bottom).max(0.0);
         let extra_height = (available_height - content_height).max(0.0);
@@ -9986,6 +10144,65 @@ mod tests {
             .filter(|item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "Header"))
             .count();
         assert_eq!(header_count, layout.pages.len());
+    }
+
+    #[test]
+    fn splits_tall_auto_height_table_rows_across_pages() {
+        fn row(text: String) -> TableRow {
+            TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    spacing: Default::default(),
+                    borders: TableCellBorders::default(),
+                    fit_text: false,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text,
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }
+        }
+
+        let tall_text = (0..14)
+            .map(|idx| format!("Line {idx:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut document = small_test_page_document();
+        document.blocks = vec![Block::Table(Table {
+            rows: vec![row(tall_text)],
+            column_widths_twips: vec![2_880],
+            borders_visible: true,
+            preserve_authored_widths: false,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let first_page_text = layout_text(&layout.pages[0]);
+        let later_page_text = layout
+            .pages
+            .iter()
+            .skip(1)
+            .map(layout_text)
+            .collect::<String>();
+
+        assert!(layout.pages.len() > 1);
+        assert!(first_page_text.contains("Line 00"));
+        assert!(!first_page_text.contains("Line 13"));
+        assert!(later_page_text.contains("Line 13"));
     }
 
     #[test]
