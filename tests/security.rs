@@ -325,6 +325,231 @@ fn table_cell_growth_is_bounded() {
 }
 
 #[test]
+fn table_cell_definition_growth_is_bounded() {
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_table_cells: 1,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            &rtf(&[
+                "{",
+                "\\",
+                "rtf1",
+                "\\",
+                "trowd",
+                "\\",
+                "cellx1000",
+                "\\",
+                "cellx2000 A",
+                "\\",
+                "cell",
+                "\\",
+                "row}"
+            ]),
+            &options
+        ),
+        Err(ParseError::ResourceLimitExceeded { resource, .. })
+            if resource == "table cell definitions"
+    ));
+}
+
+#[test]
+fn table_row_growth_is_bounded() {
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_table_rows: 1,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            &rtf(&[
+                "{",
+                "\\",
+                "rtf1",
+                "\\",
+                "trowd",
+                "\\",
+                "cellx1000 A",
+                "\\",
+                "cell",
+                "\\",
+                "row",
+                "\\",
+                "trowd",
+                "\\",
+                "cellx1000 B",
+                "\\",
+                "cell",
+                "\\",
+                "row}"
+            ]),
+            &options
+        ),
+        Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "table rows"
+    ));
+}
+
+#[test]
+fn table_nesting_growth_is_bounded() {
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_table_nesting_level: 1,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            &rtf(&[
+                "{",
+                "\\",
+                "rtf1",
+                "\\",
+                "trowd",
+                "\\",
+                "cellx6000 Outer {",
+                "\\",
+                "trowd",
+                "\\",
+                "itap2",
+                "\\",
+                "cellx1000 Inner",
+                "\\",
+                "nestcell",
+                "\\",
+                "nestrow} after",
+                "\\",
+                "cell",
+                "\\",
+                "row}"
+            ]),
+            &options
+        ),
+        Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "table nesting"
+    ));
+}
+
+#[test]
+fn header_footer_paragraph_growth_is_bounded() {
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_header_footer_paragraphs: 1,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            &rtf(&[
+                "{",
+                "\\",
+                "rtf1{",
+                "\\",
+                "header First",
+                "\\",
+                "par Second",
+                "\\",
+                "par}Body",
+                "\\",
+                "par}"
+            ]),
+            &options
+        ),
+        Err(ParseError::ResourceLimitExceeded { resource, .. })
+            if resource == "header/footer paragraphs"
+    ));
+}
+
+#[test]
+fn section_growth_is_bounded() {
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_sections: 1,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            &rtf(&[
+                "{",
+                "\\",
+                "rtf1 First",
+                "\\",
+                "sect Second",
+                "\\",
+                "par}"
+            ]),
+            &options
+        ),
+        Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "sections"
+    ));
+}
+
+#[test]
+fn document_block_growth_is_bounded_before_layout() {
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_document_blocks: 1,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            &rtf(&["{", "\\", "rtf1 First", "\\", "par", "\\", "page Second", "\\", "par}"]),
+            &options
+        ),
+        Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "document blocks"
+    ));
+}
+
+#[test]
+fn retained_section_setting_blocks_are_bounded_before_layout() {
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_document_blocks: 2,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            &rtf(&[
+                "{",
+                "\\",
+                "rtf1 First",
+                "\\",
+                "par",
+                "\\",
+                "paperw12240 Second",
+                "\\",
+                "par",
+                "\\",
+                "paperh15840 Third",
+                "\\",
+                "par}"
+            ]),
+            &options
+        ),
+        Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "document blocks"
+    ));
+}
+
+#[test]
 fn table_row_padding_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

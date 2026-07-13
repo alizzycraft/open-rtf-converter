@@ -44,7 +44,9 @@ fn converts_rtf_bytes_to_pdf_without_filesystem_core_api() {
 #[test]
 fn browser_safe_defaults_use_stricter_pdf_output_limit() {
     assert_eq!(RtfLimits::default().max_pdf_output_bytes, 100 * 1024 * 1024);
+    assert_eq!(RtfLimits::default().max_document_blocks, 1_000_000);
     assert_eq!(RtfLimits::default().max_pdf_layout_items, 1_000_000);
+    assert_eq!(RtfLimits::default().max_pdf_indirect_objects, 100_000);
     assert_eq!(RtfLimits::default().max_pdf_pages, 10_000);
     assert_eq!(
         ConvertOptions::browser_safe_defaults()
@@ -57,8 +59,22 @@ fn browser_safe_defaults_use_stricter_pdf_output_limit() {
         ConvertOptions::browser_safe_defaults()
             .parse_options
             .limits
+            .max_document_blocks,
+        200_000
+    );
+    assert_eq!(
+        ConvertOptions::browser_safe_defaults()
+            .parse_options
+            .limits
             .max_pdf_layout_items,
         200_000
+    );
+    assert_eq!(
+        ConvertOptions::browser_safe_defaults()
+            .parse_options
+            .limits
+            .max_pdf_indirect_objects,
+        25_000
     );
     assert_eq!(
         ConvertOptions::browser_safe_defaults()
@@ -87,6 +103,16 @@ fn browser_safe_defaults_use_stricter_resource_table_limits() {
     assert_eq!(browser_limits.max_fonts, 256);
     assert_eq!(browser_limits.max_colors, 2_048);
     assert_eq!(browser_limits.max_styles, 2_048);
+    assert_eq!(default_limits.max_table_cells, 100_000);
+    assert_eq!(browser_limits.max_table_cells, 50_000);
+    assert_eq!(default_limits.max_table_rows, 50_000);
+    assert_eq!(browser_limits.max_table_rows, 20_000);
+    assert_eq!(default_limits.max_table_nesting_level, 16);
+    assert_eq!(browser_limits.max_table_nesting_level, 8);
+    assert_eq!(default_limits.max_header_footer_paragraphs, 20_000);
+    assert_eq!(browser_limits.max_header_footer_paragraphs, 4_000);
+    assert_eq!(default_limits.max_sections, 10_000);
+    assert_eq!(browser_limits.max_sections, 2_000);
     assert_eq!(default_limits.max_notes, 10_000);
     assert_eq!(browser_limits.max_notes, 2_048);
     assert_eq!(default_limits.max_bookmarks, 10_000);
@@ -242,6 +268,30 @@ fn conversion_rejects_page_count_over_configured_limit_before_pdf_rendering() {
     assert!(matches!(
         error,
         ConvertError::TooManyPages { pages, limit } if pages == 3 && limit == 2
+    ));
+}
+
+#[test]
+fn conversion_rejects_pdf_object_count_over_configured_limit_before_pdf_rendering() {
+    let input = br"{\rtf1\ansi Object guard\par}";
+    let error = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            parse_options: RtfParseOptions {
+                limits: RtfLimits {
+                    max_pdf_indirect_objects: 1,
+                    ..RtfLimits::default()
+                },
+                ..RtfParseOptions::default()
+            },
+            ..ConvertOptions::default()
+        },
+    )
+    .expect_err("even a minimal PDF should exceed a one-object PDF limit");
+
+    assert!(matches!(
+        error,
+        ConvertError::TooManyPdfObjects { objects, limit } if limit == 1 && objects > limit
     ));
 }
 

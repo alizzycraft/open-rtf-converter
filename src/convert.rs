@@ -8,7 +8,10 @@ use crate::diagnostics::Diagnostic;
 use crate::fonts::{FontCoverage, FontProvider, FontProviderError};
 use crate::layout::{LayoutEngine, PdfFontFamily, passive_pdf_font_family_for_font};
 use crate::model::{Block, Document, FontDef, Paragraph, Run, StaticShape, Table};
-use crate::pdf::{PassivePdfError, audit_passive_pdf_bytes, render_pdf_with_font_provider};
+use crate::pdf::{
+    PassivePdfError, audit_passive_pdf_bytes, estimate_passive_pdf_object_count,
+    render_pdf_with_font_provider,
+};
 use crate::rtf::{ParseError, parse_rtf_bytes_with_options};
 
 #[derive(Debug, Clone)]
@@ -67,6 +70,10 @@ pub enum ConvertError {
     TooManyLayoutItems { items: usize, limit: usize },
     #[error("rendered PDF page count exceeded limit: {pages} pages > {limit} pages")]
     TooManyPages { pages: usize, limit: usize },
+    #[error(
+        "rendered PDF indirect object count exceeded limit: {objects} objects > {limit} objects"
+    )]
+    TooManyPdfObjects { objects: usize, limit: usize },
     #[error(transparent)]
     FontProvider(#[from] FontProviderError),
     #[error(transparent)]
@@ -113,6 +120,14 @@ pub fn convert_rtf_to_pdf(
         return Err(ConvertError::TooManyPages {
             pages: page_count,
             limit: page_limit,
+        });
+    }
+    let object_count = estimate_passive_pdf_object_count(&layout, Some(&options.font_provider));
+    let object_limit = options.parse_options.limits.max_pdf_indirect_objects;
+    if object_count > object_limit {
+        return Err(ConvertError::TooManyPdfObjects {
+            objects: object_count,
+            limit: object_limit,
         });
     }
     let pdf = render_pdf_with_font_provider(&layout, Some(&options.font_provider));

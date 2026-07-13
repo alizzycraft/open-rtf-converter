@@ -499,6 +499,36 @@ pub fn render_pdf(layout: &LayoutDocument) -> Vec<u8> {
     render_pdf_with_font_provider(layout, None)
 }
 
+pub fn estimate_passive_pdf_object_count(
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+) -> usize {
+    let page_used_font_indexes = collect_page_used_font_indexes(layout, font_provider);
+    let used_font_indexes = collect_used_font_indexes(&page_used_font_indexes);
+    let extended_latin_usage = collect_extended_latin_font_usage(layout);
+    2usize
+        .saturating_add(layout.pages.len().saturating_mul(2))
+        .saturating_add(used_font_indexes.len())
+        .saturating_add(usize::from(
+            used_font_indexes.contains(&font_index_for_resource(SYMBOL_REGULAR)),
+        ))
+        .saturating_add(usize::from(
+            used_font_indexes.contains(&font_index_for_resource(ZAPF_DINGBATS_REGULAR)),
+        ))
+        .saturating_add(
+            extended_latin_usage
+                .iter()
+                .filter(|usage| !usage.is_empty())
+                .count(),
+        )
+        .saturating_add(
+            collect_used_supplied_font_asset_indexes(layout, font_provider)
+                .len()
+                .saturating_mul(5),
+        )
+        .saturating_add(count_image_xobjects(layout))
+}
+
 pub fn render_pdf_with_font_provider(
     layout: &LayoutDocument,
     font_provider: Option<&FontProvider>,
@@ -1060,6 +1090,32 @@ fn collect_supplied_pdf_fonts(
     fonts
 }
 
+fn collect_used_supplied_font_asset_indexes(
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+) -> Vec<usize> {
+    let Some(font_provider) = font_provider else {
+        return Vec::new();
+    };
+    let mut indexes = Vec::<usize>::new();
+    for page in &layout.pages {
+        for item in &page.items {
+            let LayoutItem::Text(fragment) = item else {
+                continue;
+            };
+            let Some((asset_index, _glyphs, _encoded)) =
+                supplied_text_encoding_parts(fragment, layout, font_provider)
+            else {
+                continue;
+            };
+            if !indexes.contains(&asset_index) {
+                indexes.push(asset_index);
+            }
+        }
+    }
+    indexes
+}
+
 fn collect_page_supplied_font_indexes(
     layout: &LayoutDocument,
     font_provider: Option<&FontProvider>,
@@ -1388,6 +1444,21 @@ fn image_format_uses_xobject(format: ImageFormat) -> bool {
             | ImageFormat::PngIndexed
             | ImageFormat::Rgb8
     )
+}
+
+fn count_image_xobjects(layout: &LayoutDocument) -> usize {
+    layout
+        .pages
+        .iter()
+        .map(|page| {
+            page.items
+                .iter()
+                .filter(|item| {
+                    matches!(item, LayoutItem::Image(fragment) if image_format_uses_xobject(fragment.image.format))
+                })
+                .count()
+        })
+        .sum()
 }
 
 fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout::ImageFragment) {
@@ -4136,6 +4207,73 @@ mod tests {
         assert!(
             pdf.windows(b"/FontFile2".len())
                 .any(|window| window == b"/FontFile2")
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn estimated_pdf_object_count_matches_rendered_supplied_font_and_image_objects() {
+        let mut document = Document {
+            fonts: vec![FontDef {
+                index: 0,
+                name: "Tuffy".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Variable,
+            }],
+            ..Document::default()
+        };
+        let mut style = CharacterStyle::default();
+        style.font_index = 0;
+        document.blocks = vec![
+            Block::Paragraph(Paragraph {
+                style: ParagraphStyle::default(),
+                runs: vec![Run {
+                    text: "Supplied font".to_string(),
+                    style,
+                }],
+            }),
+            Block::Image(StaticImage {
+                format: ImageFormat::Rgb8,
+                bytes: vec![255, 0, 0, 0, 0, 255],
+                palette: Vec::new(),
+                vector_commands: Vec::new(),
+                width_px: 2,
+                height_px: 1,
+                natural_width_px_hint: None,
+                natural_height_px_hint: None,
+                display_width_twips: Some(720),
+                display_height_twips: Some(720),
+                scale_x_percent: None,
+                scale_y_percent: None,
+                crop: ImageCrop::default(),
+            }),
+        ];
+        let provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["Tuffy".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: Default::default(),
+        };
+
+        let layout = LayoutEngine::layout_with_font_provider(&document, Some(&provider));
+        let estimated = estimate_passive_pdf_object_count(&layout, Some(&provider));
+        let pdf = render_pdf_with_font_provider(&layout, Some(&provider));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+
+        assert_eq!(estimated, parsed.objects.len());
+        assert_eq!(estimated, 10);
+        assert!(
+            pdf.windows(b"/FontFile2".len())
+                .any(|window| window == b"/FontFile2")
+        );
+        assert!(
+            pdf.windows(b"/Subtype /Image".len())
+                .any(|window| window == b"/Subtype /Image")
         );
         audit_passive_pdf_bytes(&pdf).unwrap();
     }

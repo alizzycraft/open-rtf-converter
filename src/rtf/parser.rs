@@ -1045,6 +1045,10 @@ struct Parser {
     current_table_row: Option<TableRowBuilder>,
     preserve_authored_table_widths: bool,
     table_cell_count: usize,
+    table_cell_boundary_count: usize,
+    table_row_count: usize,
+    document_block_count: usize,
+    header_footer_paragraph_count: usize,
     pending_list_marker: String,
     pending_list_marker_runs: Vec<Run>,
     current_picture: Option<PictureBuilder>,
@@ -1162,6 +1166,10 @@ impl Parser {
             current_table_row: None,
             preserve_authored_table_widths: false,
             table_cell_count: 0,
+            table_cell_boundary_count: 0,
+            table_row_count: 0,
+            document_block_count: 0,
+            header_footer_paragraph_count: 0,
             pending_list_marker: String::new(),
             pending_list_marker_runs: Vec::new(),
             current_picture: None,
@@ -1256,6 +1264,7 @@ impl Parser {
             | Block::OddPageSectionBreak => true,
             Block::SectionSettings(_) => true,
         });
+        self.enforce_retained_document_block_limit(self.last_offset)?;
 
         Ok(ParseOutput {
             document: self.document,
@@ -1265,6 +1274,43 @@ impl Parser {
 
     fn limits(&self) -> &RtfLimits {
         &self.options.limits
+    }
+
+    fn reserve_document_blocks(
+        &mut self,
+        additional: usize,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let next = self.document_block_count.checked_add(additional).ok_or(
+            ParseError::ResourceLimitExceeded {
+                resource: "document blocks".to_string(),
+                offset,
+            },
+        )?;
+        if next > self.limits().max_document_blocks {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "document blocks".to_string(),
+                offset,
+            });
+        }
+        self.document_block_count = next;
+        Ok(())
+    }
+
+    fn push_document_block(&mut self, block: Block, offset: usize) -> Result<(), ParseError> {
+        self.reserve_document_blocks(1, offset)?;
+        self.document.blocks.push(block);
+        Ok(())
+    }
+
+    fn enforce_retained_document_block_limit(&self, offset: usize) -> Result<(), ParseError> {
+        if self.document.blocks.len() > self.limits().max_document_blocks {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "document blocks".to_string(),
+                offset,
+            });
+        }
+        Ok(())
     }
 
     fn destination_allows_ignorable_metadata(&self) -> bool {
@@ -1412,10 +1458,10 @@ impl Parser {
                 self.flush_font(offset)?;
             }
             if is_header_destination(self.state.destination) {
-                self.finish_header_paragraph();
+                self.finish_header_paragraph(offset)?;
             }
             if is_footer_destination(self.state.destination) {
-                self.finish_footer_paragraph();
+                self.finish_footer_paragraph(offset)?;
             }
             if self.state.destination == Destination::Footnote {
                 self.finish_footnote_paragraph(offset)?;
@@ -1500,7 +1546,7 @@ impl Parser {
                     && !self.state.character.hidden
                 {
                     if let Some(image) = self.passive_object_placeholder_image() {
-                        self.push_static_image(self.state.object_owner_destination, image);
+                        self.push_static_image(self.state.object_owner_destination, image, offset)?;
                         self.mark_shape_visual_result_rendered();
                     } else {
                         self.push_placeholder_for_destination(
@@ -3784,7 +3830,9 @@ impl Parser {
                 .set_current_table_row_shading_pattern(
                     table_row_shading_pattern_control(name).expect("checked above"),
                 ),
-            "cellx" => self.push_table_cell_boundary(control.parameter.unwrap_or(0).max(0)),
+            "cellx" => {
+                self.push_table_cell_boundary(control.parameter.unwrap_or(0).max(0), offset)?
+            }
             "clcbpat" | "clcfpat" => {
                 self.set_current_cell_shading(control.parameter.unwrap_or(0).max(0) as usize)
             }
@@ -3894,31 +3942,35 @@ impl Parser {
             "page" => {
                 self.finish_table(offset)?;
                 self.finish_paragraph(offset)?;
-                self.document.blocks.push(Block::PageBreak);
+                self.push_document_block(Block::PageBreak, offset)?;
             }
             "column" => {
                 self.finish_table(offset)?;
                 self.finish_paragraph(offset)?;
-                self.document.blocks.push(Block::ColumnBreak);
+                self.push_document_block(Block::ColumnBreak, offset)?;
             }
             "sect" => {
                 self.finish_table(offset)?;
                 self.finish_paragraph(offset)?;
                 match self.state.section_break_kind {
                     SectionBreakKind::Continuous => {
-                        self.document.blocks.push(Block::ContinuousSectionBreak)
+                        self.push_document_block(Block::ContinuousSectionBreak, offset)?
                     }
-                    SectionBreakKind::Page => self.document.blocks.push(Block::SectionBreak),
+                    SectionBreakKind::Page => {
+                        self.push_document_block(Block::SectionBreak, offset)?
+                    }
                     SectionBreakKind::EvenPage => {
-                        self.document.blocks.push(Block::EvenPageSectionBreak)
+                        self.push_document_block(Block::EvenPageSectionBreak, offset)?
                     }
                     SectionBreakKind::OddPage => {
-                        self.document.blocks.push(Block::OddPageSectionBreak)
+                        self.push_document_block(Block::OddPageSectionBreak, offset)?
                     }
-                    SectionBreakKind::Column => self.document.blocks.push(Block::ColumnBreak),
+                    SectionBreakKind::Column => {
+                        self.push_document_block(Block::ColumnBreak, offset)?
+                    }
                 }
                 if self.state.section_break_kind != SectionBreakKind::Column {
-                    self.current_section_index = self.current_section_index.saturating_add(1);
+                    self.advance_section(offset)?;
                 }
             }
             "sectd" => {
@@ -5638,6 +5690,24 @@ impl Parser {
             Some(Block::SectionSettings(existing)) => *existing = page,
             _ => self.document.blocks.push(Block::SectionSettings(page)),
         }
+    }
+
+    fn advance_section(&mut self, offset: usize) -> Result<(), ParseError> {
+        let next =
+            self.current_section_index
+                .checked_add(1)
+                .ok_or(ParseError::ResourceLimitExceeded {
+                    resource: "sections".to_string(),
+                    offset,
+                })?;
+        if next > self.limits().max_sections {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "sections".to_string(),
+                offset,
+            });
+        }
+        self.current_section_index = next;
+        Ok(())
     }
 
     fn has_started_visible_body(&self) -> bool {
@@ -8512,7 +8582,7 @@ impl Parser {
                     self.store_style_reference_text(index, text, offset)?;
                 }
             }
-            self.document.blocks.push(Block::Paragraph(paragraph));
+            self.push_document_block(Block::Paragraph(paragraph), offset)?;
         }
         Ok(())
     }
@@ -8558,11 +8628,11 @@ impl Parser {
                 true
             }
             destination if is_header_destination(destination) => {
-                self.finish_header_paragraph();
+                self.finish_header_paragraph(offset)?;
                 true
             }
             destination if is_footer_destination(destination) => {
-                self.finish_footer_paragraph();
+                self.finish_footer_paragraph(offset)?;
                 true
             }
             Destination::Footnote => {
@@ -8589,7 +8659,7 @@ impl Parser {
         Ok(())
     }
 
-    fn finish_header_paragraph(&mut self) {
+    fn finish_header_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
         let destination = self.state.destination;
         let current = match destination {
             Destination::FirstPageHeader => &mut self.current_first_page_header_paragraph,
@@ -8604,6 +8674,7 @@ impl Parser {
                     runs: Vec::new(),
                 },
             );
+            self.reserve_header_footer_paragraph_slot(offset)?;
             if self.has_started_visible_body() {
                 match destination {
                     Destination::FirstPageHeader => {
@@ -8623,9 +8694,10 @@ impl Parser {
                 }
             }
         }
+        Ok(())
     }
 
-    fn finish_footer_paragraph(&mut self) {
+    fn finish_footer_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
         let destination = self.state.destination;
         let current = match destination {
             Destination::FirstPageFooter => &mut self.current_first_page_footer_paragraph,
@@ -8640,6 +8712,7 @@ impl Parser {
                     runs: Vec::new(),
                 },
             );
+            self.reserve_header_footer_paragraph_slot(offset)?;
             if self.has_started_visible_body() {
                 match destination {
                     Destination::FirstPageFooter => {
@@ -8659,6 +8732,32 @@ impl Parser {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn reserve_header_footer_paragraph_slot(&mut self, offset: usize) -> Result<(), ParseError> {
+        self.reserve_header_footer_paragraph_slots(1, offset)
+    }
+
+    fn reserve_header_footer_paragraph_slots(
+        &mut self,
+        count: usize,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.header_footer_paragraph_count = self
+            .header_footer_paragraph_count
+            .checked_add(count)
+            .ok_or(ParseError::ResourceLimitExceeded {
+                resource: "header/footer paragraphs".to_string(),
+                offset,
+            })?;
+        if self.header_footer_paragraph_count > self.limits().max_header_footer_paragraphs {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "header/footer paragraphs".to_string(),
+                offset,
+            });
+        }
+        Ok(())
     }
 
     fn finish_footnote_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
@@ -8757,7 +8856,7 @@ impl Parser {
 
     fn push_placeholder(&mut self, text: String, offset: usize) -> Result<(), ParseError> {
         self.finish_paragraph(offset)?;
-        self.document.blocks.push(Block::Placeholder(text));
+        self.push_document_block(Block::Placeholder(text), offset)?;
         Ok(())
     }
 
@@ -8906,15 +9005,15 @@ impl Parser {
 
         match control.name.as_str() {
             "itap" if control.parameter.unwrap_or(1) > 1 => {
-                self.state.table_nesting_level = control.parameter.unwrap_or(2).max(2);
+                self.set_table_nesting_level(control.parameter.unwrap_or(2).max(2), offset)?;
                 return Ok(true);
             }
             "itap" if self.state.table_nesting_level > 1 => {
-                self.state.table_nesting_level = control.parameter.unwrap_or(1).max(1);
+                self.set_table_nesting_level(control.parameter.unwrap_or(1).max(1), offset)?;
                 return Ok(true);
             }
             "trowd" => {
-                self.state.table_nesting_level = self.state.table_nesting_level.max(2);
+                self.set_table_nesting_level(self.state.table_nesting_level.max(2), offset)?;
                 return Ok(true);
             }
             _ => {}
@@ -8939,12 +9038,46 @@ impl Parser {
         }
     }
 
-    fn push_table_cell_boundary(&mut self, right_edge_twips: i32) {
+    fn set_table_nesting_level(&mut self, level: i32, offset: usize) -> Result<(), ParseError> {
+        let level = level.max(1);
+        let nesting_level =
+            usize::try_from(level).map_err(|_| ParseError::ResourceLimitExceeded {
+                resource: "table nesting".to_string(),
+                offset,
+            })?;
+        if nesting_level > self.limits().max_table_nesting_level {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "table nesting".to_string(),
+                offset,
+            });
+        }
+        self.state.table_nesting_level = level;
+        Ok(())
+    }
+
+    fn push_table_cell_boundary(
+        &mut self,
+        right_edge_twips: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if right_edge_twips <= 0 || self.current_table_row.is_none() {
+            return Ok(());
+        }
+        self.table_cell_boundary_count = self.table_cell_boundary_count.checked_add(1).ok_or(
+            ParseError::ResourceLimitExceeded {
+                resource: "table cell definitions".to_string(),
+                offset,
+            },
+        )?;
+        if self.table_cell_boundary_count > self.limits().max_table_cells {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "table cell definitions".to_string(),
+                offset,
+            });
+        }
         let page_content_width_twips = self.current_page_content_width_twips();
         let max_width_twips = self.limits().max_page_dimension_twips;
-        if let Some(row) = self.current_table_row.as_mut()
-            && right_edge_twips > 0
-        {
+        if let Some(row) = self.current_table_row.as_mut() {
             let preferred_width_twips = normalized_preferred_table_width_twips(
                 row.current_cell_preferred_width,
                 page_content_width_twips,
@@ -8988,6 +9121,7 @@ impl Parser {
             row.current_cell_horizontal_merge = TableCellHorizontalMerge::None;
             row.current_cell_vertical_merge = TableCellVerticalMerge::None;
         }
+        Ok(())
     }
 
     fn set_current_cell_shading(&mut self, color_index: usize) {
@@ -9872,6 +10006,20 @@ impl Parser {
         self.last_table_row_template =
             Some(Self::table_row_template_from(&row, &self.state.paragraph));
 
+        self.table_row_count =
+            self.table_row_count
+                .checked_add(1)
+                .ok_or(ParseError::ResourceLimitExceeded {
+                    resource: "table rows".to_string(),
+                    offset,
+                })?;
+        if self.table_row_count > self.limits().max_table_rows {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "table rows".to_string(),
+                offset,
+            });
+        }
+
         let table = self.current_table.get_or_insert_with(TableBuilder::default);
         table.merge_cell_right_edges(&row.cell_right_edges_twips);
         table.rows.push(TableRow {
@@ -10034,12 +10182,15 @@ impl Parser {
         }
 
         let column_widths_twips = table.column_widths_twips();
-        self.document.blocks.push(Block::Table(Table {
-            rows: table.rows,
-            column_widths_twips,
-            borders_visible: table.borders_visible,
-            preserve_authored_widths: table.preserve_authored_widths,
-        }));
+        self.push_document_block(
+            Block::Table(Table {
+                rows: table.rows,
+                column_widths_twips,
+                borders_visible: table.borders_visible,
+                preserve_authored_widths: table.preserve_authored_widths,
+            }),
+            offset,
+        )?;
         self.last_table_row_template = None;
         Ok(())
     }
@@ -10072,7 +10223,7 @@ impl Parser {
                     "empty picture with bounded geometry replaced with a passive placeholder",
                     Some(offset),
                 ));
-                self.push_static_image(picture.owner_destination, image);
+                self.push_static_image(picture.owner_destination, image, offset)?;
                 self.mark_shape_visual_result_rendered();
             } else {
                 self.push_placeholder("[Image skipped: empty picture]".to_string(), offset)?;
@@ -10105,7 +10256,8 @@ impl Parser {
                             scale_y_percent: picture.scale_y_percent,
                             crop: picture.crop,
                         },
-                    );
+                        offset,
+                    )?;
                     self.mark_shape_visual_result_rendered();
                 }
                 None => {
@@ -10136,7 +10288,8 @@ impl Parser {
                             scale_y_percent: picture.scale_y_percent,
                             crop: picture.crop,
                         },
-                    );
+                        offset,
+                    )?;
                     self.mark_shape_visual_result_rendered();
                 }
                 None => {
@@ -10168,7 +10321,8 @@ impl Parser {
                                 scale_y_percent: picture.scale_y_percent,
                                 crop: picture.crop,
                             },
-                        );
+                            offset,
+                        )?;
                         self.mark_shape_visual_result_rendered();
                     }
                     None => {
@@ -10212,7 +10366,8 @@ impl Parser {
                             scale_y_percent: picture.scale_y_percent,
                             crop: picture.crop,
                         },
-                    );
+                        offset,
+                    )?;
                     self.mark_shape_visual_result_rendered();
                 } else {
                     self.diagnostics.push(Diagnostic::warning(
@@ -10222,7 +10377,8 @@ impl Parser {
                     self.push_static_image(
                         picture.owner_destination,
                         passive_picture_placeholder_image(&picture),
-                    );
+                        offset,
+                    )?;
                     self.mark_shape_visual_result_rendered();
                 }
             }
@@ -10234,7 +10390,8 @@ impl Parser {
                 self.push_static_image(
                     picture.owner_destination,
                     passive_picture_placeholder_image(&picture),
-                );
+                    offset,
+                )?;
                 self.mark_shape_visual_result_rendered();
             }
         }
@@ -10258,10 +10415,15 @@ impl Parser {
         Ok(())
     }
 
-    fn push_static_image(&mut self, destination: Destination, image: StaticImage) {
+    fn push_static_image(
+        &mut self,
+        destination: Destination,
+        image: StaticImage,
+        offset: usize,
+    ) -> Result<(), ParseError> {
         self.mark_field_result_visible_content();
         if is_header_destination(destination) {
-            self.finish_header_paragraph();
+            self.finish_header_paragraph(offset)?;
             if self.has_started_visible_body() {
                 match destination {
                     Destination::FirstPageHeader => self
@@ -10287,7 +10449,7 @@ impl Parser {
                 }
             }
         } else if is_footer_destination(destination) {
-            self.finish_footer_paragraph();
+            self.finish_footer_paragraph(offset)?;
             if self.has_started_visible_body() {
                 match destination {
                     Destination::FirstPageFooter => self
@@ -10313,8 +10475,9 @@ impl Parser {
                 }
             }
         } else {
-            self.document.blocks.push(Block::Image(image));
+            self.push_document_block(Block::Image(image), offset)?;
         }
+        Ok(())
     }
 
     fn passive_object_placeholder_image(&self) -> Option<StaticImage> {
@@ -10459,7 +10622,8 @@ impl Parser {
                 text: shape.text,
                 points,
             },
-        );
+            offset,
+        )?;
         let shape_diagnostic = if shape.unsupported_or_active_property_stripped {
             "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
         } else {
@@ -10491,6 +10655,7 @@ impl Parser {
             ));
         }
         if is_header_destination(destination) {
+            self.reserve_header_footer_paragraph_slots(paragraphs.len(), offset)?;
             if self.has_started_visible_body() {
                 match destination {
                     Destination::FirstPageHeader => self
@@ -10516,6 +10681,7 @@ impl Parser {
                 }
             }
         } else if is_footer_destination(destination) {
+            self.reserve_header_footer_paragraph_slots(paragraphs.len(), offset)?;
             if self.has_started_visible_body() {
                 match destination {
                     Destination::FirstPageFooter => self
@@ -10554,6 +10720,7 @@ impl Parser {
                 .endnote_placements
                 .extend(std::iter::repeat(self.document.endnote_placement).take(count));
         } else if destination != Destination::Background {
+            self.reserve_document_blocks(paragraphs.len(), offset)?;
             self.document
                 .blocks
                 .extend(paragraphs.into_iter().map(Block::Paragraph));
@@ -10561,10 +10728,15 @@ impl Parser {
         Ok(true)
     }
 
-    fn push_static_shape(&mut self, destination: Destination, shape: StaticShape) {
+    fn push_static_shape(
+        &mut self,
+        destination: Destination,
+        shape: StaticShape,
+        offset: usize,
+    ) -> Result<(), ParseError> {
         self.mark_field_result_visible_content();
         if is_header_destination(destination) {
-            self.finish_header_paragraph();
+            self.finish_header_paragraph(offset)?;
             if self.has_started_visible_body() {
                 match destination {
                     Destination::FirstPageHeader => self
@@ -10590,7 +10762,7 @@ impl Parser {
                 }
             }
         } else if is_footer_destination(destination) {
-            self.finish_footer_paragraph();
+            self.finish_footer_paragraph(offset)?;
             if self.has_started_visible_body() {
                 match destination {
                     Destination::FirstPageFooter => self
@@ -10623,8 +10795,9 @@ impl Parser {
                 self.document.background_shapes.push(shape);
             }
         } else {
-            self.document.blocks.push(Block::Shape(shape));
+            self.push_document_block(Block::Shape(shape), offset)?;
         }
+        Ok(())
     }
 
     fn set_current_shape_kind(&mut self, kind: StaticShapeKind) {
