@@ -18864,6 +18864,96 @@ fn zero_line_number_distance_does_not_enable_margin_numbers_or_leak_controls() {
 }
 
 #[test]
+fn no_line_number_paragraph_control_suppresses_passive_margin_number_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "sectd",
+        "\\",
+        "linex360",
+        "\\",
+        "linemod1 First",
+        "\\",
+        "par",
+        "\\",
+        "noline Suppressed",
+        "\\",
+        "par",
+        "\\",
+        "noline0 After",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("First"));
+    assert!(text.contains("Suppressed"));
+    assert!(text.contains("After"));
+    assert!(!text.contains("noline"));
+    let paragraph = |idx| match &parsed.document.blocks[idx] {
+        open_rtf_converter::model::Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    assert!(!paragraph(0).style.suppress_line_numbers);
+    assert!(paragraph(1).style.suppress_line_numbers);
+    assert!(!paragraph(2).style.suppress_line_numbers);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "line-number suppression should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("1First"),
+        "first line should render passive margin number: {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("2Suppressed"),
+        "suppressed paragraph should not render passive margin number: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("3After"),
+        "later numbered paragraph should preserve physical line sequence: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"noline".as_slice(),
+        b"linemod",
+        b"linex",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "line-number suppression control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn line_number_restart_modes_render_passively_without_control_leakage() {
     let continuous = rtf(&[
         "{",

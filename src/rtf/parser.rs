@@ -4125,6 +4125,9 @@ impl Parser {
             "widctlpar" => self.state.paragraph.widow_control = control.parameter.unwrap_or(1) != 0,
             "nowidctlpar" => self.state.paragraph.widow_control = false,
             "nowwrap" => self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0,
+            "noline" => {
+                self.state.paragraph.suppress_line_numbers = control.parameter.unwrap_or(1) != 0
+            }
             "dropcapli" => self.set_drop_cap_lines(control.parameter, offset),
             "dropcapt" => self.set_drop_cap_type(control.parameter),
             "li" | "lin" => {
@@ -12965,6 +12968,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.no_wrap == default.no_wrap {
         output.no_wrap = base.no_wrap;
+    }
+    if output.suppress_line_numbers == default.suppress_line_numbers {
+        output.suppress_line_numbers = base.suppress_line_numbers;
     }
     if output.auto_hyphenation == default.auto_hyphenation {
         output.auto_hyphenation = base.auto_hyphenation;
@@ -25484,6 +25490,28 @@ After\par}"#;
                 .diagnostics
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("line numbering approximated"))
+        );
+    }
+
+    #[test]
+    fn normalizes_no_line_number_paragraph_control() {
+        let output = parse_rtf(
+            r"{\rtf1\sectd\linex360 Numbered\par\noline Suppressed\par\noline0 Numbered again\par}",
+        )
+        .unwrap();
+        let paragraph = |idx| match &output.document.blocks[idx] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert!(!paragraph(0).style.suppress_line_numbers);
+        assert!(paragraph(1).style.suppress_line_numbers);
+        assert!(!paragraph(2).style.suppress_line_numbers);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
     }
 

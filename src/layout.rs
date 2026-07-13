@@ -3898,7 +3898,15 @@ fn layout_paragraph(
             line_idx + 1 == line_count,
         );
         if let Some(state) = line_numbers.as_mut().map(|state| &mut **state) {
-            push_passive_line_number(pages, line, margin_left, *cursor_y, *geometry, state);
+            push_passive_line_number(
+                pages,
+                line,
+                margin_left,
+                *cursor_y,
+                *geometry,
+                state,
+                paragraph.style.suppress_line_numbers,
+            );
         }
         push_bar_tab_stops(pages, &paragraph.style, x, *cursor_y, line.height);
         push_line(pages, &line, x, *cursor_y, document, word_spacing);
@@ -3948,6 +3956,7 @@ fn push_passive_line_number(
     top_y: f32,
     geometry: PageGeometry,
     state: &mut LineNumberState,
+    suppress_number: bool,
 ) {
     if !geometry.line_numbering.enabled || !line_has_visible_text(line) {
         return;
@@ -3958,7 +3967,7 @@ fn push_passive_line_number(
     let start = geometry.line_numbering.start.max(1);
     let should_render = current >= start && (current - start) % step == 0;
     state.next = state.next.saturating_add(1).max(1);
-    if !should_render {
+    if suppress_number || !should_render {
         return;
     }
 
