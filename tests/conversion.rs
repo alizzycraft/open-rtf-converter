@@ -1,6 +1,7 @@
 use std::fs;
 
 use lopdf::Document as PdfDocument;
+use open_rtf_converter::rtf::ParseError;
 use open_rtf_converter::{
     ConvertError, ConvertOptions, FontAsset, FontAssetStyle, FontProvider, FontProviderLimits,
     RtfLimits, RtfParseOptions, convert_rtf_file_to_pdf, convert_rtf_to_pdf,
@@ -57,6 +58,88 @@ fn browser_safe_defaults_use_stricter_pdf_output_limit() {
             .max_asset_bytes,
         2 * 1024 * 1024
     );
+}
+
+#[test]
+fn browser_safe_defaults_use_stricter_resource_table_limits() {
+    let default_limits = RtfLimits::default();
+    let browser_limits = ConvertOptions::browser_safe_defaults().parse_options.limits;
+
+    assert_eq!(default_limits.max_fonts, 2_000);
+    assert_eq!(default_limits.max_colors, 10_000);
+    assert_eq!(default_limits.max_styles, 10_000);
+    assert_eq!(browser_limits.max_fonts, 256);
+    assert_eq!(browser_limits.max_colors, 2_048);
+    assert_eq!(browser_limits.max_styles, 2_048);
+}
+
+#[test]
+fn browser_safe_conversion_rejects_excessive_font_table() {
+    let limit = ConvertOptions::browser_safe_defaults()
+        .parse_options
+        .limits
+        .max_fonts;
+    let mut input = String::from(r"{\rtf1{\fonttbl");
+    for idx in 0..=limit {
+        input.push_str(&format!(r"{{\f{idx} BrowserFont{idx};}}"));
+    }
+    input.push_str(r"}Visible\par}");
+
+    let error = convert_rtf_to_pdf(input.as_bytes(), &ConvertOptions::browser_safe_defaults())
+        .expect_err("browser-safe conversion should reject excessive font tables");
+
+    assert!(matches!(
+        error,
+        ConvertError::Parse(ParseError::ResourceLimitExceeded { resource, .. })
+            if resource == "fonts"
+    ));
+}
+
+#[test]
+fn browser_safe_conversion_rejects_excessive_color_table() {
+    let limit = ConvertOptions::browser_safe_defaults()
+        .parse_options
+        .limits
+        .max_colors;
+    let mut input = String::from(r"{\rtf1{\colortbl;");
+    for idx in 0..=limit {
+        let red = idx % 256;
+        let green = (idx / 2) % 256;
+        let blue = (idx / 3) % 256;
+        input.push_str(&format!(r"\red{red}\green{green}\blue{blue};"));
+    }
+    input.push_str(r"}Visible\par}");
+
+    let error = convert_rtf_to_pdf(input.as_bytes(), &ConvertOptions::browser_safe_defaults())
+        .expect_err("browser-safe conversion should reject excessive color tables");
+
+    assert!(matches!(
+        error,
+        ConvertError::Parse(ParseError::ResourceLimitExceeded { resource, .. })
+            if resource == "colors"
+    ));
+}
+
+#[test]
+fn browser_safe_conversion_rejects_excessive_stylesheet() {
+    let limit = ConvertOptions::browser_safe_defaults()
+        .parse_options
+        .limits
+        .max_styles;
+    let mut input = String::from(r"{\rtf1{\stylesheet");
+    for idx in 0..=limit {
+        input.push_str(&format!(r"{{\s{idx} Browser Style {idx};}}"));
+    }
+    input.push_str(r"}Visible\par}");
+
+    let error = convert_rtf_to_pdf(input.as_bytes(), &ConvertOptions::browser_safe_defaults())
+        .expect_err("browser-safe conversion should reject excessive stylesheets");
+
+    assert!(matches!(
+        error,
+        ConvertError::Parse(ParseError::ResourceLimitExceeded { resource, .. })
+            if resource == "styles"
+    ));
 }
 
 #[test]

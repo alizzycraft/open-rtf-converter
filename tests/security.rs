@@ -5255,10 +5255,11 @@ fn header_field_results_and_placeholders_render_passively_without_body_flow_or_i
 }
 
 #[test]
-fn hyperlink_stored_results_render_as_inert_pdf_text_under_passive_link_policies() {
+fn hyperlink_stored_results_render_as_inert_pdf_text_under_all_current_link_policies() {
     for policy in [
         PdfLinkPolicy::RenderVisibleTextOnly,
         PdfLinkPolicy::DisableAll,
+        PdfLinkPolicy::AllowSanitizedHttpLinks,
     ] {
         let output = convert_rtf_to_pdf(
             &field_with_link_result(),

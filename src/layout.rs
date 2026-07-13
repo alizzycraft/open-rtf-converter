@@ -21,6 +21,7 @@ const MAX_LAYOUT_COLUMNS: usize = 16;
 const PASSIVE_NARROW_FONT_SCALE_PERCENT: i32 = 82;
 const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
 const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
+const LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER: &str = "888";
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -4468,16 +4469,19 @@ fn marker_context(
 fn contains_inline_marker(text: &str) -> bool {
     text.contains(PAGE_NUMBER_MARKER)
         || text.contains(SECTION_NUMBER_MARKER)
+        || text.contains(TOTAL_PAGES_MARKER)
+        || text.contains(SECTION_PAGES_MARKER)
         || text.contains(DOCUMENT_WORDS_MARKER)
         || text.contains(DOCUMENT_CHARS_MARKER)
         || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
 }
 
 fn paragraph_contains_page_number_marker(paragraph: &Paragraph) -> bool {
-    paragraph
-        .runs
-        .iter()
-        .any(|run| run.text.contains(PAGE_NUMBER_MARKER))
+    paragraph.runs.iter().any(|run| {
+        run.text.contains(PAGE_NUMBER_MARKER)
+            || run.text.contains(TOTAL_PAGES_MARKER)
+            || run.text.contains(SECTION_PAGES_MARKER)
+    })
 }
 
 #[derive(Debug, Default)]
@@ -4688,13 +4692,7 @@ fn format_alpha_page_number(value: i32, lowercase: bool) -> String {
 fn resolve_total_page_markers(pages: &mut [LayoutPage]) {
     let total_pages = pages.len().to_string();
     for page in pages {
-        for item in &mut page.items {
-            if let LayoutItem::Text(fragment) = item
-                && fragment.text.contains(TOTAL_PAGES_MARKER)
-            {
-                fragment.text = fragment.text.replace(TOTAL_PAGES_MARKER, &total_pages);
-            }
-        }
+        replace_late_page_marker(page, TOTAL_PAGES_MARKER, &total_pages);
     }
 }
 
@@ -4718,14 +4716,264 @@ fn resolve_section_page_markers(pages: &mut [LayoutPage]) {
             .unwrap_or(1)
             .max(1)
             .to_string();
-        for item in &mut page.items {
-            if let LayoutItem::Text(fragment) = item
-                && fragment.text.contains(SECTION_PAGES_MARKER)
-            {
-                fragment.text = fragment.text.replace(SECTION_PAGES_MARKER, &section_pages);
-            }
+        replace_late_page_marker(page, SECTION_PAGES_MARKER, &section_pages);
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct LateMarkerWidthAdjustment {
+    text_index: usize,
+    old_width: f32,
+    new_width: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct LateMarkerGeometry {
+    x: f32,
+    baseline_y: f32,
+    old_width: f32,
+    new_width: f32,
+    font_size: f32,
+}
+
+fn replace_late_page_marker(page: &mut LayoutPage, marker: &str, replacement: &str) {
+    let mut adjustments = Vec::new();
+    for (idx, item) in page.items.iter_mut().enumerate() {
+        let LayoutItem::Text(fragment) = item else {
+            continue;
+        };
+        if !fragment.text.contains(marker) {
+            continue;
+        }
+        let old_text = fragment.text.clone();
+        let new_text = old_text.replace(marker, replacement);
+        let old_width = passive_text_fragment_width(fragment, &old_text);
+        let new_width = passive_text_fragment_width(fragment, &new_text);
+        fragment.text = new_text;
+        if (new_width - old_width).abs() > 0.01 {
+            adjustments.push(LateMarkerWidthAdjustment {
+                text_index: idx,
+                old_width,
+                new_width,
+            });
         }
     }
+    for adjustment in adjustments {
+        let Some(geometry) = late_marker_geometry(page, adjustment) else {
+            continue;
+        };
+        adjust_late_marker_decorations(page, adjustment.text_index, geometry);
+        shift_late_marker_following_items(page, adjustment.text_index, geometry);
+    }
+}
+
+fn passive_text_fragment_width(fragment: &TextFragment, text: &str) -> f32 {
+    let text = late_page_count_measurement_text(text);
+    measure_text_with_family(&text, &fragment.style, fragment.font_family)
+        + fragment.word_spacing * regular_space_count(&text) as f32
+}
+
+fn late_page_count_measurement_text(text: &str) -> String {
+    if text.contains(TOTAL_PAGES_MARKER) || text.contains(SECTION_PAGES_MARKER) {
+        text.replace(TOTAL_PAGES_MARKER, LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER)
+            .replace(SECTION_PAGES_MARKER, LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER)
+    } else {
+        text.to_string()
+    }
+}
+
+fn late_marker_geometry(
+    page: &LayoutPage,
+    adjustment: LateMarkerWidthAdjustment,
+) -> Option<LateMarkerGeometry> {
+    let LayoutItem::Text(fragment) = page.items.get(adjustment.text_index)? else {
+        return None;
+    };
+    Some(LateMarkerGeometry {
+        x: fragment.x,
+        baseline_y: fragment.baseline_y,
+        old_width: adjustment.old_width,
+        new_width: adjustment.new_width,
+        font_size: fragment.style.font_size_points(),
+    })
+}
+
+fn adjust_late_marker_decorations(
+    page: &mut LayoutPage,
+    text_index: usize,
+    geometry: LateMarkerGeometry,
+) {
+    let start = text_index.saturating_sub(3);
+    let end = text_index
+        .saturating_add(6)
+        .min(page.items.len().saturating_sub(1));
+    for idx in start..=end {
+        if idx == text_index {
+            continue;
+        }
+        match &mut page.items[idx] {
+            LayoutItem::Highlight { x, width, .. }
+                if same_pdf_coord(*x, geometry.x)
+                    && same_pdf_length(*width, geometry.old_width) =>
+            {
+                *width = geometry.new_width;
+            }
+            LayoutItem::Underline { x, width, .. }
+                if same_pdf_coord(*x, geometry.x)
+                    && same_pdf_length(*width, geometry.old_width) =>
+            {
+                *width = geometry.new_width;
+            }
+            LayoutItem::Line { x1, y1, x2, y2, .. }
+                if same_pdf_coord(*x1, geometry.x)
+                    && same_pdf_coord(*x2, geometry.x + geometry.old_width)
+                    && same_pdf_coord(*y1, *y2)
+                    && (*y1 - geometry.baseline_y).abs() <= geometry.font_size =>
+            {
+                *x2 = geometry.x + geometry.new_width;
+            }
+            LayoutItem::Line { x1, y1, x2, y2, .. }
+                if character_border_horizontal_line_matches(*x1, *y1, *x2, *y2, geometry) =>
+            {
+                adjust_character_border_horizontal_line(x1, x2, geometry);
+            }
+            LayoutItem::Line { x1, y1, x2, y2, .. }
+                if character_border_right_line_matches(*x1, *y1, *x2, *y2, geometry) =>
+            {
+                let delta = geometry.new_width - geometry.old_width;
+                *x1 += delta;
+                *x2 += delta;
+            }
+            _ => {}
+        }
+    }
+}
+
+fn character_border_horizontal_line_matches(
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    geometry: LateMarkerGeometry,
+) -> bool {
+    if !same_pdf_coord(y1, y2) || (y1 - geometry.baseline_y).abs() > geometry.font_size * 1.5 {
+        return false;
+    }
+    let left = x1.min(x2);
+    let right = x1.max(x2);
+    if left > geometry.x + 0.01 || right < geometry.x + geometry.old_width - 0.01 {
+        return false;
+    }
+    let left_pad = geometry.x - left;
+    let right_pad = right - (geometry.x + geometry.old_width);
+    left_pad >= -0.01 && right_pad >= -0.01 && (left_pad - right_pad).abs() < 0.05
+}
+
+fn adjust_character_border_horizontal_line(
+    x1: &mut f32,
+    x2: &mut f32,
+    geometry: LateMarkerGeometry,
+) {
+    let delta = geometry.new_width - geometry.old_width;
+    if *x1 >= *x2 {
+        *x1 += delta;
+    } else {
+        *x2 += delta;
+    }
+}
+
+fn character_border_right_line_matches(
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    geometry: LateMarkerGeometry,
+) -> bool {
+    if !same_pdf_coord(x1, x2) || x1 <= geometry.x + geometry.old_width {
+        return false;
+    }
+    let pad = x1 - (geometry.x + geometry.old_width);
+    let baseline_between =
+        geometry.baseline_y >= y1.min(y2) - 0.01 && geometry.baseline_y <= y1.max(y2) + 0.01;
+    baseline_between && pad >= 0.0 && pad <= geometry.font_size
+}
+
+fn shift_late_marker_following_items(
+    page: &mut LayoutPage,
+    text_index: usize,
+    geometry: LateMarkerGeometry,
+) {
+    let delta = geometry.new_width - geometry.old_width;
+    if delta.abs() <= 0.01 {
+        return;
+    }
+    let old_end = geometry.x + geometry.old_width;
+    let mut saw_following_line_item = false;
+    for item in page.items.iter_mut().skip(text_index.saturating_add(1)) {
+        if item_starts_after_late_marker_on_line(item, old_end, geometry) {
+            shift_layout_item_x(item, delta);
+            saw_following_line_item = true;
+        } else if saw_following_line_item && starts_new_text_line(item, geometry) {
+            break;
+        }
+    }
+}
+
+fn item_starts_after_late_marker_on_line(
+    item: &LayoutItem,
+    old_end: f32,
+    geometry: LateMarkerGeometry,
+) -> bool {
+    match item {
+        LayoutItem::Text(fragment) => {
+            same_late_marker_line(fragment.baseline_y, geometry) && fragment.x >= old_end - 0.01
+        }
+        LayoutItem::Highlight { x, y, height, .. } => {
+            *x >= old_end - 0.01
+                && geometry.baseline_y >= *y - 0.01
+                && geometry.baseline_y <= *y + *height + 0.01
+        }
+        LayoutItem::Underline { x, y, .. } => {
+            *x >= old_end - 0.01 && (*y - geometry.baseline_y).abs() <= geometry.font_size
+        }
+        LayoutItem::Line { x1, y1, x2, y2, .. } => {
+            x1.min(*x2) >= old_end - 0.01
+                && same_pdf_coord(*y1, *y2)
+                && (*y1 - geometry.baseline_y).abs() <= geometry.font_size
+        }
+        _ => false,
+    }
+}
+
+fn same_late_marker_line(baseline_y: f32, geometry: LateMarkerGeometry) -> bool {
+    (baseline_y - geometry.baseline_y).abs() < 0.01
+}
+
+fn starts_new_text_line(item: &LayoutItem, geometry: LateMarkerGeometry) -> bool {
+    matches!(
+        item,
+        LayoutItem::Text(fragment) if !same_late_marker_line(fragment.baseline_y, geometry)
+    )
+}
+
+fn shift_layout_item_x(item: &mut LayoutItem, delta: f32) {
+    match item {
+        LayoutItem::Text(fragment) => fragment.x += delta,
+        LayoutItem::Highlight { x, .. } | LayoutItem::Underline { x, .. } => *x += delta,
+        LayoutItem::Line { x1, x2, .. } => {
+            *x1 += delta;
+            *x2 += delta;
+        }
+        _ => {}
+    }
+}
+
+fn same_pdf_coord(left: f32, right: f32) -> bool {
+    (left - right).abs() < 0.01
+}
+
+fn same_pdf_length(left: f32, right: f32) -> bool {
+    (left - right).abs() < 0.01
 }
 
 fn resolve_bookmark_page_ref_markers(
@@ -5200,8 +5448,15 @@ fn measure_flow_run(
     }
     let style = passive_pdf_style_for_run(document, &run.style);
     let text = display_text(&run.text, &style);
+    let measurement_text = late_page_count_measurement_text(&text);
     let font_family = font_family_for_run_text(document, &style, &text);
-    measure_text_with_document_font(&text, &style, font_family, document, font_provider)
+    measure_text_with_document_font(
+        &measurement_text,
+        &style,
+        font_family,
+        document,
+        font_provider,
+    )
 }
 
 fn next_tab_position(
@@ -5541,14 +5796,14 @@ fn word_underline_spans(
     for ch in text.chars() {
         if is_word_underline_gap(ch) {
             if let Some(start) = word_start.take() {
-                let width = measure_text_with_family(&word, style, font_family);
+                let width = measure_late_page_count_text_with_family(&word, style, font_family);
                 if width > 0.0 {
                     spans.push((start, width));
                 }
                 cursor += width;
                 word.clear();
             }
-            cursor += measure_text_with_family(&ch.to_string(), style, font_family);
+            cursor += measure_late_page_count_text_with_family(&ch.to_string(), style, font_family);
             if ch == ' ' {
                 cursor += word_spacing;
             }
@@ -5561,13 +5816,22 @@ fn word_underline_spans(
     }
 
     if let Some(start) = word_start {
-        let width = measure_text_with_family(&word, style, font_family);
+        let width = measure_late_page_count_text_with_family(&word, style, font_family);
         if width > 0.0 {
             spans.push((start, width));
         }
     }
 
     spans
+}
+
+fn measure_late_page_count_text_with_family(
+    text: &str,
+    style: &CharacterStyle,
+    font_family: PdfFontFamily,
+) -> f32 {
+    let text = late_page_count_measurement_text(text);
+    measure_text_with_family(&text, style, font_family)
 }
 
 fn is_word_underline_gap(ch: char) -> bool {
@@ -14008,6 +14272,60 @@ mod tests {
     }
 
     #[test]
+    fn positions_header_total_page_count_from_safe_page_number_coordinates() {
+        let mut document = Document::default();
+        document.page.page_number_x_twips = Some(360);
+        document.page.page_number_y_twips = Some(1_440);
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Pages {TOTAL_PAGES_MARKER}"),
+                style: Default::default(),
+            }],
+        }];
+        document.blocks = vec![
+            paragraph_with_text("Page one"),
+            Block::PageBreak,
+            paragraph_with_text("Page two"),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragment = text_fragment_for(&layout.pages[0], "Pages ");
+
+        assert!((fragment.x - 18.0).abs() < 0.01);
+        assert!((fragment.baseline_y - 708.75).abs() < 0.01);
+        assert!(layout_text(&layout.pages[0]).contains("Pages 2"));
+    }
+
+    #[test]
+    fn positions_header_section_page_count_from_safe_page_number_coordinates() {
+        let mut document = Document::default();
+        document.page.page_number_x_twips = Some(360);
+        document.page.page_number_y_twips = Some(1_440);
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Section pages {SECTION_PAGES_MARKER}"),
+                style: Default::default(),
+            }],
+        }];
+        document.blocks = vec![
+            paragraph_with_text("First body page one"),
+            Block::PageBreak,
+            paragraph_with_text("First body page two"),
+            Block::SectionBreak,
+            paragraph_with_text("Second section"),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragment = text_fragment_for(&layout.pages[0], "Section ");
+
+        assert!((fragment.x - 18.0).abs() < 0.01);
+        assert!((fragment.baseline_y - 708.75).abs() < 0.01);
+        assert!(layout_text(&layout.pages[0]).contains("Section pages 2"));
+    }
+
+    #[test]
     fn resolves_page_number_markers_from_section_start() {
         let mut document = Document::default();
         document.header = vec![Paragraph {
@@ -14097,6 +14415,514 @@ mod tests {
         assert!(!layout_text(&layout.pages[2]).contains("Page 3"));
     }
 
+    #[test]
+    fn late_total_page_marker_updates_passive_underline_width() {
+        let mut document = small_test_page_document();
+        let mut style = CharacterStyle::default();
+        style.underline = UnderlineStyle::Single;
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Pages {TOTAL_PAGES_MARKER}"),
+                style: style.clone(),
+            }],
+        }];
+        document.blocks.clear();
+        for idx in 0..80 {
+            document
+                .blocks
+                .push(paragraph_with_text(&format!("Body {idx}")));
+        }
+
+        let layout = LayoutEngine::layout(&document);
+        let page_text = layout_text(&layout.pages[0]);
+        assert!(
+            layout.pages.len() >= 10,
+            "fixture should cross into two-digit page count, got {} page(s)",
+            layout.pages.len()
+        );
+        let expected = format!("Pages {}", layout.pages.len());
+        assert!(
+            page_text.contains(&expected),
+            "header text was {page_text:?}"
+        );
+        let resolved_marker = layout.pages.len().to_string();
+        let expected_width =
+            measure_text_with_family(&resolved_marker, &style, PdfFontFamily::Helvetica);
+        let old_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &style,
+            PdfFontFamily::Helvetica,
+        );
+
+        let underline_width =
+            underline_width_for_fragment_after(&layout.pages[0], "Pages ", &resolved_marker);
+        assert!(
+            (underline_width - expected_width).abs() < 0.01,
+            "late NUMPAGES underline width should match resolved text width"
+        );
+        assert!(
+            (underline_width - old_width).abs() > 1.0,
+            "late NUMPAGES underline should not keep marker placeholder width"
+        );
+    }
+
+    #[test]
+    fn late_total_page_marker_updates_word_underline_width() {
+        let mut document = small_test_page_document();
+        let mut style = CharacterStyle::default();
+        style.underline = UnderlineStyle::Words;
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Pages {TOTAL_PAGES_MARKER}"),
+                style: style.clone(),
+            }],
+        }];
+        document.blocks.clear();
+        for idx in 0..80 {
+            document
+                .blocks
+                .push(paragraph_with_text(&format!("Body {idx}")));
+        }
+
+        let layout = LayoutEngine::layout(&document);
+        assert!(
+            layout.pages.len() >= 10,
+            "fixture should cross into two-digit page count, got {} page(s)",
+            layout.pages.len()
+        );
+        let resolved_marker = layout.pages.len().to_string();
+        let expected_width =
+            measure_text_with_family(&resolved_marker, &style, PdfFontFamily::Helvetica);
+        let old_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &style,
+            PdfFontFamily::Helvetica,
+        );
+
+        let underline_width =
+            underline_width_for_fragment_after(&layout.pages[0], "Pages ", &resolved_marker);
+        assert!(
+            (underline_width - expected_width).abs() < 0.01,
+            "late NUMPAGES word underline width should match resolved text width"
+        );
+        assert!(
+            (underline_width - old_width).abs() > 1.0,
+            "late NUMPAGES word underline should not keep marker placeholder width"
+        );
+    }
+
+    #[test]
+    fn late_total_page_marker_updates_character_border_width() {
+        let mut document = small_test_page_document();
+        let mut style = CharacterStyle::default();
+        style.border.visible = true;
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Pages {TOTAL_PAGES_MARKER}"),
+                style: style.clone(),
+            }],
+        }];
+        document.blocks.clear();
+        for idx in 0..80 {
+            document
+                .blocks
+                .push(paragraph_with_text(&format!("Body {idx}")));
+        }
+
+        let layout = LayoutEngine::layout(&document);
+        assert!(
+            layout.pages.len() >= 10,
+            "fixture should cross into two-digit page count, got {} page(s)",
+            layout.pages.len()
+        );
+        let resolved_marker = layout.pages.len().to_string();
+        let fragment = text_fragment_after(&layout.pages[0], "Pages ", &resolved_marker);
+        let expected_width =
+            measure_text_with_family(&resolved_marker, &style, PdfFontFamily::Helvetica);
+        let old_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &style,
+            PdfFontFamily::Helvetica,
+        );
+        let pad = character_border_test_pad(&style);
+        let right_edge = character_border_right_edge_for_fragment(
+            &layout.pages[0],
+            fragment,
+            fragment.x + expected_width + pad,
+        );
+
+        assert!(
+            (right_edge - (fragment.x + expected_width + pad)).abs() < 0.01,
+            "late NUMPAGES character border should match resolved text width"
+        );
+        assert!(
+            (right_edge - (fragment.x + old_width + pad)).abs() > 1.0,
+            "late NUMPAGES character border should not keep marker placeholder width"
+        );
+    }
+
+    #[test]
+    fn late_total_page_marker_uses_bounded_width_for_wrapping() {
+        let document = Document::default();
+        let style = CharacterStyle::default();
+        let paragraph = Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("A {TOTAL_PAGES_MARKER} tail"),
+                style: style.clone(),
+            }],
+        };
+        let raw_marker_width =
+            measure_text_with_family(TOTAL_PAGES_MARKER, &style, PdfFontFamily::Helvetica);
+        let placeholder_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &style,
+            PdfFontFamily::Helvetica,
+        );
+        let prefix_width = measure_text_with_family("A ", &style, PdfFontFamily::Helvetica);
+        let line_width = prefix_width + raw_marker_width + 0.5;
+        assert!(
+            line_width < prefix_width + placeholder_width,
+            "fixture should distinguish raw marker width from placeholder width"
+        );
+
+        let lines = wrap_paragraph(&paragraph, line_width, &test_markers("1", "1"), &document);
+
+        assert_eq!(line_text(&lines[0]), "A ");
+        assert!(
+            line_text(&lines[1]).starts_with(TOTAL_PAGES_MARKER),
+            "late NUMPAGES marker should wrap using bounded placeholder width"
+        );
+    }
+
+    #[test]
+    fn late_total_page_marker_shifts_following_same_line_text() {
+        let mut document = small_test_page_document();
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![
+                Run {
+                    text: format!("Pages {TOTAL_PAGES_MARKER}"),
+                    style: Default::default(),
+                },
+                Run {
+                    text: " total".to_string(),
+                    style: Default::default(),
+                },
+            ],
+        }];
+        document.blocks.clear();
+        for idx in 0..80 {
+            document
+                .blocks
+                .push(paragraph_with_text(&format!("Body {idx}")));
+        }
+
+        let layout = LayoutEngine::layout(&document);
+        assert!(
+            layout.pages.len() >= 10,
+            "fixture should cross into two-digit page count, got {} page(s)",
+            layout.pages.len()
+        );
+        let resolved_marker = layout.pages.len().to_string();
+        let marker = text_fragment_after(&layout.pages[0], "Pages ", &resolved_marker);
+        let suffix = text_fragment_after(&layout.pages[0], &resolved_marker, " ");
+        let expected_width = measure_text_with_family(
+            &resolved_marker,
+            &CharacterStyle::default(),
+            PdfFontFamily::Helvetica,
+        );
+        let old_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &CharacterStyle::default(),
+            PdfFontFamily::Helvetica,
+        );
+
+        assert!(
+            (suffix.x - (marker.x + expected_width)).abs() < 0.01,
+            "late NUMPAGES following text should start after resolved marker text"
+        );
+        assert!(
+            (suffix.x - (marker.x + old_width)).abs() > 1.0,
+            "late NUMPAGES following text should not keep marker placeholder position"
+        );
+    }
+
+    #[test]
+    fn late_section_page_marker_updates_passive_underline_width() {
+        let mut document = small_test_page_document();
+        let mut style = CharacterStyle::default();
+        style.underline = UnderlineStyle::Single;
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Section pages {SECTION_PAGES_MARKER}"),
+                style: style.clone(),
+            }],
+        }];
+        document.blocks.clear();
+        for idx in 0..80 {
+            document
+                .blocks
+                .push(paragraph_with_text(&format!("First section body {idx}")));
+        }
+        document.blocks.push(Block::SectionBreak);
+        document
+            .blocks
+            .push(Block::SectionSettings(PageSettings::default()));
+        document.blocks.push(paragraph_with_text("Second section"));
+
+        let layout = LayoutEngine::layout(&document);
+        let first_section_pages = layout
+            .pages
+            .iter()
+            .filter(|page| page.section_number == 1)
+            .count();
+        assert!(
+            first_section_pages >= 10,
+            "fixture should cross into two-digit section page count, got {first_section_pages}"
+        );
+        let resolved_marker = first_section_pages.to_string();
+        let expected = format!("Section pages {resolved_marker}");
+        let page_text = layout_text(&layout.pages[0]);
+        assert!(
+            page_text.contains(&expected),
+            "header text was {page_text:?}"
+        );
+        let expected_width =
+            measure_text_with_family(&resolved_marker, &style, PdfFontFamily::Helvetica);
+        let old_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &style,
+            PdfFontFamily::Helvetica,
+        );
+
+        let underline_width =
+            underline_width_for_fragment_after(&layout.pages[0], "pages ", &resolved_marker);
+        assert!(
+            (underline_width - expected_width).abs() < 0.01,
+            "late SECTIONPAGES underline width should match resolved text width"
+        );
+        assert!(
+            (underline_width - old_width).abs() > 1.0,
+            "late SECTIONPAGES underline should not keep marker placeholder width"
+        );
+    }
+
+    #[test]
+    fn late_section_page_marker_updates_word_underline_width() {
+        let mut document = small_test_page_document();
+        let mut style = CharacterStyle::default();
+        style.underline = UnderlineStyle::Words;
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Section pages {SECTION_PAGES_MARKER}"),
+                style: style.clone(),
+            }],
+        }];
+        document.blocks.clear();
+        for idx in 0..80 {
+            document
+                .blocks
+                .push(paragraph_with_text(&format!("First section body {idx}")));
+        }
+        document.blocks.push(Block::SectionBreak);
+        document
+            .blocks
+            .push(Block::SectionSettings(PageSettings::default()));
+        document.blocks.push(paragraph_with_text("Second section"));
+
+        let layout = LayoutEngine::layout(&document);
+        let first_section_pages = layout
+            .pages
+            .iter()
+            .filter(|page| page.section_number == 1)
+            .count();
+        assert!(
+            first_section_pages >= 10,
+            "fixture should cross into two-digit section page count, got {first_section_pages}"
+        );
+        let resolved_marker = first_section_pages.to_string();
+        let expected_width =
+            measure_text_with_family(&resolved_marker, &style, PdfFontFamily::Helvetica);
+        let old_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &style,
+            PdfFontFamily::Helvetica,
+        );
+
+        let underline_width =
+            underline_width_for_fragment_after(&layout.pages[0], "pages ", &resolved_marker);
+        assert!(
+            (underline_width - expected_width).abs() < 0.01,
+            "late SECTIONPAGES word underline width should match resolved text width"
+        );
+        assert!(
+            (underline_width - old_width).abs() > 1.0,
+            "late SECTIONPAGES word underline should not keep marker placeholder width"
+        );
+    }
+
+    #[test]
+    fn late_section_page_marker_updates_character_border_width() {
+        let mut document = small_test_page_document();
+        let mut style = CharacterStyle::default();
+        style.border.visible = true;
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("Section pages {SECTION_PAGES_MARKER}"),
+                style: style.clone(),
+            }],
+        }];
+        document.blocks.clear();
+        for idx in 0..80 {
+            document
+                .blocks
+                .push(paragraph_with_text(&format!("First section body {idx}")));
+        }
+        document.blocks.push(Block::SectionBreak);
+        document
+            .blocks
+            .push(Block::SectionSettings(PageSettings::default()));
+        document.blocks.push(paragraph_with_text("Second section"));
+
+        let layout = LayoutEngine::layout(&document);
+        let first_section_pages = layout
+            .pages
+            .iter()
+            .filter(|page| page.section_number == 1)
+            .count();
+        assert!(
+            first_section_pages >= 10,
+            "fixture should cross into two-digit section page count, got {first_section_pages}"
+        );
+        let resolved_marker = first_section_pages.to_string();
+        let fragment = text_fragment_after(&layout.pages[0], "pages ", &resolved_marker);
+        let expected_width =
+            measure_text_with_family(&resolved_marker, &style, PdfFontFamily::Helvetica);
+        let old_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &style,
+            PdfFontFamily::Helvetica,
+        );
+        let pad = character_border_test_pad(&style);
+        let right_edge = character_border_right_edge_for_fragment(
+            &layout.pages[0],
+            fragment,
+            fragment.x + expected_width + pad,
+        );
+
+        assert!(
+            (right_edge - (fragment.x + expected_width + pad)).abs() < 0.01,
+            "late SECTIONPAGES character border should match resolved text width"
+        );
+        assert!(
+            (right_edge - (fragment.x + old_width + pad)).abs() > 1.0,
+            "late SECTIONPAGES character border should not keep marker placeholder width"
+        );
+    }
+
+    #[test]
+    fn late_section_page_marker_uses_bounded_width_for_wrapping() {
+        let document = Document::default();
+        let style = CharacterStyle::default();
+        let paragraph = Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: format!("A {SECTION_PAGES_MARKER} tail"),
+                style: style.clone(),
+            }],
+        };
+        let raw_marker_width =
+            measure_text_with_family(SECTION_PAGES_MARKER, &style, PdfFontFamily::Helvetica);
+        let placeholder_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &style,
+            PdfFontFamily::Helvetica,
+        );
+        let prefix_width = measure_text_with_family("A ", &style, PdfFontFamily::Helvetica);
+        let line_width = prefix_width + raw_marker_width + 0.5;
+        assert!(
+            line_width < prefix_width + placeholder_width,
+            "fixture should distinguish raw marker width from placeholder width"
+        );
+
+        let lines = wrap_paragraph(&paragraph, line_width, &test_markers("1", "1"), &document);
+
+        assert_eq!(line_text(&lines[0]), "A ");
+        assert!(
+            line_text(&lines[1]).starts_with(SECTION_PAGES_MARKER),
+            "late SECTIONPAGES marker should wrap using bounded placeholder width"
+        );
+    }
+
+    #[test]
+    fn late_section_page_marker_shifts_following_same_line_text() {
+        let mut document = small_test_page_document();
+        document.header = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![
+                Run {
+                    text: format!("Section pages {SECTION_PAGES_MARKER}"),
+                    style: Default::default(),
+                },
+                Run {
+                    text: " total".to_string(),
+                    style: Default::default(),
+                },
+            ],
+        }];
+        document.blocks.clear();
+        for idx in 0..80 {
+            document
+                .blocks
+                .push(paragraph_with_text(&format!("First section body {idx}")));
+        }
+        document.blocks.push(Block::SectionBreak);
+        document
+            .blocks
+            .push(Block::SectionSettings(PageSettings::default()));
+        document.blocks.push(paragraph_with_text("Second section"));
+
+        let layout = LayoutEngine::layout(&document);
+        let first_section_pages = layout
+            .pages
+            .iter()
+            .filter(|page| page.section_number == 1)
+            .count();
+        assert!(
+            first_section_pages >= 10,
+            "fixture should cross into two-digit section page count, got {first_section_pages}"
+        );
+        let resolved_marker = first_section_pages.to_string();
+        let marker = text_fragment_after(&layout.pages[0], "pages ", &resolved_marker);
+        let suffix = text_fragment_after(&layout.pages[0], &resolved_marker, " ");
+        let expected_width = measure_text_with_family(
+            &resolved_marker,
+            &CharacterStyle::default(),
+            PdfFontFamily::Helvetica,
+        );
+        let old_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &CharacterStyle::default(),
+            PdfFontFamily::Helvetica,
+        );
+
+        assert!(
+            (suffix.x - (marker.x + expected_width)).abs() < 0.01,
+            "late SECTIONPAGES following text should start after resolved marker text"
+        );
+        assert!(
+            (suffix.x - (marker.x + old_width)).abs() > 1.0,
+            "late SECTIONPAGES following text should not keep marker placeholder position"
+        );
+    }
+
     fn text_baselines(page: &LayoutPage) -> Vec<f32> {
         page.items
             .iter()
@@ -14154,6 +14980,82 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("missing text fragment outside {excluded_text:?}"))
+    }
+
+    fn underline_width_for_fragment_after(page: &LayoutPage, prefix: &str, text: &str) -> f32 {
+        let fragment = text_fragment_after(page, prefix, text);
+        page.items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Underline { x, width, .. } if (*x - fragment.x).abs() < 0.01 => {
+                    Some(*width)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing underline for {text}"))
+    }
+
+    fn text_fragment_after<'a>(page: &'a LayoutPage, prefix: &str, text: &str) -> &'a TextFragment {
+        let prefix = page
+            .items
+            .iter()
+            .enumerate()
+            .find_map(|(idx, item)| match item {
+                LayoutItem::Text(fragment) if fragment.text == prefix => Some((idx, fragment)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing prefix fragment {prefix}"));
+        let fragment = page
+            .items
+            .iter()
+            .skip(prefix.0.saturating_add(1))
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment)
+                    if fragment.text == text
+                        && (fragment.baseline_y - prefix.1.baseline_y).abs() < 0.01 =>
+                {
+                    Some(fragment)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing text fragment {text} after {prefix:?}"));
+        fragment
+    }
+
+    fn character_border_test_pad(style: &CharacterStyle) -> f32 {
+        let stroke_width = twips_to_points(style.border.width_twips.max(1)).max(0.25);
+        1.5 + (stroke_width * 0.5) + twips_to_points(style.border.spacing_twips.max(0))
+    }
+
+    fn character_border_right_edge_for_fragment(
+        page: &LayoutPage,
+        fragment: &TextFragment,
+        expected_x: f32,
+    ) -> f32 {
+        page.items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Line { x1, y1, x2, y2, .. }
+                    if same_pdf_coord(*x1, *x2)
+                        && *x1 > fragment.x
+                        && fragment.baseline_y >= y1.min(*y2) - 0.01
+                        && fragment.baseline_y <= y1.max(*y2) + 0.01 =>
+                {
+                    Some(*x1)
+                }
+                _ => None,
+            })
+            .min_by(|left, right| {
+                (left - expected_x)
+                    .abs()
+                    .total_cmp(&(right - expected_x).abs())
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing character border right edge for {:?}",
+                    fragment.text
+                )
+            })
     }
 
     fn line_text(line: &Line) -> String {

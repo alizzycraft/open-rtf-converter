@@ -257,6 +257,8 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/XFA", "/XFA"),
 ];
 const MAX_AUDITED_PDF_NAME_BYTES: usize = 128;
+const OVERLONG_PDF_NAME_TOKEN: &str = "<overlong PDF name>";
+const MALFORMED_PDF_NAME_ESCAPE_TOKEN: &str = "<malformed PDF name escape>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PassivePdfIssue {
@@ -371,16 +373,28 @@ pub fn audit_passive_pdf_bytes(pdf: &[u8]) -> Result<(), PassivePdfError> {
         }
 
         if pdf[offset] == b'/' {
-            if let Some((name, name_end)) = parse_pdf_name_token(pdf, offset) {
+            if let Some(parsed_name) = parse_pdf_name_token(pdf, offset) {
+                if parsed_name.truncated {
+                    issues.push(PassivePdfIssue {
+                        token: OVERLONG_PDF_NAME_TOKEN,
+                        offset,
+                    });
+                }
+                if parsed_name.malformed_escape {
+                    issues.push(PassivePdfIssue {
+                        token: MALFORMED_PDF_NAME_ESCAPE_TOKEN,
+                        offset,
+                    });
+                }
                 for (token, label) in ACTIVE_PDF_NAME_TOKENS {
-                    if name == *token {
+                    if parsed_name.name == *token {
                         issues.push(PassivePdfIssue {
                             token: label,
                             offset,
                         });
                     }
                 }
-                offset = name_end;
+                offset = parsed_name.end;
                 continue;
             } else {
                 for (token, label) in ACTIVE_PDF_NAME_TOKENS {
@@ -406,35 +420,54 @@ pub fn audit_passive_pdf_bytes(pdf: &[u8]) -> Result<(), PassivePdfError> {
     }
 }
 
-fn parse_pdf_name_token(pdf: &[u8], offset: usize) -> Option<(Vec<u8>, usize)> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedPdfName {
+    name: Vec<u8>,
+    end: usize,
+    truncated: bool,
+    malformed_escape: bool,
+}
+
+fn parse_pdf_name_token(pdf: &[u8], offset: usize) -> Option<ParsedPdfName> {
     if pdf.get(offset).copied()? != b'/' {
         return None;
     }
 
     let mut name = Vec::new();
     name.push(b'/');
+    let mut truncated = false;
+    let mut malformed_escape = false;
     let mut pos = offset + 1;
     while pos < pdf.len() && !is_pdf_name_boundary(Some(pdf[pos])) {
         if pdf[pos] == b'#' {
             if pos + 2 < pdf.len()
                 && let (Some(high), Some(low)) = (hex_value(pdf[pos + 1]), hex_value(pdf[pos + 2]))
             {
-                push_audited_pdf_name_byte(&mut name, (high << 4) | low);
+                truncated |= push_audited_pdf_name_byte(&mut name, (high << 4) | low);
                 pos += 3;
                 continue;
             }
+            malformed_escape = true;
         }
 
-        push_audited_pdf_name_byte(&mut name, pdf[pos]);
+        truncated |= push_audited_pdf_name_byte(&mut name, pdf[pos]);
         pos += 1;
     }
 
-    Some((name, pos))
+    Some(ParsedPdfName {
+        name,
+        end: pos,
+        truncated,
+        malformed_escape,
+    })
 }
 
-fn push_audited_pdf_name_byte(name: &mut Vec<u8>, byte: u8) {
+fn push_audited_pdf_name_byte(name: &mut Vec<u8>, byte: u8) -> bool {
     if name.len() < MAX_AUDITED_PDF_NAME_BYTES {
         name.push(byte);
+        false
+    } else {
+        true
     }
 }
 
@@ -4006,6 +4039,71 @@ endobj
                 error.issues
             );
         }
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_overlong_names_outside_streams() {
+        let mut pdf = b"%PDF-1.7
+1 0 obj
+<< "
+        .to_vec();
+        pdf.push(b'/');
+        pdf.extend(std::iter::repeat_n(b'A', MAX_AUDITED_PDF_NAME_BYTES));
+        pdf.extend_from_slice(
+            b" /Type /Catalog >>
+endobj
+%%EOF",
+        );
+
+        let error = audit_passive_pdf_bytes(&pdf).expect_err("overlong PDF names must be rejected");
+
+        assert!(error.issues.iter().any(|issue| {
+            issue.token == OVERLONG_PDF_NAME_TOKEN
+                && issue.offset == b"%PDF-1.7\n1 0 obj\n<< ".len()
+        }));
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_overlong_escaped_names_outside_streams() {
+        let mut pdf = b"%PDF-1.7
+1 0 obj
+<< /"
+            .to_vec();
+        for _ in 0..MAX_AUDITED_PDF_NAME_BYTES {
+            pdf.extend_from_slice(b"#41");
+        }
+        pdf.extend_from_slice(
+            b" /Type /Catalog >>
+endobj
+%%EOF",
+        );
+
+        let error =
+            audit_passive_pdf_bytes(&pdf).expect_err("overlong escaped PDF names must be rejected");
+
+        assert!(error.issues.iter().any(|issue| {
+            issue.token == OVERLONG_PDF_NAME_TOKEN
+                && issue.offset == b"%PDF-1.7\n1 0 obj\n<< ".len()
+        }));
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_malformed_name_escapes_outside_streams() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< /Open#4Gction true /Java#5 >>
+endobj
+%%EOF";
+
+        let error =
+            audit_passive_pdf_bytes(pdf).expect_err("malformed PDF name escapes must be rejected");
+
+        let malformed = error
+            .issues
+            .iter()
+            .filter(|issue| issue.token == MALFORMED_PDF_NAME_ESCAPE_TOKEN)
+            .count();
+        assert_eq!(malformed, 2, "issues were {:?}", error.issues);
     }
 
     #[test]
