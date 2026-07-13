@@ -3585,6 +3585,13 @@ impl Parser {
                 self.handle_active_content("form field macro", offset)?;
                 self.count_skipped_destination_bytes(control.name.len(), offset)?;
             }
+            name if self.state.inside_metadata
+                && metadata_nested_active_feature(name).is_some() =>
+            {
+                let feature = metadata_nested_active_feature(name).expect("checked above");
+                self.handle_active_content(feature, offset)?;
+                self.count_skipped_destination_bytes(name.len(), offset)?;
+            }
             name if self.state.destination == Destination::Ignored
                 && skipped_destination_active_feature(name).is_some() =>
             {
@@ -13081,6 +13088,20 @@ fn skipped_destination_active_feature(name: &str) -> Option<&'static str> {
         name if is_annotation_destination(name) => {
             Some("annotation metadata in skipped destination")
         }
+        _ => None,
+    }
+}
+
+fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
+    match name {
+        "object" | "objdata" | "objocx" | "objemb" | "objlink" | "objautlink" | "objupdate" => {
+            Some("object payload in metadata")
+        }
+        "field" | "fldinst" => Some("field instruction in metadata"),
+        "template" => Some("external template in metadata"),
+        "fontemb" | "fontfile" => Some("embedded font payload in metadata"),
+        name if is_mail_merge_destination(name) => Some("mail merge data source in metadata"),
+        name if is_annotation_destination(name) => Some("annotation metadata in metadata"),
         _ => None,
     }
 }

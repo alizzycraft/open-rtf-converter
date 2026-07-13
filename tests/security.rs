@@ -10673,6 +10673,93 @@ fn metadata_and_external_templates_do_not_reach_text_or_pdf() {
 }
 
 #[test]
+fn active_controls_nested_in_metadata_obey_reject_policy() {
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+
+    for (input, expected_feature) in [
+        (
+            br"{\rtf1{\info{\title Hidden {\object\objdata 414243}}}Body\par}".as_slice(),
+            "object payload in metadata",
+        ),
+        (
+            br#"{\rtf1{\info{\title Hidden {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}}}}Body\par}"#.as_slice(),
+            "field instruction in metadata",
+        ),
+        (
+            br"{\rtf1{\info{\title Hidden {\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}}}}Body\par}".as_slice(),
+            "embedded font payload in metadata",
+        ),
+        (
+            br"{\rtf1{\info{\title Hidden {\template https://example.com/t.dotm}}}Body\par}".as_slice(),
+            "external template in metadata",
+        ),
+        (
+            br"{\rtf1{\info{\title Hidden {\mmdatasource https://example.com/data.csv}}}Body\par}".as_slice(),
+            "mail merge data source in metadata",
+        ),
+        (
+            br"{\rtf1{\info{\title Hidden {\annotation comment payload}}}Body\par}".as_slice(),
+            "annotation metadata in metadata",
+        ),
+    ] {
+        let result = parse_rtf_bytes_with_options(input, &reject_options);
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ActiveContentRejected { ref feature, .. })
+                    if feature == expected_feature
+            ),
+            "expected {expected_feature:?}, got {result:?}"
+        );
+    }
+
+    let parsed = parse_rtf_bytes(
+        br#"{\rtf1{\info{\title Hidden {\object\objdata 414243}{\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}}{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}}{\template https://example.com/t.dotm}{\mmdatasource https://example.com/data.csv}{\annotation comment payload}}}Body\par}"#,
+    )
+    .unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Body"));
+    for forbidden in [
+        "Hidden",
+        "414243",
+        "HYPERLINK",
+        "example.com",
+        "Hidden link",
+        "HOSTILE-FONT-PAYLOAD",
+        "data.csv",
+        "comment payload",
+        "[Embedded object removed]",
+        "[Field removed",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "metadata active payload leaked to text: {forbidden}"
+        );
+    }
+    for expected in [
+        "active content removed: object payload in metadata before safe model normalization",
+        "active content removed: field instruction in metadata before safe model normalization",
+        "active content removed: embedded font payload in metadata before safe model normalization",
+        "active content removed: external template in metadata before safe model normalization",
+        "active content removed: mail merge data source in metadata before safe model normalization",
+        "active content removed: annotation metadata in metadata before safe model normalization",
+    ] {
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing metadata active-content diagnostic {expected:?}: {:?}",
+            parsed.diagnostics
+        );
+    }
+}
+
+#[test]
 fn encapsulated_html_metadata_does_not_warn_or_reach_text_or_pdf() {
     let input = rtf(&[
         "{",
