@@ -12002,7 +12002,7 @@ impl Parser {
             *existing = list;
             return Ok(());
         }
-        if self.list_definitions.len() >= self.limits().max_styles {
+        if self.list_state_len() >= self.limits().max_lists {
             return Err(ParseError::ResourceLimitExceeded {
                 resource: "lists".to_string(),
                 offset,
@@ -12103,7 +12103,7 @@ impl Parser {
             *existing = list_override;
             return Ok(());
         }
-        if self.list_overrides.len() >= self.limits().max_styles {
+        if self.list_state_len() >= self.limits().max_lists {
             return Err(ParseError::ResourceLimitExceeded {
                 resource: "list overrides".to_string(),
                 offset,
@@ -12111,6 +12111,12 @@ impl Parser {
         }
         self.list_overrides.push(list_override);
         Ok(())
+    }
+
+    fn list_state_len(&self) -> usize {
+        self.list_definitions
+            .len()
+            .saturating_add(self.list_overrides.len())
     }
 
     fn finish_style_definition(&mut self, offset: usize) -> Result<(), ParseError> {
@@ -23137,7 +23143,7 @@ After\par}"#;
     fn list_definition_count_limit_is_enforced() {
         let options = RtfParseOptions {
             limits: RtfLimits {
-                max_styles: 1,
+                max_lists: 1,
                 ..RtfLimits::default()
             },
             ..RtfParseOptions::default()
@@ -23151,6 +23157,51 @@ After\par}"#;
         assert!(matches!(
             error,
             ParseError::ResourceLimitExceeded { resource, .. } if resource == "lists"
+        ));
+    }
+
+    #[test]
+    fn list_limit_is_independent_from_styles() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_lists: 2,
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid1}}{\*\listoverridetable{\listoverride\listid1\ls1}}\pard\ls1\ilvl0 Body\par}",
+            &options,
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].text, "1.\tBody");
+    }
+
+    #[test]
+    fn list_limit_bounds_combined_definitions_and_overrides() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_lists: 1,
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let error = parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid1}}{\*\listoverridetable{\listoverride\listid1\ls1}}Body\par}",
+            &options,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ParseError::ResourceLimitExceeded { resource, .. } if resource == "list overrides"
         ));
     }
 

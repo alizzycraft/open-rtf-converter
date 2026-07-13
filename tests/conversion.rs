@@ -79,6 +79,8 @@ fn browser_safe_defaults_use_stricter_resource_table_limits() {
     assert_eq!(browser_limits.max_field_counters, 2_048);
     assert_eq!(default_limits.max_document_properties, 10_000);
     assert_eq!(browser_limits.max_document_properties, 2_048);
+    assert_eq!(default_limits.max_lists, 10_000);
+    assert_eq!(browser_limits.max_lists, 2_048);
     assert_eq!(default_limits.max_field_instruction_chars, 64 * 1024);
     assert_eq!(browser_limits.max_field_instruction_chars, 16 * 1024);
 }
