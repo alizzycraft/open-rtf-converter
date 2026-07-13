@@ -510,10 +510,12 @@ pub fn estimate_passive_pdf_object_count(
         .saturating_add(layout.pages.len().saturating_mul(2))
         .saturating_add(used_font_indexes.len())
         .saturating_add(usize::from(
-            used_font_indexes.contains(&font_index_for_resource(SYMBOL_REGULAR)),
+            font_index_for_resource(SYMBOL_REGULAR)
+                .is_some_and(|index| used_font_indexes.contains(&index)),
         ))
         .saturating_add(usize::from(
-            used_font_indexes.contains(&font_index_for_resource(ZAPF_DINGBATS_REGULAR)),
+            font_index_for_resource(ZAPF_DINGBATS_REGULAR)
+                .is_some_and(|index| used_font_indexes.contains(&index)),
         ))
         .saturating_add(
             extended_latin_usage
@@ -547,9 +549,11 @@ pub fn render_pdf_with_font_provider(
         font_refs[*font_idx] = Some(Ref::new(next_object_id));
         next_object_id += 1;
     }
-    let symbol_to_unicode_ref =
-        font_refs[font_index_for_resource(SYMBOL_REGULAR)].map(|_| next_ref(&mut next_object_id));
-    let zapf_dingbats_to_unicode_ref = font_refs[font_index_for_resource(ZAPF_DINGBATS_REGULAR)]
+    let symbol_to_unicode_ref = font_index_for_resource(SYMBOL_REGULAR)
+        .and_then(|index| font_refs[index])
+        .map(|_| next_ref(&mut next_object_id));
+    let zapf_dingbats_to_unicode_ref = font_index_for_resource(ZAPF_DINGBATS_REGULAR)
+        .and_then(|index| font_refs[index])
         .map(|_| next_ref(&mut next_object_id));
     let extended_latin_usage = collect_extended_latin_font_usage(layout);
     let mut extended_latin_to_unicode_refs = [None; 14];
@@ -907,7 +911,7 @@ pub fn render_pdf_with_font_provider(
                         ImageFormat::Jpeg => image.color_space().device_rgb(),
                         ImageFormat::JpegGrayscale => image.color_space().device_gray(),
                         ImageFormat::JpegCmyk => image.color_space().device_cmyk(),
-                        _ => unreachable!("only JPEG formats enter this branch"),
+                        _ => image.color_space().device_rgb(),
                     }
                     image.bits_per_component(8);
                     image.filter(Filter::DctDecode);
@@ -940,7 +944,10 @@ pub fn render_pdf_with_font_provider(
                             );
                             1
                         }
-                        _ => unreachable!("only PNG formats enter this branch"),
+                        _ => {
+                            image.color_space().device_rgb();
+                            3
+                        }
                     };
                     image.bits_per_component(8);
                     image.filter(Filter::FlateDecode);
@@ -1153,7 +1160,9 @@ fn collect_extended_latin_font_usage(layout: &LayoutDocument) -> [ExtendedLatinU
                 continue;
             };
             let resource = font_resource_for_style(fragment.font_family, &fragment.style);
-            let font_idx = font_index_for_resource(resource);
+            let Some(font_idx) = font_index_for_resource(resource) else {
+                continue;
+            };
             if !is_normal_text_font_index(font_idx) {
                 continue;
             }
@@ -1344,14 +1353,15 @@ fn used_font_index_list(used: &[bool; 14]) -> Vec<usize> {
 }
 
 fn mark_used_font_resource(used: &mut [bool; 14], resource_name: &[u8]) {
-    used[font_index_for_resource(resource_name)] = true;
+    if let Some(index) = font_index_for_resource(resource_name) {
+        used[index] = true;
+    }
 }
 
-fn font_index_for_resource(resource_name: &[u8]) -> usize {
+fn font_index_for_resource(resource_name: &[u8]) -> Option<usize> {
     BUILTIN_FONTS
         .iter()
         .position(|(candidate, _base_font)| *candidate == resource_name)
-        .expect("font resource must be one of the PDF base fonts")
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -4295,6 +4305,12 @@ mod tests {
             "Bad-Font-Name-1"
         );
         assert_eq!(sanitize_pdf_font_name(" --- ", 64), "");
+    }
+
+    #[test]
+    fn unknown_builtin_font_resource_lookup_is_non_panicking() {
+        assert_eq!(font_index_for_resource(b"UnknownFontResource"), None);
+        assert!(font_index_for_resource(HELVETICA_REGULAR).is_some());
     }
 
     fn page_font_resource_names(pdf: &[u8], page_index: usize) -> Vec<Vec<u8>> {

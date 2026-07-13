@@ -1157,7 +1157,9 @@ fn layout_footnotes(
         start_new_page(pages, cursor_y, geometry, &mut column);
         margin_left = geometry.body_left(0);
     }
-    let page = pages.last_mut().expect("layout always has a page");
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
     page.items.push(LayoutItem::Line {
         x1: margin_left,
         y1: *cursor_y - 3.0,
@@ -1322,7 +1324,9 @@ fn layout_endnote_entries(
         let mut column = 0;
         start_new_page(pages, cursor_y, geometry, &mut column);
     }
-    let page = pages.last_mut().expect("layout always has a page");
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
     page.items.push(LayoutItem::Line {
         x1: margin_left,
         y1: *cursor_y - 3.0,
@@ -1546,17 +1550,16 @@ fn layout_image(
     }
 
     let y = *cursor_y - height;
-    pages
-        .last_mut()
-        .expect("layout always has a page")
-        .items
-        .push(LayoutItem::Image(ImageFragment {
-            image: image.clone(),
-            x: margin_left,
-            y,
-            width,
-            height,
-        }));
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
+    page.items.push(LayoutItem::Image(ImageFragment {
+        image: image.clone(),
+        x: margin_left,
+        y,
+        width,
+        height,
+    }));
     *cursor_y = y - 6.0;
 }
 
@@ -1637,7 +1640,9 @@ fn layout_shape(
         blue: shape.stroke_color.blue as f32 / 255.0,
     };
     let stroke_style = line_style_for_border_style(shape.stroke_style);
-    let page = pages.last_mut().expect("layout always has a page");
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
     match shape.kind {
         StaticShapeKind::Line => {
             if let Some(width_points) = stroke_width_points {
@@ -2719,13 +2724,12 @@ fn repeating_paragraphs_for_page<'a>(
     geometry: PageGeometry,
     is_header: bool,
 ) -> &'a [Paragraph] {
-    let section = header_footer_sets
+    let Some(section) = header_footer_sets
         .get(geometry.header_footer_index)
-        .unwrap_or_else(|| {
-            header_footer_sets
-                .first()
-                .expect("document header/footer set")
-        });
+        .or_else(|| header_footer_sets.first())
+    else {
+        return &[];
+    };
     let is_first_section_page =
         geometry.title_page && physical_page_number == geometry.numbering.base_physical_page;
     if is_header {
@@ -2776,13 +2780,12 @@ fn select_repeating_header_footer_images<'a>(
     geometry: PageGeometry,
     is_header: bool,
 ) -> &'a [StaticImage] {
-    let section = header_footer_sets
+    let Some(section) = header_footer_sets
         .get(geometry.header_footer_index)
-        .unwrap_or_else(|| {
-            header_footer_sets
-                .first()
-                .expect("document header/footer set")
-        });
+        .or_else(|| header_footer_sets.first())
+    else {
+        return &[];
+    };
     let is_first_section_page =
         geometry.title_page && physical_page_number == geometry.numbering.base_physical_page;
     if is_header {
@@ -2846,13 +2849,12 @@ fn select_repeating_header_footer_shapes<'a>(
     geometry: PageGeometry,
     is_header: bool,
 ) -> &'a [StaticShape] {
-    let section = header_footer_sets
+    let Some(section) = header_footer_sets
         .get(geometry.header_footer_index)
-        .unwrap_or_else(|| {
-            header_footer_sets
-                .first()
-                .expect("document header/footer set")
-        });
+        .or_else(|| header_footer_sets.first())
+    else {
+        return &[];
+    };
     let is_first_section_page =
         geometry.title_page && physical_page_number == geometry.numbering.base_physical_page;
     if is_header {
@@ -3762,7 +3764,9 @@ fn push_table_borders(
     document: &Document,
     next_row: Option<&TableRow>,
 ) {
-    let page = pages.last_mut().expect("layout always has a page");
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
 
     for (idx, visual_cell) in prepared.visual_cells.iter().enumerate() {
         let Some(cell) = row.cells.get(visual_cell.cell_index) else {
@@ -3912,7 +3916,9 @@ fn push_paragraph_borders(
     let x2 = x1 + paragraph_line_width(content_width, style, line_idx == 0);
     let y1 = top_y;
     let y2 = top_y - line_height;
-    let page = pages.last_mut().expect("layout always has a page");
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
 
     if style.borders.top.visible && line_idx == 0 {
         let border = &style.borders.top;
@@ -4211,7 +4217,9 @@ fn push_passive_line_number(
     let distance = twips_to_points(geometry.line_numbering.distance_twips.max(0));
     let x = (margin_left - distance - width).max(0.0);
     let baseline_y = top_y - line.height + (line.height * 0.25);
-    let page = pages.last_mut().expect("layout always has a page");
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
     page.items.push(LayoutItem::Text(TextFragment {
         text,
         x,

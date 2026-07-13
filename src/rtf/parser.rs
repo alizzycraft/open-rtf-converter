@@ -40,6 +40,8 @@ pub enum ParseError {
     OutputTextTooLarge(usize),
     #[error("resource limit exceeded for {resource} at byte {offset}")]
     ResourceLimitExceeded { resource: String, offset: usize },
+    #[error("malformed RTF input at byte {offset}: {reason}")]
+    MalformedInput { reason: String, offset: usize },
     #[error("active content rejected: {feature} at byte {offset}")]
     ActiveContentRejected { feature: String, offset: usize },
 }
@@ -3713,30 +3715,26 @@ impl Parser {
                 self.count_skipped_destination_bytes(control.name.len(), offset)?;
             }
             name if self.state.inside_metadata
-                && metadata_nested_active_feature(name).is_some() =>
+                && let Some(feature) = metadata_nested_active_feature(name) =>
             {
-                let feature = metadata_nested_active_feature(name).expect("checked above");
                 self.handle_active_content(feature, offset)?;
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
             name if self.state.inside_metadata
-                && opaque_metadata_payload_feature(name).is_some() =>
+                && let Some(feature) = opaque_metadata_payload_feature(name) =>
             {
-                let feature = opaque_metadata_payload_feature(name).expect("checked above");
                 self.reject_active_content_only(feature, offset)?;
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
             name if self.state.destination == Destination::Ignored
-                && opaque_metadata_payload_feature(name).is_some() =>
+                && let Some(feature) = opaque_metadata_payload_feature(name) =>
             {
-                let feature = opaque_metadata_payload_feature(name).expect("checked above");
                 self.reject_active_content_only(feature, offset)?;
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
             name if self.state.destination == Destination::Ignored
-                && skipped_destination_active_feature(name).is_some() =>
+                && let Some(feature) = skipped_destination_active_feature(name) =>
             {
-                let feature = skipped_destination_active_feature(name).expect("checked above");
                 if self.state.suppress_skipped_object_payload_diagnostic
                     && feature == "object payload in skipped destination"
                 {
@@ -3826,10 +3824,9 @@ impl Parser {
                 self.set_current_table_row_shading(control.parameter.unwrap_or(0).max(0) as usize)
             }
             "trshdng" => self.set_current_table_row_shading_basis(control.parameter, offset),
-            name if table_row_shading_pattern_control(name).is_some() => self
-                .set_current_table_row_shading_pattern(
-                    table_row_shading_pattern_control(name).expect("checked above"),
-                ),
+            name if let Some(pattern) = table_row_shading_pattern_control(name) => {
+                self.set_current_table_row_shading_pattern(pattern)
+            }
             "cellx" => {
                 self.push_table_cell_boundary(control.parameter.unwrap_or(0).max(0), offset)?
             }
@@ -3837,10 +3834,9 @@ impl Parser {
                 self.set_current_cell_shading(control.parameter.unwrap_or(0).max(0) as usize)
             }
             "clshdng" => self.set_current_cell_shading_basis(control.parameter, offset),
-            name if table_cell_shading_pattern_control(name).is_some() => self
-                .set_current_cell_shading_pattern(
-                    table_cell_shading_pattern_control(name).expect("checked above"),
-                ),
+            name if let Some(pattern) = table_cell_shading_pattern_control(name) => {
+                self.set_current_cell_shading_pattern(pattern)
+            }
             "clpadl" => self.set_current_cell_padding_left(control.parameter, offset),
             "clpadr" => self.set_current_cell_padding_right(control.parameter, offset),
             "clpadt" => self.set_current_cell_padding_top(control.parameter, offset),
@@ -4251,9 +4247,8 @@ impl Parser {
                     offset,
                 );
             }
-            name if paragraph_shading_pattern_control(name).is_some() => {
-                self.state.paragraph.shading_pattern =
-                    paragraph_shading_pattern_control(name).expect("checked above");
+            name if let Some(pattern) = paragraph_shading_pattern_control(name) => {
+                self.state.paragraph.shading_pattern = pattern;
             }
             "ql" => self.state.paragraph.alignment = Alignment::Left,
             "qc" => self.state.paragraph.alignment = Alignment::Center,
@@ -4622,8 +4617,7 @@ impl Parser {
                     Some(offset),
                 ));
             }
-            name if custom_xml_markup_feature(name).is_some() => {
-                let feature = custom_xml_markup_feature(name).expect("checked above");
+            name if let Some(feature) = custom_xml_markup_feature(name) => {
                 self.reject_active_content_only(feature, offset)?;
             }
             name if let Some(message) = word_layout_compatibility_control_message(name) => {
@@ -9472,7 +9466,7 @@ impl Parser {
             TableCellBorderSide::Bottom => &mut row.row_borders.bottom,
             TableCellBorderSide::RowHorizontal => &mut row.row_inner_horizontal_border,
             TableCellBorderSide::RowVertical => &mut row.row_inner_vertical_border,
-            TableCellBorderSide::DiagonalDown | TableCellBorderSide::DiagonalUp => unreachable!(),
+            TableCellBorderSide::DiagonalDown | TableCellBorderSide::DiagonalUp => return false,
         };
         row.row_border_flags.set(side);
         update(border);
@@ -9991,10 +9985,13 @@ impl Parser {
         if row.cell_open || row.cells.is_empty() {
             self.current_table_row = Some(row);
             self.finish_table_cell(offset)?;
-            row = self
-                .current_table_row
-                .take()
-                .expect("finish_table_cell preserves the active row");
+            let Some(active_row) = self.current_table_row.take() else {
+                return Err(ParseError::MalformedInput {
+                    reason: "table row ended before current cell could be normalized".to_string(),
+                    offset,
+                });
+            };
+            row = active_row;
         }
 
         self.apply_table_row_preferred_width_fallback(&mut row);
@@ -10055,7 +10052,11 @@ impl Parser {
                 width_twips.saturating_mul((cell_index as i32) + 1) / cell_count
             };
             row.cell_right_edges_twips.push(edge.max(previous_edge + 1));
-            previous_edge = *row.cell_right_edges_twips.last().expect("edge just pushed");
+            previous_edge = row
+                .cell_right_edges_twips
+                .last()
+                .copied()
+                .unwrap_or(previous_edge);
         }
     }
 
