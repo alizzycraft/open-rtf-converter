@@ -13272,6 +13272,24 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
             report.diagnostics
         );
     }
+    for expected in [
+        "font 'MS Sans Serif' approximated with passive PDF base font Helvetica",
+        "font 'MS Serif' approximated with passive PDF base font Times-Roman",
+        "font 'Wingdings' approximated with passive PDF base font ZapfDingbats",
+        "font 'Times New Roman' approximated with passive PDF base font Times-Roman",
+        "font 'Times New Roman CE' approximated with passive PDF base font Times-Roman",
+        "font 'Arial' approximated with passive PDF base font Helvetica",
+        "font 'Courier New' approximated with passive PDF base font Courier",
+    ] {
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing font approximation diagnostic {expected:?}; diagnostics were {:?}",
+            report.diagnostics
+        );
+    }
     for unexpected in [
         "font 'MS Sans Serif' substituted",
         "font 'MS Serif' substituted",

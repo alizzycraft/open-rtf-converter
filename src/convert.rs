@@ -118,9 +118,6 @@ fn passive_font_substitution_diagnostics(
     let mut seen = Vec::<(String, PdfFontFamily)>::new();
     for font in fonts {
         let family = passive_pdf_font_family_for_font(font);
-        if font_name_matches_pdf_family(&font.name, family) {
-            continue;
-        }
         if font_provider_has_asset_for_font(font_provider, font) {
             continue;
         }
@@ -129,14 +126,22 @@ fn passive_font_substitution_diagnostics(
             continue;
         }
         seen.push(key);
-        diagnostics.push(Diagnostic::warning(
+        let message = if font_name_matches_exact_pdf_base_font(&font.name, family) {
+            continue;
+        } else if font_name_matches_pdf_family(&font.name, family) {
+            format!(
+                "font '{}' approximated with passive PDF base font {}; provide a passive font asset for closer Word-compatible output",
+                font.name,
+                passive_pdf_font_family_label(family)
+            )
+        } else {
             format!(
                 "font '{}' substituted with passive PDF base font {}",
                 font.name,
                 passive_pdf_font_family_label(family)
-            ),
-            None,
-        ));
+            )
+        };
+        diagnostics.push(Diagnostic::warning(message, None));
     }
     diagnostics
 }
@@ -446,6 +451,19 @@ fn font_name_matches_pdf_family(name: &str, family: PdfFontFamily) -> bool {
                     | "wingdings3"
                     | "webdings"
             )
+        }
+    }
+}
+
+fn font_name_matches_exact_pdf_base_font(name: &str, family: PdfFontFamily) -> bool {
+    let normalized = direct_base14_alias_name(name);
+    match family {
+        PdfFontFamily::Helvetica => normalized == "helvetica",
+        PdfFontFamily::Courier => normalized == "courier",
+        PdfFontFamily::Times => matches!(normalized.as_str(), "times-roman" | "times roman"),
+        PdfFontFamily::Symbol => normalized == "symbol",
+        PdfFontFamily::ZapfDingbats => {
+            matches!(normalized.as_str(), "zapfdingbats" | "zapf dingbats")
         }
     }
 }
