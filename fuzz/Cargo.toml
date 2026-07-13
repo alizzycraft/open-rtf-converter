@@ -1,0 +1,33 @@
+[package]
+name = "open-rtf-converter-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+open-rtf-converter = { path = "..", default-features = false }
+
+[[bin]]
+name = "rtf_lexer"
+path = "fuzz_targets/rtf_lexer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtf_parser"
+path = "fuzz_targets/rtf_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtf_to_pdf_passive"
+path = "fuzz_targets/rtf_to_pdf_passive.rs"
+test = false
+doc = false
+bench = false
