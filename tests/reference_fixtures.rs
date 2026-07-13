@@ -1,5 +1,10 @@
 use std::path::Path;
 
+use lopdf::Document as PdfDocument;
+use lopdf::content::Content;
+use open_rtf_converter::pdf::audit_passive_pdf_bytes;
+use open_rtf_converter::{ConvertOptions, convert_rtf_to_pdf};
+
 const MANIFEST: &str = include_str!("../fixtures/reference/expected-policy.json");
 
 #[test]
@@ -52,4 +57,146 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         MANIFEST.contains("\"known_gaps\""),
         "visual fixtures must track missing comparison evidence"
     );
+}
+
+#[test]
+fn reference_policy_fixtures_match_current_passive_converter_output() {
+    for fixture in reference_fixtures() {
+        let input = std::fs::read(fixture.input).unwrap_or_else(|error| {
+            panic!(
+                "failed to read reference fixture {}: {error}",
+                fixture.input
+            )
+        });
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::default()
+            },
+        )
+        .unwrap_or_else(|error| panic!("failed to convert {}: {error}", fixture.input));
+
+        assert_eq!(
+            output.pages, fixture.expected_pages,
+            "{} should render the expected page count",
+            fixture.input
+        );
+        audit_passive_pdf_bytes(&output.pdf).unwrap_or_else(|error| {
+            panic!("{} emitted active PDF content: {error}", fixture.input)
+        });
+
+        let pdf = PdfDocument::load_mem(&output.pdf)
+            .unwrap_or_else(|error| panic!("{} emitted invalid PDF: {error}", fixture.input));
+        assert_eq!(
+            pdf.get_pages().len(),
+            fixture.expected_pages,
+            "{} PDF page tree should match report",
+            fixture.input
+        );
+        let rendered_text = decoded_pdf_text(&pdf);
+        for expected in fixture.must_preserve_text {
+            assert!(
+                rendered_text.contains(expected),
+                "{} rendered PDF text did not contain {:?}; text was {:?}",
+                fixture.input,
+                expected,
+                rendered_text
+            );
+        }
+        for forbidden in fixture.must_not_leak {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == *forbidden),
+                "{} leaked forbidden source/control bytes {:?}",
+                fixture.input,
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+struct ReferenceFixture {
+    input: &'static str,
+    expected_pages: usize,
+    must_preserve_text: &'static [&'static str],
+    must_not_leak: &'static [&'static [u8]],
+}
+
+fn reference_fixtures() -> &'static [ReferenceFixture] {
+    &[
+        ReferenceFixture {
+            input: "fixtures/simple.rtf",
+            expected_pages: 2,
+            must_preserve_text: &[
+                "Hello from open-rtf-converter",
+                "Centered paragraph with",
+                "Second page text",
+            ],
+            must_not_leak: &[b"fonttbl", b"colortbl", b"/JavaScript", b"/EmbeddedFile"],
+        },
+        ReferenceFixture {
+            input: "fixtures/table-ish.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Name", "Value", "Alpha", "Beta", "After table text"],
+            must_not_leak: &[b"trowd", b"cellx", b"/JavaScript", b"/EmbeddedFile"],
+        },
+        ReferenceFixture {
+            input: "fixtures/weird.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "visible text should survive",
+                "Escaped braces: {sample}",
+                "hex: ABC",
+            ],
+            must_not_leak: &[
+                b"unknownDestination",
+                b"madeup123",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+            ],
+        },
+    ]
+}
+
+fn decoded_pdf_text(pdf: &PdfDocument) -> String {
+    let mut output = String::new();
+    for page_id in pdf.get_pages().values() {
+        let content = pdf
+            .get_and_decode_page_content(*page_id)
+            .expect("page content should decode");
+        output.push_str(&content_text(&content));
+        output.push('\n');
+    }
+    output
+}
+
+fn content_text(content: &Content) -> String {
+    let mut text = String::new();
+    for operation in &content.operations {
+        match operation.operator.as_ref() {
+            "Tj" | "'" | "\"" => {
+                for operand in &operation.operands {
+                    if let Ok(bytes) = operand.as_str() {
+                        text.push_str(&String::from_utf8_lossy(bytes));
+                    }
+                }
+            }
+            "TJ" => {
+                for operand in &operation.operands {
+                    if let Ok(items) = operand.as_array() {
+                        for item in items {
+                            if let Ok(bytes) = item.as_str() {
+                                text.push_str(&String::from_utf8_lossy(bytes));
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    text
 }
