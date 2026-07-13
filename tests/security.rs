@@ -25155,6 +25155,84 @@ fn paragraph_direction_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn word_paragraph_indent_aliases_render_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw6000",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "lin720",
+        "\\",
+        "rin360",
+        "\\",
+        "fin-240 Alias indented paragraph",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Alias indented paragraph"));
+    for forbidden in ["lin720", "rin360", "fin-240"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden indent alias control leaked to text: {forbidden}"
+        );
+    }
+    let open_rtf_converter::model::Block::Paragraph(paragraph) = &parsed.document.blocks[0] else {
+        panic!("expected paragraph");
+    };
+    assert_eq!(paragraph.style.left_indent_twips, 720);
+    assert_eq!(paragraph.style.right_indent_twips, 360);
+    assert_eq!(paragraph.style.first_line_indent_twips, -240);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "indent aliases should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("paragraph-indent-aliases.rtf");
+    let output_path = dir.path().join("paragraph-indent-aliases.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    assert!(PdfDocument::load_mem(&pdf).is_ok());
+    for forbidden in [
+        b"lin720".as_slice(),
+        b"rin360",
+        b"fin-240",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden indent alias content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn widow_control_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

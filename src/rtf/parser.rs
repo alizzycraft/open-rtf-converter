@@ -4127,15 +4127,15 @@ impl Parser {
             "nowwrap" => self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0,
             "dropcapli" => self.set_drop_cap_lines(control.parameter, offset),
             "dropcapt" => self.set_drop_cap_type(control.parameter),
-            "li" => {
+            "li" | "lin" => {
                 self.state.paragraph.left_indent_twips =
                     self.clamp_paragraph_indent(control.parameter, "left indent", offset)
             }
-            "ri" => {
+            "ri" | "rin" => {
                 self.state.paragraph.right_indent_twips =
                     self.clamp_paragraph_indent(control.parameter, "right indent", offset)
             }
-            "fi" => {
+            "fi" | "fin" => {
                 self.state.paragraph.first_line_indent_twips =
                     self.clamp_paragraph_indent(control.parameter, "first-line indent", offset)
             }
@@ -25870,6 +25870,25 @@ After\par}"#;
     }
 
     #[test]
+    fn normalizes_word_paragraph_indent_alias_controls() {
+        let output = parse_rtf(r"{\rtf1\lin720\rin360\fin-240 Indented\par}").unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.style.left_indent_twips, 720);
+        assert_eq!(paragraph.style.right_indent_twips, 360);
+        assert_eq!(paragraph.style.first_line_indent_twips, -240);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
     fn clamps_extreme_paragraph_indent_controls() {
         let options = RtfParseOptions {
             limits: RtfLimits {
@@ -25880,6 +25899,48 @@ After\par}"#;
         };
         let output = parse_rtf_bytes_with_options(
             br"{\rtf1\li99999\ri-99999\fi99999 Too much indent\par}",
+            &options,
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.style.left_indent_twips, 480);
+        assert_eq!(paragraph.style.right_indent_twips, -480);
+        assert_eq!(paragraph.style.first_line_indent_twips, 480);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("left indent clamped"))
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("right indent clamped"))
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("first-line indent clamped"))
+        );
+    }
+
+    #[test]
+    fn clamps_extreme_word_paragraph_indent_alias_controls() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_paragraph_indent_twips: 480,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\lin99999\rin-99999\fin99999 Too much indent\par}",
             &options,
         )
         .unwrap();
