@@ -76,6 +76,13 @@ fn binary_payloads_obey_reject_policy_outside_passive_pictures() {
         ),
         Err(ParseError::ActiveContentRejected { feature, .. }) if feature == "binary RTF payload"
     ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\unknown\bin5 abcde} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. }) if feature == "binary RTF payload"
+    ));
 }
 
 #[test]
@@ -29180,6 +29187,9 @@ fn unknown_non_ignorable_destinations_are_skipped_without_pdf_leakage() {
         "\\",
         "objdata ",
         payload_hex(),
+        " ",
+        "\\",
+        "bin5 ABCDE",
         " /JavaScript /EmbeddedFile}} after",
         "\\",
         "par}",
@@ -29193,6 +29203,7 @@ fn unknown_non_ignorable_destinations_are_skipped_without_pdf_leakage() {
         payload_hex(),
         "unknown",
         "objdata",
+        "ABCDE",
         "JavaScript",
         "EmbeddedFile",
         "[Embedded object removed]",
@@ -29222,6 +29233,7 @@ fn unknown_non_ignorable_destinations_are_skipped_without_pdf_leakage() {
         payload_hex().as_bytes(),
         b"unknown",
         b"objdata",
+        b"ABCDE",
         b"Embedded object removed",
         b"/JavaScript",
         b"/EmbeddedFile",
