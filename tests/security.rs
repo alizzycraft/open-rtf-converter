@@ -8518,6 +8518,86 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
 }
 
 #[test]
+fn no_snap_line_grid_control_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "sectd",
+        "\\",
+        "sectlinegrid720",
+        "\\",
+        "nosnaplinegrid Loose one",
+        "\\",
+        "line Loose two",
+        "\\",
+        "par",
+        "\\",
+        "nosnaplinegrid0 Grid one",
+        "\\",
+        "line Grid two",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let paragraph = |idx| match &parsed.document.blocks[idx] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+
+    assert!(text.contains("Loose one\nLoose two"));
+    assert!(text.contains("Grid one\nGrid two"));
+    assert!(!text.contains("nosnaplinegrid"));
+    assert!(!paragraph(0).style.snap_to_line_grid);
+    assert!(paragraph(1).style.snap_to_line_grid);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "nosnaplinegrid should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Loose one"));
+    assert!(rendered_text.contains("Loose two"));
+    assert!(rendered_text.contains("Grid one"));
+    assert!(rendered_text.contains("Grid two"));
+    for forbidden in [
+        b"nosnaplinegrid".as_slice(),
+        b"sectlinegrid",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "no-snap line-grid content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_external_fields_are_placeholdered_without_fetching() {
     let parsed = parse_rtf_bytes(&rtf(&[
         "{",

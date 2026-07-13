@@ -4167,6 +4167,9 @@ impl Parser {
             "slmult" => {
                 self.state.paragraph.line_spacing_multiple = control.parameter.unwrap_or(0) != 0
             }
+            "nosnaplinegrid" => {
+                self.state.paragraph.snap_to_line_grid = control.parameter.unwrap_or(1) == 0
+            }
             "hyphauto" => {
                 self.default_paragraph_style.auto_hyphenation = control.parameter.unwrap_or(1) != 0;
                 self.state.paragraph.auto_hyphenation =
@@ -13026,6 +13029,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.line_spacing_multiple == default.line_spacing_multiple {
         output.line_spacing_multiple = base.line_spacing_multiple;
+    }
+    if output.snap_to_line_grid == default.snap_to_line_grid {
+        output.snap_to_line_grid = base.snap_to_line_grid;
     }
     if output.shading_color_index == default.shading_color_index {
         output.shading_color_index = base.shading_color_index;
@@ -25484,6 +25490,29 @@ After\par}"#;
         let output = parse_rtf(r"{\rtf1\sectd\sectlinegrid480\sectdefaultcl Body\par}").unwrap();
 
         assert_eq!(output.document.page.text_line_grid_twips, None);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_paragraph_no_snap_line_grid_control() {
+        let output = parse_rtf(
+            r"{\rtf1\sectd\sectlinegrid720 Grid\par\nosnaplinegrid Loose\par\nosnaplinegrid0 Grid again\par}",
+        )
+        .unwrap();
+        let paragraph = |idx| match &output.document.blocks[idx] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(output.document.page.text_line_grid_twips, Some(720));
+        assert!(paragraph(0).style.snap_to_line_grid);
+        assert!(!paragraph(1).style.snap_to_line_grid);
+        assert!(paragraph(2).style.snap_to_line_grid);
         assert!(
             output
                 .diagnostics

@@ -5560,6 +5560,9 @@ fn apply_line_spacing_with_grid(
     geometry: PageGeometry,
 ) -> f32 {
     let spaced = apply_line_spacing(line_height, style);
+    if !style.snap_to_line_grid {
+        return spaced;
+    }
     let Some(grid_twips) = geometry.text_line_grid_twips else {
         return spaced;
     };
@@ -13181,6 +13184,27 @@ mod tests {
 
         assert_eq!(baselines.len(), 2);
         assert!((baselines[0] - baselines[1] - 36.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn no_snap_line_grid_paragraphs_use_normal_line_spacing() {
+        let mut document = Document::default();
+        document.page.text_line_grid_twips = Some(720);
+        let mut paragraph_style = ParagraphStyle::default();
+        paragraph_style.snap_to_line_grid = false;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: paragraph_style,
+            runs: vec![Run {
+                text: "First\nSecond".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let baselines = text_baselines(&layout.pages[0]);
+
+        assert_eq!(baselines.len(), 2);
+        assert!((baselines[0] - baselines[1] - 15.0).abs() < 0.01);
     }
 
     #[test]
