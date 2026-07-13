@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "purpose": "Track Word-reference fixture intent for passive RTF-to-PDF rendering. Word-exported PDFs/PNGs are development references only and are never production dependencies.",
+  "fixtures": [
+    {
+      "id": "simple-basic-visual",
+      "input": "fixtures/simple.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "Hello from open-rtf-converter",
+        "Centered paragraph with",
+        "Second page text"
+      ],
+      "intentional_security_differences": [],
+      "known_gaps": [
+        "Word-exported PDF and page PNG references still need to be captured for visual diffing."
+      ]
+    },
+    {
+      "id": "table-basic-visual",
+      "input": "fixtures/table-ish.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Name",
+        "Value",
+        "Alpha",
+        "Beta",
+        "After table text"
+      ],
+      "intentional_security_differences": [],
+      "known_gaps": [
+        "Table geometry should be compared against a Word-exported reference once available."
+      ]
+    },
+    {
+      "id": "unknown-destination-security",
+      "input": "fixtures/weird.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "visible text should survive",
+        "Escaped braces: {sample}",
+        "hex: ABC"
+      ],
+      "intentional_security_differences": [
+        "Unknown ignorable destinations are skipped and never copied into the PDF layer.",
+        "Unsupported controls are warned about without allowing parser metadata to become visible output."
+      ],
+      "known_gaps": [
+        "Word-exported reference should document whether Word surfaces any recoverable unknown-control text differently."
+      ]
+    }
+  ]
+}
