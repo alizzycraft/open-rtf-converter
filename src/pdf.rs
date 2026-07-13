@@ -363,12 +363,25 @@ pub fn audit_passive_pdf_bytes(pdf: &[u8]) -> Result<(), PassivePdfError> {
                 });
                 break;
             };
-            let Some(stream_end) = find_endstream_marker(pdf, stream_start) else {
-                issues.push(PassivePdfIssue {
-                    token: "<unterminated stream>",
-                    offset,
-                });
-                break;
+            let stream_end = match stream_end_from_declared_length(pdf, offset, stream_start) {
+                Some(DeclaredStreamEnd::Found(stream_end)) => stream_end,
+                Some(DeclaredStreamEnd::Malformed) => {
+                    issues.push(PassivePdfIssue {
+                        token: "<malformed stream length>",
+                        offset,
+                    });
+                    break;
+                }
+                None => {
+                    let Some(stream_end) = find_endstream_marker(pdf, stream_start) else {
+                        issues.push(PassivePdfIssue {
+                            token: "<unterminated stream>",
+                            offset,
+                        });
+                        break;
+                    };
+                    stream_end
+                }
             };
             offset = stream_end + b"endstream".len();
             continue;
@@ -2336,6 +2349,146 @@ fn stream_data_start(pdf: &[u8], stream_offset: usize) -> Option<usize> {
     }
 }
 
+enum DeclaredStreamEnd {
+    Found(usize),
+    Malformed,
+}
+
+fn stream_end_from_declared_length(
+    pdf: &[u8],
+    stream_offset: usize,
+    stream_start: usize,
+) -> Option<DeclaredStreamEnd> {
+    let (dictionary_start, dictionary_end) = stream_dictionary_bounds(pdf, stream_offset)?;
+    let declared_length = pdf_dictionary_direct_length(pdf, dictionary_start, dictionary_end)?;
+    let Some(stream_data_end) = stream_start.checked_add(declared_length) else {
+        return Some(DeclaredStreamEnd::Malformed);
+    };
+    let Some(endstream_offset) = stream_end_marker_after_declared_data(pdf, stream_data_end) else {
+        return Some(DeclaredStreamEnd::Malformed);
+    };
+    Some(DeclaredStreamEnd::Found(endstream_offset))
+}
+
+fn stream_dictionary_bounds(pdf: &[u8], stream_offset: usize) -> Option<(usize, usize)> {
+    let mut cursor = stream_offset.checked_sub(1)?;
+    while is_pdf_whitespace(*pdf.get(cursor)?) {
+        cursor = cursor.checked_sub(1)?;
+    }
+    if pdf.get(cursor).copied() != Some(b'>')
+        || cursor.checked_sub(1).and_then(|idx| pdf.get(idx)).copied() != Some(b'>')
+    {
+        return None;
+    }
+    let dictionary_end = cursor + 1;
+    let mut depth = 0usize;
+    let mut idx = cursor.checked_sub(2)?;
+    loop {
+        if pdf.get(idx).copied() == Some(b'>')
+            && idx
+                .checked_sub(1)
+                .and_then(|previous| pdf.get(previous))
+                .copied()
+                == Some(b'>')
+        {
+            depth = depth.checked_add(1)?;
+            idx = idx.checked_sub(2)?;
+            continue;
+        }
+        if pdf.get(idx).copied() == Some(b'<') && pdf.get(idx + 1).copied() == Some(b'<') {
+            if depth == 0 {
+                return Some((idx, dictionary_end));
+            }
+            depth -= 1;
+            idx = idx.checked_sub(1)?;
+            continue;
+        }
+        let Some(previous) = idx.checked_sub(1) else {
+            break;
+        };
+        idx = previous;
+    }
+    None
+}
+
+fn pdf_dictionary_direct_length(
+    pdf: &[u8],
+    dictionary_start: usize,
+    dictionary_end: usize,
+) -> Option<usize> {
+    let mut offset = dictionary_start.checked_add(2)?;
+    let mut depth = 0usize;
+    while offset < dictionary_end {
+        if pdf.get(offset).copied() == Some(b'<') && pdf.get(offset + 1).copied() == Some(b'<') {
+            depth = depth.checked_add(1)?;
+            offset += 2;
+            continue;
+        }
+        if pdf.get(offset).copied() == Some(b'>') && pdf.get(offset + 1).copied() == Some(b'>') {
+            if depth == 0 {
+                break;
+            }
+            depth -= 1;
+            offset += 2;
+            continue;
+        }
+        if depth == 0
+            && pdf[offset] == b'/'
+            && let Some(parsed_name) = parse_pdf_name_token(pdf, offset)
+        {
+            if parsed_name.name == b"/Length" {
+                return parse_pdf_unsigned_integer(pdf, parsed_name.end, dictionary_end);
+            }
+            offset = parsed_name.end;
+            continue;
+        }
+        offset += 1;
+    }
+    None
+}
+
+fn parse_pdf_unsigned_integer(pdf: &[u8], mut offset: usize, limit: usize) -> Option<usize> {
+    while offset < limit && is_pdf_whitespace(*pdf.get(offset)?) {
+        offset += 1;
+    }
+    let mut value = 0usize;
+    let mut digits = 0usize;
+    while offset < limit {
+        let byte = *pdf.get(offset)?;
+        if !byte.is_ascii_digit() {
+            break;
+        }
+        value = value
+            .checked_mul(10)?
+            .checked_add(usize::from(byte - b'0'))?;
+        digits += 1;
+        offset += 1;
+    }
+    if digits == 0 { None } else { Some(value) }
+}
+
+fn stream_end_marker_after_declared_data(pdf: &[u8], stream_data_end: usize) -> Option<usize> {
+    let mut marker_offset = stream_data_end;
+    match pdf.get(marker_offset).copied() {
+        Some(b'\r') if pdf.get(marker_offset + 1).copied() == Some(b'\n') => {
+            marker_offset += 2;
+        }
+        Some(b'\r' | b'\n') => {
+            marker_offset += 1;
+        }
+        _ => {}
+    }
+    if pdf
+        .get(marker_offset..)
+        .is_some_and(|tail| tail.starts_with(b"endstream"))
+        && is_pdf_whitespace_or_eof(pdf.get(marker_offset + b"endstream".len()).copied())
+    {
+        Some(marker_offset)
+    } else {
+        None
+    }
+}
+
 fn find_endstream_marker(pdf: &[u8], stream_start: usize) -> Option<usize> {
     let mut offset = stream_start;
     while offset < pdf.len() {
@@ -4134,16 +4287,69 @@ endobj
 
     #[test]
     fn passive_pdf_audit_ignores_visible_words_inside_content_streams() {
+        let stream =
+            b"BT (/A /Next /JavaScript /Launch /URI /Annots /Widget /ObjStm /XRef) Tj ET\n";
+        let mut pdf = format!(
+            "%PDF-1.7\n1 0 obj\n<< /Length {} >>\nstream\n",
+            stream.len()
+        )
+        .into_bytes();
+        pdf.extend_from_slice(stream);
+        pdf.extend_from_slice(b"endstream\nendobj\n%%EOF");
+
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn passive_pdf_audit_uses_declared_stream_length_before_marker_words() {
+        let stream = b"BT (visible endstream /JavaScript /OpenAction text) Tj ET\n";
+        let mut pdf = format!(
+            "%PDF-1.7\n1 0 obj\n<< /Length {} >>\nstream\n",
+            stream.len()
+        )
+        .into_bytes();
+        pdf.extend_from_slice(stream);
+        pdf.extend_from_slice(b"endstream\nendobj\n%%EOF");
+
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn passive_pdf_audit_uses_top_level_stream_length() {
+        let stream = b"BT (visible endstream /JavaScript text) Tj ET\n";
+        let mut pdf = format!(
+            "%PDF-1.7\n1 0 obj\n<< /DecodeParms << /Length 0 >> /Length {} >>\nstream\n",
+            stream.len()
+        )
+        .into_bytes();
+        pdf.extend_from_slice(stream);
+        pdf.extend_from_slice(b"endstream\nendobj\n%%EOF");
+
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_mismatched_direct_stream_length() {
         let pdf = b"%PDF-1.7
 1 0 obj
-<< /Length 54 >>
+<< /Length 0 >>
 stream
-BT (/A /Next /JavaScript /Launch /URI /Annots /Widget /ObjStm /XRef) Tj ET
+/JavaScript
 endstream
 endobj
 %%EOF";
 
-        audit_passive_pdf_bytes(pdf).unwrap();
+        let error =
+            audit_passive_pdf_bytes(pdf).expect_err("mismatched direct stream length is malformed");
+
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == "<malformed stream length>"),
+            "issues were {:?}",
+            error.issues
+        );
     }
 
     #[test]
@@ -4169,16 +4375,16 @@ endstream
 
     #[test]
     fn passive_pdf_audit_ignores_escaped_visible_words_inside_content_streams() {
-        let pdf = b"%PDF-1.7
-1 0 obj
-<< /Length 54 >>
-stream
-BT (/Java#53cript /Launch /Embedded#46iles /Open#41ction) Tj ET
-endstream
-endobj
-%%EOF";
+        let stream = b"BT (/Java#53cript /Launch /Embedded#46iles /Open#41ction) Tj ET\n";
+        let mut pdf = format!(
+            "%PDF-1.7\n1 0 obj\n<< /Length {} >>\nstream\n",
+            stream.len()
+        )
+        .into_bytes();
+        pdf.extend_from_slice(stream);
+        pdf.extend_from_slice(b"endstream\nendobj\n%%EOF");
 
-        audit_passive_pdf_bytes(pdf).unwrap();
+        audit_passive_pdf_bytes(&pdf).unwrap();
     }
 
     #[test]
