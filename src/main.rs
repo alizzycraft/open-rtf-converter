@@ -62,6 +62,12 @@ struct Cli {
     #[arg(long = "font-dir", value_name = "PATH")]
     font_dirs: Vec<PathBuf>,
 
+    /// Do not inspect platform system font directories in normal CLI mode.
+    ///
+    /// System font discovery is never enabled for --browser-safe.
+    #[arg(long)]
+    no_system_fonts: bool,
+
     /// Substitute a missing RTF font family with a font family found in --font-dir, in the form REQUESTED[,ALIAS...]=INSTALLED.
     #[arg(
         long = "font-substitute",
@@ -133,7 +139,9 @@ fn main() {
         }),
     };
 
-    let requested_font_families = match requested_font_families_for_font_dirs(&cli) {
+    let font_dirs = effective_cli_font_dirs(&cli);
+
+    let requested_font_families = match requested_font_families_for_font_dirs(&cli, &font_dirs) {
         Ok(families) => families,
         Err(error) => {
             eprintln!("error: {error}");
@@ -151,7 +159,7 @@ fn main() {
 
     let font_provider = match load_cli_font_provider(
         &cli.fonts,
-        &cli.font_dirs,
+        &font_dirs,
         &cli.font_substitutes,
         &requested_font_families,
         cli.browser_safe,
@@ -224,8 +232,64 @@ fn build_parse_options(cli: &Cli) -> RtfParseOptions {
     options
 }
 
-fn requested_font_families_for_font_dirs(cli: &Cli) -> Result<Vec<String>, CliInputFontError> {
-    if cli.font_dirs.is_empty() {
+fn effective_cli_font_dirs(cli: &Cli) -> Vec<PathBuf> {
+    let mut font_dirs = cli.font_dirs.clone();
+    if cli.browser_safe || cli.no_system_fonts {
+        return font_dirs;
+    }
+    append_existing_unique_font_dirs(&mut font_dirs, default_system_font_dirs());
+    font_dirs
+}
+
+fn append_existing_unique_font_dirs(
+    font_dirs: &mut Vec<PathBuf>,
+    candidates: impl IntoIterator<Item = PathBuf>,
+) {
+    for candidate in candidates {
+        if !candidate.is_dir() {
+            continue;
+        }
+        if font_dirs
+            .iter()
+            .any(|existing| same_cli_path(existing, &candidate))
+        {
+            continue;
+        }
+        font_dirs.push(candidate);
+    }
+}
+
+fn default_system_font_dirs() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        vec![PathBuf::from(r"C:\Windows\Fonts")]
+    } else if cfg!(target_os = "macos") {
+        vec![
+            PathBuf::from("/System/Library/Fonts"),
+            PathBuf::from("/Library/Fonts"),
+        ]
+    } else {
+        vec![
+            PathBuf::from("/usr/share/fonts"),
+            PathBuf::from("/usr/local/share/fonts"),
+            PathBuf::from("/usr/share/fonts/truetype"),
+        ]
+    }
+}
+
+fn same_cli_path(left: &Path, right: &Path) -> bool {
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    } else {
+        left == right
+    }
+}
+
+fn requested_font_families_for_font_dirs(
+    cli: &Cli,
+    font_dirs: &[PathBuf],
+) -> Result<Vec<String>, CliInputFontError> {
+    if font_dirs.is_empty() {
         return Ok(Vec::new());
     }
     let input = std::fs::read(&cli.input).map_err(|source| CliInputFontError::ReadInput {
@@ -1212,6 +1276,41 @@ mod tests {
             provider.coverage_for_char("Tuffy", 'A'),
             open_rtf_converter::FontCoverage::Covered
         );
+    }
+
+    #[test]
+    fn appends_existing_unique_font_dirs_without_host_assumptions() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let missing = second.path().join("missing");
+        let mut font_dirs = vec![first.path().to_path_buf()];
+
+        append_existing_unique_font_dirs(
+            &mut font_dirs,
+            [
+                first.path().to_path_buf(),
+                second.path().to_path_buf(),
+                missing,
+            ],
+        );
+
+        assert_eq!(font_dirs.len(), 2);
+        assert_eq!(font_dirs[0], first.path());
+        assert_eq!(font_dirs[1], second.path());
+    }
+
+    #[test]
+    fn cli_system_font_discovery_stays_out_of_browser_safe_mode() {
+        let normal = Cli::try_parse_from(["open-rtf-converter", "input.rtf"]).unwrap();
+        assert!(!normal.no_system_fonts);
+
+        let no_system =
+            Cli::try_parse_from(["open-rtf-converter", "--no-system-fonts", "input.rtf"]).unwrap();
+        assert!(effective_cli_font_dirs(&no_system).is_empty());
+
+        let browser_safe =
+            Cli::try_parse_from(["open-rtf-converter", "--browser-safe", "input.rtf"]).unwrap();
+        assert!(effective_cli_font_dirs(&browser_safe).is_empty());
     }
 
     #[test]
