@@ -285,6 +285,9 @@ fn same_cli_path(left: &Path, right: &Path) -> bool {
     }
 }
 
+const CLI_FONT_DIR_MAX_DEPTH: usize = 4;
+const CLI_FONT_DIR_MAX_ENTRIES: usize = 4096;
+
 fn requested_font_families_for_font_dirs(
     cli: &Cli,
     font_dirs: &[PathBuf],
@@ -523,52 +526,125 @@ fn load_cli_font_dir(
     requested_font_families: &[String],
     substitutions: &[FontSubstitution],
     provider: &mut FontProvider,
+    total_bytes: usize,
+) -> Result<usize, CliFontError> {
+    load_cli_font_dir_with_limits(
+        dir,
+        requested_font_families,
+        substitutions,
+        provider,
+        total_bytes,
+        CLI_FONT_DIR_MAX_DEPTH,
+        CLI_FONT_DIR_MAX_ENTRIES,
+    )
+}
+
+fn load_cli_font_dir_with_limits(
+    dir: &Path,
+    requested_font_families: &[String],
+    substitutions: &[FontSubstitution],
+    provider: &mut FontProvider,
+    mut total_bytes: usize,
+    max_depth: usize,
+    max_entries: usize,
+) -> Result<usize, CliFontError> {
+    let mut pending_dirs = vec![(dir.to_path_buf(), 0usize)];
+    let mut entry_count = 0usize;
+    while let Some((current_dir, depth)) = pending_dirs.pop() {
+        let entries =
+            std::fs::read_dir(&current_dir).map_err(|source| CliFontError::ReadFontDir {
+                path: current_dir.clone(),
+                source,
+            })?;
+        for entry in entries {
+            let entry = entry.map_err(|source| CliFontError::ReadFontDir {
+                path: current_dir.clone(),
+                source,
+            })?;
+            entry_count =
+                entry_count
+                    .checked_add(1)
+                    .ok_or_else(|| CliFontError::FontDirectoryTooLarge {
+                        path: dir.to_path_buf(),
+                        entries: usize::MAX,
+                        limit: max_entries,
+                    })?;
+            if entry_count > max_entries {
+                return Err(CliFontError::FontDirectoryTooLarge {
+                    path: dir.to_path_buf(),
+                    entries: entry_count,
+                    limit: max_entries,
+                });
+            }
+
+            let file_type = entry
+                .file_type()
+                .map_err(|source| CliFontError::ReadFontDir {
+                    path: current_dir.clone(),
+                    source,
+                })?;
+            let path = entry.path();
+            if file_type.is_dir() {
+                if depth < max_depth {
+                    pending_dirs.push((path, depth + 1));
+                }
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            total_bytes = load_cli_font_file_from_dir(
+                &path,
+                requested_font_families,
+                substitutions,
+                provider,
+                total_bytes,
+            )?;
+        }
+    }
+    Ok(total_bytes)
+}
+
+fn load_cli_font_file_from_dir(
+    path: &Path,
+    requested_font_families: &[String],
+    substitutions: &[FontSubstitution],
+    provider: &mut FontProvider,
     mut total_bytes: usize,
 ) -> Result<usize, CliFontError> {
-    let entries = std::fs::read_dir(dir).map_err(|source| CliFontError::ReadFontDir {
-        path: dir.to_path_buf(),
-        source,
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|source| CliFontError::ReadFontDir {
-            path: dir.to_path_buf(),
-            source,
-        })?;
-        let path = entry.path();
-        if !is_supported_cli_font_path(&path) {
-            continue;
-        }
-        if cli_font_dir_file_exceeds_asset_limit(&path, provider.limits.max_asset_bytes)? {
-            continue;
-        }
-        let bytes = read_bounded_font_file(&path, provider.limits.max_asset_bytes)?;
-        let (mut family_names, style) = cli_font_metadata(&bytes, &path)?;
-        let mut substitute_aliases =
-            substitute_aliases_for_font(&family_names, requested_font_families, substitutions);
-        for alias in passive_symbolic_aliases_for_font(&family_names, requested_font_families) {
-            push_unique_font_family_name(&mut substitute_aliases, alias);
-        }
-        let direct_match = requested_font_families.is_empty()
-            || font_metadata_matches_requested_families(&family_names, requested_font_families);
-        if !direct_match && substitute_aliases.is_empty() {
-            continue;
-        }
-        for alias in substitute_aliases {
-            push_unique_font_family_name(&mut family_names, alias);
-        }
-        if provider.assets.len() >= provider.limits.max_assets {
-            return Err(CliFontError::Provider(FontProviderError::TooManyAssets {
-                count: provider.assets.len() + 1,
-                limit: provider.limits.max_assets,
-            }));
-        }
-        total_bytes = checked_add_font_asset_bytes(total_bytes, bytes.len(), provider)?;
-        provider.assets.push(FontAsset {
-            family_names,
-            style,
-            bytes,
-        });
+    if !is_supported_cli_font_path(path) {
+        return Ok(total_bytes);
     }
+    if cli_font_dir_file_exceeds_asset_limit(path, provider.limits.max_asset_bytes)? {
+        return Ok(total_bytes);
+    }
+    let bytes = read_bounded_font_file(path, provider.limits.max_asset_bytes)?;
+    let (mut family_names, style) = cli_font_metadata(&bytes, path)?;
+    let mut substitute_aliases =
+        substitute_aliases_for_font(&family_names, requested_font_families, substitutions);
+    for alias in passive_symbolic_aliases_for_font(&family_names, requested_font_families) {
+        push_unique_font_family_name(&mut substitute_aliases, alias);
+    }
+    let direct_match = requested_font_families.is_empty()
+        || font_metadata_matches_requested_families(&family_names, requested_font_families);
+    if !direct_match && substitute_aliases.is_empty() {
+        return Ok(total_bytes);
+    }
+    for alias in substitute_aliases {
+        push_unique_font_family_name(&mut family_names, alias);
+    }
+    if provider.assets.len() >= provider.limits.max_assets {
+        return Err(CliFontError::Provider(FontProviderError::TooManyAssets {
+            count: provider.assets.len() + 1,
+            limit: provider.limits.max_assets,
+        }));
+    }
+    total_bytes = checked_add_font_asset_bytes(total_bytes, bytes.len(), provider)?;
+    provider.assets.push(FontAsset {
+        family_names,
+        style,
+        bytes,
+    });
     Ok(total_bytes)
 }
 
@@ -791,6 +867,11 @@ enum CliFontError {
         size: usize,
         limit: usize,
     },
+    FontDirectoryTooLarge {
+        path: PathBuf,
+        entries: usize,
+        limit: usize,
+    },
     TotalFontBytesTooLarge {
         size: usize,
         limit: usize,
@@ -832,6 +913,15 @@ impl fmt::Display for CliFontError {
             Self::FontTooLarge { path, size, limit } => write!(
                 formatter,
                 "font asset {} exceeded configured limit: {size} bytes > {limit} bytes",
+                path.display()
+            ),
+            Self::FontDirectoryTooLarge {
+                path,
+                entries,
+                limit,
+            } => write!(
+                formatter,
+                "font directory {} exceeded configured traversal limit: {entries} entries > {limit} entries",
                 path.display()
             ),
             Self::TotalFontBytesTooLarge { size, limit } => write!(
@@ -1118,6 +1208,50 @@ mod tests {
             provider.coverage_for_char("Tuffy", 'A'),
             open_rtf_converter::FontCoverage::Covered
         );
+    }
+
+    #[test]
+    fn loads_cli_font_directory_from_bounded_subdirectories() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("truetype").join("fixture");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::copy("fixtures/fonts/Tuffy.ttf", nested.join("Tuffy.ttf")).unwrap();
+
+        let provider = load_cli_font_provider(
+            &[],
+            &[dir.path().to_path_buf()],
+            &[],
+            &["Tuffy".to_string()],
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(provider.assets.len(), 1);
+        assert_eq!(
+            provider.coverage_for_char("Tuffy", 'A'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+    }
+
+    #[test]
+    fn cli_font_directory_traversal_obeys_entry_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("one.txt"), b"not a font").unwrap();
+        std::fs::write(dir.path().join("two.txt"), b"not a font").unwrap();
+        let mut provider = FontProvider::default();
+
+        let error = load_cli_font_dir_with_limits(dir.path(), &[], &[], &mut provider, 0, 1, 1)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CliFontError::FontDirectoryTooLarge {
+                entries: 2,
+                limit: 1,
+                ..
+            }
+        ));
+        assert!(provider.assets.is_empty());
     }
 
     #[test]
