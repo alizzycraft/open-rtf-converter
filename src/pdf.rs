@@ -2302,9 +2302,29 @@ fn is_stream_marker_at(pdf: &[u8], offset: usize) -> bool {
             .checked_sub(1)
             .and_then(|idx| pdf.get(idx))
             .is_some_and(|byte| is_pdf_whitespace(*byte))
+        && stream_marker_follows_dictionary(pdf, offset)
         && pdf
             .get(offset + b"stream".len())
             .is_some_and(|byte| matches!(*byte, b'\r' | b'\n'))
+}
+
+fn stream_marker_follows_dictionary(pdf: &[u8], stream_offset: usize) -> bool {
+    let Some(first_trailing_whitespace) = stream_offset.checked_sub(1) else {
+        return false;
+    };
+    let mut cursor = first_trailing_whitespace;
+    while let Some(byte) = pdf.get(cursor).copied() {
+        if !is_pdf_whitespace(byte) {
+            break;
+        }
+        let Some(previous) = cursor.checked_sub(1) else {
+            return false;
+        };
+        cursor = previous;
+    }
+
+    pdf.get(cursor).copied() == Some(b'>')
+        && cursor.checked_sub(1).and_then(|idx| pdf.get(idx)).copied() == Some(b'>')
 }
 
 fn stream_data_start(pdf: &[u8], stream_offset: usize) -> Option<usize> {
@@ -4124,6 +4144,27 @@ endobj
 %%EOF";
 
         audit_passive_pdf_bytes(pdf).unwrap();
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_active_names_after_forged_stream_marker() {
+        let pdf = b"%PDF-1.7
+stream
+/JavaScript
+endstream
+%%EOF";
+
+        let error = audit_passive_pdf_bytes(pdf)
+            .expect_err("forged stream marker must not hide active PDF names");
+
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == "/JavaScript"),
+            "issues were {:?}",
+            error.issues
+        );
     }
 
     #[test]
