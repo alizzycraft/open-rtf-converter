@@ -17911,6 +17911,10 @@ fn opaque_metadata_payloads_obey_reject_policy() {
             "Office theme data",
         ),
         (
+            br"{\rtf1{\info{\hlinkbase https://example.com/base/}}Visible body\par}".as_slice(),
+            "hyperlink base",
+        ),
+        (
             br"{\rtf1{\*\colorschememapping 414243}Visible body\par}".as_slice(),
             "Office color scheme mapping",
         ),

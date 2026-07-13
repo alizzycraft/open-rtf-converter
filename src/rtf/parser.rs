@@ -3601,6 +3601,13 @@ impl Parser {
                 self.handle_active_content(feature, offset)?;
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
+            name if self.state.inside_metadata
+                && opaque_metadata_payload_feature(name).is_some() =>
+            {
+                let feature = opaque_metadata_payload_feature(name).expect("checked above");
+                self.reject_active_content_only(feature, offset)?;
+                self.count_skipped_destination_bytes(name.len(), offset)?;
+            }
             name if self.state.destination == Destination::Ignored
                 && opaque_metadata_payload_feature(name).is_some() =>
             {
@@ -13144,6 +13151,7 @@ fn opaque_metadata_payload_feature(name: &str) -> Option<&'static str> {
     match name {
         "datastore" => Some("custom XML data store"),
         "colorschememapping" => Some("Office color scheme mapping"),
+        "hlinkbase" => Some("hyperlink base"),
         "themedata" => Some("Office theme data"),
         "xmlattrname" | "xmlattrns" | "xmlattrvalue" => Some("custom XML attribute metadata"),
         "xmlnstbl" => Some("custom XML namespace table"),
