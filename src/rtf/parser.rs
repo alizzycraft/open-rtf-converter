@@ -7624,7 +7624,7 @@ impl Parser {
         {
             *existing = text;
         } else {
-            if self.document_variables.len() >= self.limits().max_styles {
+            if self.document_property_state_len() >= self.limits().max_document_properties {
                 return Err(ParseError::ResourceLimitExceeded {
                     resource: "document variables".to_string(),
                     offset,
@@ -7652,7 +7652,7 @@ impl Parser {
         {
             *existing = text;
         } else {
-            if self.custom_document_properties.len() >= self.limits().max_styles {
+            if self.document_property_state_len() >= self.limits().max_document_properties {
                 return Err(ParseError::ResourceLimitExceeded {
                     resource: "custom document properties".to_string(),
                     offset,
@@ -7662,6 +7662,12 @@ impl Parser {
                 .push((name.to_string(), text));
         }
         Ok(())
+    }
+
+    fn document_property_state_len(&self) -> usize {
+        self.document_variables
+            .len()
+            .saturating_add(self.custom_document_properties.len())
     }
 
     fn push_passive_field_result(
@@ -23389,7 +23395,7 @@ After\par}"#;
     fn document_variable_metadata_obeys_count_bounds() {
         let options = RtfParseOptions {
             limits: RtfLimits {
-                max_styles: 0,
+                max_document_properties: 0,
                 ..RtfLimits::default()
             },
             ..RtfParseOptions::default()
@@ -23402,6 +23408,56 @@ After\par}"#;
                 result,
                 Err(ParseError::ResourceLimitExceeded { ref resource, .. })
                     if resource == "document variables"
+            ),
+            "unexpected result: {result:?}"
+        );
+    }
+
+    #[test]
+    fn document_property_limit_is_independent_from_styles() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_document_properties: 1,
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let output = parse_rtf_bytes_with_options(
+            br#"{\rtf1{\*\docvar {Client}{Contoso}}Client {\field{\*\fldinst DOCVARIABLE Client}}\par}"#,
+            &options,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Client Contoso"),
+            "metadata fields should render despite max_styles=0: {text:?}"
+        );
+    }
+
+    #[test]
+    fn document_property_limit_bounds_combined_custom_properties_and_variables() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_document_properties: 1,
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let result = parse_rtf_bytes_with_options(
+            br#"{\rtf1{\*\docvar {Client}{Contoso}}{\*\userprops{\propname Region}{\proptype30}{\staticval North}}\par}"#,
+            &options,
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ResourceLimitExceeded { ref resource, .. })
+                    if resource == "custom document properties"
             ),
             "unexpected result: {result:?}"
         );
