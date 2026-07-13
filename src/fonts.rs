@@ -202,6 +202,18 @@ impl FontGlyphMetrics {
         }
         font_size_points * f32::from(self.advance_units) / f32::from(self.units_per_em)
     }
+
+    pub fn line_height_points(self, font_size_points: f32) -> Option<f32> {
+        if self.units_per_em == 0 {
+            return None;
+        }
+        let height_units = i32::from(self.ascender_units) - i32::from(self.descender_units);
+        if height_units <= 0 {
+            return None;
+        }
+        let height = font_size_points * height_units as f32 / f32::from(self.units_per_em);
+        height.is_finite().then_some(height)
+    }
 }
 
 fn glyph_metrics_for_asset(asset: &FontAsset, ch: char) -> Option<FontGlyphMetrics> {

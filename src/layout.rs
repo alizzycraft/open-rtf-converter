@@ -5351,7 +5351,7 @@ fn push_segment(
     line.width += segment.width;
     line.height = line
         .height
-        .max((segment.line_height_points * 1.25) + segment.style.baseline_shift_points().abs());
+        .max(flow_run_line_height(&segment, document, font_provider));
     line.runs.push(segment);
 }
 
@@ -5436,7 +5436,41 @@ fn materialize_line_end_soft_hyphen(
     line.width += added_width;
     line.height = line
         .height
-        .max((last.line_height_points * 1.25) + last.style.baseline_shift_points().abs());
+        .max(flow_run_line_height(last, document, font_provider));
+}
+
+fn flow_run_line_height(
+    run: &FlowRun,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
+    let fallback = fallback_flow_run_line_height(run);
+    let Some(provider) = font_provider else {
+        return fallback;
+    };
+    let Some(font) = font_for_style(document, &run.style) else {
+        return fallback;
+    };
+    let metric_char = run
+        .text
+        .chars()
+        .find(|ch| !ch.is_control() && !ch.is_whitespace())
+        .unwrap_or('A');
+    let Some(line_height) = supplied_font_glyph_metrics(provider, font, &run.style, metric_char)
+        .or_else(|| supplied_font_glyph_metrics(provider, font, &run.style, 'A'))
+        .and_then(|metrics| metrics.line_height_points(run.line_height_points))
+    else {
+        return fallback;
+    };
+    let bounded_line_height = line_height.clamp(
+        run.line_height_points.max(1.0),
+        run.line_height_points.max(1.0) * 2.0,
+    );
+    bounded_line_height + run.style.baseline_shift_points().abs()
+}
+
+fn fallback_flow_run_line_height(run: &FlowRun) -> f32 {
+    (run.line_height_points * 1.25) + run.style.baseline_shift_points().abs()
 }
 
 fn measure_flow_run(
@@ -12448,6 +12482,73 @@ mod tests {
         assert!(
             (provided_advance - fallback_advance).abs() > 0.1,
             "provided metrics should visibly differ from fallback width"
+        );
+    }
+
+    #[test]
+    fn caller_font_metrics_drive_line_height_without_system_fonts() {
+        let mut document = Document::default();
+        document.fonts = vec![FontDef {
+            index: 0,
+            name: "Tuffy".to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Swiss,
+            pitch: FontPitch::Default,
+        }];
+        let paragraph = Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "A".to_string(),
+                style: Default::default(),
+            }],
+        };
+        let provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["Tuffy".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: FontProviderLimits {
+                max_asset_bytes: 256 * 1024,
+                max_total_bytes: 256 * 1024,
+                ..FontProviderLimits::default()
+            },
+        };
+        provider.validate().unwrap();
+        let markers = test_markers("1", "1");
+        let fallback_line =
+            wrap_paragraph_with_font_provider(&paragraph, 500.0, &markers, &document, None)
+                .into_iter()
+                .next()
+                .expect("fallback line");
+        let supplied_line = wrap_paragraph_with_font_provider(
+            &paragraph,
+            500.0,
+            &markers,
+            &document,
+            Some(&provider),
+        )
+        .into_iter()
+        .next()
+        .expect("supplied line");
+        let expected_height = provider
+            .glyph_metrics_for_char("Tuffy", 'A')
+            .and_then(|metrics| {
+                metrics.line_height_points(CharacterStyle::default().font_size_points())
+            })
+            .expect("line metrics")
+            .clamp(
+                CharacterStyle::default().font_size_points().max(1.0),
+                CharacterStyle::default().font_size_points().max(1.0) * 2.0,
+            )
+            .max(empty_line().height);
+
+        assert!((supplied_line.height - expected_height).abs() < 0.01);
+        assert!(
+            (supplied_line.height - fallback_line.height).abs() > 0.1,
+            "provided metrics should visibly differ from fallback line height"
         );
     }
 
