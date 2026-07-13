@@ -622,6 +622,94 @@ fn nogrowautofit_preserves_authored_table_widths_without_control_leakage() {
 }
 
 #[test]
+fn trautofit_row_control_normalizes_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw7200",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "trowd",
+        "\\",
+        "trautofit0",
+        "\\",
+        "cellx4000 Fixed left",
+        "\\",
+        "cell",
+        "\\",
+        "cellx8000 Fixed right",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+
+    assert!(table.preserve_authored_widths);
+    assert_eq!(table.column_widths_twips, vec![4_000, 4_000]);
+    assert!(text.contains("Fixed left"));
+    assert!(text.contains("Fixed right"));
+    assert!(!text.contains("trautofit"));
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("table row autofit interpreted through bounded passive table width layout")),
+        "missing trautofit diagnostic: {:?}",
+        parsed.diagnostics
+    );
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "trautofit should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Fixed left"));
+    assert!(rendered_text.contains("Fixed right"));
+    for forbidden in [
+        b"trautofit".as_slice(),
+        b"cellx",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden trautofit content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn floating_table_positioning_controls_warn_without_payload_leakage() {
     let input = rtf(&[
         "{",

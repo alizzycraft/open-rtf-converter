@@ -4461,6 +4461,16 @@ impl Parser {
                     table.preserve_authored_widths = self.preserve_authored_table_widths;
                 }
             }
+            "trautofit" => {
+                self.preserve_authored_table_widths = control.parameter.unwrap_or(1) == 0;
+                if let Some(table) = self.current_table.as_mut() {
+                    table.preserve_authored_widths = self.preserve_authored_table_widths;
+                }
+                self.diagnostics.push(Diagnostic::warning(
+                    "table row autofit interpreted through bounded passive table width layout",
+                    Some(offset),
+                ));
+            }
             name if custom_xml_markup_feature(name).is_some() => {
                 let feature = custom_xml_markup_feature(name).expect("checked above");
                 self.reject_active_content_only(feature, offset)?;
@@ -20078,6 +20088,38 @@ mod tests {
         let output =
             parse_rtf(r"{\rtf1\nogrowautofit0\trowd\cellx4000 A\cell\cellx8000 B\cell\row}")
                 .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        assert!(!table.preserve_authored_widths);
+    }
+
+    #[test]
+    fn trautofit_normalizes_as_safe_table_width_metadata() {
+        let output =
+            parse_rtf(r"{\rtf1\trowd\trautofit0\cellx4000 A\cell\cellx8000 B\cell\row}").unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert!(table.preserve_authored_widths);
+        assert_eq!(table.column_widths_twips, vec![4_000, 4_000]);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "table row autofit interpreted through bounded passive table width layout",
+            )
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+
+        let output =
+            parse_rtf(r"{\rtf1\trowd\trautofit1\cellx4000 A\cell\cellx8000 B\cell\row}").unwrap();
         let table = match &output.document.blocks[0] {
             Block::Table(table) => table,
             _ => panic!("expected table block"),
