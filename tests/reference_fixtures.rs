@@ -19,6 +19,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/simple.rtf",
         "fixtures/table-ish.rtf",
         "fixtures/weird.rtf",
+        "fixtures/object-result.rtf",
     ] {
         assert!(
             Path::new(fixture).is_file(),
@@ -156,6 +157,26 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"madeup123",
                 b"/JavaScript",
                 b"/EmbeddedFile",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/object-result.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before object result.",
+                "visible fallback",
+                "After object result.",
+            ],
+            must_not_leak: &[
+                b"objemb",
+                b"objdata",
+                b"414243",
+                b"JavaScript",
+                b"EmbeddedFile",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
             ],
         },
     ]

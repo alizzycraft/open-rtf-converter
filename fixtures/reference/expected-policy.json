@@ -60,6 +60,27 @@
       "known_gaps": [
         "Word-exported reference should document whether Word surfaces any recoverable unknown-control text differently."
       ]
+    },
+    {
+      "id": "object-result-security",
+      "input": "fixtures/object-result.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before object result.",
+        "visible fallback",
+        "After object result."
+      ],
+      "intentional_security_differences": [
+        "Embedded OLE payload bytes are stripped and never copied into the normalized model or PDF.",
+        "Only the safe static object result is rendered; the object itself is not activated, embedded, attached, or preserved."
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm the fallback result's exact visual position once available."
+      ]
     }
   ]
 }
