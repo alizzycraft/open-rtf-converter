@@ -2562,6 +2562,7 @@ impl Parser {
             name if is_object_metadata_destination(name)
                 && destination_allows_visible_content(&self.state) =>
             {
+                self.handle_active_content("object metadata", offset)?;
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
@@ -2636,6 +2637,9 @@ impl Parser {
             {
                 if let Some(feature) = opaque_metadata_payload_feature(name) {
                     self.reject_active_content_only(feature, offset)?;
+                }
+                if let Some(feature) = metadata_nested_active_feature(name) {
+                    self.handle_active_content(feature, offset)?;
                 }
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
@@ -13311,6 +13315,9 @@ fn skipped_destination_active_feature(name: &str) -> Option<&'static str> {
         "field" | "fldinst" => Some("field instruction in skipped destination"),
         "template" => Some("external template in skipped destination"),
         "fontemb" | "fontfile" => Some("embedded font payload in skipped destination"),
+        name if is_object_metadata_destination(name) => {
+            Some("object metadata in skipped destination")
+        }
         name if is_mail_merge_destination(name) => {
             Some("mail merge data source in skipped destination")
         }
@@ -13397,6 +13404,7 @@ fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
         "field" | "fldinst" => Some("field instruction in metadata"),
         "template" => Some("external template in metadata"),
         "fontemb" | "fontfile" => Some("embedded font payload in metadata"),
+        name if is_object_metadata_destination(name) => Some("object metadata in metadata"),
         name if is_mail_merge_destination(name) => Some("mail merge data source in metadata"),
         name if is_annotation_destination(name) => Some("annotation metadata in metadata"),
         _ => None,

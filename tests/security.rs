@@ -5165,6 +5165,20 @@ fn object_metadata_destinations_do_not_reach_text_or_pdf() {
         "\\",
         "par}",
     ]);
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+    let reject_result = parse_rtf_bytes_with_options(&input, &reject_options);
+    assert!(
+        matches!(
+            reject_result,
+            Err(ParseError::ActiveContentRejected { ref feature, .. })
+                if feature == "object metadata"
+        ),
+        "unexpected object metadata reject result: {reject_result:?}"
+    );
+
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
@@ -29287,6 +29301,14 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
     ));
     assert!(matches!(
         parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\unknown{\objclass HiddenClass}{\objname HiddenName}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "object metadata in skipped destination"
+    ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
             br"{\rtf1{\*\unknown{\mmdatasource https://example.com/data.csv}} visible\par}",
             &reject_options
         ),
@@ -29312,7 +29334,7 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
 
     let parsed =
         parse_rtf_bytes(
-            br"{\rtf1{\*\unknown{\object\objdata 414243}{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}}{\template https://example.com/template.dotm}{\mmdatasource https://example.com/data.csv}{\annotation hidden comment}}{\*\template https://example.com/direct-template.dotm}{\*\objdata 444546} visible\par}"
+            br"{\rtf1{\*\unknown{\object\objdata 414243}{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}}{\template https://example.com/template.dotm}{\objclass HiddenClass}{\mmdatasource https://example.com/data.csv}{\annotation hidden comment}}{\*\template https://example.com/direct-template.dotm}{\*\objdata 444546} visible\par}"
         ).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("visible"));
@@ -29320,6 +29342,7 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
     assert!(!text.contains("444546"));
     assert!(!text.contains("template.dotm"));
     assert!(!text.contains("direct-template.dotm"));
+    assert!(!text.contains("HiddenClass"));
     assert!(!text.contains("data.csv"));
     assert!(!text.contains("hidden comment"));
     assert!(!text.contains("HOSTILE-FONT-PAYLOAD"));
@@ -29328,6 +29351,7 @@ fn active_controls_inside_skipped_destinations_obey_reject_policy() {
         "active content removed: object payload in skipped destination before safe model normalization",
         "active content removed: embedded font payload in skipped destination before safe model normalization",
         "active content removed: external template in skipped destination before safe model normalization",
+        "active content removed: object metadata in skipped destination before safe model normalization",
         "active content removed: mail merge data source in skipped destination before safe model normalization",
         "active content removed: annotation metadata in skipped destination before safe model normalization",
     ] {
