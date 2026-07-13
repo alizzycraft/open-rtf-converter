@@ -82,7 +82,7 @@ pub fn convert_rtf_to_pdf(
     };
     if options.diagnostics {
         diagnostics.extend(passive_font_substitution_diagnostics(
-            &parsed.document.fonts,
+            &parsed.document,
             &options.font_provider,
         ));
         diagnostics.extend(unsupported_passive_glyph_diagnostics(
@@ -111,12 +111,16 @@ pub fn convert_rtf_to_pdf(
 }
 
 fn passive_font_substitution_diagnostics(
-    fonts: &[FontDef],
+    document: &Document,
     font_provider: &FontProvider,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = Vec::<(String, PdfFontFamily)>::new();
-    for font in fonts {
+    let used_font_indexes = collect_visible_font_indexes(document);
+    for font in &document.fonts {
+        if !used_font_indexes.contains(&font.index) {
+            continue;
+        }
         let family = passive_pdf_font_family_for_font(font);
         if font_provider_has_asset_for_font(font_provider, font) {
             continue;
@@ -144,6 +148,94 @@ fn passive_font_substitution_diagnostics(
         diagnostics.push(Diagnostic::warning(message, None));
     }
     diagnostics
+}
+
+fn collect_visible_font_indexes(document: &Document) -> Vec<i32> {
+    let mut indexes = Vec::new();
+    collect_visible_font_indexes_from_blocks(&document.blocks, &mut indexes);
+    for paragraphs in [
+        &document.header,
+        &document.first_page_header,
+        &document.even_page_header,
+        &document.footer,
+        &document.first_page_footer,
+        &document.even_page_footer,
+        &document.footnotes,
+        &document.endnotes,
+    ] {
+        collect_visible_font_indexes_from_paragraphs(paragraphs, &mut indexes);
+    }
+    for shapes in [
+        &document.header_shapes,
+        &document.first_page_header_shapes,
+        &document.even_page_header_shapes,
+        &document.footer_shapes,
+        &document.first_page_footer_shapes,
+        &document.even_page_footer_shapes,
+        &document.background_shapes,
+    ] {
+        collect_visible_font_indexes_from_shapes(shapes, &mut indexes);
+    }
+    indexes
+}
+
+fn push_visible_font_index(indexes: &mut Vec<i32>, index: i32) {
+    if !indexes.contains(&index) {
+        indexes.push(index);
+    }
+}
+
+fn collect_visible_font_indexes_from_blocks(blocks: &[Block], indexes: &mut Vec<i32>) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(paragraph) => {
+                collect_visible_font_indexes_from_paragraph(paragraph, indexes)
+            }
+            Block::Table(table) => collect_visible_font_indexes_from_table(table, indexes),
+            Block::Shape(shape) => collect_visible_font_indexes_from_shape(shape, indexes),
+            Block::Image(_)
+            | Block::Placeholder(_)
+            | Block::PageBreak
+            | Block::ColumnBreak
+            | Block::ContinuousSectionBreak
+            | Block::SectionBreak
+            | Block::EvenPageSectionBreak
+            | Block::OddPageSectionBreak
+            | Block::SectionSettings(_) => {}
+        }
+    }
+}
+
+fn collect_visible_font_indexes_from_table(table: &Table, indexes: &mut Vec<i32>) {
+    for row in &table.rows {
+        for cell in &row.cells {
+            collect_visible_font_indexes_from_paragraphs(&cell.paragraphs, indexes);
+        }
+    }
+}
+
+fn collect_visible_font_indexes_from_shapes(shapes: &[StaticShape], indexes: &mut Vec<i32>) {
+    for shape in shapes {
+        collect_visible_font_indexes_from_shape(shape, indexes);
+    }
+}
+
+fn collect_visible_font_indexes_from_shape(shape: &StaticShape, indexes: &mut Vec<i32>) {
+    collect_visible_font_indexes_from_paragraphs(&shape.text, indexes);
+}
+
+fn collect_visible_font_indexes_from_paragraphs(paragraphs: &[Paragraph], indexes: &mut Vec<i32>) {
+    for paragraph in paragraphs {
+        collect_visible_font_indexes_from_paragraph(paragraph, indexes);
+    }
+}
+
+fn collect_visible_font_indexes_from_paragraph(paragraph: &Paragraph, indexes: &mut Vec<i32>) {
+    for run in &paragraph.runs {
+        if !run.text.is_empty() {
+            push_visible_font_index(indexes, run.style.font_index);
+        }
+    }
 }
 
 fn unsupported_passive_glyph_diagnostics(

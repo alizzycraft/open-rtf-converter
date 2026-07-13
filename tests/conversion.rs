@@ -455,6 +455,40 @@ fn caller_base_font_asset_matches_word_charset_suffixed_font_names() {
 }
 
 #[test]
+fn unused_font_table_entries_do_not_emit_passive_font_diagnostics() {
+    let input =
+        br"{\rtf1\ansi{\fonttbl{\f0 Arial;}{\f1 Calibri;}{\f2 Cambria;}}\f0 Visible text\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("font 'Arial' approximated with passive PDF base font Helvetica")),
+        "used Word font should still report passive approximation: {:?}",
+        output.diagnostics
+    );
+    for unused in ["Calibri", "Cambria"] {
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains(unused)),
+            "unused font table entry {unused} should not produce a font diagnostic: {:?}",
+            output.diagnostics
+        );
+    }
+}
+
+#[test]
 fn caller_font_asset_aliases_embed_passive_font_for_multiple_word_names() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial Narrow;}{\f1 Book Antiqua;}}\f0 Narrow AB\par\f1 Serif CD\par}";
     let provider = FontProvider {
