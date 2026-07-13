@@ -10887,6 +10887,129 @@ fn metadata_and_external_templates_do_not_reach_text_or_pdf() {
 }
 
 #[test]
+fn macro_and_script_destinations_do_not_reach_text_or_pdf() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Visible before {",
+        "\\",
+        "macros launch.exe}{",
+        "\\",
+        "script <script>414243</script>}{",
+        "\\",
+        "*",
+        "\\",
+        "vbaproject Hidden VBA payload}{",
+        "\\",
+        "info{",
+        "\\",
+        "title Hidden {",
+        "\\",
+        "activex Forms.CommandButton.1}}} visible after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before"));
+    assert!(text.contains("visible after"));
+    for forbidden in [
+        "launch.exe",
+        "script",
+        "414243",
+        "Hidden VBA payload",
+        "Forms.CommandButton",
+        "macros",
+        "vbaproject",
+        "activex",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "macro/script payload leaked to text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "active content removed: macro/script payload before safe model normalization",
+        )
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before"));
+    assert!(rendered_text.contains("visible after"));
+    for forbidden in [
+        b"launch.exe".as_slice(),
+        b"<script>",
+        b"414243",
+        b"Hidden VBA payload",
+        b"Forms.CommandButton",
+        b"macros",
+        b"vbaproject",
+        b"activex",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "macro/script payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn macro_and_script_destinations_obey_reject_policy() {
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+
+    for (input, expected_feature) in [
+        (
+            br"{\rtf1{\macros launch.exe}Visible body\par}".as_slice(),
+            "macro/script payload",
+        ),
+        (
+            br"{\rtf1{\info{\title Hidden {\script launch.exe}}}Visible body\par}".as_slice(),
+            "macro/script payload in metadata",
+        ),
+        (
+            br"{\rtf1{\*\vbaproject Hidden VBA payload}Visible body\par}".as_slice(),
+            "macro/script payload in skipped destination",
+        ),
+    ] {
+        let result = parse_rtf_bytes_with_options(input, &reject_options);
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ActiveContentRejected { ref feature, .. })
+                    if feature == expected_feature
+            ),
+            "expected {expected_feature:?}, got {result:?}"
+        );
+    }
+}
+
+#[test]
 fn active_controls_nested_in_metadata_obey_reject_policy() {
     let reject_options = RtfParseOptions {
         active_content_policy: ActiveContentPolicy::Reject,

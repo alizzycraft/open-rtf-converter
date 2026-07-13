@@ -2536,6 +2536,14 @@ impl Parser {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
+            name if is_macro_script_destination(name)
+                && destination_allows_safe_structural_content(&self.state)
+                && self.state.destination != Destination::Ignored =>
+            {
+                self.handle_active_content("macro/script payload", offset)?;
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
             "fontemb" | "fontfile"
                 if destination_allows_safe_structural_content(&self.state)
                     && self.state.destination != Destination::Ignored =>
@@ -13317,6 +13325,9 @@ fn skipped_destination_active_feature(name: &str) -> Option<&'static str> {
         }
         "field" | "fldinst" => Some("field instruction in skipped destination"),
         "template" => Some("external template in skipped destination"),
+        name if is_macro_script_destination(name) => {
+            Some("macro/script payload in skipped destination")
+        }
         "fontemb" | "fontfile" => Some("embedded font payload in skipped destination"),
         name if is_object_metadata_destination(name) => {
             Some("object metadata in skipped destination")
@@ -13406,12 +13417,20 @@ fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
         }
         "field" | "fldinst" => Some("field instruction in metadata"),
         "template" => Some("external template in metadata"),
+        name if is_macro_script_destination(name) => Some("macro/script payload in metadata"),
         "fontemb" | "fontfile" => Some("embedded font payload in metadata"),
         name if is_object_metadata_destination(name) => Some("object metadata in metadata"),
         name if is_mail_merge_destination(name) => Some("mail merge data source in metadata"),
         name if is_annotation_destination(name) => Some("annotation metadata in metadata"),
         _ => None,
     }
+}
+
+fn is_macro_script_destination(name: &str) -> bool {
+    matches!(
+        name,
+        "macro" | "macros" | "script" | "scripts" | "vba" | "vbaproject" | "activex"
+    )
 }
 
 fn html_metadata_feature(name: &str) -> Option<&'static str> {
