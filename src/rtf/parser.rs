@@ -4451,6 +4451,10 @@ impl Parser {
                     table.preserve_authored_widths = self.preserve_authored_table_widths;
                 }
             }
+            name if custom_xml_markup_feature(name).is_some() => {
+                let feature = custom_xml_markup_feature(name).expect("checked above");
+                self.reject_active_content_only(feature, offset)?;
+            }
             name if let Some(message) = word_layout_compatibility_control_message(name) => {
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
@@ -13139,8 +13143,18 @@ fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
 fn opaque_metadata_payload_feature(name: &str) -> Option<&'static str> {
     match name {
         "datastore" => Some("custom XML data store"),
+        "colorschememapping" => Some("Office color scheme mapping"),
         "themedata" => Some("Office theme data"),
+        "xmlattrname" | "xmlattrns" | "xmlattrvalue" => Some("custom XML attribute metadata"),
+        "xmlnstbl" => Some("custom XML namespace table"),
         "datafield" => Some("form field data payload"),
+        _ => None,
+    }
+}
+
+fn custom_xml_markup_feature(name: &str) -> Option<&'static str> {
+    match name {
+        "xmlopen" | "xmlclose" => Some("custom XML markup"),
         _ => None,
     }
 }

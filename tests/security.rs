@@ -17911,6 +17911,23 @@ fn opaque_metadata_payloads_obey_reject_policy() {
             "Office theme data",
         ),
         (
+            br"{\rtf1{\*\colorschememapping 414243}Visible body\par}".as_slice(),
+            "Office color scheme mapping",
+        ),
+        (
+            br"{\rtf1{\*\xmlnstbl {\xmlns1 http://schemas.example/payload}}Visible body\par}"
+                .as_slice(),
+            "custom XML namespace table",
+        ),
+        (
+            br"{\rtf1{\xmlattrvalue 414243}Visible body\par}".as_slice(),
+            "custom XML attribute metadata",
+        ),
+        (
+            br"{\rtf1 Before {\xmlopen tagged\par} After\par}".as_slice(),
+            "custom XML markup",
+        ),
+        (
             br"{\rtf1{\datafield 414243}Visible body\par}".as_slice(),
             "form field data payload",
         ),
