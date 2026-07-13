@@ -3368,6 +3368,14 @@ impl Parser {
                 self.handle_active_content(control.name.as_str(), offset)?;
                 self.state.destination = Destination::ObjectData;
             }
+            name if is_embedded_package_destination(name)
+                && destination_allows_safe_structural_content(&self.state)
+                && self.state.destination != Destination::Ignored =>
+            {
+                self.handle_active_content("embedded package payload", offset)?;
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
             "result"
                 if self.state.inside_object && destination_allows_object_result(&self.state) =>
             {
@@ -13323,6 +13331,9 @@ fn skipped_destination_active_feature(name: &str) -> Option<&'static str> {
         "object" | "objdata" | "objocx" | "objemb" | "objlink" | "objautlink" | "objupdate" => {
             Some("object payload in skipped destination")
         }
+        name if is_embedded_package_destination(name) => {
+            Some("embedded package payload in skipped destination")
+        }
         "field" | "fldinst" => Some("field instruction in skipped destination"),
         "template" => Some("external template in skipped destination"),
         name if is_macro_script_destination(name) => {
@@ -13415,6 +13426,9 @@ fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
         "object" | "objdata" | "objocx" | "objemb" | "objlink" | "objautlink" | "objupdate" => {
             Some("object payload in metadata")
         }
+        name if is_embedded_package_destination(name) => {
+            Some("embedded package payload in metadata")
+        }
         "field" | "fldinst" => Some("field instruction in metadata"),
         "template" => Some("external template in metadata"),
         name if is_macro_script_destination(name) => Some("macro/script payload in metadata"),
@@ -13431,6 +13445,10 @@ fn is_macro_script_destination(name: &str) -> bool {
         name,
         "macro" | "macros" | "script" | "scripts" | "vba" | "vbaproject" | "activex"
     )
+}
+
+fn is_embedded_package_destination(name: &str) -> bool {
+    matches!(name, "package" | "packager" | "embeddedpackage")
 }
 
 fn html_metadata_feature(name: &str) -> Option<&'static str> {

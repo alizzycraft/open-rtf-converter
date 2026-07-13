@@ -5150,6 +5150,103 @@ fn linked_object_result_renders_without_fetching_or_pdf_actions() {
 }
 
 #[test]
+fn embedded_package_destinations_do_not_reach_text_or_pdf_and_obey_reject_policy() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "package calc.exe /JavaScript /EmbeddedFile}{",
+        "\\",
+        "packager HiddenPackager}{",
+        "\\",
+        "embeddedpackage HiddenEmbeddedPackage} After",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "calc.exe",
+        "JavaScript",
+        "EmbeddedFile",
+        "HiddenPackager",
+        "HiddenEmbeddedPackage",
+        "package",
+        "packager",
+        "embeddedpackage",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "embedded package payload leaked into text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    for forbidden in [
+        b"calc.exe".as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"HiddenPackager",
+        b"HiddenEmbeddedPackage",
+        b"package",
+        b"packager",
+        b"embeddedpackage",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "embedded package payload leaked into PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+    for package_input in [
+        br"{\rtf1{\package calc.exe} visible\par}".as_slice(),
+        br"{\rtf1{\packager calc.exe} visible\par}",
+        br"{\rtf1{\embeddedpackage calc.exe} visible\par}",
+    ] {
+        assert!(matches!(
+            parse_rtf_bytes_with_options(package_input, &reject_options),
+            Err(ParseError::ActiveContentRejected { feature, .. })
+                if feature == "embedded package payload"
+        ));
+    }
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\info{\title Safe {\package calc.exe}}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "embedded package payload in metadata"
+    ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\unknown{\package calc.exe}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "embedded package payload in skipped destination"
+    ));
+}
+
+#[test]
 fn object_metadata_destinations_do_not_reach_text_or_pdf() {
     let input = rtf(&[
         "{",
