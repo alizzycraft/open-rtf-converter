@@ -20849,6 +20849,76 @@ fn hostile_binary_picture_payload_is_not_retokenized_or_copied_to_pdf() {
 }
 
 #[test]
+fn object_data_picture_payload_is_stripped_while_safe_result_renders() {
+    let image = minimal_jpeg_with_dimensions(2, 2);
+    let mut input = br"{\rtf1 before {\object\objdata {\pict\jpegblip\bin".to_vec();
+    input.extend_from_slice(image.len().to_string().as_bytes());
+    input.push(b' ');
+    input.extend_from_slice(&image);
+    input.extend_from_slice(br"}{\result visible fallback}} after\par}");
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("before visible fallback after"),
+        "normalized text was {text:?}; diagnostics were {:?}",
+        parsed.diagnostics
+    );
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_))),
+        "object payload picture crossed into normalized document blocks: {:?}",
+        parsed.document.blocks
+    );
+    for forbidden in ["pict", "jpegblip", "objdata", "[Image skipped"] {
+        assert!(
+            !text.contains(forbidden),
+            "object payload leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("visible fallback"));
+    assert!(rendered_text.contains("after"));
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"jpegblip",
+        b"objdata",
+        b"[Image skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "object payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn uncompressed_dib_picture_renders_passively_without_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_24bit_dib_with_dimensions(2, 1));
     let input = rtf(&[

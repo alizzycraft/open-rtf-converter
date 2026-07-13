@@ -3334,7 +3334,7 @@ impl Parser {
                 self.state.destination = Destination::ObjectData;
             }
             "result"
-                if self.state.inside_object && destination_allows_visible_content(&self.state) =>
+                if self.state.inside_object && destination_allows_object_result(&self.state) =>
             {
                 self.state.object_result_seen = true;
                 self.state.destination = self.state.object_owner_destination;
@@ -13475,6 +13475,14 @@ fn is_object_metadata_destination(name: &str) -> bool {
 }
 
 fn destination_allows_visible_content(state: &ParserState) -> bool {
+    !state.inside_metadata
+        && !matches!(
+            state.destination,
+            Destination::Ignored | Destination::ObjectData
+        )
+}
+
+fn destination_allows_object_result(state: &ParserState) -> bool {
     !state.inside_metadata && state.destination != Destination::Ignored
 }
 
