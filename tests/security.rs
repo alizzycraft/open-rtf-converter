@@ -272,6 +272,18 @@ fn oversized_controls_parameters_and_deep_groups_are_rejected() {
 }
 
 #[test]
+fn unmatched_and_unclosed_groups_are_rejected_by_tokenizer_boundary() {
+    assert!(matches!(
+        parse_rtf_bytes(b"}{\\rtf1 visible}"),
+        Err(ParseError::Lex(LexError::UnmatchedGroupEnd(0)))
+    ));
+    assert!(matches!(
+        parse_rtf_bytes(b"{\\rtf1 visible"),
+        Err(ParseError::Lex(LexError::UnclosedGroup(_)))
+    ));
+}
+
+#[test]
 fn table_cell_growth_is_bounded() {
     let options = RtfParseOptions {
         limits: RtfLimits {

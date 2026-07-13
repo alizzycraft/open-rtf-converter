@@ -8,6 +8,10 @@ pub enum LexError {
     FileTooLarge,
     #[error("RTF group depth limit exceeded at byte {0}")]
     GroupDepthExceeded(usize),
+    #[error("unmatched RTF group ending at byte {0}")]
+    UnmatchedGroupEnd(usize),
+    #[error("RTF input ended before all groups closed at byte {0}")]
+    UnclosedGroup(usize),
     #[error("control word is longer than the configured limit at byte {0}")]
     ControlWordTooLong(usize),
     #[error("numeric parameter is longer than the configured limit at byte {0}")]
@@ -101,8 +105,11 @@ impl<'a> Lexer<'a> {
                     )?;
                 }
                 b'}' => {
+                    if self.group_depth == 0 {
+                        return Err(LexError::UnmatchedGroupEnd(offset));
+                    }
                     self.pos += 1;
-                    self.group_depth = self.group_depth.saturating_sub(1);
+                    self.group_depth -= 1;
                     push_token(
                         &mut tokens,
                         Token {
@@ -138,6 +145,10 @@ impl<'a> Lexer<'a> {
                 }
                 _ => push_token(&mut tokens, self.read_text()?, &self.limits)?,
             }
+        }
+
+        if self.group_depth != 0 {
+            return Err(LexError::UnclosedGroup(self.input.len()));
         }
 
         Ok(tokens)
@@ -419,5 +430,21 @@ mod tests {
                 .iter()
                 .any(|token| token.kind == TokenKind::RawText(b" visible".to_vec()))
         );
+    }
+
+    #[test]
+    fn rejects_unmatched_group_end_before_parser_recovery() {
+        assert!(matches!(
+            Lexer::new(br"}{\rtf1 visible}", RtfLimits::default()).tokenize(),
+            Err(LexError::UnmatchedGroupEnd(0))
+        ));
+    }
+
+    #[test]
+    fn rejects_unclosed_groups_at_end_of_input() {
+        assert!(matches!(
+            Lexer::new(br"{\rtf1 visible", RtfLimits::default()).tokenize(),
+            Err(LexError::UnclosedGroup(_))
+        ));
     }
 }
