@@ -80,6 +80,7 @@ pub struct RtfLimits {
     pub min_character_scaling_percent: i32,
     pub max_character_scaling_percent: i32,
     pub max_output_text_chars: usize,
+    pub max_pdf_pages: usize,
     pub max_pdf_output_bytes: usize,
 }
 
@@ -146,6 +147,7 @@ impl Default for RtfLimits {
             min_character_scaling_percent: 25,
             max_character_scaling_percent: 400,
             max_output_text_chars: 10_000_000,
+            max_pdf_pages: 10_000,
             max_pdf_output_bytes: 100 * 1024 * 1024,
         }
     }
@@ -184,6 +186,7 @@ impl RtfLimits {
             max_hyphenation_consecutive_lines: 8,
             max_hyphenation_zone_twips: 1_440,
             max_output_text_chars: 5_000_000,
+            max_pdf_pages: 2_000,
             max_pdf_output_bytes: 20 * 1024 * 1024,
             ..Self::default()
         }

@@ -63,6 +63,8 @@ pub enum ConvertError {
     PdfSafety(#[from] PassivePdfError),
     #[error("rendered PDF output exceeded limit: {size} bytes > {limit} bytes")]
     OutputTooLarge { size: usize, limit: usize },
+    #[error("rendered PDF page count exceeded limit: {pages} pages > {limit} pages")]
+    TooManyPages { pages: usize, limit: usize },
     #[error(transparent)]
     FontProvider(#[from] FontProviderError),
     #[error(transparent)]
@@ -93,6 +95,13 @@ pub fn convert_rtf_to_pdf(
     let layout =
         LayoutEngine::layout_with_font_provider(&parsed.document, Some(&options.font_provider));
     let page_count = layout.pages.len();
+    let page_limit = options.parse_options.limits.max_pdf_pages;
+    if page_count > page_limit {
+        return Err(ConvertError::TooManyPages {
+            pages: page_count,
+            limit: page_limit,
+        });
+    }
     let pdf = render_pdf_with_font_provider(&layout, Some(&options.font_provider));
     let output_limit = options.parse_options.limits.max_pdf_output_bytes;
     if pdf.len() > output_limit {

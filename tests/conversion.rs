@@ -44,12 +44,20 @@ fn converts_rtf_bytes_to_pdf_without_filesystem_core_api() {
 #[test]
 fn browser_safe_defaults_use_stricter_pdf_output_limit() {
     assert_eq!(RtfLimits::default().max_pdf_output_bytes, 100 * 1024 * 1024);
+    assert_eq!(RtfLimits::default().max_pdf_pages, 10_000);
     assert_eq!(
         ConvertOptions::browser_safe_defaults()
             .parse_options
             .limits
             .max_pdf_output_bytes,
         20 * 1024 * 1024
+    );
+    assert_eq!(
+        ConvertOptions::browser_safe_defaults()
+            .parse_options
+            .limits
+            .max_pdf_pages,
+        2_000
     );
     assert_eq!(
         ConvertOptions::browser_safe_defaults()
@@ -178,6 +186,30 @@ fn conversion_rejects_pdf_output_over_configured_limit() {
     assert!(matches!(
         error,
         ConvertError::OutputTooLarge { size, limit } if limit == 1 && size > limit
+    ));
+}
+
+#[test]
+fn conversion_rejects_page_count_over_configured_limit_before_pdf_rendering() {
+    let input = br"{\rtf1\ansi First\page Second\page Third\par}";
+    let error = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            parse_options: RtfParseOptions {
+                limits: RtfLimits {
+                    max_pdf_pages: 2,
+                    ..RtfLimits::default()
+                },
+                ..RtfParseOptions::default()
+            },
+            ..ConvertOptions::default()
+        },
+    )
+    .expect_err("three-page layout should exceed a two-page PDF limit");
+
+    assert!(matches!(
+        error,
+        ConvertError::TooManyPages { pages, limit } if pages == 3 && limit == 2
     ));
 }
 
