@@ -11190,7 +11190,7 @@ impl Parser {
     }
 
     fn push_picture_byte(&mut self, byte: u8, offset: usize) -> Result<(), ParseError> {
-        let max_size = self.limits().max_binary_blob_size;
+        let max_size = self.limits().max_image_bytes;
         let Some(picture) = self.current_picture.as_mut() else {
             return Ok(());
         };
@@ -27958,6 +27958,40 @@ After\par}"#;
                 .message
                 .contains("DIB picture data was unsupported")
         }));
+    }
+
+    #[test]
+    fn hex_picture_byte_limit_is_enforced_before_decoding() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_image_bytes: 2,
+                max_binary_blob_size: 1024,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        assert!(matches!(
+            parse_rtf_bytes_with_options(br"{\rtf1{\pict\pngblip 000102}}", &options),
+            Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "picture bytes"
+        ));
+    }
+
+    #[test]
+    fn binary_picture_byte_limit_is_enforced_before_decoding() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_image_bytes: 2,
+                max_binary_blob_size: 1024,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        assert!(matches!(
+            parse_rtf_bytes_with_options(br"{\rtf1{\pict\pngblip\bin3 abc}}", &options),
+            Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "picture bytes"
+        ));
     }
 
     #[test]
