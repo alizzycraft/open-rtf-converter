@@ -355,8 +355,8 @@ fn caller_provided_font_assets_prefer_matching_run_style() {
     for expected in [
         b"/TF1".as_slice(),
         b"/TF2".as_slice(),
-        b"ORTFSuppliedFont1",
-        b"ORTFSuppliedFont2",
+        b"ORTF01+Tuffy",
+        b"ORTF02+Tuffy",
     ] {
         assert!(
             output

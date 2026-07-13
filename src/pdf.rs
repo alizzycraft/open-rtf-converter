@@ -5,7 +5,7 @@ use pdf_writer::types::{
     CidFontType, FontFlags, Predictor, SystemInfo, TextRenderingMode, UnicodeCmap,
 };
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
-use ttf_parser::Face;
+use ttf_parser::{Face, name_id};
 
 use crate::fonts::{FontAsset, FontProvider};
 use crate::layout::{
@@ -1027,10 +1027,15 @@ fn collect_supplied_pdf_fonts(
                 index
             } else {
                 let index = fonts.len();
+                let base_name = font_provider
+                    .assets
+                    .get(asset_index)
+                    .map(|asset| supplied_pdf_font_base_name(asset, index))
+                    .unwrap_or_else(|| supplied_pdf_font_fallback_base_name(index));
                 fonts.push(SuppliedPdfFont {
                     asset_index,
                     resource_name: format!("TF{}", index + 1).into_bytes(),
-                    base_name: format!("ORTFSuppliedFont{}", index + 1).into_bytes(),
+                    base_name,
                     type0_ref: next_ref(next_object_id),
                     cid_ref: next_ref(next_object_id),
                     descriptor_ref: next_ref(next_object_id),
@@ -1155,6 +1160,69 @@ fn supplied_font_asset_matches_font(asset: &FontAsset, font: &crate::model::Font
             .alternate_name
             .as_deref()
             .is_some_and(|alternate| asset.matches_family(alternate))
+}
+
+fn supplied_pdf_font_base_name(asset: &FontAsset, font_index: usize) -> Vec<u8> {
+    let Some(name) = supplied_pdf_font_postscript_name(asset) else {
+        return supplied_pdf_font_fallback_base_name(font_index);
+    };
+    let sanitized = sanitize_pdf_font_name(&name, 96);
+    if sanitized.is_empty() {
+        supplied_pdf_font_fallback_base_name(font_index)
+    } else {
+        format!("ORTF{:02}+{sanitized}", font_index + 1).into_bytes()
+    }
+}
+
+fn supplied_pdf_font_fallback_base_name(font_index: usize) -> Vec<u8> {
+    format!("ORTFSuppliedFont{}", font_index + 1).into_bytes()
+}
+
+fn supplied_pdf_font_postscript_name(asset: &FontAsset) -> Option<String> {
+    let face = Face::parse(&asset.bytes, 0).ok()?;
+    for name in face.names() {
+        if name.name_id != name_id::POST_SCRIPT_NAME {
+            continue;
+        }
+        let Some(value) = font_name_to_string(&name) else {
+            continue;
+        };
+        if !value.trim().is_empty() {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn font_name_to_string(name: &ttf_parser::name::Name<'_>) -> Option<String> {
+    if !name.is_unicode() || name.name.len() % 2 != 0 {
+        return None;
+    }
+    let utf16 = name
+        .name
+        .chunks_exact(2)
+        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&utf16).ok()
+}
+
+fn sanitize_pdf_font_name(value: &str, max_len: usize) -> String {
+    let mut output = String::new();
+    for ch in value.chars() {
+        if output.len() >= max_len {
+            break;
+        }
+        let byte = if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '+') {
+            ch as u8
+        } else {
+            b'-'
+        };
+        if output.len() + 1 > max_len {
+            break;
+        }
+        output.push(byte as char);
+    }
+    output.trim_matches('-').to_string()
 }
 
 fn supplied_font_style_mismatch_score(
@@ -3943,18 +4011,41 @@ mod tests {
         assert!(!content_bytes_for_font(&content, b"TF1").is_empty());
         assert!(!content_bytes_for_font(&content, b"TF2").is_empty());
         assert!(
-            pdf.windows(b"ORTFSuppliedFont1".len())
-                .any(|window| window == b"ORTFSuppliedFont1")
+            pdf.windows(b"ORTF01+Tuffy".len())
+                .any(|window| window == b"ORTF01+Tuffy")
         );
         assert!(
-            pdf.windows(b"ORTFSuppliedFont2".len())
-                .any(|window| window == b"ORTFSuppliedFont2")
+            pdf.windows(b"ORTF02+Tuffy".len())
+                .any(|window| window == b"ORTF02+Tuffy")
+        );
+        assert!(
+            !pdf.windows(b"ORTFSuppliedFont".len())
+                .any(|window| window == b"ORTFSuppliedFont")
         );
         assert!(
             pdf.windows(b"/FontFile2".len())
                 .any(|window| window == b"/FontFile2")
         );
         audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn supplied_pdf_font_names_are_metadata_derived_and_sanitized() {
+        let asset = FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        };
+
+        assert_eq!(
+            supplied_pdf_font_base_name(&asset, 2),
+            b"ORTF03+Tuffy".to_vec()
+        );
+        assert_eq!(
+            sanitize_pdf_font_name("Bad Font/Name#1", 64),
+            "Bad-Font-Name-1"
+        );
+        assert_eq!(sanitize_pdf_font_name(" --- ", 64), "");
     }
 
     fn page_font_resource_names(pdf: &[u8], page_index: usize) -> Vec<Vec<u8>> {
