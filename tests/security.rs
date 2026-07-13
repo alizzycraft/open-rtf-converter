@@ -1459,6 +1459,7 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
     input.push_str(
         "{\\object\\objemb\\objdata 4142432f4a6176615363726970742f456d62656464656446696c65{\\result Safe object fallback\\par}}",
     );
+    input.push_str("\\trowd\\trhdr\\cellx9000 Split header\\cell\\row");
     input.push_str("\\trowd\\cellx9000 ");
     for idx in 0..120 {
         input.push_str(&format!("Split row line {idx:03}\\line "));
@@ -1469,6 +1470,7 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("Safe object fallback"));
+    assert!(text.contains("Split header"));
     assert!(text.contains("Split row line 000"));
     assert!(text.contains("Split row line 119"));
     for forbidden in [
@@ -1476,6 +1478,7 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
         "objemb",
         "JavaScript",
         "EmbeddedFile",
+        "trhdr",
         "cellx",
         "trowd",
     ] {
@@ -1511,6 +1514,12 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
             .any(|text| text.contains("Split row line 119")),
         "continued split-row fragments missing final line: {page_texts:?}"
     );
+    for page_text in page_texts.iter().skip(1) {
+        assert!(
+            page_text.contains("Split header"),
+            "continued split-row page missing repeated header: {page_text:?}"
+        );
+    }
 
     for forbidden in [
         b"objdata".as_slice(),
@@ -1518,6 +1527,7 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
         b"414243",
         b"JavaScript",
         b"EmbeddedFile",
+        b"trhdr",
         b"cellx",
         b"trowd",
         b"/OpenAction",

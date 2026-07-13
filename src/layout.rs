@@ -2957,12 +2957,32 @@ fn layout_table(
             if *cursor_y - 14.0 < margin_bottom {
                 advance_column_or_page(pages, cursor_y, geometry, current_column);
                 margin_left = geometry.body_left(*current_column);
+                if !row.repeat_header {
+                    push_repeating_table_headers(
+                        pages,
+                        cursor_y,
+                        &header_rows,
+                        &column_widths,
+                        content_width,
+                        column_count,
+                        margin_bottom,
+                        margin_left,
+                        table_width,
+                        document,
+                        document_stats,
+                        font_provider,
+                        table.borders_visible,
+                    );
+                }
             }
             push_split_table_row(
                 pages,
                 cursor_y,
                 row,
                 prepared,
+                &header_rows,
+                &column_widths,
+                column_count,
                 content_width,
                 margin_left,
                 table_width,
@@ -2970,6 +2990,8 @@ fn layout_table(
                 geometry,
                 current_column,
                 document,
+                document_stats,
+                font_provider,
                 table.borders_visible,
                 next_row,
             );
@@ -2981,34 +3003,21 @@ fn layout_table(
             margin_left = geometry.body_left(*current_column);
 
             if !row.repeat_header {
-                for header_row in &header_rows {
-                    let header = prepare_table_row(
-                        header_row,
-                        &column_widths,
-                        content_width / column_count as f32,
-                        &current_marker_context(pages, document_stats),
-                        document,
-                        font_provider,
-                    );
-                    if *cursor_y - header.row_height < margin_bottom {
-                        break;
-                    }
-                    let header_vertical_span_heights =
-                        vec![header.row_height; header.visual_cells.len()];
-                    push_table_row(
-                        pages,
-                        cursor_y,
-                        header_row,
-                        &header,
-                        &header_vertical_span_heights,
-                        content_width,
-                        margin_left,
-                        table_width,
-                        document,
-                        table.borders_visible,
-                        None,
-                    );
-                }
+                push_repeating_table_headers(
+                    pages,
+                    cursor_y,
+                    &header_rows,
+                    &column_widths,
+                    content_width,
+                    column_count,
+                    margin_bottom,
+                    margin_left,
+                    table_width,
+                    document,
+                    document_stats,
+                    font_provider,
+                    table.borders_visible,
+                );
                 prepared = prepare_table_row(
                     row,
                     &column_widths,
@@ -3049,6 +3058,51 @@ fn layout_table(
     *cursor_y -= 6.0;
 }
 
+#[allow(clippy::too_many_arguments)]
+fn push_repeating_table_headers(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    header_rows: &[&TableRow],
+    column_widths: &[f32],
+    content_width: f32,
+    column_count: usize,
+    margin_bottom: f32,
+    margin_left: f32,
+    table_width: f32,
+    document: &Document,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+    borders_visible: bool,
+) {
+    for header_row in header_rows {
+        let header = prepare_table_row(
+            header_row,
+            column_widths,
+            content_width / column_count as f32,
+            &current_marker_context(pages, document_stats),
+            document,
+            font_provider,
+        );
+        if *cursor_y - header.row_height < margin_bottom {
+            break;
+        }
+        let header_vertical_span_heights = vec![header.row_height; header.visual_cells.len()];
+        push_table_row(
+            pages,
+            cursor_y,
+            header_row,
+            &header,
+            &header_vertical_span_heights,
+            content_width,
+            margin_left,
+            table_width,
+            document,
+            borders_visible,
+            None,
+        );
+    }
+}
+
 fn should_split_tall_table_row(
     row: &TableRow,
     prepared: &PreparedTableRow,
@@ -3076,6 +3130,9 @@ fn push_split_table_row(
     cursor_y: &mut f32,
     row: &TableRow,
     mut remaining: PreparedTableRow,
+    header_rows: &[&TableRow],
+    column_widths: &[f32],
+    column_count: usize,
     content_width: f32,
     mut margin_left: f32,
     table_width: f32,
@@ -3083,6 +3140,8 @@ fn push_split_table_row(
     geometry: &mut PageGeometry,
     current_column: &mut usize,
     document: &Document,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
     borders_visible: bool,
     next_row: Option<&TableRow>,
 ) {
@@ -3110,6 +3169,21 @@ fn push_split_table_row(
         if !is_final_fragment {
             advance_column_or_page(pages, cursor_y, geometry, current_column);
             margin_left = geometry.body_left(*current_column);
+            push_repeating_table_headers(
+                pages,
+                cursor_y,
+                header_rows,
+                column_widths,
+                content_width,
+                column_count,
+                margin_bottom,
+                margin_left,
+                table_width,
+                document,
+                document_stats,
+                font_provider,
+                borders_visible,
+            );
         }
     }
 }
@@ -10148,13 +10222,13 @@ mod tests {
 
     #[test]
     fn splits_tall_auto_height_table_rows_across_pages() {
-        fn row(text: String) -> TableRow {
+        fn row(text: String, repeat_header: bool) -> TableRow {
             TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
-                repeat_header: false,
+                repeat_header,
                 keep_together: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
@@ -10184,7 +10258,7 @@ mod tests {
             .join("\n");
         let mut document = small_test_page_document();
         document.blocks = vec![Block::Table(Table {
-            rows: vec![row(tall_text)],
+            rows: vec![row(tall_text, false)],
             column_widths_twips: vec![2_880],
             borders_visible: true,
             preserve_authored_widths: false,
@@ -10203,6 +10277,60 @@ mod tests {
         assert!(first_page_text.contains("Line 00"));
         assert!(!first_page_text.contains("Line 13"));
         assert!(later_page_text.contains("Line 13"));
+    }
+
+    #[test]
+    fn repeats_table_header_on_split_tall_row_continuation_pages() {
+        fn row(text: String, repeat_header: bool) -> TableRow {
+            TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    spacing: Default::default(),
+                    borders: TableCellBorders::default(),
+                    fit_text: false,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text,
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }
+        }
+
+        let tall_text = (0..14)
+            .map(|idx| format!("Line {idx:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut document = small_test_page_document();
+        document.blocks = vec![Block::Table(Table {
+            rows: vec![row("Header".to_string(), true), row(tall_text, false)],
+            column_widths_twips: vec![2_880],
+            borders_visible: true,
+            preserve_authored_widths: false,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        assert!(layout.pages.len() > 1);
+        for page in layout.pages.iter().skip(1) {
+            assert!(
+                layout_text(page).contains("Header"),
+                "split-row continuation page should repeat table header"
+            );
+        }
     }
 
     #[test]
