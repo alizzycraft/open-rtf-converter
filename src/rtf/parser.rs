@@ -2536,6 +2536,14 @@ impl Parser {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
+            name if is_external_file_reference_destination(name)
+                && destination_allows_safe_structural_content(&self.state)
+                && self.state.destination != Destination::Ignored =>
+            {
+                self.handle_active_content("external file reference", offset)?;
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
             name if is_macro_script_destination(name)
                 && destination_allows_safe_structural_content(&self.state)
                 && self.state.destination != Destination::Ignored =>
@@ -13336,6 +13344,9 @@ fn skipped_destination_active_feature(name: &str) -> Option<&'static str> {
         }
         "field" | "fldinst" => Some("field instruction in skipped destination"),
         "template" => Some("external template in skipped destination"),
+        name if is_external_file_reference_destination(name) => {
+            Some("external file reference in skipped destination")
+        }
         name if is_macro_script_destination(name) => {
             Some("macro/script payload in skipped destination")
         }
@@ -13431,6 +13442,9 @@ fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
         }
         "field" | "fldinst" => Some("field instruction in metadata"),
         "template" => Some("external template in metadata"),
+        name if is_external_file_reference_destination(name) => {
+            Some("external file reference in metadata")
+        }
         name if is_macro_script_destination(name) => Some("macro/script payload in metadata"),
         "fontemb" | "fontfile" => Some("embedded font payload in metadata"),
         name if is_object_metadata_destination(name) => Some("object metadata in metadata"),
@@ -13449,6 +13463,10 @@ fn is_macro_script_destination(name: &str) -> bool {
 
 fn is_embedded_package_destination(name: &str) -> bool {
     matches!(name, "package" | "packager" | "embeddedpackage")
+}
+
+fn is_external_file_reference_destination(name: &str) -> bool {
+    matches!(name, "filetbl" | "file" | "filepath" | "filename")
 }
 
 fn html_metadata_feature(name: &str) -> Option<&'static str> {

@@ -5247,6 +5247,105 @@ fn embedded_package_destinations_do_not_reach_text_or_pdf_and_obey_reject_policy
 }
 
 #[test]
+fn external_file_reference_destinations_do_not_reach_text_or_pdf_and_obey_reject_policy() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "filetbl{",
+        "\\",
+        "file{",
+        "\\",
+        "filepath C:\\\\secret\\\\}{",
+        "\\",
+        "filename payload.docm /JavaScript /EmbeddedFile}}} After",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "secret",
+        "payload.docm",
+        "JavaScript",
+        "EmbeddedFile",
+        "filetbl",
+        "filepath",
+        "filename",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "external file reference leaked into text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    for forbidden in [
+        b"secret".as_slice(),
+        b"payload.docm",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"filetbl",
+        b"filepath",
+        b"filename",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "external file reference leaked into PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+    for file_input in [
+        br"{\rtf1{\filetbl{\file{\filepath C:\\secret\\}{\filename payload.docm}}} visible\par}"
+            .as_slice(),
+        br"{\rtf1{\file{\filename payload.docm}} visible\par}",
+        br"{\rtf1{\filepath C:\\secret\\} visible\par}",
+        br"{\rtf1{\filename payload.docm} visible\par}",
+    ] {
+        assert!(matches!(
+            parse_rtf_bytes_with_options(file_input, &reject_options),
+            Err(ParseError::ActiveContentRejected { feature, .. })
+                if feature == "external file reference"
+        ));
+    }
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\info{\title Safe {\file{\filename payload.docm}}}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "external file reference in metadata"
+    ));
+    assert!(matches!(
+        parse_rtf_bytes_with_options(
+            br"{\rtf1{\*\unknown{\filename payload.docm}} visible\par}",
+            &reject_options
+        ),
+        Err(ParseError::ActiveContentRejected { feature, .. })
+            if feature == "external file reference in skipped destination"
+    ));
+}
+
+#[test]
 fn object_metadata_destinations_do_not_reach_text_or_pdf() {
     let input = rtf(&[
         "{",
