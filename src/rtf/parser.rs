@@ -1234,7 +1234,7 @@ impl Parser {
         }
 
         self.finish_table(self.last_offset)?;
-        self.finish_paragraph();
+        self.finish_paragraph(self.last_offset)?;
         self.finish_footnote_paragraph(self.last_offset)?;
         self.finish_endnote_paragraph(self.last_offset)?;
         self.resolve_unmatched_note_reference_markers();
@@ -1512,11 +1512,14 @@ impl Parser {
                 previous.shape_result_seen |= self.state.shape_result_seen;
                 previous.shape_visual_result_rendered |= self.state.shape_visual_result_rendered;
             } else if self.state.inside_shape && !previous.inside_shape {
-                self.finish_paragraph();
+                self.finish_paragraph(offset)?;
                 let rendered_shape = self.finish_shape(offset)?;
                 if !self.state.shape_result_seen && !rendered_shape && !self.state.character.hidden
                 {
-                    self.push_placeholder("[Shape skipped: unsupported shape]".to_string());
+                    self.push_placeholder(
+                        "[Shape skipped: unsupported shape]".to_string(),
+                        offset,
+                    )?;
                 }
             }
 
@@ -2963,7 +2966,7 @@ impl Parser {
                 }
             }
             "pict" if destination_allows_visible_content(&self.state) => {
-                self.finish_paragraph();
+                self.finish_paragraph(offset)?;
                 let owner_destination = self.state.destination;
                 self.state.destination = Destination::Picture;
                 self.current_picture = Some(PictureBuilder {
@@ -3636,7 +3639,7 @@ impl Parser {
             }
             "tab" => self.push_text("\t", offset)?,
             "intbl" if control.parameter.unwrap_or(1) != 0 => self.ensure_carried_table_row(),
-            "trowd" => self.start_table_row(),
+            "trowd" => self.start_table_row(offset)?,
             "trrh" => self.set_current_table_row_height(control.parameter, offset),
             "trleft" => self.set_current_table_row_left_offset(control.parameter, offset),
             "trgaph" => self.set_current_table_cell_gap(control.parameter, offset),
@@ -3774,17 +3777,17 @@ impl Parser {
             "row" => self.finish_table_row(offset)?,
             "page" => {
                 self.finish_table(offset)?;
-                self.finish_paragraph();
+                self.finish_paragraph(offset)?;
                 self.document.blocks.push(Block::PageBreak);
             }
             "column" => {
                 self.finish_table(offset)?;
-                self.finish_paragraph();
+                self.finish_paragraph(offset)?;
                 self.document.blocks.push(Block::ColumnBreak);
             }
             "sect" => {
                 self.finish_table(offset)?;
-                self.finish_paragraph();
+                self.finish_paragraph(offset)?;
                 match self.state.section_break_kind {
                     SectionBreakKind::Continuous => {
                         self.document.blocks.push(Block::ContinuousSectionBreak)
@@ -8295,12 +8298,12 @@ impl Parser {
         Ok(())
     }
 
-    fn finish_paragraph(&mut self) {
+    fn finish_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
         let paragraph_style_index = self.state.paragraph_style_index;
         let mut pending_style_reference_text = None;
         if self.state.destination == Destination::ShapeText {
             self.finish_shape_text_paragraph();
-            return;
+            return Ok(());
         }
         if let Some(row) = self.current_table_row.as_mut() {
             if !row.current_cell_paragraph.runs.is_empty() {
@@ -8319,9 +8322,9 @@ impl Parser {
             }
             if let (Some(index), Some(text)) = (paragraph_style_index, pending_style_reference_text)
             {
-                self.store_style_reference_text(index, text);
+                self.store_style_reference_text(index, text, offset)?;
             }
-            return;
+            return Ok(());
         }
 
         if !self.current_paragraph.runs.is_empty() {
@@ -8334,20 +8337,26 @@ impl Parser {
             );
             if let Some(index) = paragraph_style_index {
                 if let Some(text) = paragraph_plain_text(&paragraph) {
-                    self.store_style_reference_text(index, text);
+                    self.store_style_reference_text(index, text, offset)?;
                 }
             }
             self.document.blocks.push(Block::Paragraph(paragraph));
         }
+        Ok(())
     }
 
-    fn store_style_reference_text(&mut self, style_index: i32, text: String) {
+    fn store_style_reference_text(
+        &mut self,
+        style_index: i32,
+        text: String,
+        offset: usize,
+    ) -> Result<(), ParseError> {
         if text.is_empty()
             || text.chars().count() > self.limits().max_text_run_len
             || text.chars().any(|ch| ch.is_control())
             || contains_internal_marker(&text)
         {
-            return;
+            return Ok(());
         }
         if let Some((_, stored_text)) = self
             .style_reference_texts
@@ -8355,11 +8364,16 @@ impl Parser {
             .find(|(index, _)| *index == style_index)
         {
             *stored_text = text;
-            return;
+            return Ok(());
         }
-        if self.style_reference_texts.len() < self.limits().max_styles {
-            self.style_reference_texts.push((style_index, text));
+        if self.style_reference_texts.len() >= self.limits().max_style_references {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "style references".to_string(),
+                offset,
+            });
         }
+        self.style_reference_texts.push((style_index, text));
+        Ok(())
     }
 
     fn finish_current_paragraph_for_destination(
@@ -8368,7 +8382,7 @@ impl Parser {
     ) -> Result<(), ParseError> {
         let advance_next_style = match self.state.destination {
             Destination::Body => {
-                self.finish_paragraph();
+                self.finish_paragraph(offset)?;
                 true
             }
             destination if is_header_destination(destination) => {
@@ -8393,7 +8407,7 @@ impl Parser {
             }
             Destination::ListText => false,
             _ => {
-                self.finish_paragraph();
+                self.finish_paragraph(offset)?;
                 false
             }
         };
@@ -8569,9 +8583,10 @@ impl Parser {
         }
     }
 
-    fn push_placeholder(&mut self, text: String) {
-        self.finish_paragraph();
+    fn push_placeholder(&mut self, text: String, offset: usize) -> Result<(), ParseError> {
+        self.finish_paragraph(offset)?;
         self.document.blocks.push(Block::Placeholder(text));
+        Ok(())
     }
 
     fn push_placeholder_for_destination(
@@ -8599,21 +8614,19 @@ impl Parser {
                 self.state.destination = previous_destination;
                 Ok(())
             }
-            _ => {
-                self.push_placeholder(text);
-                Ok(())
-            }
+            _ => self.push_placeholder(text, offset),
         }
     }
 
-    fn start_table_row(&mut self) {
-        self.finish_paragraph();
+    fn start_table_row(&mut self, offset: usize) -> Result<(), ParseError> {
+        self.finish_paragraph(offset)?;
         if self.current_table.is_none() {
             let mut table = TableBuilder::default();
             table.preserve_authored_widths = self.preserve_authored_table_widths;
             self.current_table = Some(table);
         }
         self.current_table_row = Some(self.new_table_row_builder());
+        Ok(())
     }
 
     fn new_table_row_builder(&self) -> TableRowBuilder {
@@ -9633,7 +9646,7 @@ impl Parser {
     fn finish_table_row(&mut self, offset: usize) -> Result<(), ParseError> {
         self.ensure_carried_table_row();
         let Some(mut row) = self.current_table_row.take() else {
-            self.finish_paragraph();
+            self.finish_paragraph(offset)?;
             return Ok(());
         };
 
@@ -9837,7 +9850,10 @@ impl Parser {
                 "picture data had an odd trailing hex nibble and was skipped",
                 Some(offset),
             ));
-            self.push_placeholder("[Image skipped: malformed picture data]".to_string());
+            self.push_placeholder(
+                "[Image skipped: malformed picture data]".to_string(),
+                offset,
+            )?;
             return Ok(());
         }
 
@@ -9855,7 +9871,7 @@ impl Parser {
                 self.push_static_image(picture.owner_destination, image);
                 self.mark_shape_visual_result_rendered();
             } else {
-                self.push_placeholder("[Image skipped: empty picture]".to_string());
+                self.push_placeholder("[Image skipped: empty picture]".to_string(), offset)?;
             }
             return Ok(());
         }
@@ -9893,7 +9909,7 @@ impl Parser {
                         "JPEG picture data was malformed and replaced with a placeholder",
                         Some(offset),
                     ));
-                    self.push_placeholder("[Image skipped: malformed JPEG]".to_string());
+                    self.push_placeholder("[Image skipped: malformed JPEG]".to_string(), offset)?;
                 }
             },
             PictureKind::Png => match parse_png_image_data(&picture.bytes) {
@@ -9924,7 +9940,7 @@ impl Parser {
                             "PNG picture data was unsupported or malformed and replaced with a placeholder",
                             Some(offset),
                         ));
-                    self.push_placeholder("[Image skipped: unsupported PNG]".to_string());
+                    self.push_placeholder("[Image skipped: unsupported PNG]".to_string(), offset)?;
                 }
             },
             PictureKind::Dib => {
@@ -9956,7 +9972,10 @@ impl Parser {
                         "DIB picture data was unsupported or malformed and replaced with a placeholder",
                         Some(offset),
                     ));
-                        self.push_placeholder("[Image skipped: unsupported DIB]".to_string());
+                        self.push_placeholder(
+                            "[Image skipped: unsupported DIB]".to_string(),
+                            offset,
+                        )?;
                     }
                 }
             }
@@ -10946,7 +10965,10 @@ impl Parser {
                     Some(offset),
                 ));
                 self.current_picture = None;
-                self.push_placeholder("[Image skipped: malformed picture data]".to_string());
+                self.push_placeholder(
+                    "[Image skipped: malformed picture data]".to_string(),
+                    offset,
+                )?;
                 return Ok(());
             };
             let Some(picture) = self.current_picture.as_mut() else {
@@ -21013,6 +21035,56 @@ mod tests {
                 .message
                 .contains("rendering passive field STYLEREF without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn style_reference_limit_is_independent_from_styles() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_style_references: 1,
+                max_styles: 1,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\stylesheet{\s1 Heading;}}\s1 Visible heading\par\pard Body {\field{\*\fldinst STYLEREF 1}}\par}",
+            &options,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Visible headingBody Visible heading"),
+            "STYLEREF should render with an independent style-reference budget: {text:?}"
+        );
+    }
+
+    #[test]
+    fn style_reference_limit_rejects_excess_cached_style_texts() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_style_references: 1,
+                max_styles: 2,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let result = parse_rtf_bytes_with_options(
+            br"{\rtf1{\stylesheet{\s1 One;}{\s2 Two;}}\s1 First\par\s2 Second\par}",
+            &options,
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ResourceLimitExceeded { ref resource, .. })
+                    if resource == "style references"
+            ),
+            "unexpected result: {result:?}"
+        );
     }
 
     #[test]
