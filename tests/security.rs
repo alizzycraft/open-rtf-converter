@@ -10,6 +10,7 @@ use open_rtf_converter::model::{
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
     TOTAL_PAGES_MARKER, TabAlignment, TextRelief, UnderlineStyle,
 };
+use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
 };
@@ -1447,6 +1448,89 @@ fn table_header_rows_repeat_passively_without_control_leakage() {
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden table header content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
+    let mut input = String::from("{\\rtf1\\ansi");
+    input.push_str(
+        "{\\object\\objemb\\objdata 4142432f4a6176615363726970742f456d62656464656446696c65{\\result Safe object fallback\\par}}",
+    );
+    input.push_str("\\trowd\\cellx9000 ");
+    for idx in 0..120 {
+        input.push_str(&format!("Split row line {idx:03}\\line "));
+    }
+    input.push_str("\\cell\\row}");
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Safe object fallback"));
+    assert!(text.contains("Split row line 000"));
+    assert!(text.contains("Split row line 119"));
+    for forbidden in [
+        "objdata",
+        "objemb",
+        "JavaScript",
+        "EmbeddedFile",
+        "cellx",
+        "trowd",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden tall-row source content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let pages = parsed_pdf.get_pages();
+    assert!(pages.len() > 1, "tall row should split across PDF pages");
+
+    let page_texts = pages
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        page_texts[0].contains("Split row line 000"),
+        "first split-row fragment missing first line: {:?}",
+        page_texts[0]
+    );
+    assert!(
+        page_texts
+            .iter()
+            .skip(1)
+            .any(|text| text.contains("Split row line 119")),
+        "continued split-row fragments missing final line: {page_texts:?}"
+    );
+
+    for forbidden in [
+        b"objdata".as_slice(),
+        b"objemb",
+        b"414243",
+        b"JavaScript",
+        b"EmbeddedFile",
+        b"cellx",
+        b"trowd",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden tall-row source content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -26330,6 +26414,72 @@ fn page_vertical_alignment_renders_passively_without_control_leakage() {
         assert!(
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
+fn page_break_before_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 First page text",
+        "\\",
+        "par",
+        "\\",
+        "pagebb Second page text",
+        "\\",
+        "par",
+        "\\",
+        "pagebb0 Still second page",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("First page text"));
+    assert!(text.contains("Second page text"));
+    assert!(text.contains("Still second page"));
+    assert!(!text.contains("pagebb"));
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let pages = parsed_pdf.get_pages();
+    assert_eq!(
+        pages.len(),
+        2,
+        "page-break-before paragraph should start a second PDF page"
+    );
+    let page_texts = pages
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>();
+    assert!(page_texts[0].contains("First page text"));
+    assert!(!page_texts[0].contains("Second page text"));
+    assert!(page_texts[1].contains("Second page text"));
+    assert!(page_texts[1].contains("Still second page"));
+
+    for forbidden in [
+        b"pagebb".as_slice(),
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden page-break-before content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
         );
     }
 }
