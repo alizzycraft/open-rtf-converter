@@ -7971,7 +7971,7 @@ impl Parser {
             return Ok(value);
         }
 
-        if self.field_sequence_counters.len() >= self.limits().max_styles {
+        if self.field_counter_state_len() >= self.limits().max_field_counters {
             return Err(ParseError::ResourceLimitExceeded {
                 resource: "field sequences".to_string(),
                 offset,
@@ -8072,7 +8072,7 @@ impl Parser {
             return Ok(value);
         }
 
-        if self.field_list_number_counters.len() >= self.limits().max_styles {
+        if self.field_counter_state_len() >= self.limits().max_field_counters {
             return Err(ParseError::ResourceLimitExceeded {
                 resource: "field list numbers".to_string(),
                 offset,
@@ -8105,6 +8105,12 @@ impl Parser {
         }
 
         self.set_list_number_counter(name, 1, offset)
+    }
+
+    fn field_counter_state_len(&self) -> usize {
+        self.field_sequence_counters
+            .len()
+            .saturating_add(self.field_list_number_counters.len())
     }
 
     fn passive_ref_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
@@ -20917,6 +20923,56 @@ mod tests {
                 result,
                 Err(ParseError::ResourceLimitExceeded { ref resource, .. })
                     if resource == "bookmarks"
+            ),
+            "unexpected result: {result:?}"
+        );
+    }
+
+    #[test]
+    fn field_counter_limit_is_independent_from_styles() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_field_counters: 1,
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let parsed = parse_rtf_bytes_with_options(
+            br"{\rtf1{\field{\*\fldinst SEQ Figure}}{\field{\*\fldinst SEQ Figure}}\par}",
+            &options,
+        )
+        .unwrap();
+        let text = document_text(&parsed.document);
+
+        assert!(
+            text.contains("12"),
+            "field counters should render despite max_styles=0: {text:?}"
+        );
+    }
+
+    #[test]
+    fn field_counter_limit_bounds_combined_sequence_and_listnum_state() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_field_counters: 1,
+                max_styles: 0,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+
+        let result = parse_rtf_bytes_with_options(
+            br"{\rtf1{\field{\*\fldinst SEQ Figure}}{\field{\*\fldinst LISTNUM LegalDefault}}\par}",
+            &options,
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(ParseError::ResourceLimitExceeded { ref resource, .. })
+                    if resource == "field list numbers"
             ),
             "unexpected result: {result:?}"
         );
