@@ -11087,6 +11087,28 @@ fn encapsulated_html_metadata_does_not_warn_or_reach_text_or_pdf() {
 }
 
 #[test]
+fn encapsulated_html_metadata_obeys_reject_policy() {
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+
+    for input in [
+        br"{\rtf1{\*\htmltag <script>launch.exe</script>}Visible body\par}".as_slice(),
+        br"{\rtf1{\htmlbase https://example.com/base/}Visible body\par}".as_slice(),
+        br#"{\rtf1{\info{\htmltag <p onclick="launch.exe">Hidden</p>}}Visible body\par}"#
+            .as_slice(),
+        br"{\rtf1{\*\unknown{\htmltag <script>414243</script>}}Visible body\par}".as_slice(),
+    ] {
+        assert!(matches!(
+            parse_rtf_bytes_with_options(input, &reject_options),
+            Err(ParseError::ActiveContentRejected { feature, .. })
+                if feature == "encapsulated HTML metadata"
+        ));
+    }
+}
+
+#[test]
 fn review_bookmark_and_annotation_payloads_do_not_reach_text_or_pdf() {
     let input = rtf(&[
         "{",

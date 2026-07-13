@@ -2525,6 +2525,9 @@ impl Parser {
                 if control_starts_group
                     && destination_allows_safe_structural_content(&self.state) =>
             {
+                if let Some(feature) = html_metadata_feature(&control.name) {
+                    self.reject_active_content_only(feature, offset)?;
+                }
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
@@ -13411,11 +13414,19 @@ fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
     }
 }
 
+fn html_metadata_feature(name: &str) -> Option<&'static str> {
+    match name {
+        "htmltag" | "htmlbase" => Some("encapsulated HTML metadata"),
+        _ => None,
+    }
+}
+
 fn opaque_metadata_payload_feature(name: &str) -> Option<&'static str> {
     match name {
         "datastore" => Some("custom XML data store"),
         "colorschememapping" => Some("Office color scheme mapping"),
         "hlinkbase" => Some("hyperlink base"),
+        name if html_metadata_feature(name).is_some() => html_metadata_feature(name),
         "themedata" => Some("Office theme data"),
         "xmlattrname" | "xmlattrns" | "xmlattrvalue" => Some("custom XML attribute metadata"),
         "xmlnstbl" => Some("custom XML namespace table"),
