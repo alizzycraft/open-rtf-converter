@@ -21,6 +21,45 @@ use open_rtf_converter::{
 use tempfile::tempdir;
 
 #[test]
+fn fuzz_corpus_seeds_exercise_bounded_parser_and_passive_pdf_paths() {
+    let parser_options = RtfParseOptions::browser_safe_defaults();
+    for seed in [
+        include_bytes!("../fuzz/corpus/rtf_lexer/simple.rtf").as_slice(),
+        include_bytes!("../fuzz/corpus/rtf_lexer/malformed-boundaries.rtf").as_slice(),
+        include_bytes!("../fuzz/corpus/rtf_lexer/oversized-control.rtf").as_slice(),
+        include_bytes!("../fuzz/corpus/rtf_parser/bin-boundary.rtf").as_slice(),
+        include_bytes!("../fuzz/corpus/rtf_parser/object-result.rtf").as_slice(),
+        include_bytes!("../fuzz/corpus/rtf_parser/unknown-object-data.rtf").as_slice(),
+        include_bytes!("../fuzz/corpus/rtf_parser/malformed-hex-and-bin.rtf").as_slice(),
+        include_bytes!("../fuzz/corpus/rtf_parser/deep-groups.rtf").as_slice(),
+    ] {
+        let _ = parse_rtf_bytes_with_options(seed, &parser_options);
+    }
+
+    let convert_options = ConvertOptions::browser_safe_defaults();
+    for (name, seed) in [
+        (
+            "passive field object",
+            include_bytes!("../fuzz/corpus/rtf_to_pdf_passive/field-object.rtf").as_slice(),
+        ),
+        (
+            "passive external and object fields",
+            include_bytes!("../fuzz/corpus/rtf_to_pdf_passive/external-and-object-fields.rtf")
+                .as_slice(),
+        ),
+        (
+            "passive metadata object smuggling",
+            include_bytes!("../fuzz/corpus/rtf_to_pdf_passive/metadata-object-smuggling.rtf")
+                .as_slice(),
+        ),
+    ] {
+        let output = convert_rtf_to_pdf(seed, &convert_options)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        audit_passive_pdf_bytes(&output.pdf).unwrap_or_else(|error| panic!("{name}: {error}"));
+    }
+}
+
+#[test]
 fn bin_lengths_are_bounded_and_binary_does_not_become_text() {
     let parsed = parse_rtf_bytes(&rtf(&[
         "{",
