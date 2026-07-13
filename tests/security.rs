@@ -20919,6 +20919,60 @@ fn object_data_picture_payload_is_stripped_while_safe_result_renders() {
 }
 
 #[test]
+fn object_data_structural_payload_does_not_seed_visible_result() {
+    let input = br"{\rtf1 before {\object\objdata {\*\listtext Hidden marker\tab}{\result visible fallback}} after\par}";
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("before visible fallback after"),
+        "normalized text was {text:?}; diagnostics were {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["Hidden marker", "listtext", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "object structural payload leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("visible fallback"));
+    assert!(rendered_text.contains("after"));
+    for forbidden in [
+        b"Hidden marker".as_slice(),
+        b"listtext",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "object structural payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn uncompressed_dib_picture_renders_passively_without_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_24bit_dib_with_dimensions(2, 1));
     let input = rtf(&[

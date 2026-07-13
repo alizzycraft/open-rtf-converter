@@ -13487,7 +13487,7 @@ fn destination_allows_object_result(state: &ParserState) -> bool {
 }
 
 fn destination_allows_safe_structural_content(state: &ParserState) -> bool {
-    !state.inside_metadata
+    !state.inside_metadata && state.destination != Destination::ObjectData
 }
 
 fn destination_allows_visible_old_style_list_marker(state: &ParserState) -> bool {
