@@ -454,8 +454,11 @@ fn load_cli_font_dir(
         }
         let bytes = read_bounded_font_file(&path, provider.limits.max_asset_bytes)?;
         let (mut family_names, style) = cli_font_metadata(&bytes, &path)?;
-        let substitute_aliases =
+        let mut substitute_aliases =
             substitute_aliases_for_font(&family_names, requested_font_families, substitutions);
+        for alias in passive_symbolic_aliases_for_font(&family_names, requested_font_families) {
+            push_unique_font_family_name(&mut substitute_aliases, alias);
+        }
         let direct_match = requested_font_families.is_empty()
             || font_metadata_matches_requested_families(&family_names, requested_font_families);
         if !direct_match && substitute_aliases.is_empty() {
@@ -505,6 +508,28 @@ fn substitute_aliases_for_font(
         }
     }
     aliases
+}
+
+fn passive_symbolic_aliases_for_font(
+    family_names: &[String],
+    requested_font_families: &[String],
+) -> Vec<String> {
+    if requested_font_families.is_empty()
+        || !requested_font_families
+            .iter()
+            .any(|requested| cli_font_family_names_match(requested, "ZapfDingbats"))
+    {
+        return Vec::new();
+    }
+
+    if family_names
+        .iter()
+        .any(|family| cli_font_family_names_match(family, "Segoe UI Symbol"))
+    {
+        vec!["ZapfDingbats".to_string()]
+    } else {
+        Vec::new()
+    }
 }
 
 fn cli_font_dir_file_exceeds_asset_limit(path: &Path, limit: usize) -> Result<bool, CliFontError> {
@@ -1035,6 +1060,41 @@ mod tests {
             open_rtf_converter::FontCoverage::NoAsset,
             "aliases not requested by the document should not be added"
         );
+    }
+
+    #[test]
+    fn passive_symbolic_alias_maps_requested_zapf_to_segoe_ui_symbol() {
+        let aliases = passive_symbolic_aliases_for_font(
+            &["Segoe UI Symbol".to_string()],
+            &["ZapfDingbats".to_string()],
+        );
+
+        assert_eq!(aliases, vec!["ZapfDingbats".to_string()]);
+    }
+
+    #[test]
+    fn passive_symbolic_alias_does_not_map_legacy_private_symbol_fonts() {
+        for family in ["Wingdings", "Webdings", "Symbol"] {
+            let aliases = passive_symbolic_aliases_for_font(
+                &[family.to_string()],
+                &["ZapfDingbats".to_string()],
+            );
+
+            assert!(
+                aliases.is_empty(),
+                "{family} should not be treated as a Unicode ZapfDingbats substitute"
+            );
+        }
+    }
+
+    #[test]
+    fn passive_symbolic_alias_only_applies_when_zapf_is_requested() {
+        let aliases = passive_symbolic_aliases_for_font(
+            &["Segoe UI Symbol".to_string()],
+            &["Arial".to_string()],
+        );
+
+        assert!(aliases.is_empty());
     }
 
     #[test]
