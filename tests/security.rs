@@ -17895,6 +17895,35 @@ fn custom_xml_markup_preserves_visible_text_without_metadata_leakage() {
 }
 
 #[test]
+fn opaque_metadata_payloads_obey_reject_policy() {
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+
+    for (input, expected_feature) in [
+        (
+            br"{\rtf1{\*\datastore 414243}Visible body\par}".as_slice(),
+            "custom XML data store",
+        ),
+        (
+            br"{\rtf1{\*\themedata 504b0304}Visible body\par}".as_slice(),
+            "Office theme data",
+        ),
+        (
+            br"{\rtf1{\datafield 414243}Visible body\par}".as_slice(),
+            "form field data payload",
+        ),
+    ] {
+        assert!(matches!(
+            parse_rtf_bytes_with_options(input, &reject_options),
+            Err(ParseError::ActiveContentRejected { feature, .. })
+                if feature == expected_feature
+        ));
+    }
+}
+
+#[test]
 fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
     let input = rtf(&[
         "{",

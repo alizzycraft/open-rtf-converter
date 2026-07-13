@@ -2614,6 +2614,9 @@ impl Parser {
             name if is_metadata_destination(name)
                 && destination_allows_visible_content(&self.state) =>
             {
+                if let Some(feature) = opaque_metadata_payload_feature(name) {
+                    self.reject_active_content_only(feature, offset)?;
+                }
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
@@ -3596,6 +3599,13 @@ impl Parser {
             {
                 let feature = metadata_nested_active_feature(name).expect("checked above");
                 self.handle_active_content(feature, offset)?;
+                self.count_skipped_destination_bytes(name.len(), offset)?;
+            }
+            name if self.state.destination == Destination::Ignored
+                && opaque_metadata_payload_feature(name).is_some() =>
+            {
+                let feature = opaque_metadata_payload_feature(name).expect("checked above");
+                self.reject_active_content_only(feature, offset)?;
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
             name if self.state.destination == Destination::Ignored
@@ -12300,6 +12310,20 @@ impl Parser {
         }
     }
 
+    fn reject_active_content_only(
+        &self,
+        feature: &'static str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.options.active_content_policy == ActiveContentPolicy::Reject {
+            return Err(ParseError::ActiveContentRejected {
+                feature: feature.to_string(),
+                offset,
+            });
+        }
+        Ok(())
+    }
+
     fn handle_skipped_destination_active_content(
         &mut self,
         feature: &'static str,
@@ -13108,6 +13132,15 @@ fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
         "fontemb" | "fontfile" => Some("embedded font payload in metadata"),
         name if is_mail_merge_destination(name) => Some("mail merge data source in metadata"),
         name if is_annotation_destination(name) => Some("annotation metadata in metadata"),
+        _ => None,
+    }
+}
+
+fn opaque_metadata_payload_feature(name: &str) -> Option<&'static str> {
+    match name {
+        "datastore" => Some("custom XML data store"),
+        "themedata" => Some("Office theme data"),
+        "datafield" => Some("form field data payload"),
         _ => None,
     }
 }
