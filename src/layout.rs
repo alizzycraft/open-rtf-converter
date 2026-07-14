@@ -1562,6 +1562,9 @@ fn layout_image(
         width,
         height,
     }));
+    if image.placement.is_some_and(|placement| placement.text_wrap) {
+        return;
+    }
     *cursor_y = y - 6.0;
 }
 
@@ -4073,9 +4076,15 @@ fn layout_paragraph(
         twips_to_points(effective_space_before_twips(&paragraph.style))
     };
     *cursor_y -= paragraph_top;
+    let mut wrap_content_width = content_width;
+    if let Some((_, adjusted_width)) =
+        wrapped_image_text_area_for_line(pages, margin_left, content_width, *cursor_y, 14.0)
+    {
+        wrap_content_width = adjusted_width;
+    }
     let mut lines = wrap_paragraph_with_font_provider(
         paragraph,
-        content_width,
+        wrap_content_width,
         &markers,
         document,
         font_provider,
@@ -4114,9 +4123,18 @@ fn layout_paragraph(
             margin_left = geometry.body_left(*current_column);
         }
 
-        let x = aligned_x(
+        let (line_margin_left, line_content_width) = wrapped_image_text_area_for_line(
+            pages,
             margin_left,
             content_width,
+            *cursor_y,
+            line.height,
+        )
+        .unwrap_or((margin_left, content_width));
+
+        let x = aligned_x(
+            line_margin_left,
+            line_content_width,
             line.width,
             &paragraph.style,
             line_idx == 0,
@@ -4131,9 +4149,9 @@ fn layout_paragraph(
             push_shading_rect(
                 pages,
                 document,
-                margin_left + line_left_indent,
+                line_margin_left + line_left_indent,
                 *cursor_y - line.height,
-                paragraph_line_width(content_width, &paragraph.style, line_idx == 0),
+                paragraph_line_width(line_content_width, &paragraph.style, line_idx == 0),
                 line.height,
                 color_index,
                 paragraph.style.shading_basis_points,
@@ -4142,8 +4160,8 @@ fn layout_paragraph(
         }
         push_paragraph_borders(
             pages,
-            margin_left,
-            content_width,
+            line_margin_left,
+            line_content_width,
             &paragraph.style,
             line_idx,
             line_count,
@@ -4155,14 +4173,14 @@ fn layout_paragraph(
         let word_spacing = justified_word_spacing(
             &line,
             &paragraph.style,
-            paragraph_line_width(content_width, &paragraph.style, line_idx == 0),
+            paragraph_line_width(line_content_width, &paragraph.style, line_idx == 0),
             line_idx + 1 == line_count,
         );
         if let Some(state) = line_numbers.as_mut().map(|state| &mut **state) {
             push_passive_line_number(
                 pages,
                 line,
-                margin_left,
+                line_margin_left,
                 *cursor_y,
                 *geometry,
                 state,
@@ -4190,6 +4208,54 @@ fn reset_line_numbers_for_page_restart(
     {
         state.reset_for_geometry(geometry);
     }
+}
+
+fn wrapped_image_text_area_for_line(
+    pages: &[LayoutPage],
+    margin_left: f32,
+    content_width: f32,
+    line_top_y: f32,
+    line_height: f32,
+) -> Option<(f32, f32)> {
+    let page = pages.last()?;
+    let content_right = margin_left + content_width;
+    let line_bottom_y = line_top_y - line_height.max(0.0);
+    let gap = 6.0;
+    let mut best: Option<(f32, f32)> = None;
+    for item in &page.items {
+        let LayoutItem::Image(image) = item else {
+            continue;
+        };
+        if !image
+            .image
+            .placement
+            .is_some_and(|placement| placement.text_wrap)
+        {
+            continue;
+        }
+        let image_left = image.x.max(margin_left);
+        let image_right = (image.x + image.width).min(content_right);
+        if image_right <= margin_left || image_left >= content_right {
+            continue;
+        }
+        let image_bottom = image.y;
+        let image_top = image.y + image.height;
+        if line_top_y <= image_bottom || line_bottom_y >= image_top {
+            continue;
+        }
+        let left_width = (image_left - gap - margin_left).max(0.0);
+        let right_left = (image_right + gap).min(content_right);
+        let right_width = (content_right - right_left).max(0.0);
+        let candidate = if right_width >= left_width {
+            (right_left, right_width)
+        } else {
+            (margin_left, left_width)
+        };
+        if candidate.1 >= 12.0 && best.is_none_or(|(_, width)| candidate.1 < width) {
+            best = Some(candidate);
+        }
+    }
+    best
 }
 
 fn reset_line_numbers_for_section_restart(
@@ -7658,6 +7724,69 @@ mod tests {
         assert!((image.y - 666.0).abs() < 0.01);
         assert!((image.width - 72.0).abs() < 0.01);
         assert!((image.height - 36.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn wraps_paragraph_line_beside_prior_passive_shape_picture_frame() {
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Image(StaticImage {
+                format: ImageFormat::Jpeg,
+                bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+                palette: Vec::new(),
+                vector_commands: Vec::new(),
+                width_px: 100,
+                height_px: 50,
+                natural_width_px_hint: None,
+                natural_height_px_hint: None,
+                display_width_twips: None,
+                display_height_twips: None,
+                scale_x_percent: None,
+                scale_y_percent: None,
+                crop: ImageCrop::default(),
+                placement: Some(StaticImagePlacement {
+                    left_twips: 0,
+                    top_twips: 0,
+                    width_twips: 1440,
+                    height_twips: 720,
+                    text_wrap: true,
+                }),
+            }),
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Wrapped beside image".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let image = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("wrapped shape image");
+        let text = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.contains("Wrapped") => Some(text),
+                _ => None,
+            })
+            .expect("paragraph text");
+
+        assert!((image.x - 72.0).abs() < 0.01);
+        assert!(
+            text.x > image.x + image.width,
+            "text should be shifted beside wrapped image: text {}, image right {}",
+            text.x,
+            image.x + image.width
+        );
+        assert!(text.baseline_y < image.y + image.height && text.baseline_y > image.y);
     }
 
     #[test]
