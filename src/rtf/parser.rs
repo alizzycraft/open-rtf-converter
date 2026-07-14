@@ -9,10 +9,10 @@ use crate::model::{
     FontFamilyHint, FontPitch, FootnotePlacement, ImageCrop, ImageFormat, LineNumberRestart,
     PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
-    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeKind,
-    StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell,
-    TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
+    StaticImagePlacement, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
+    StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table,
+    TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
     TableCellSpacing, TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
     TextRelief, UnderlineStyle,
 };
@@ -10342,6 +10342,7 @@ impl Parser {
                             scale_x_percent: picture.scale_x_percent,
                             scale_y_percent: picture.scale_y_percent,
                             crop: picture.crop,
+                            placement: None,
                         },
                         offset,
                     )?;
@@ -10374,6 +10375,7 @@ impl Parser {
                             scale_x_percent: picture.scale_x_percent,
                             scale_y_percent: picture.scale_y_percent,
                             crop: picture.crop,
+                            placement: None,
                         },
                         offset,
                     )?;
@@ -10407,6 +10409,7 @@ impl Parser {
                                 scale_x_percent: picture.scale_x_percent,
                                 scale_y_percent: picture.scale_y_percent,
                                 crop: picture.crop,
+                                placement: None,
                             },
                             offset,
                         )?;
@@ -10452,6 +10455,7 @@ impl Parser {
                             scale_x_percent: picture.scale_x_percent,
                             scale_y_percent: picture.scale_y_percent,
                             crop: picture.crop,
+                            placement: None,
                         },
                         offset,
                     )?;
@@ -10508,6 +10512,7 @@ impl Parser {
         image: StaticImage,
         offset: usize,
     ) -> Result<(), ParseError> {
+        let image = self.apply_current_shape_image_placement(image, offset);
         self.mark_field_result_visible_content();
         if is_header_destination(destination) {
             self.finish_header_paragraph(offset)?;
@@ -10567,6 +10572,47 @@ impl Parser {
         Ok(())
     }
 
+    fn apply_current_shape_image_placement(
+        &mut self,
+        mut image: StaticImage,
+        offset: usize,
+    ) -> StaticImage {
+        if !self.state.inside_shape || image.placement.is_some() {
+            return image;
+        }
+        let Some(shape) = self.current_shape.as_ref() else {
+            return image;
+        };
+        let left_twips = shape
+            .base_x_twips
+            .saturating_add(shape.left_twips)
+            .clamp(0, self.limits().max_shape_offset_twips.max(0));
+        let top_twips = shape
+            .base_y_twips
+            .saturating_add(shape.top_twips)
+            .clamp(0, self.limits().max_shape_offset_twips.max(0));
+        if shape.width_twips <= 0 || shape.height_twips <= 0 {
+            return image;
+        }
+        let width_twips = shape
+            .width_twips
+            .clamp(1, self.limits().max_shape_dimension_twips.max(1));
+        let height_twips = shape
+            .height_twips
+            .clamp(1, self.limits().max_shape_dimension_twips.max(1));
+        image.placement = Some(StaticImagePlacement {
+            left_twips,
+            top_twips,
+            width_twips,
+            height_twips,
+        });
+        self.diagnostics.push(Diagnostic::warning(
+            "rendering shape picture result with bounded passive shape frame",
+            Some(offset),
+        ));
+        image
+    }
+
     fn passive_object_placeholder_image(&self) -> Option<StaticImage> {
         let width_twips = self.state.object_width_twips?;
         let height_twips = self.state.object_height_twips?;
@@ -10587,6 +10633,7 @@ impl Parser {
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         })
     }
 
@@ -17552,6 +17599,7 @@ fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
         scale_x_percent: picture.scale_x_percent,
         scale_y_percent: picture.scale_y_percent,
         crop: picture.crop,
+        placement: None,
     }
 }
 

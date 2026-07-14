@@ -4259,6 +4259,7 @@ mod tests {
                 scale_x_percent: None,
                 scale_y_percent: None,
                 crop: ImageCrop::default(),
+                placement: None,
             }),
         ];
         let provider = FontProvider {
@@ -5269,6 +5270,7 @@ endstream
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -5311,6 +5313,7 @@ endstream
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -5353,6 +5356,7 @@ endstream
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -5395,6 +5399,7 @@ endstream
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -5441,6 +5446,7 @@ endstream
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -5491,6 +5497,7 @@ endstream
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -5542,6 +5549,7 @@ endstream
                 right_twips: 0,
                 bottom_twips: 0,
             },
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);

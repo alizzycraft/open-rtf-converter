@@ -22881,6 +22881,143 @@ fn nested_shape_picture_renders_without_shape_placeholder_or_property_leakage() 
 }
 
 #[test]
+fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop360",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1080{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-frame-payload}}}{",
+        "\\",
+        "*",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "}}{",
+        "\\",
+        "nonshppict FALLBACK {",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("shape picture image");
+    let placement = image.placement.expect("shape picture placement");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(placement.left_twips, 720);
+    assert_eq!(placement.top_twips, 360);
+    assert_eq!(placement.width_twips, 1440);
+    assert_eq!(placement.height_twips, 720);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "hidden-frame-payload",
+        "pFragments",
+        "nonshppict",
+        "FALLBACK",
+        "objdata",
+        "414243",
+        "shppict",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden shape picture frame content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("bounded passive shape frame") })
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(decoded_pdf_text(&content).contains("Before"));
+    assert!(decoded_pdf_text(&content).contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "shape picture frame should still render passive image bytes"
+    );
+    for forbidden in [
+        b"hidden-frame-payload".as_slice(),
+        b"pFragments",
+        b"nonshppict",
+        b"FALLBACK",
+        b"objdata",
+        b"414243",
+        b"shppict",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden shape picture frame content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn header_picture_renders_passively_without_body_flow_or_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[

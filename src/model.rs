@@ -354,6 +354,7 @@ pub struct StaticImage {
     pub scale_x_percent: Option<i32>,
     pub scale_y_percent: Option<i32>,
     pub crop: ImageCrop,
+    pub placement: Option<StaticImagePlacement>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -362,6 +363,14 @@ pub struct ImageCrop {
     pub top_twips: i32,
     pub right_twips: i32,
     pub bottom_twips: i32,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct StaticImagePlacement {
+    pub left_twips: i32,
+    pub top_twips: i32,
+    pub width_twips: i32,
+    pub height_twips: i32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

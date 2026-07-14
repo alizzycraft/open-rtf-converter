@@ -1541,26 +1541,47 @@ fn layout_image(
     geometry: &mut PageGeometry,
     current_column: &mut usize,
 ) {
-    let (mut width, mut height) = image_display_size(image, content_width);
+    let (left_offset, top_offset, mut width, mut height) = image_layout_frame(image, content_width);
+    let block_height = top_offset + height;
 
-    if *cursor_y - height < margin_bottom {
+    if *cursor_y - block_height < margin_bottom {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
         margin_left = geometry.body_left(*current_column);
-        (width, height) = image_display_size(image, content_width);
+        (_, _, width, height) = image_layout_frame(image, content_width);
     }
 
-    let y = *cursor_y - height;
+    let x = margin_left + left_offset;
+    let y = *cursor_y - top_offset - height;
     let Some(page) = pages.last_mut() else {
         return;
     };
     page.items.push(LayoutItem::Image(ImageFragment {
         image: image.clone(),
-        x: margin_left,
+        x,
         y,
         width,
         height,
     }));
     *cursor_y = y - 6.0;
+}
+
+fn image_layout_frame(image: &StaticImage, content_width: f32) -> (f32, f32, f32, f32) {
+    if let Some(placement) = image.placement {
+        let left = twips_to_points(placement.left_twips.max(0));
+        let top = twips_to_points(placement.top_twips.max(0));
+        let mut width = twips_to_points(placement.width_twips.max(1));
+        let mut height = twips_to_points(placement.height_twips.max(1));
+        let max_width = (content_width - left).max(1.0);
+        if width > max_width {
+            let scale = max_width / width;
+            width *= scale;
+            height *= scale;
+        }
+        (left, top, width.max(1.0), height.max(1.0))
+    } else {
+        let (width, height) = image_display_size(image, content_width);
+        (0.0, 0.0, width, height)
+    }
 }
 
 fn image_display_size(image: &StaticImage, content_width: f32) -> (f32, f32) {
@@ -2681,13 +2702,14 @@ fn layout_repeating_header_footer(
         }
 
         for image in images {
-            let (width, height) = image_display_size(image, geometry.content_width);
-            let y = cursor_y - height;
+            let (left_offset, top_offset, width, height) =
+                image_layout_frame(image, geometry.content_width);
+            let y = cursor_y - top_offset - height;
             scratch_pages[0]
                 .items
                 .push(LayoutItem::Image(ImageFragment {
                     image: image.clone(),
-                    x: geometry.margin_left,
+                    x: geometry.margin_left + left_offset,
                     y,
                     width,
                     height,
@@ -7457,9 +7479,9 @@ mod tests {
     use crate::fonts::{FontAsset, FontAssetStyle, FontProviderLimits};
     use crate::model::{
         Block, Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat,
-        PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, Paragraph, Run, StaticShape,
-        StaticShapeKind, StaticShapePoint, Table, TableCell, TableCellBorder, TableCellBorders,
-        TableCellPadding, TableCellSpacing, TableCellVerticalMerge, TableRow,
+        PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, Paragraph, Run, StaticImagePlacement,
+        StaticShape, StaticShapeKind, StaticShapePoint, Table, TableCell, TableCellBorder,
+        TableCellBorders, TableCellPadding, TableCellSpacing, TableCellVerticalMerge, TableRow,
     };
 
     use super::*;
@@ -7509,6 +7531,7 @@ mod tests {
             scale_x_percent: Some(50),
             scale_y_percent: Some(200),
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -7542,6 +7565,7 @@ mod tests {
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -7577,6 +7601,7 @@ mod tests {
             scale_x_percent: Some(50),
             scale_y_percent: Some(200),
             crop: ImageCrop::default(),
+            placement: None,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -7591,6 +7616,47 @@ mod tests {
 
         assert!((image.width - 18.0).abs() < 0.01);
         assert!((image.height - 144.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn lays_out_shape_picture_images_with_bounded_passive_placement_frame() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 100,
+            height_px: 50,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(7200),
+            display_height_twips: Some(3600),
+            scale_x_percent: Some(25),
+            scale_y_percent: Some(25),
+            crop: ImageCrop::default(),
+            placement: Some(StaticImagePlacement {
+                left_twips: 720,
+                top_twips: 360,
+                width_twips: 1440,
+                height_twips: 720,
+            }),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let image = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("placed shape image");
+
+        assert!((image.x - 108.0).abs() < 0.01);
+        assert!((image.y - 666.0).abs() < 0.01);
+        assert!((image.width - 72.0).abs() < 0.01);
+        assert!((image.height - 36.0).abs() < 0.01);
     }
 
     #[test]
@@ -14402,6 +14468,7 @@ mod tests {
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            placement: None,
         }];
         document.blocks.clear();
         for _ in 0..120 {
