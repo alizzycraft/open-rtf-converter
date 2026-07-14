@@ -246,6 +246,71 @@ fn cyrillic_charset_text_is_decoded_but_unrenderable_font_gap_is_reported() {
 }
 
 #[test]
+fn central_european_charset_text_reports_browser_safe_font_gap() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ansi",
+        "\\",
+        "ansicpg1252{",
+        "\\",
+        "fonttbl{",
+        "\\",
+        "f37",
+        "\\",
+        "fcharset238 Times New Roman CE;}}",
+        "\\",
+        "f37 ",
+        "\\",
+        "'e1rv",
+        "\\",
+        "'edzt",
+        "\\",
+        "'fbr",
+        "\\",
+        "'f5",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("\u{00e1}rv\u{00ed}zt\u{0171}r\u{0151}"));
+    assert!(!text.contains("fcharset238"));
+    assert!(!text.contains("Times New Roman CE"));
+
+    let mut options = ConvertOptions::browser_safe_defaults();
+    options.diagnostics = true;
+    let output = convert_rtf_to_pdf(&input, &options).unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("Latin Extended characters")
+            && diagnostic.message.contains("passive font asset support")
+            && diagnostic.message.contains("Times New Roman CE")
+    }));
+
+    for forbidden in [
+        b"Times New Roman CE".as_slice(),
+        b"fcharset238".as_slice(),
+        b"ansicpg1250".as_slice(),
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile".as_slice(),
+        b"/Launch".as_slice(),
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Central European/source content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn invalid_caller_font_assets_are_rejected_before_pdf_rendering() {
     let input = rtf(&[
         "{",
