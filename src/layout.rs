@@ -5150,6 +5150,9 @@ fn push_block_stats(builder: &mut DocumentStatsBuilder, block: &Block) {
         Block::Table(table) => {
             for row in &table.rows {
                 for cell in &row.cells {
+                    if table_cell_is_merge_continuation(cell) {
+                        continue;
+                    }
                     for paragraph in &cell.paragraphs {
                         push_paragraph_stats(builder, paragraph);
                     }
@@ -5194,6 +5197,11 @@ fn push_block_stats(builder: &mut DocumentStatsBuilder, block: &Block) {
         | Block::EvenPageSectionBreak
         | Block::OddPageSectionBreak => builder.finish_text_boundary(),
     }
+}
+
+fn table_cell_is_merge_continuation(cell: &TableCell) -> bool {
+    cell.horizontal_merge == TableCellHorizontalMerge::Continuation
+        || cell.vertical_merge == TableCellVerticalMerge::Continuation
 }
 
 fn push_paragraph_stats(builder: &mut DocumentStatsBuilder, paragraph: &Paragraph) {

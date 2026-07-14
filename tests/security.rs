@@ -6822,6 +6822,116 @@ fn resultless_document_stat_fields_render_passive_counts_without_instruction_lea
 }
 
 #[test]
+fn document_stat_fields_ignore_hidden_merged_table_continuations() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "trowd",
+        "\\",
+        "clmgf",
+        "\\",
+        "cellx1000 Visible",
+        "\\",
+        "cell",
+        "\\",
+        "clmrg",
+        "\\",
+        "cellx2000 Hidden horizontal",
+        "\\",
+        "cell",
+        "\\",
+        "cellx3000 Plain",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "\\",
+        "trowd",
+        "\\",
+        "clvmgf",
+        "\\",
+        "cellx1000 Top",
+        "\\",
+        "cell",
+        "\\",
+        "cellx2000 A",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "\\",
+        "trowd",
+        "\\",
+        "clvmrg",
+        "\\",
+        "cellx1000 Hidden vertical",
+        "\\",
+        "cell",
+        "\\",
+        "cellx2000 B",
+        "\\",
+        "cell",
+        "\\",
+        "row Words:{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst NUMWORDS}}",
+        "\\",
+        "par}",
+    ]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Words:6"),
+        "visible merged table stats should count only rendered cells; got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Words:10"),
+        "hidden merge continuation text changed passive NUMWORDS: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"Hidden horizontal".as_slice(),
+        b"Hidden vertical",
+        b"NUMWORDS",
+        b"fldinst",
+        b"clmgf",
+        b"clmrg",
+        b"clvmgf",
+        b"clvmrg",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "merged table stat field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn section_numbers_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
