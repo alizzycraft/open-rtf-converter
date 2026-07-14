@@ -91,6 +91,7 @@ struct ParserState {
     inside_shape_picture: bool,
     shape_picture_rendered: bool,
     suppressing_nonshape_picture: bool,
+    inside_picture_properties: bool,
     inside_field: bool,
     field_owner_destination: Destination,
     field_result_seen: bool,
@@ -242,6 +243,7 @@ impl Default for ParserState {
             inside_shape_picture: false,
             shape_picture_rendered: false,
             suppressing_nonshape_picture: false,
+            inside_picture_properties: false,
             inside_field: false,
             field_owner_destination: Destination::Body,
             field_result_seen: false,
@@ -3180,11 +3182,28 @@ impl Parser {
                 }
             }
             "sp" if control_starts_group && self.state.destination == Destination::Shape => {}
+            "sp" if control_starts_group
+                && self.state.destination == Destination::Metadata
+                && self.state.inside_picture_properties => {}
             "sn" if control_starts_group && self.state.destination == Destination::Shape => {
                 self.state.shape_property_capture = Some(ShapePropertyCapture::Name);
                 self.state.shape_property_name.clear();
             }
             "sv" if control_starts_group && self.state.destination == Destination::Shape => {
+                self.state.shape_property_capture = Some(ShapePropertyCapture::Value);
+                self.state.shape_property_value.clear();
+            }
+            "sn" if control_starts_group
+                && self.state.destination == Destination::Metadata
+                && self.state.inside_picture_properties =>
+            {
+                self.state.shape_property_capture = Some(ShapePropertyCapture::Name);
+                self.state.shape_property_name.clear();
+            }
+            "sv" if control_starts_group
+                && self.state.destination == Destination::Metadata
+                && self.state.inside_picture_properties =>
+            {
                 self.state.shape_property_capture = Some(ShapePropertyCapture::Value);
                 self.state.shape_property_value.clear();
             }
@@ -3323,6 +3342,7 @@ impl Parser {
             "picprop" if self.state.destination == Destination::Picture && control_starts_group => {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
+                self.state.inside_picture_properties = true;
             }
             "picw" if self.state.destination == Destination::Picture => {
                 self.set_picture_width_hint(control.parameter, offset)
@@ -6782,6 +6802,15 @@ impl Parser {
                     let name = self.state.shape_property_name.clone();
                     let value = self.state.shape_property_value.clone();
                     self.apply_current_shape_property(&name, &value, offset);
+                } else if self.state.destination == Destination::Metadata
+                    && previous.destination == Destination::Metadata
+                    && self.state.inside_picture_properties
+                    && previous.inside_picture_properties
+                    && !self.state.shape_property_name.trim().is_empty()
+                {
+                    let name = self.state.shape_property_name.clone();
+                    let value = self.state.shape_property_value.clone();
+                    self.apply_picture_metadata_property(&name, &value, offset);
                 }
             }
         }
@@ -11187,6 +11216,30 @@ impl Parser {
                 }
             }
             _ => self.mark_current_shape_unsupported_or_active_property_stripped(),
+        }
+    }
+
+    fn apply_picture_metadata_property(&mut self, name: &str, value: &str, offset: usize) {
+        let name = name.trim();
+        let value = value.trim();
+        match name {
+            "pictureGray" => {
+                if parse_shape_property_i64(value).is_some_and(|enabled| enabled != 0) {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "picture grayscale property approximated by passive original image",
+                        Some(offset),
+                    ));
+                }
+            }
+            "pictureBiLevel" => {
+                if parse_shape_property_i64(value).is_some_and(|enabled| enabled != 0) {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "picture bilevel property approximated by passive original image",
+                        Some(offset),
+                    ));
+                }
+            }
+            _ => {}
         }
     }
 

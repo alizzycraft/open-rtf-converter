@@ -22038,6 +22038,133 @@ fn picture_metadata_controls_do_not_corrupt_image_or_leak_payloads() {
 }
 
 #[test]
+fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureGray}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBiLevel}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-visible-picture-metadata {",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("picture grayscale property approximated")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("picture bilevel property approximated")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("active content removed: object payload in metadata")
+    }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "picture color-mode metadata should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "pictureGray",
+        "pictureBiLevel",
+        "pFragments",
+        "hostile-visible-picture-metadata",
+        "objdata",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "visible picture metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "valid JPEG should still render as a passive image"
+    );
+    for forbidden in [
+        b"pictureGray".as_slice(),
+        b"pictureBiLevel",
+        b"pFragments",
+        b"hostile-visible-picture-metadata",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "visible picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn hostile_binary_picture_payload_is_not_retokenized_or_copied_to_pdf() {
     let payload = br"{\object\objdata 414243 /JavaScript /EmbeddedFile}";
     let mut input = br"{\rtf1 before {\pict\jpegblip\bin".to_vec();
