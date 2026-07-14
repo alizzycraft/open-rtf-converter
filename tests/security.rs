@@ -22960,6 +22960,8 @@ fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
     assert!(placement.text_wrap);
     assert_eq!(placement.wrap_margin_left_twips, 120);
     assert_eq!(placement.wrap_margin_right_twips, 120);
+    assert_eq!(placement.wrap_margin_top_twips, 0);
+    assert_eq!(placement.wrap_margin_bottom_twips, 0);
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     for forbidden in [
@@ -23064,7 +23066,19 @@ fn shape_picture_result_uses_passive_author_wrap_distances_without_payload_leaka
         "\\",
         "sn dxWrapDistRight}{",
         "\\",
-        "sv 457200}}}{",
+        "sv 457200}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn dyWrapDistTop}{",
+        "\\",
+        "sv 304800}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn dyWrapDistBottom}{",
+        "\\",
+        "sv 609600}}}{",
         "\\",
         "*",
         "\\",
@@ -23098,9 +23112,20 @@ fn shape_picture_result_uses_passive_author_wrap_distances_without_payload_leaka
     assert!(placement.text_wrap);
     assert_eq!(placement.wrap_margin_left_twips, 240);
     assert_eq!(placement.wrap_margin_right_twips, 720);
+    assert_eq!(placement.wrap_margin_top_twips, 480);
+    assert_eq!(placement.wrap_margin_bottom_twips, 960);
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
-    for forbidden in ["dxWrapDistLeft", "dxWrapDistRight", "152400", "457200"] {
+    for forbidden in [
+        "dxWrapDistLeft",
+        "dxWrapDistRight",
+        "dyWrapDistTop",
+        "dyWrapDistBottom",
+        "152400",
+        "457200",
+        "304800",
+        "609600",
+    ] {
         assert!(
             !text.contains(forbidden),
             "forbidden shape wrap-distance metadata leaked to text: {forbidden}"
@@ -23125,8 +23150,12 @@ fn shape_picture_result_uses_passive_author_wrap_distances_without_payload_leaka
     for forbidden in [
         b"dxWrapDistLeft".as_slice(),
         b"dxWrapDistRight",
+        b"dyWrapDistTop",
+        b"dyWrapDistBottom",
         b"152400",
         b"457200",
+        b"304800",
+        b"609600",
         b"shppict",
         b"/JavaScript",
         b"/EmbeddedFile",

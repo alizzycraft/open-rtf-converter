@@ -784,6 +784,8 @@ struct ShapeBuilder {
     text_wrap: bool,
     wrap_margin_left_twips: i32,
     wrap_margin_right_twips: i32,
+    wrap_margin_top_twips: i32,
+    wrap_margin_bottom_twips: i32,
     text: Vec<Paragraph>,
     current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
@@ -817,6 +819,8 @@ impl Default for ShapeBuilder {
             text_wrap: false,
             wrap_margin_left_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
             wrap_margin_right_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             text: Vec::new(),
             current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
@@ -10636,6 +10640,8 @@ impl Parser {
             text_wrap: shape.text_wrap,
             wrap_margin_left_twips: shape.wrap_margin_left_twips,
             wrap_margin_right_twips: shape.wrap_margin_right_twips,
+            wrap_margin_top_twips: shape.wrap_margin_top_twips,
+            wrap_margin_bottom_twips: shape.wrap_margin_bottom_twips,
         });
         self.diagnostics.push(Diagnostic::warning(
             "rendering shape picture result with bounded passive shape frame",
@@ -11259,6 +11265,34 @@ impl Parser {
                     );
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.wrap_margin_right_twips = margin;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "dyWrapDistTop" => {
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
+                    let margin = self.clamp_shape_wrap_margin(
+                        twips as i32,
+                        "shape top wrap distance",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.wrap_margin_top_twips = margin;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "dyWrapDistBottom" => {
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
+                    let margin = self.clamp_shape_wrap_margin(
+                        twips as i32,
+                        "shape bottom wrap distance",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.wrap_margin_bottom_twips = margin;
                     }
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();

@@ -374,6 +374,8 @@ pub struct StaticImagePlacement {
     pub text_wrap: bool,
     pub wrap_margin_left_twips: i32,
     pub wrap_margin_right_twips: i32,
+    pub wrap_margin_top_twips: i32,
+    pub wrap_margin_bottom_twips: i32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

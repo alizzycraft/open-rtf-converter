@@ -4242,8 +4242,10 @@ fn wrapped_image_text_area_for_line(
         if image_right <= margin_left || image_left >= content_right {
             continue;
         }
-        let image_bottom = image.y;
-        let image_top = image.y + image.height;
+        let top_gap = twips_to_points(placement.wrap_margin_top_twips.max(0));
+        let bottom_gap = twips_to_points(placement.wrap_margin_bottom_twips.max(0));
+        let image_bottom = image.y - bottom_gap;
+        let image_top = image.y + image.height + top_gap;
         if line_top_y <= image_bottom || line_bottom_y >= image_top {
             continue;
         }
@@ -7763,6 +7765,8 @@ mod tests {
                 text_wrap: false,
                 wrap_margin_left_twips: 120,
                 wrap_margin_right_twips: 120,
+                wrap_margin_top_twips: 0,
+                wrap_margin_bottom_twips: 0,
             }),
         })];
 
@@ -7808,6 +7812,8 @@ mod tests {
                     text_wrap: true,
                     wrap_margin_left_twips: 120,
                     wrap_margin_right_twips: 120,
+                    wrap_margin_top_twips: 0,
+                    wrap_margin_bottom_twips: 0,
                 }),
             }),
             Block::Paragraph(Paragraph {
@@ -7873,6 +7879,8 @@ mod tests {
                     text_wrap: true,
                     wrap_margin_left_twips: 120,
                     wrap_margin_right_twips: 720,
+                    wrap_margin_top_twips: 0,
+                    wrap_margin_bottom_twips: 0,
                 }),
             }),
             Block::Paragraph(Paragraph {
@@ -7912,6 +7920,64 @@ mod tests {
     }
 
     #[test]
+    fn wrapped_line_exclusion_honors_passive_vertical_wrap_margins() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 100,
+            height_px: 50,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: None,
+            display_height_twips: None,
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: Some(StaticImagePlacement {
+                left_twips: 0,
+                top_twips: 0,
+                width_twips: 1440,
+                height_twips: 720,
+                text_wrap: true,
+                wrap_margin_left_twips: 120,
+                wrap_margin_right_twips: 120,
+                wrap_margin_top_twips: 0,
+                wrap_margin_bottom_twips: 480,
+            }),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let image = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("wrapped shape image");
+        let (line_margin_left, line_content_width) = wrapped_image_text_area_for_line(
+            &layout.pages,
+            page.geometry.margin_left,
+            page.geometry.content_width,
+            image.y - 1.0,
+            12.0,
+        )
+        .expect("line inside passive bottom wrap margin should be excluded");
+
+        assert!(
+            line_margin_left > image.x + image.width,
+            "text should stay beside image within passive vertical wrap margin: text {}, image right {}",
+            line_margin_left,
+            image.x + image.width
+        );
+        assert!(line_content_width < page.geometry.content_width);
+    }
+
+    #[test]
     fn wrapped_paragraph_returns_to_full_width_below_passive_shape_picture_frame() {
         let mut document = Document::default();
         document.blocks = vec![
@@ -7937,6 +8003,8 @@ mod tests {
                     text_wrap: true,
                     wrap_margin_left_twips: 120,
                     wrap_margin_right_twips: 120,
+                    wrap_margin_top_twips: 0,
+                    wrap_margin_bottom_twips: 0,
                 }),
             }),
             Block::Paragraph(Paragraph {
@@ -8018,6 +8086,8 @@ mod tests {
                 text_wrap: true,
                 wrap_margin_left_twips: 120,
                 wrap_margin_right_twips: 120,
+                wrap_margin_top_twips: 0,
+                wrap_margin_bottom_twips: 0,
             }),
         };
         let mut document = Document::default();
