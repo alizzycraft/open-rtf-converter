@@ -782,6 +782,8 @@ struct ShapeBuilder {
     fill_color: Option<Color>,
     fill_color_from_foreground: bool,
     text_wrap: bool,
+    wrap_margin_left_twips: i32,
+    wrap_margin_right_twips: i32,
     text: Vec<Paragraph>,
     current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
@@ -813,6 +815,8 @@ impl Default for ShapeBuilder {
             fill_color: None,
             fill_color_from_foreground: false,
             text_wrap: false,
+            wrap_margin_left_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
+            wrap_margin_right_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
             text: Vec::new(),
             current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
@@ -10630,8 +10634,8 @@ impl Parser {
             width_twips,
             height_twips,
             text_wrap: shape.text_wrap,
-            wrap_margin_left_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
-            wrap_margin_right_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
+            wrap_margin_left_twips: shape.wrap_margin_left_twips,
+            wrap_margin_right_twips: shape.wrap_margin_right_twips,
         });
         self.diagnostics.push(Diagnostic::warning(
             "rendering shape picture result with bounded passive shape frame",
@@ -11223,11 +11227,38 @@ impl Parser {
                 }
             }
             "lineWidth" => {
-                if let Some(emu) = parse_shape_property_i64(value) {
-                    let twips = ((emu.max(0).saturating_add(317)) / 635).min(i32::MAX as i64);
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
                     let width = self.clamp_shape_stroke_width(twips as i32, offset);
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.stroke_width_twips = width;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "dxWrapDistLeft" => {
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
+                    let margin = self.clamp_shape_wrap_margin(
+                        twips as i32,
+                        "shape left wrap distance",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.wrap_margin_left_twips = margin;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "dxWrapDistRight" => {
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
+                    let margin = self.clamp_shape_wrap_margin(
+                        twips as i32,
+                        "shape right wrap distance",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.wrap_margin_right_twips = margin;
                     }
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
@@ -11387,6 +11418,18 @@ impl Parser {
         if clamped != value {
             self.diagnostics.push(Diagnostic::warning(
                 format!("shape stroke width clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        clamped
+    }
+
+    fn clamp_shape_wrap_margin(&mut self, value: i32, label: &str, offset: usize) -> i32 {
+        let max = self.limits().max_shape_dimension_twips.max(0);
+        let clamped = value.clamp(0, max);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("{label} clamped from {value} to {clamped} twips"),
                 Some(offset),
             ));
         }
@@ -14372,6 +14415,11 @@ fn append_shape_property_text(
 
 fn parse_shape_property_i64(value: &str) -> Option<i64> {
     value.trim().parse::<i64>().ok()
+}
+
+fn parse_shape_property_emu_twips(value: &str) -> Option<i64> {
+    let emu = parse_shape_property_i64(value)?;
+    Some(((emu.max(0).saturating_add(317)) / 635).min(i32::MAX as i64))
 }
 
 fn parse_office_shape_color(value: &str) -> Option<Color> {

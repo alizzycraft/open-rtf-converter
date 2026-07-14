@@ -23031,6 +23031,121 @@ fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
 }
 
 #[test]
+fn shape_picture_result_uses_passive_author_wrap_distances_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop360",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1080",
+        "\\",
+        "shpwr1{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn dxWrapDistLeft}{",
+        "\\",
+        "sv 152400}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn dxWrapDistRight}{",
+        "\\",
+        "sv 457200}}}{",
+        "\\",
+        "*",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("shape picture image");
+    let placement = image.placement.expect("shape picture placement");
+    let text = collect_text(&parsed.document);
+
+    assert!(placement.text_wrap);
+    assert_eq!(placement.wrap_margin_left_twips, 240);
+    assert_eq!(placement.wrap_margin_right_twips, 720);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in ["dxWrapDistLeft", "dxWrapDistRight", "152400", "457200"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden shape wrap-distance metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "shape wrap distances should be consumed as passive metadata: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    for forbidden in [
+        b"dxWrapDistLeft".as_slice(),
+        b"dxWrapDistRight",
+        b"152400",
+        b"457200",
+        b"shppict",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden shape wrap-distance metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn header_picture_renders_passively_without_body_flow_or_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
