@@ -97,6 +97,7 @@ pub enum LayoutItem {
         fill_color: Option<PdfColor>,
     },
     Image(ImageFragment),
+    Drawing(DrawingFragment),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -133,6 +134,15 @@ pub struct ImageFragment {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub z_order: i32,
+    pub below_text: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DrawingFragment {
+    pub z_order: i32,
+    pub below_text: bool,
+    pub item: Box<LayoutItem>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -1095,6 +1105,7 @@ impl LayoutEngine {
         resolve_bookmark_page_ref_markers(&mut pages, document, font_provider);
         resolve_section_page_markers(&mut pages);
         resolve_total_page_markers(&mut pages);
+        apply_passive_drawing_z_order(&mut pages);
 
         let width = pages
             .first()
@@ -1562,6 +1573,14 @@ fn layout_image(
         y,
         width,
         height,
+        z_order: image
+            .placement
+            .map(|placement| placement.z_order)
+            .unwrap_or(0),
+        below_text: image
+            .placement
+            .map(|placement| placement.below_text)
+            .unwrap_or(false),
     }));
     if image.placement.is_some_and(|placement| placement.text_wrap) {
         return;
@@ -1668,6 +1687,7 @@ fn layout_shape(
     let Some(page) = pages.last_mut() else {
         return;
     };
+    let shape_item_start = page.items.len();
     match shape.kind {
         StaticShapeKind::Line => {
             if let Some(width_points) = stroke_width_points {
@@ -1900,6 +1920,7 @@ fn layout_shape(
             }
         }
     }
+    wrap_static_shape_items_with_order(page, shape_item_start, shape.z_order, shape.below_text);
     layout_shape_text(
         pages,
         shape,
@@ -1912,6 +1933,113 @@ fn layout_shape(
         font_provider,
     );
     *cursor_y -= block_height + 6.0;
+}
+
+fn wrap_static_shape_items_with_order(
+    page: &mut LayoutPage,
+    start: usize,
+    z_order: i32,
+    below_text: bool,
+) {
+    if (z_order == 0 && !below_text) || start >= page.items.len() {
+        return;
+    }
+    for item in &mut page.items[start..] {
+        let previous = item.clone();
+        *item = LayoutItem::Drawing(DrawingFragment {
+            z_order,
+            below_text,
+            item: Box::new(previous),
+        });
+    }
+}
+
+fn apply_passive_drawing_z_order(pages: &mut [LayoutPage]) {
+    for page in pages {
+        move_below_text_drawings_to_background(page);
+        sort_drawing_slots_by_z_order(&mut page.items);
+    }
+}
+
+fn move_below_text_drawings_to_background(page: &mut LayoutPage) {
+    let mut background = page
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            drawing_order(item)
+                .filter(|order| order.below_text)
+                .map(|order| (order.z_order, index, item.clone()))
+        })
+        .collect::<Vec<_>>();
+    if background.is_empty() {
+        return;
+    }
+    background.sort_by(|(z_a, index_a, _), (z_b, index_b, _)| {
+        z_a.cmp(z_b).then_with(|| index_a.cmp(index_b))
+    });
+    let foreground = page
+        .items
+        .iter()
+        .filter(|item| !drawing_order(item).is_some_and(|order| order.below_text))
+        .cloned()
+        .collect::<Vec<_>>();
+    page.items = background
+        .into_iter()
+        .map(|(_, _, item)| item)
+        .chain(foreground)
+        .collect();
+}
+
+fn sort_drawing_slots_by_z_order(items: &mut [LayoutItem]) {
+    let mut drawing_slots = items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            drawing_order(item)
+                .filter(|order| !order.below_text)
+                .map(|order| (index, order.z_order))
+        })
+        .collect::<Vec<_>>();
+    if drawing_slots.len() <= 1 {
+        return;
+    }
+    let mut drawings = drawing_slots
+        .iter()
+        .map(|(index, z_order)| (*z_order, *index, items[*index].clone()))
+        .collect::<Vec<_>>();
+    drawings.sort_by(|(z_a, index_a, _), (z_b, index_b, _)| {
+        z_a.cmp(z_b).then_with(|| index_a.cmp(index_b))
+    });
+    drawing_slots.sort_by_key(|(index, _)| *index);
+    for ((slot_index, _), (_, _, drawing)) in drawing_slots.into_iter().zip(drawings) {
+        items[slot_index] = drawing;
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct DrawingOrder {
+    z_order: i32,
+    below_text: bool,
+}
+
+fn drawing_order(item: &LayoutItem) -> Option<DrawingOrder> {
+    match item {
+        LayoutItem::Image(fragment) => Some(DrawingOrder {
+            z_order: fragment.z_order,
+            below_text: fragment.below_text,
+        }),
+        LayoutItem::Drawing(fragment) => Some(DrawingOrder {
+            z_order: fragment.z_order,
+            below_text: fragment.below_text,
+        }),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+fn drawing_z_order(item: &LayoutItem) -> Option<i32> {
+    drawing_order(item).map(|order| order.z_order)
 }
 
 fn shape_point_x(left: f32, width: f32, offset_x: f32, flip_horizontal: bool) -> f32 {
@@ -2374,6 +2502,7 @@ fn layout_item_vertical_bounds(item: &LayoutItem) -> Option<VerticalBounds> {
             top: image.y + image.height,
             bottom: image.y,
         }),
+        LayoutItem::Drawing(drawing) => layout_item_vertical_bounds(&drawing.item),
     }
 }
 
@@ -2394,6 +2523,7 @@ fn translate_layout_item_y(item: &mut LayoutItem, delta_y: f32) {
             }
         }
         LayoutItem::Image(image) => image.y += delta_y,
+        LayoutItem::Drawing(drawing) => translate_layout_item_y(&mut drawing.item, delta_y),
     }
 }
 
@@ -2717,6 +2847,14 @@ fn layout_repeating_header_footer(
                     y,
                     width,
                     height,
+                    z_order: image
+                        .placement
+                        .map(|placement| placement.z_order)
+                        .unwrap_or(0),
+                    below_text: image
+                        .placement
+                        .map(|placement| placement.below_text)
+                        .unwrap_or(false),
                 }));
             cursor_y = y - 6.0;
         }
@@ -5346,6 +5484,9 @@ fn item_starts_after_late_marker_on_line(
                 && same_pdf_coord(*y1, *y2)
                 && (*y1 - geometry.baseline_y).abs() <= geometry.font_size
         }
+        LayoutItem::Drawing(drawing) => {
+            item_starts_after_late_marker_on_line(&drawing.item, old_end, geometry)
+        }
         _ => false,
     }
 }
@@ -5355,10 +5496,11 @@ fn same_late_marker_line(baseline_y: f32, geometry: LateMarkerGeometry) -> bool 
 }
 
 fn starts_new_text_line(item: &LayoutItem, geometry: LateMarkerGeometry) -> bool {
-    matches!(
-        item,
-        LayoutItem::Text(fragment) if !same_late_marker_line(fragment.baseline_y, geometry)
-    )
+    match item {
+        LayoutItem::Text(fragment) if !same_late_marker_line(fragment.baseline_y, geometry) => true,
+        LayoutItem::Drawing(drawing) => starts_new_text_line(&drawing.item, geometry),
+        _ => false,
+    }
 }
 
 fn shift_layout_item_x(item: &mut LayoutItem, delta: f32) {
@@ -5369,6 +5511,7 @@ fn shift_layout_item_x(item: &mut LayoutItem, delta: f32) {
             *x1 += delta;
             *x2 += delta;
         }
+        LayoutItem::Drawing(drawing) => shift_layout_item_x(&mut drawing.item, delta),
         _ => {}
     }
 }
@@ -7773,6 +7916,8 @@ mod tests {
                 top_twips: 360,
                 width_twips: 1440,
                 height_twips: 720,
+                z_order: 0,
+                below_text: false,
                 text_wrap: false,
                 wrap_side: StaticImageWrapSide::Both,
                 wrap_margin_left_twips: 120,
@@ -7821,6 +7966,8 @@ mod tests {
                     top_twips: 0,
                     width_twips: 1440,
                     height_twips: 720,
+                    z_order: 0,
+                    below_text: false,
                     text_wrap: true,
                     wrap_side: StaticImageWrapSide::Both,
                     wrap_margin_left_twips: 120,
@@ -7889,6 +8036,8 @@ mod tests {
                     top_twips: 0,
                     width_twips: 1440,
                     height_twips: 720,
+                    z_order: 0,
+                    below_text: false,
                     text_wrap: true,
                     wrap_side: StaticImageWrapSide::Both,
                     wrap_margin_left_twips: 120,
@@ -7955,6 +8104,8 @@ mod tests {
                 top_twips: 0,
                 width_twips: 1440,
                 height_twips: 720,
+                z_order: 0,
+                below_text: false,
                 text_wrap: true,
                 wrap_side: StaticImageWrapSide::Both,
                 wrap_margin_left_twips: 120,
@@ -8013,6 +8164,8 @@ mod tests {
                 top_twips: 0,
                 width_twips: 1440,
                 height_twips: 720,
+                z_order: 0,
+                below_text: false,
                 text_wrap: true,
                 wrap_side,
                 wrap_margin_left_twips: 120,
@@ -8110,6 +8263,8 @@ mod tests {
                     top_twips: 0,
                     width_twips: 5760,
                     height_twips: 560,
+                    z_order: 0,
+                    below_text: false,
                     text_wrap: true,
                     wrap_side: StaticImageWrapSide::Both,
                     wrap_margin_left_twips: 120,
@@ -8194,6 +8349,8 @@ mod tests {
                 top_twips: 0,
                 width_twips: 2160,
                 height_twips: 720,
+                z_order: 0,
+                below_text: false,
                 text_wrap: true,
                 wrap_side: StaticImageWrapSide::Both,
                 wrap_margin_left_twips: 120,
@@ -8251,6 +8408,134 @@ mod tests {
     }
 
     #[test]
+    fn passive_drawing_slots_are_sorted_by_normalized_z_order() {
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Image(StaticImage {
+                format: ImageFormat::Placeholder,
+                bytes: Vec::new(),
+                palette: Vec::new(),
+                vector_commands: Vec::new(),
+                width_px: 1,
+                height_px: 1,
+                natural_width_px_hint: None,
+                natural_height_px_hint: None,
+                display_width_twips: None,
+                display_height_twips: None,
+                scale_x_percent: None,
+                scale_y_percent: None,
+                crop: ImageCrop::default(),
+                placement: Some(StaticImagePlacement {
+                    left_twips: 0,
+                    top_twips: 0,
+                    width_twips: 720,
+                    height_twips: 720,
+                    z_order: 30,
+                    below_text: false,
+                    text_wrap: true,
+                    wrap_side: StaticImageWrapSide::Both,
+                    wrap_margin_left_twips: 120,
+                    wrap_margin_right_twips: 120,
+                    wrap_margin_top_twips: 0,
+                    wrap_margin_bottom_twips: 0,
+                }),
+            }),
+            Block::Shape(StaticShape {
+                kind: StaticShapeKind::Rectangle,
+                left_twips: 0,
+                top_twips: 0,
+                width_twips: 720,
+                height_twips: 720,
+                z_order: 10,
+                below_text: false,
+                flip_horizontal: false,
+                flip_vertical: false,
+                start_arrowhead: StaticShapeArrowhead::None,
+                end_arrowhead: StaticShapeArrowhead::None,
+                stroke_width_twips: 0,
+                stroke_color: Color::default(),
+                stroke_style: BorderStyle::Single,
+                fill_color: Some(Color {
+                    red: 200,
+                    green: 20,
+                    blue: 20,
+                }),
+                text: Vec::new(),
+                points: Vec::new(),
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let drawing_items = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| drawing_z_order(item).map(|z_order| (z_order, item)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(drawing_items.len(), 2);
+        assert_eq!(drawing_items[0].0, 10);
+        assert_eq!(drawing_items[1].0, 30);
+        assert!(matches!(drawing_items[0].1, LayoutItem::Drawing(_)));
+        assert!(matches!(drawing_items[1].1, LayoutItem::Image(_)));
+    }
+
+    #[test]
+    fn below_text_passive_drawings_move_to_page_background_layer() {
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Body text".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+            Block::Shape(StaticShape {
+                kind: StaticShapeKind::Rectangle,
+                left_twips: 0,
+                top_twips: 0,
+                width_twips: 720,
+                height_twips: 720,
+                z_order: 0,
+                below_text: true,
+                flip_horizontal: false,
+                flip_vertical: false,
+                start_arrowhead: StaticShapeArrowhead::None,
+                end_arrowhead: StaticShapeArrowhead::None,
+                stroke_width_twips: 0,
+                stroke_color: Color::default(),
+                stroke_style: BorderStyle::Single,
+                fill_color: Some(Color {
+                    red: 200,
+                    green: 20,
+                    blue: 20,
+                }),
+                text: Vec::new(),
+                points: Vec::new(),
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let first_drawing = layout.pages[0]
+            .items
+            .iter()
+            .position(|item| matches!(item, LayoutItem::Drawing(_)))
+            .expect("below-text drawing");
+        let first_text = layout.pages[0]
+            .items
+            .iter()
+            .position(
+                |item| matches!(item, LayoutItem::Text(fragment) if fragment.text.contains("Body")),
+            )
+            .expect("body text");
+
+        assert!(
+            first_drawing < first_text,
+            "below-text drawing should be emitted before text: drawing {first_drawing}, text {first_text}"
+        );
+    }
+
+    #[test]
     fn lays_out_legacy_static_drawing_shapes_as_passive_lines() {
         let mut document = Document::default();
         document.blocks = vec![Block::Shape(StaticShape {
@@ -8259,6 +8544,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8314,6 +8601,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8382,6 +8671,8 @@ mod tests {
             top_twips: 720,
             width_twips: 2160,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8457,6 +8748,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8492,6 +8785,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: true,
             flip_vertical: true,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8529,6 +8824,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::Open,
@@ -8580,6 +8877,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8646,6 +8945,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8712,6 +9013,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8761,6 +9064,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8832,6 +9137,8 @@ mod tests {
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -15093,6 +15400,8 @@ mod tests {
             top_twips: 0,
             width_twips: 720,
             height_twips: 360,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,

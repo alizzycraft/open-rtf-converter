@@ -807,6 +807,94 @@ pub fn render_pdf_with_font_provider(
                         *fill_color,
                     );
                 }
+                LayoutItem::Drawing(fragment) => match fragment.item.as_ref() {
+                    LayoutItem::Highlight {
+                        x,
+                        y,
+                        width,
+                        height,
+                        color,
+                    } => {
+                        set_fill_color(&mut content, *color);
+                        content.rect(*x, *y, *width, *height);
+                        content.fill_nonzero();
+                    }
+                    LayoutItem::Line {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        width,
+                        color,
+                        style,
+                    } => {
+                        draw_passive_line(&mut content, *x1, *y1, *x2, *y2, *width, *color, *style);
+                    }
+                    LayoutItem::Ellipse {
+                        x,
+                        y,
+                        width,
+                        height,
+                        stroke_width,
+                        stroke_color,
+                        stroke_style,
+                        fill_color,
+                    } => {
+                        draw_passive_ellipse(
+                            &mut content,
+                            *x,
+                            *y,
+                            *width,
+                            *height,
+                            *stroke_width,
+                            *stroke_color,
+                            *stroke_style,
+                            *fill_color,
+                        );
+                    }
+                    LayoutItem::RoundedRectangle {
+                        x,
+                        y,
+                        width,
+                        height,
+                        radius,
+                        stroke_width,
+                        stroke_color,
+                        stroke_style,
+                        fill_color,
+                    } => {
+                        draw_passive_rounded_rectangle(
+                            &mut content,
+                            *x,
+                            *y,
+                            *width,
+                            *height,
+                            *radius,
+                            *stroke_width,
+                            *stroke_color,
+                            *stroke_style,
+                            *fill_color,
+                        );
+                    }
+                    LayoutItem::Polygon {
+                        points,
+                        stroke_width,
+                        stroke_color,
+                        stroke_style,
+                        fill_color,
+                    } => {
+                        draw_passive_polygon(
+                            &mut content,
+                            points,
+                            *stroke_width,
+                            *stroke_color,
+                            *stroke_style,
+                            StaticImageVectorFillRule::Winding,
+                            *fill_color,
+                        );
+                    }
+                    _ => {}
+                },
                 LayoutItem::Image(fragment) => {
                     if fragment.image.format == ImageFormat::Placeholder {
                         draw_passive_image_placeholder(&mut content, fragment);
@@ -5022,6 +5110,8 @@ endstream
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -5103,6 +5193,8 @@ endstream
             top_twips: 240,
             width_twips: 1440,
             height_twips: 720,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,

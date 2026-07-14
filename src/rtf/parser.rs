@@ -25,6 +25,7 @@ const DEFAULT_SCRIPT_FONT_SCALE_PERCENT: i32 = 65;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 60;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
+const MAX_PASSIVE_SHAPE_Z_ORDER: i32 = 65_535;
 const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
 
 #[derive(Debug, Error)]
@@ -772,6 +773,8 @@ struct ShapeBuilder {
     top_twips: i32,
     width_twips: i32,
     height_twips: i32,
+    z_order: i32,
+    below_text: bool,
     flip_horizontal: bool,
     flip_vertical: bool,
     start_arrowhead: StaticShapeArrowhead,
@@ -808,6 +811,8 @@ impl Default for ShapeBuilder {
             top_twips: 0,
             width_twips: 0,
             height_twips: 0,
+            z_order: 0,
+            below_text: false,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -3338,6 +3343,12 @@ impl Parser {
                     self.diagnostics
                         .push(Diagnostic::warning(message, Some(offset)));
                 }
+            }
+            "dodhgt" | "shpz" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_z_order(control.parameter, offset);
+            }
+            "shpfblwtxt" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_below_text(control.parameter);
             }
             name if self.state.destination == Destination::Shape
                 && is_shape_layout_compatibility_control(name) =>
@@ -10648,6 +10659,8 @@ impl Parser {
             top_twips,
             width_twips,
             height_twips,
+            z_order: shape.z_order,
+            below_text: shape.below_text,
             text_wrap: shape.text_wrap,
             wrap_side: shape.wrap_side,
             wrap_margin_left_twips: shape.wrap_margin_left_twips,
@@ -10792,6 +10805,8 @@ impl Parser {
                 top_twips,
                 width_twips,
                 height_twips,
+                z_order: shape.z_order,
+                below_text: shape.below_text,
                 flip_horizontal: shape.flip_horizontal,
                 flip_vertical: shape.flip_vertical,
                 start_arrowhead: shape.start_arrowhead,
@@ -11056,6 +11071,26 @@ impl Parser {
         let value = self.clamp_shape_dimension(value.unwrap_or(0), "shape height", offset);
         if let Some(shape) = self.current_shape.as_mut() {
             shape.height_twips = value;
+        }
+    }
+
+    fn set_current_shape_z_order(&mut self, value: Option<i32>, offset: usize) {
+        let raw = value.unwrap_or(0);
+        let clamped = raw.clamp(0, MAX_PASSIVE_SHAPE_Z_ORDER);
+        if clamped != raw {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("shape z-order clamped from {raw} to {clamped}"),
+                Some(offset),
+            ));
+        }
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.z_order = clamped;
+        }
+    }
+
+    fn set_current_shape_below_text(&mut self, value: Option<i32>) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.below_text = value.unwrap_or(1) != 0;
         }
     }
 
@@ -13446,12 +13481,6 @@ fn shape_layout_compatibility_control_message(
             Some("floating shape anchoring approximated by passive shape layout")
         }
         "dobxcolumn" | "dobypara" | "shpbxcolumn" | "shpbypara" => None,
-        "dodhgt" | "shpz" if parameter.unwrap_or(0) != 0 => {
-            Some("shape z-order approximated by passive document order")
-        }
-        "shpfblwtxt" if parameter.unwrap_or(1) != 0 => {
-            Some("shape text wrapping approximated by passive shape layout")
-        }
         "shpwr" if !matches!(parameter.unwrap_or(1), 0 | 1) => {
             Some("shape text wrapping approximated by passive shape layout")
         }

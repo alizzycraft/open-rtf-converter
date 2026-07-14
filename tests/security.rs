@@ -32391,6 +32391,321 @@ fn neutral_shape_layout_metadata_is_consumed_without_false_approximation_warning
 }
 
 #[test]
+fn shape_z_order_controls_are_bounded_and_do_not_leak() {
+    let modern = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop720",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1440",
+        "\\",
+        "shpz99999{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&modern).unwrap();
+    let modern_shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("modern z-ordered shape");
+
+    assert_eq!(modern_shape.z_order, 65_535);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("shape z-order clamped")),
+        "oversized z-order should be reported as clamped: {:?}",
+        parsed.diagnostics
+    );
+
+    let legacy = parse_rtf_bytes(&rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dprect",
+        "\\",
+        "dpxsize720",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dodhgt17}After",
+        "\\",
+        "par}",
+    ]))
+    .unwrap();
+    let legacy_shape = legacy
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("legacy z-ordered shape");
+
+    assert_eq!(legacy_shape.z_order, 17);
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let shape_picture = parse_rtf_bytes(&rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft0",
+        "\\",
+        "shptop0",
+        "\\",
+        "shpright720",
+        "\\",
+        "shpbottom720",
+        "\\",
+        "shpz23{",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip ",
+        image_hex.as_str(),
+        "}}}}}",
+    ]))
+    .unwrap();
+    let picture_z_order = shape_picture
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => image.placement.map(|placement| placement.z_order),
+            _ => None,
+        })
+        .expect("shape picture placement z-order");
+
+    assert_eq!(picture_z_order, 23);
+    for text in [
+        collect_text(&parsed.document),
+        collect_text(&legacy.document),
+        collect_text(&shape_picture.document),
+    ] {
+        for forbidden in ["shpz", "dodhgt", "shapeType", "[Shape skipped"] {
+            assert!(
+                !text.contains(forbidden),
+                "shape z-order control leaked to text: {forbidden}"
+            );
+        }
+    }
+
+    let output = convert_rtf_to_pdf(
+        &modern,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("shape z-order approximated")),
+        "nonzero normalized z-order should not be reported as ignored: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"shpz".as_slice(),
+        b"dodhgt",
+        b"shapeType",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape z-order control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn shape_below_text_controls_are_normalized_without_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop720",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1440",
+        "\\",
+        "shpfblwtxt1{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("below-text shape");
+
+    assert!(shape.below_text);
+
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let shape_picture = parse_rtf_bytes(&rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft0",
+        "\\",
+        "shptop0",
+        "\\",
+        "shpright720",
+        "\\",
+        "shpbottom720",
+        "\\",
+        "shpfblwtxt1{",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip ",
+        image_hex.as_str(),
+        "}}}}}",
+    ]))
+    .unwrap();
+    let placement_below_text = shape_picture
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => image.placement.map(|placement| placement.below_text),
+            _ => None,
+        })
+        .expect("shape picture below-text placement");
+
+    assert!(placement_below_text);
+    for text in [
+        collect_text(&parsed.document),
+        collect_text(&shape_picture.document),
+    ] {
+        for forbidden in ["shpfblwtxt", "shapeType", "shppict", "[Shape skipped"] {
+            assert!(
+                !text.contains(forbidden),
+                "shape below-text control leaked to text: {forbidden}"
+            );
+        }
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("shape text wrapping approximated")
+        }),
+        "below-text shape ordering should not be reported as an ignored wrap approximation: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"shpfblwtxt".as_slice(),
+        b"shapeType",
+        b"shppict",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape below-text control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn square_shape_wrap_metadata_is_consumed_by_passive_line_exclusion() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
