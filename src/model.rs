@@ -374,6 +374,20 @@ pub enum StaticImageWrapSide {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StaticShapeHorizontalAnchor {
+    Column,
+    Margin,
+    Page,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StaticShapeVerticalAnchor {
+    Paragraph,
+    Margin,
+    Page,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct StaticImagePlacement {
     pub left_twips: i32,
     pub top_twips: i32,
@@ -387,6 +401,8 @@ pub struct StaticImagePlacement {
     pub wrap_margin_right_twips: i32,
     pub wrap_margin_top_twips: i32,
     pub wrap_margin_bottom_twips: i32,
+    pub horizontal_anchor: StaticShapeHorizontalAnchor,
+    pub vertical_anchor: StaticShapeVerticalAnchor,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -517,6 +533,8 @@ pub struct StaticShape {
     pub height_twips: i32,
     pub z_order: i32,
     pub below_text: bool,
+    pub horizontal_anchor: StaticShapeHorizontalAnchor,
+    pub vertical_anchor: StaticShapeVerticalAnchor,
     pub flip_horizontal: bool,
     pub flip_vertical: bool,
     pub start_arrowhead: StaticShapeArrowhead,

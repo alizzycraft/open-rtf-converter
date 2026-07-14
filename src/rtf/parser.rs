@@ -11,10 +11,11 @@ use crate::model::{
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImagePlacement, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
     StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageWrapSide, StaticShape,
-    StaticShapeArrowhead, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment,
-    TabLeader, Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
-    TableCellPadding, TableCellSpacing, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
-    TableRowAlignment, TextRelief, UnderlineStyle,
+    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint,
+    StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell,
+    TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
+    TableCellSpacing, TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -775,6 +776,8 @@ struct ShapeBuilder {
     height_twips: i32,
     z_order: i32,
     below_text: bool,
+    horizontal_anchor: StaticShapeHorizontalAnchor,
+    vertical_anchor: StaticShapeVerticalAnchor,
     flip_horizontal: bool,
     flip_vertical: bool,
     start_arrowhead: StaticShapeArrowhead,
@@ -813,6 +816,8 @@ impl Default for ShapeBuilder {
             height_twips: 0,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -3260,6 +3265,24 @@ impl Parser {
             }
             "doby" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_base_y(control.parameter, offset);
+            }
+            "dobxcolumn" | "shpbxcolumn" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_horizontal_anchor(StaticShapeHorizontalAnchor::Column);
+            }
+            "dobxmargin" | "shpbxmargin" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_horizontal_anchor(StaticShapeHorizontalAnchor::Margin);
+            }
+            "dobxpage" | "shpbxpage" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_horizontal_anchor(StaticShapeHorizontalAnchor::Page);
+            }
+            "dobypara" | "shpbypara" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_vertical_anchor(StaticShapeVerticalAnchor::Paragraph);
+            }
+            "dobymargin" | "shpbymargin" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_vertical_anchor(StaticShapeVerticalAnchor::Margin);
+            }
+            "dobypage" | "shpbypage" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_vertical_anchor(StaticShapeVerticalAnchor::Page);
             }
             "dpx" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_left(control.parameter, offset);
@@ -10667,6 +10690,8 @@ impl Parser {
             wrap_margin_right_twips: shape.wrap_margin_right_twips,
             wrap_margin_top_twips: shape.wrap_margin_top_twips,
             wrap_margin_bottom_twips: shape.wrap_margin_bottom_twips,
+            horizontal_anchor: shape.horizontal_anchor,
+            vertical_anchor: shape.vertical_anchor,
         });
         self.diagnostics.push(Diagnostic::warning(
             "rendering shape picture result with bounded passive shape frame",
@@ -10819,6 +10844,8 @@ impl Parser {
                 fill_color: shape.fill_color,
                 text: shape.text,
                 points,
+                horizontal_anchor: shape.horizontal_anchor,
+                vertical_anchor: shape.vertical_anchor,
             },
             offset,
         )?;
@@ -11091,6 +11118,18 @@ impl Parser {
     fn set_current_shape_below_text(&mut self, value: Option<i32>) {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.below_text = value.unwrap_or(1) != 0;
+        }
+    }
+
+    fn set_current_shape_horizontal_anchor(&mut self, anchor: StaticShapeHorizontalAnchor) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.horizontal_anchor = anchor;
+        }
+    }
+
+    fn set_current_shape_vertical_anchor(&mut self, anchor: StaticShapeVerticalAnchor) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.vertical_anchor = anchor;
         }
     }
 
@@ -13476,11 +13515,9 @@ fn shape_layout_compatibility_control_message(
     parameter: Option<i32>,
 ) -> Option<&'static str> {
     match name {
-        "dobxmargin" | "dobxpage" | "dobymargin" | "dobypage" | "shpbxmargin" | "shpbxpage"
-        | "shpbymargin" | "shpbypage" => {
-            Some("floating shape anchoring approximated by passive shape layout")
-        }
-        "dobxcolumn" | "dobypara" | "shpbxcolumn" | "shpbypara" => None,
+        "dobxcolumn" | "dobxmargin" | "dobxpage" | "dobypara" | "dobymargin" | "dobypage"
+        | "shpbxcolumn" | "shpbxmargin" | "shpbxpage" | "shpbypara" | "shpbymargin"
+        | "shpbypage" => None,
         "shpwr" if !matches!(parameter.unwrap_or(1), 0 | 1) => {
             Some("shape text wrapping approximated by passive shape layout")
         }

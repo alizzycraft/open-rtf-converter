@@ -32119,6 +32119,14 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
     assert_eq!(shape.top_twips, 720);
     assert_eq!(shape.width_twips, 1440);
     assert_eq!(shape.height_twips, 720);
+    assert_eq!(
+        shape.horizontal_anchor,
+        open_rtf_converter::model::StaticShapeHorizontalAnchor::Column
+    );
+    assert_eq!(
+        shape.vertical_anchor,
+        open_rtf_converter::model::StaticShapeVerticalAnchor::Paragraph
+    );
     assert_eq!(shape.stroke_width_twips, 20);
     assert_eq!(
         shape.stroke_color,
@@ -32183,13 +32191,15 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("floating shape anchoring approximated")
-    }));
-    assert!(report.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
             .contains("shape text wrapping approximated")
     }));
+    assert!(
+        report.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("floating shape anchoring approximated")),
+        "supported shape anchors should not be reported as ignored: {:?}",
+        report.diagnostics
+    );
     assert!(
         report
             .diagnostics
@@ -33010,6 +33020,167 @@ fn column_paragraph_shape_anchoring_is_consumed_as_passive_layout_metadata() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "column/paragraph shape anchor metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn page_and_margin_shape_anchoring_is_consumed_without_property_leakage() {
+    let static_input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop720",
+        "\\",
+        "shpright1440",
+        "\\",
+        "shpbottom1440",
+        "\\",
+        "shpbxpage",
+        "\\",
+        "shpbymargin{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&static_input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("page/margin anchored shape");
+
+    assert_eq!(
+        shape.horizontal_anchor,
+        open_rtf_converter::model::StaticShapeHorizontalAnchor::Page
+    );
+    assert_eq!(
+        shape.vertical_anchor,
+        open_rtf_converter::model::StaticShapeVerticalAnchor::Margin
+    );
+
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let picture_input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop720",
+        "\\",
+        "shpright1440",
+        "\\",
+        "shpbottom1440",
+        "\\",
+        "shpbxmargin",
+        "\\",
+        "shpbypage{",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip ",
+        image_hex.as_str(),
+        "}}}}}",
+    ]);
+    let picture = parse_rtf_bytes(&picture_input).unwrap();
+    let placement = picture
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => image.placement,
+            _ => None,
+        })
+        .expect("page/margin anchored shape picture");
+
+    assert_eq!(
+        placement.horizontal_anchor,
+        open_rtf_converter::model::StaticShapeHorizontalAnchor::Margin
+    );
+    assert_eq!(
+        placement.vertical_anchor,
+        open_rtf_converter::model::StaticShapeVerticalAnchor::Page
+    );
+
+    let output = convert_rtf_to_pdf(
+        &static_input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("floating shape anchoring approximated")),
+        "page/margin anchors should be normalized, not reported as ignored: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        "shpbxpage",
+        "shpbymargin",
+        "shpbxmargin",
+        "shpbypage",
+        "shapeType",
+        "shppict",
+    ] {
+        for text in [
+            collect_text(&parsed.document),
+            collect_text(&picture.document),
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "shape anchor control leaked to text: {forbidden}"
+            );
+        }
+    }
+    for forbidden in [
+        b"shpbxpage".as_slice(),
+        b"shpbymargin",
+        b"shapeType",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape anchor control leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

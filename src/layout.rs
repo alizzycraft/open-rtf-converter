@@ -9,9 +9,9 @@ use crate::model::{
     FootnotePlacement, LineNumberRestart, PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings,
     PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticShape, StaticShapeArrowhead,
-    StaticShapeKind, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell,
-    TableCellBorder, TableCellHorizontalMerge, TableCellVerticalAlign, TableCellVerticalMerge,
-    TableRow, TableRowAlignment, UnderlineStyle,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER,
+    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellHorizontalMerge,
+    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment, UnderlineStyle,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -1562,8 +1562,17 @@ fn layout_image(
         (_, _, width, height) = image_layout_frame(image, content_width);
     }
 
-    let x = margin_left + left_offset;
-    let y = *cursor_y - top_offset - height;
+    let placement = image.placement;
+    let x_origin = placement
+        .map(|placement| {
+            shape_horizontal_origin(placement.horizontal_anchor, margin_left, geometry)
+        })
+        .unwrap_or(margin_left);
+    let y_origin = placement
+        .map(|placement| shape_vertical_origin(placement.vertical_anchor, *cursor_y, geometry))
+        .unwrap_or(*cursor_y);
+    let x = x_origin + left_offset;
+    let y = y_origin - top_offset - height;
     let Some(page) = pages.last_mut() else {
         return;
     };
@@ -1639,6 +1648,30 @@ fn image_display_size(image: &StaticImage, content_width: f32) -> (f32, f32) {
     (width, height)
 }
 
+fn shape_horizontal_origin(
+    anchor: StaticShapeHorizontalAnchor,
+    column_left: f32,
+    geometry: &PageGeometry,
+) -> f32 {
+    match anchor {
+        StaticShapeHorizontalAnchor::Column => column_left,
+        StaticShapeHorizontalAnchor::Margin => geometry.margin_left,
+        StaticShapeHorizontalAnchor::Page => 0.0,
+    }
+}
+
+fn shape_vertical_origin(
+    anchor: StaticShapeVerticalAnchor,
+    paragraph_top: f32,
+    geometry: &PageGeometry,
+) -> f32 {
+    match anchor {
+        StaticShapeVerticalAnchor::Paragraph => paragraph_top,
+        StaticShapeVerticalAnchor::Margin => geometry.height - geometry.margin_top,
+        StaticShapeVerticalAnchor::Page => geometry.height,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn layout_shape(
     pages: &mut Vec<LayoutPage>,
@@ -1669,8 +1702,8 @@ fn layout_shape(
         margin_left = geometry.body_left(*current_column);
     }
 
-    let x = margin_left + left;
-    let top_y = *cursor_y - top;
+    let x = shape_horizontal_origin(shape.horizontal_anchor, margin_left, geometry) + left;
+    let top_y = shape_vertical_origin(shape.vertical_anchor, *cursor_y, geometry) - top;
     let bottom_y = top_y - height;
     let right_x = x + width;
     let stroke_width_points = if shape.stroke_width_twips > 0 {
@@ -2838,12 +2871,27 @@ fn layout_repeating_header_footer(
         for image in images {
             let (left_offset, top_offset, width, height) =
                 image_layout_frame(image, geometry.content_width);
-            let y = cursor_y - top_offset - height;
+            let placement = image.placement;
+            let x_origin = placement
+                .map(|placement| {
+                    shape_horizontal_origin(
+                        placement.horizontal_anchor,
+                        geometry.margin_left,
+                        &geometry,
+                    )
+                })
+                .unwrap_or(geometry.margin_left);
+            let y_origin = placement
+                .map(|placement| {
+                    shape_vertical_origin(placement.vertical_anchor, cursor_y, &geometry)
+                })
+                .unwrap_or(cursor_y);
+            let y = y_origin - top_offset - height;
             scratch_pages[0]
                 .items
                 .push(LayoutItem::Image(ImageFragment {
                     image: image.clone(),
-                    x: geometry.margin_left + left_offset,
+                    x: x_origin + left_offset,
                     y,
                     width,
                     height,
@@ -7924,6 +7972,8 @@ mod tests {
                 wrap_margin_right_twips: 120,
                 wrap_margin_top_twips: 0,
                 wrap_margin_bottom_twips: 0,
+                horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             }),
         })];
 
@@ -7974,6 +8024,8 @@ mod tests {
                     wrap_margin_right_twips: 120,
                     wrap_margin_top_twips: 0,
                     wrap_margin_bottom_twips: 0,
+                    horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                    vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
                 }),
             }),
             Block::Paragraph(Paragraph {
@@ -8044,6 +8096,8 @@ mod tests {
                     wrap_margin_right_twips: 720,
                     wrap_margin_top_twips: 0,
                     wrap_margin_bottom_twips: 0,
+                    horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                    vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
                 }),
             }),
             Block::Paragraph(Paragraph {
@@ -8112,6 +8166,8 @@ mod tests {
                 wrap_margin_right_twips: 120,
                 wrap_margin_top_twips: 0,
                 wrap_margin_bottom_twips: 480,
+                horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             }),
         })];
 
@@ -8172,6 +8228,8 @@ mod tests {
                 wrap_margin_right_twips: 120,
                 wrap_margin_top_twips: 0,
                 wrap_margin_bottom_twips: 0,
+                horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             }),
         };
 
@@ -8271,6 +8329,8 @@ mod tests {
                     wrap_margin_right_twips: 120,
                     wrap_margin_top_twips: 0,
                     wrap_margin_bottom_twips: 0,
+                    horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                    vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
                 }),
             }),
             Block::Paragraph(Paragraph {
@@ -8357,6 +8417,8 @@ mod tests {
                 wrap_margin_right_twips: 120,
                 wrap_margin_top_twips: 0,
                 wrap_margin_bottom_twips: 0,
+                horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             }),
         };
         let mut document = Document::default();
@@ -8438,6 +8500,8 @@ mod tests {
                     wrap_margin_right_twips: 120,
                     wrap_margin_top_twips: 0,
                     wrap_margin_bottom_twips: 0,
+                    horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                    vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
                 }),
             }),
             Block::Shape(StaticShape {
@@ -8448,6 +8512,8 @@ mod tests {
                 height_twips: 720,
                 z_order: 10,
                 below_text: false,
+                horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
                 flip_horizontal: false,
                 flip_vertical: false,
                 start_arrowhead: StaticShapeArrowhead::None,
@@ -8480,6 +8546,55 @@ mod tests {
     }
 
     #[test]
+    fn page_anchored_shape_picture_uses_page_origin() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Placeholder,
+            bytes: Vec::new(),
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: None,
+            display_height_twips: None,
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: Some(StaticImagePlacement {
+                left_twips: 720,
+                top_twips: 720,
+                width_twips: 720,
+                height_twips: 720,
+                z_order: 0,
+                below_text: false,
+                text_wrap: true,
+                wrap_side: StaticImageWrapSide::Both,
+                wrap_margin_left_twips: 120,
+                wrap_margin_right_twips: 120,
+                wrap_margin_top_twips: 0,
+                wrap_margin_bottom_twips: 0,
+                horizontal_anchor: StaticShapeHorizontalAnchor::Page,
+                vertical_anchor: StaticShapeVerticalAnchor::Page,
+            }),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let image = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("page anchored image");
+
+        assert!((image.x - 36.0).abs() < 0.01);
+        assert!((image.y - (layout.pages[0].height - 72.0)).abs() < 0.01);
+    }
+
+    #[test]
     fn below_text_passive_drawings_move_to_page_background_layer() {
         let mut document = Document::default();
         document.blocks = vec![
@@ -8498,6 +8613,8 @@ mod tests {
                 height_twips: 720,
                 z_order: 0,
                 below_text: true,
+                horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
                 flip_horizontal: false,
                 flip_vertical: false,
                 start_arrowhead: StaticShapeArrowhead::None,
@@ -8536,6 +8653,66 @@ mod tests {
     }
 
     #[test]
+    fn page_and_margin_anchored_static_shapes_use_normalized_origins() {
+        let mut page_document = Document::default();
+        page_document.blocks = vec![Block::Shape(StaticShape {
+            kind: StaticShapeKind::Rectangle,
+            left_twips: 720,
+            top_twips: 720,
+            width_twips: 720,
+            height_twips: 720,
+            z_order: 0,
+            below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Page,
+            vertical_anchor: StaticShapeVerticalAnchor::Page,
+            flip_horizontal: false,
+            flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
+            stroke_width_twips: 0,
+            stroke_color: Color::default(),
+            stroke_style: BorderStyle::Single,
+            fill_color: Some(Color {
+                red: 10,
+                green: 20,
+                blue: 30,
+            }),
+            text: Vec::new(),
+            points: Vec::new(),
+        })];
+        let page_layout = LayoutEngine::layout(&page_document);
+        let page_fill = page_layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Highlight { x, y, .. } => Some((*x, *y)),
+                _ => None,
+            })
+            .expect("page anchored fill");
+
+        assert!((page_fill.0 - 36.0).abs() < 0.01);
+        assert!((page_fill.1 - (page_layout.pages[0].height - 72.0)).abs() < 0.01);
+
+        let mut margin_document = page_document.clone();
+        if let Block::Shape(shape) = &mut margin_document.blocks[0] {
+            shape.horizontal_anchor = StaticShapeHorizontalAnchor::Margin;
+            shape.vertical_anchor = StaticShapeVerticalAnchor::Margin;
+        }
+        let margin_layout = LayoutEngine::layout(&margin_document);
+        let margin_fill = margin_layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Highlight { x, y, .. } => Some((*x, *y)),
+                _ => None,
+            })
+            .expect("margin anchored fill");
+
+        assert!((margin_fill.0 - (72.0 + 36.0)).abs() < 0.01);
+        assert!((margin_fill.1 - (margin_layout.pages[0].height - 72.0 - 72.0)).abs() < 0.01);
+    }
+
+    #[test]
     fn lays_out_legacy_static_drawing_shapes_as_passive_lines() {
         let mut document = Document::default();
         document.blocks = vec![Block::Shape(StaticShape {
@@ -8546,6 +8723,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8603,6 +8782,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8673,6 +8854,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8750,6 +8933,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8787,6 +8972,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: true,
             flip_vertical: true,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8826,6 +9013,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::Open,
@@ -8879,6 +9068,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -8947,6 +9138,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -9015,6 +9208,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -9066,6 +9261,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -9139,6 +9336,8 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
@@ -15402,6 +15601,8 @@ mod tests {
             height_twips: 360,
             z_order: 0,
             below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
