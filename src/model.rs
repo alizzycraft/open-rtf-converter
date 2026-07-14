@@ -366,12 +366,21 @@ pub struct ImageCrop {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StaticImageWrapSide {
+    Both,
+    Left,
+    Right,
+    Largest,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct StaticImagePlacement {
     pub left_twips: i32,
     pub top_twips: i32,
     pub width_twips: i32,
     pub height_twips: i32,
     pub text_wrap: bool,
+    pub wrap_side: StaticImageWrapSide,
     pub wrap_margin_left_twips: i32,
     pub wrap_margin_right_twips: i32,
     pub wrap_margin_top_twips: i32,

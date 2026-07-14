@@ -1,6 +1,7 @@
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 
 use crate::fonts::{FontAssetStyle, FontProvider};
+use crate::model::StaticImageWrapSide;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
@@ -4256,17 +4257,27 @@ fn wrapped_image_text_area_for_line(
         if excluded_left >= excluded_right {
             continue;
         }
+        let side_left = match placement.wrap_side {
+            StaticImageWrapSide::Left => excluded_left,
+            StaticImageWrapSide::Right => margin_left,
+            StaticImageWrapSide::Both | StaticImageWrapSide::Largest => excluded_left,
+        };
+        let side_right = match placement.wrap_side {
+            StaticImageWrapSide::Left => content_right,
+            StaticImageWrapSide::Right => excluded_right,
+            StaticImageWrapSide::Both | StaticImageWrapSide::Largest => excluded_right,
+        };
         let mut next_intervals = Vec::with_capacity(free_intervals.len() + 1);
         for (left, right) in free_intervals {
-            if excluded_right <= left || excluded_left >= right {
+            if side_right <= left || side_left >= right {
                 next_intervals.push((left, right));
                 continue;
             }
-            if left < excluded_left {
-                next_intervals.push((left, excluded_left));
+            if left < side_left {
+                next_intervals.push((left, side_left));
             }
-            if excluded_right < right {
-                next_intervals.push((excluded_right, right));
+            if side_right < right {
+                next_intervals.push((side_right, right));
             }
         }
         free_intervals = next_intervals;
@@ -7763,6 +7774,7 @@ mod tests {
                 width_twips: 1440,
                 height_twips: 720,
                 text_wrap: false,
+                wrap_side: StaticImageWrapSide::Both,
                 wrap_margin_left_twips: 120,
                 wrap_margin_right_twips: 120,
                 wrap_margin_top_twips: 0,
@@ -7810,6 +7822,7 @@ mod tests {
                     width_twips: 1440,
                     height_twips: 720,
                     text_wrap: true,
+                    wrap_side: StaticImageWrapSide::Both,
                     wrap_margin_left_twips: 120,
                     wrap_margin_right_twips: 120,
                     wrap_margin_top_twips: 0,
@@ -7877,6 +7890,7 @@ mod tests {
                     width_twips: 1440,
                     height_twips: 720,
                     text_wrap: true,
+                    wrap_side: StaticImageWrapSide::Both,
                     wrap_margin_left_twips: 120,
                     wrap_margin_right_twips: 720,
                     wrap_margin_top_twips: 0,
@@ -7942,6 +7956,7 @@ mod tests {
                 width_twips: 1440,
                 height_twips: 720,
                 text_wrap: true,
+                wrap_side: StaticImageWrapSide::Both,
                 wrap_margin_left_twips: 120,
                 wrap_margin_right_twips: 120,
                 wrap_margin_top_twips: 0,
@@ -7978,6 +7993,101 @@ mod tests {
     }
 
     #[test]
+    fn wrapped_line_exclusion_honors_passive_wrap_side() {
+        let wrapped_image = |left_twips, wrap_side| StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 100,
+            height_px: 50,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: None,
+            display_height_twips: None,
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: Some(StaticImagePlacement {
+                left_twips,
+                top_twips: 0,
+                width_twips: 1440,
+                height_twips: 720,
+                text_wrap: true,
+                wrap_side,
+                wrap_margin_left_twips: 120,
+                wrap_margin_right_twips: 120,
+                wrap_margin_top_twips: 0,
+                wrap_margin_bottom_twips: 0,
+            }),
+        };
+
+        let mut right_only_document = Document::default();
+        right_only_document.blocks = vec![Block::Image(wrapped_image(
+            1440,
+            StaticImageWrapSide::Right,
+        ))];
+        let right_only = LayoutEngine::layout(&right_only_document);
+        let right_page = &right_only.pages[0];
+        let right_image = right_page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("right-only wrapped image");
+        let (right_margin_left, _) = wrapped_image_text_area_for_line(
+            &right_only.pages,
+            right_page.geometry.margin_left,
+            right_page.geometry.content_width,
+            right_image.y + right_image.height,
+            12.0,
+        )
+        .expect("right-only side interval");
+        assert!(
+            right_margin_left > right_image.x + right_image.width,
+            "right-side wrapping should discard the left interval: text {}, image right {}",
+            right_margin_left,
+            right_image.x + right_image.width
+        );
+
+        let mut left_only_document = Document::default();
+        left_only_document.blocks =
+            vec![Block::Image(wrapped_image(5760, StaticImageWrapSide::Left))];
+        let left_only = LayoutEngine::layout(&left_only_document);
+        let left_page = &left_only.pages[0];
+        let left_image = left_page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("left-only wrapped image");
+        let (left_margin_left, left_width) = wrapped_image_text_area_for_line(
+            &left_only.pages,
+            left_page.geometry.margin_left,
+            left_page.geometry.content_width,
+            left_image.y + left_image.height,
+            12.0,
+        )
+        .expect("left-only side interval");
+        assert!(
+            left_margin_left < left_image.x,
+            "left-side wrapping should keep the left interval: text {}, image left {}",
+            left_margin_left,
+            left_image.x
+        );
+        assert!(
+            left_margin_left + left_width < left_image.x,
+            "left-side wrapping should discard the right interval: text right {}, image left {}",
+            left_margin_left + left_width,
+            left_image.x
+        );
+    }
+
+    #[test]
     fn wrapped_paragraph_returns_to_full_width_below_passive_shape_picture_frame() {
         let mut document = Document::default();
         document.blocks = vec![
@@ -8001,6 +8111,7 @@ mod tests {
                     width_twips: 5760,
                     height_twips: 560,
                     text_wrap: true,
+                    wrap_side: StaticImageWrapSide::Both,
                     wrap_margin_left_twips: 120,
                     wrap_margin_right_twips: 120,
                     wrap_margin_top_twips: 0,
@@ -8084,6 +8195,7 @@ mod tests {
                 width_twips: 2160,
                 height_twips: 720,
                 text_wrap: true,
+                wrap_side: StaticImageWrapSide::Both,
                 wrap_margin_left_twips: 120,
                 wrap_margin_right_twips: 120,
                 wrap_margin_top_twips: 0,

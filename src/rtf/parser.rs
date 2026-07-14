@@ -10,11 +10,11 @@ use crate::model::{
     PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImagePlacement, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
-    StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table,
-    TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
-    TableCellSpacing, TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TextRelief, UnderlineStyle,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageWrapSide, StaticShape,
+    StaticShapeArrowhead, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, TabAlignment,
+    TabLeader, Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
+    TableCellPadding, TableCellSpacing, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
+    TableRowAlignment, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -782,6 +782,7 @@ struct ShapeBuilder {
     fill_color: Option<Color>,
     fill_color_from_foreground: bool,
     text_wrap: bool,
+    wrap_side: StaticImageWrapSide,
     wrap_margin_left_twips: i32,
     wrap_margin_right_twips: i32,
     wrap_margin_top_twips: i32,
@@ -817,6 +818,7 @@ impl Default for ShapeBuilder {
             fill_color: None,
             fill_color_from_foreground: false,
             text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
             wrap_margin_left_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
             wrap_margin_right_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
             wrap_margin_top_twips: 0,
@@ -3323,6 +3325,15 @@ impl Parser {
                 self.set_current_shape_text_wrap(control.parameter);
                 if let Some(message) =
                     shape_layout_compatibility_control_message("shpwr", control.parameter)
+                {
+                    self.diagnostics
+                        .push(Diagnostic::warning(message, Some(offset)));
+                }
+            }
+            "shpwrk" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_wrap_side(control.parameter);
+                if let Some(message) =
+                    shape_layout_compatibility_control_message("shpwrk", control.parameter)
                 {
                     self.diagnostics
                         .push(Diagnostic::warning(message, Some(offset)));
@@ -10638,6 +10649,7 @@ impl Parser {
             width_twips,
             height_twips,
             text_wrap: shape.text_wrap,
+            wrap_side: shape.wrap_side,
             wrap_margin_left_twips: shape.wrap_margin_left_twips,
             wrap_margin_right_twips: shape.wrap_margin_right_twips,
             wrap_margin_top_twips: shape.wrap_margin_top_twips,
@@ -11202,6 +11214,18 @@ impl Parser {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.text_wrap = value.unwrap_or(1) != 0;
         }
+    }
+
+    fn set_current_shape_wrap_side(&mut self, value: Option<i32>) {
+        let Some(shape) = self.current_shape.as_mut() else {
+            return;
+        };
+        shape.wrap_side = match value.unwrap_or(0) {
+            1 => StaticImageWrapSide::Left,
+            2 => StaticImageWrapSide::Right,
+            3 => StaticImageWrapSide::Largest,
+            _ => StaticImageWrapSide::Both,
+        };
     }
 
     fn apply_current_shape_property(&mut self, name: &str, value: &str, offset: usize) {
@@ -13431,7 +13455,7 @@ fn shape_layout_compatibility_control_message(
         "shpwr" if !matches!(parameter.unwrap_or(1), 0 | 1) => {
             Some("shape text wrapping approximated by passive shape layout")
         }
-        "shpwrk" if parameter.unwrap_or(0) != 0 => {
+        "shpwrk" if !matches!(parameter.unwrap_or(0), 0..=3) => {
             Some("shape text wrapping approximated by passive shape layout")
         }
         "dodhgt" | "shpz" | "shpfblwtxt" | "shpwr" | "shpwrk" | "shpfhdr" | "shplid" => None,

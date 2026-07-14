@@ -8,7 +8,7 @@ use open_rtf_converter::model::{
     FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    TOTAL_PAGES_MARKER, TabAlignment, TextRelief, UnderlineStyle,
+    StaticImageWrapSide, TOTAL_PAGES_MARKER, TabAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -32479,6 +32479,111 @@ fn square_shape_wrap_metadata_is_consumed_by_passive_line_exclusion() {
             "forbidden square-wrap shape content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
+    }
+}
+
+#[test]
+fn shape_picture_wrap_side_metadata_is_consumed_by_passive_line_exclusion() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    for (control_value, expected_side) in [
+        (1, StaticImageWrapSide::Left),
+        (2, StaticImageWrapSide::Right),
+        (3, StaticImageWrapSide::Largest),
+    ] {
+        let control_value = control_value.to_string();
+        let input = rtf(&[
+            "{",
+            "\\",
+            "rtf1 Before",
+            "\\",
+            "par{",
+            "\\",
+            "shp{",
+            "\\",
+            "*",
+            "\\",
+            "shpinst",
+            "\\",
+            "shpleft0",
+            "\\",
+            "shptop0",
+            "\\",
+            "shpright1440",
+            "\\",
+            "shpbottom720",
+            "\\",
+            "shpbxcolumn",
+            "\\",
+            "shpbypara",
+            "\\",
+            "shpwr1",
+            "\\",
+            "shpwrk",
+            control_value.as_str(),
+            "\\",
+            "shpfblwtxt0",
+            "\\",
+            "shpz0{",
+            "\\",
+            "shppict{",
+            "\\",
+            "pict",
+            "\\",
+            "jpegblip ",
+            image_hex.as_str(),
+            "}}}} Wrapped text beside picture",
+            "\\",
+            "par}",
+        ]);
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("shape picture image");
+        let placement = image.placement.expect("shape picture placement");
+        assert_eq!(placement.wrap_side, expected_side);
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| {
+                !diagnostic
+                    .message
+                    .contains("shape text wrapping approximated")
+            }),
+            "supported wrap side should be consumed without approximation warning: {:?}",
+            output.diagnostics
+        );
+        for forbidden in [
+            b"shpwrk".as_slice(),
+            b"shpwr",
+            b"shppict",
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "forbidden wrap-side content leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
     }
 }
 
