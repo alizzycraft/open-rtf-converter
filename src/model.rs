@@ -371,6 +371,7 @@ pub struct StaticImagePlacement {
     pub top_twips: i32,
     pub width_twips: i32,
     pub height_twips: i32,
+    pub text_wrap: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

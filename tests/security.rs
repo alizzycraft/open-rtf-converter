@@ -22902,6 +22902,8 @@ fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
         "\\",
         "shpbottom1080{",
         "\\",
+        "shpwr1",
+        "\\",
         "sp{",
         "\\",
         "sn pFragments}{",
@@ -22947,6 +22949,7 @@ fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
     assert_eq!(placement.top_twips, 360);
     assert_eq!(placement.width_twips, 1440);
     assert_eq!(placement.height_twips, 720);
+    assert!(placement.text_wrap);
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     for forbidden in [

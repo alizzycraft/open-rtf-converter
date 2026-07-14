@@ -7640,6 +7640,7 @@ mod tests {
                 top_twips: 360,
                 width_twips: 1440,
                 height_twips: 720,
+                text_wrap: false,
             }),
         })];
 

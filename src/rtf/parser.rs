@@ -780,6 +780,7 @@ struct ShapeBuilder {
     stroke_style: BorderStyle,
     fill_color: Option<Color>,
     fill_color_from_foreground: bool,
+    text_wrap: bool,
     text: Vec<Paragraph>,
     current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
@@ -810,6 +811,7 @@ impl Default for ShapeBuilder {
             stroke_style: BorderStyle::Single,
             fill_color: None,
             fill_color_from_foreground: false,
+            text_wrap: false,
             text: Vec::new(),
             current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
@@ -3307,6 +3309,15 @@ impl Parser {
             }
             "dpfillpat" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_fill_pattern(control.parameter);
+            }
+            "shpwr" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_text_wrap(control.parameter);
+                if let Some(message) =
+                    shape_layout_compatibility_control_message("shpwr", control.parameter)
+                {
+                    self.diagnostics
+                        .push(Diagnostic::warning(message, Some(offset)));
+                }
             }
             name if self.state.destination == Destination::Shape
                 && is_shape_layout_compatibility_control(name) =>
@@ -10605,6 +10616,7 @@ impl Parser {
             top_twips,
             width_twips,
             height_twips,
+            text_wrap: shape.text_wrap,
         });
         self.diagnostics.push(Diagnostic::warning(
             "rendering shape picture result with bounded passive shape frame",
@@ -11158,6 +11170,12 @@ impl Parser {
                     blue: 255,
                 });
             }
+        }
+    }
+
+    fn set_current_shape_text_wrap(&mut self, value: Option<i32>) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.text_wrap = value.unwrap_or(1) != 0;
         }
     }
 
