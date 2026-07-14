@@ -21272,6 +21272,105 @@ fn picture_scaling_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn picture_crop_uses_natural_size_hints_without_control_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(2, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picw80",
+        "\\",
+        "pich40",
+        "\\",
+        "picwgoal1440",
+        "\\",
+        "pichgoal720",
+        "\\",
+        "piccropl720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+    assert_eq!(image.natural_width_px_hint, Some(80));
+    assert_eq!(image.natural_height_px_hint, Some(40));
+    assert_eq!(image.crop.left_twips, 720);
+    for forbidden in [
+        "jpegblip", "picw80", "pich40", "picwgoal", "pichgoal", "piccropl",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "picture crop control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let image_transform = pdf_image_transform_before_first_do(&content).expect("image transform");
+    assert_eq!(image_transform.operands.len(), 6);
+    assert!(
+        pdf_operand_number(&image_transform.operands[0])
+            .is_some_and(|value| (value - 180.0).abs() < 0.01),
+        "picture crop should use passive natural width hint; got {:?}",
+        image_transform.operands
+    );
+    assert!(
+        pdf_operand_number(&image_transform.operands[3])
+            .is_some_and(|value| (value - 36.0).abs() < 0.01),
+        "picture crop should preserve displayed height; got {:?}",
+        image_transform.operands
+    );
+    for forbidden in [
+        b"jpegblip".as_slice(),
+        b"picw80",
+        b"pich40",
+        b"picwgoal",
+        b"pichgoal",
+        b"piccropl",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden picture crop content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn picture_goal_dimensions_and_scaling_combine_in_passive_pdf_transform() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(2, 2));
     let input = rtf(&[
@@ -36417,6 +36516,18 @@ fn pdf_text_bytes_for_font(content: &lopdf::content::Content, font_name: &[u8]) 
         }
     }
     output
+}
+
+fn pdf_image_transform_before_first_do(
+    content: &lopdf::content::Content,
+) -> Option<&lopdf::content::Operation> {
+    let do_pos = content
+        .operations
+        .iter()
+        .position(|operation| operation.operator == "Do")?;
+    content.operations[..do_pos]
+        .iter()
+        .rfind(|operation| operation.operator == "cm")
 }
 
 fn pdf_operand_number(object: &lopdf::Object) -> Option<f32> {

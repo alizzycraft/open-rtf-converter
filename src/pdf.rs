@@ -1465,8 +1465,18 @@ struct ImageDrawRect {
 }
 
 fn image_draw_rect(fragment: &crate::layout::ImageFragment) -> ImageDrawRect {
-    let natural_width = (fragment.image.width_px as f32 * 0.75).max(1.0);
-    let natural_height = (fragment.image.height_px as f32 * 0.75).max(1.0);
+    let natural_width = fragment
+        .image
+        .natural_width_px_hint
+        .unwrap_or(fragment.image.width_px)
+        .max(1) as f32
+        * 0.75;
+    let natural_height = fragment
+        .image
+        .natural_height_px_hint
+        .unwrap_or(fragment.image.height_px)
+        .max(1) as f32
+        * 0.75;
     let crop = fragment.image.crop;
     let mut left = twips_to_points(crop.left_twips.max(0)) / natural_width;
     let mut right = twips_to_points(crop.right_twips.max(0)) / natural_width;
@@ -5690,6 +5700,68 @@ endstream
                 .operations
                 .iter()
                 .any(|operation| operation.operator == "Do")
+        );
+        assert!(
+            !pdf.windows(b"/JavaScript".len())
+                .any(|window| window == b"/JavaScript")
+        );
+        assert!(
+            !pdf.windows(b"/EmbeddedFile".len())
+                .any(|window| window == b"/EmbeddedFile")
+        );
+    }
+
+    #[test]
+    fn crops_image_against_passive_natural_size_hints() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: minimal_jpeg_with_dimensions(2, 1),
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 2,
+            height_px: 1,
+            natural_width_px_hint: Some(80),
+            natural_height_px_hint: Some(40),
+            display_width_twips: Some(1440),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop {
+                left_twips: 720,
+                top_twips: 0,
+                right_twips: 0,
+                bottom_twips: 0,
+            },
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+        let do_pos = content
+            .operations
+            .iter()
+            .position(|operation| operation.operator == "Do")
+            .expect("image draw operation");
+        let image_transform = content.operations[..do_pos]
+            .iter()
+            .rfind(|operation| operation.operator == "cm")
+            .expect("image transform");
+
+        assert!(
+            pdf_number(image_transform.operands[0].clone())
+                .is_some_and(|value| (value - 180.0).abs() < 0.01),
+            "left crop should use passive natural width hint, got {:?}",
+            image_transform.operands
+        );
+        assert!(
+            pdf_number(image_transform.operands[3].clone())
+                .is_some_and(|value| (value - 36.0).abs() < 0.01),
+            "vertical image scale should remain the displayed height, got {:?}",
+            image_transform.operands
         );
         assert!(
             !pdf.windows(b"/JavaScript".len())
