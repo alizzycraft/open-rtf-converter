@@ -13307,9 +13307,11 @@ fn shape_layout_compatibility_control_message(
     parameter: Option<i32>,
 ) -> Option<&'static str> {
     match name {
-        "dobxcolumn" | "dobxmargin" | "dobxpage" | "dobypara" | "dobymargin" | "dobypage"
-        | "shpbxcolumn" | "shpbxmargin" | "shpbxpage" | "shpbypara" | "shpbymargin"
-        | "shpbypage" => Some("floating shape anchoring approximated by passive shape layout"),
+        "dobxmargin" | "dobxpage" | "dobymargin" | "dobypage" | "shpbxmargin" | "shpbxpage"
+        | "shpbymargin" | "shpbypage" => {
+            Some("floating shape anchoring approximated by passive shape layout")
+        }
+        "dobxcolumn" | "dobypara" | "shpbxcolumn" | "shpbypara" => None,
         "dodhgt" | "shpz" if parameter.unwrap_or(0) != 0 => {
             Some("shape z-order approximated by passive document order")
         }

@@ -32234,6 +32234,119 @@ fn neutral_shape_layout_metadata_is_consumed_without_false_approximation_warning
 }
 
 #[test]
+fn column_paragraph_shape_anchoring_is_consumed_as_passive_layout_metadata() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop360",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1080",
+        "\\",
+        "shpbxcolumn",
+        "\\",
+        "shpbypara{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}}{",
+        "\\",
+        "*",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip ",
+        image_hex.as_str(),
+        "}}} After",
+        "\\",
+        "par}",
+    ]);
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("bounded passive shape frame") })
+    );
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("floating shape anchoring approximated")),
+        "column/paragraph anchoring should be handled by the passive frame layout: {:?}",
+        output.diagnostics
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "column/paragraph shape anchors should be classified: {:?}",
+        output.diagnostics
+    );
+
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "anchored shape picture should render as passive image bytes"
+    );
+    for forbidden in [
+        b"shpbxcolumn".as_slice(),
+        b"shpbypara",
+        b"shpinst",
+        b"shppict",
+        b"shapeType",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "column/paragraph shape anchor metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn background_static_shape_renders_passively_without_body_flow_or_payload_leakage() {
     let input = rtf(&[
         "{",
