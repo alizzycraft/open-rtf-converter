@@ -21374,6 +21374,103 @@ fn picture_goal_dimensions_and_scaling_combine_in_passive_pdf_transform() {
 }
 
 #[test]
+fn one_sided_picture_goal_dimensions_preserve_aspect_ratio_without_control_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(2, 1));
+    let width_only = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picwgoal1440 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let height_only = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+
+    for (input, forbidden_goal) in [
+        (&width_only, b"picwgoal".as_slice()),
+        (&height_only, b"pichgoal".as_slice()),
+    ] {
+        let parsed = parse_rtf_bytes(input).unwrap();
+        let text = collect_text(&parsed.document);
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert!(!text.contains("jpegblip"));
+        assert!(!text.contains("picwgoal"));
+        assert!(!text.contains("pichgoal"));
+
+        let output = convert_rtf_to_pdf(
+            input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::default()
+            },
+        )
+        .unwrap();
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let image_transform = content
+            .operations
+            .iter()
+            .find(|operation| operation.operator == "cm")
+            .expect("image transform");
+
+        assert_eq!(image_transform.operands.len(), 6);
+        assert!(
+            pdf_operand_number(&image_transform.operands[0])
+                .is_some_and(|value| (value - 72.0).abs() < 0.01),
+            "one-sided picture goal should preserve natural width ratio; got {:?}",
+            image_transform.operands
+        );
+        assert!(
+            pdf_operand_number(&image_transform.operands[3])
+                .is_some_and(|value| (value - 36.0).abs() < 0.01),
+            "one-sided picture goal should preserve natural height ratio; got {:?}",
+            image_transform.operands
+        );
+        for forbidden in [
+            forbidden_goal,
+            b"jpegblip",
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "forbidden one-sided picture sizing content leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn picture_natural_size_hints_shape_passive_pdf_without_raw_control_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
@@ -21459,6 +21556,295 @@ fn picture_natural_size_hints_shape_passive_pdf_without_raw_control_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden picture natural-size content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn picture_units_per_inch_metadata_affects_natural_size_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picw192",
+        "\\",
+        "pich96",
+        "\\",
+        "blipupi192 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.width_px, 1);
+    assert_eq!(image.height_px, 1);
+    assert_eq!(image.natural_width_px_hint, Some(96));
+    assert_eq!(image.natural_height_px_hint, Some(48));
+    assert_eq!(image.display_width_twips, None);
+    assert_eq!(image.display_height_twips, None);
+    for forbidden in ["picw", "pich", "blipupi", "jpegblip"] {
+        assert!(
+            !text.contains(forbidden),
+            "picture units-per-inch metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let image_transform = content
+        .operations
+        .iter()
+        .find(|operation| operation.operator == "cm")
+        .expect("image transform");
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert_eq!(image_transform.operands.len(), 6);
+    assert!(
+        pdf_operand_number(&image_transform.operands[0])
+            .is_some_and(|value| (value - 72.0).abs() < 0.01),
+        "horizontal image matrix should use blip units-per-inch natural size; got {:?}",
+        image_transform.operands
+    );
+    assert!(
+        pdf_operand_number(&image_transform.operands[3])
+            .is_some_and(|value| (value - 36.0).abs() < 0.01),
+        "vertical image matrix should use blip units-per-inch natural size; got {:?}",
+        image_transform.operands
+    );
+    for forbidden in [
+        b"picw".as_slice(),
+        b"pich",
+        b"blipupi",
+        b"jpegblip",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "picture units-per-inch metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn picture_units_per_inch_metadata_is_bounded_before_layout() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+
+    let invalid = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picw80",
+        "\\",
+        "pich40",
+        "\\",
+        "blipupi0 ",
+        image_hex.as_str(),
+        "}}",
+    ]);
+    let parsed_invalid = parse_rtf_bytes(&invalid).unwrap();
+    let invalid_image = parsed_invalid
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("invalid blipupi image");
+    assert_eq!(invalid_image.natural_width_px_hint, Some(80));
+    assert_eq!(invalid_image.natural_height_px_hint, Some(40));
+    assert!(
+        parsed_invalid
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic
+                .message
+                .contains("picture units-per-inch metadata ignored")),
+        "invalid blipupi should be diagnosed: {:?}",
+        parsed_invalid.diagnostics
+    );
+
+    let oversized_units = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picw9600",
+        "\\",
+        "pich4800",
+        "\\",
+        "blipupi999999 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed_oversized_units = parse_rtf_bytes(&oversized_units).unwrap();
+    let oversized_units_text = collect_text(&parsed_oversized_units.document);
+    let oversized_units_image = parsed_oversized_units
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("oversized blipupi image");
+    assert!(oversized_units_text.contains("before"));
+    assert!(oversized_units_text.contains("after"));
+    assert_eq!(oversized_units_image.natural_width_px_hint, Some(96));
+    assert_eq!(oversized_units_image.natural_height_px_hint, Some(48));
+    assert!(
+        parsed_oversized_units
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic
+                .message
+                .contains("picture units-per-inch metadata clamped from 999999 to 9600")),
+        "oversized blipupi should be diagnosed: {:?}",
+        parsed_oversized_units.diagnostics
+    );
+    for forbidden in ["picw", "pich", "blipupi", "jpegblip"] {
+        assert!(
+            !oversized_units_text.contains(forbidden),
+            "oversized picture units-per-inch metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let bounded = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip",
+        "\\",
+        "picw10",
+        "\\",
+        "pich5",
+        "\\",
+        "blipupi1 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let options = RtfParseOptions {
+        limits: RtfLimits {
+            max_image_dimension_hint_px: 10,
+            ..RtfLimits::default()
+        },
+        ..RtfParseOptions::default()
+    };
+    let parsed_bounded = parse_rtf_bytes_with_options(&bounded, &options).unwrap();
+    let bounded_text = collect_text(&parsed_bounded.document);
+    let bounded_image = parsed_bounded
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("bounded blipupi image");
+    assert!(bounded_text.contains("before"));
+    assert!(bounded_text.contains("after"));
+    assert_eq!(bounded_image.natural_width_px_hint, Some(10));
+    assert_eq!(bounded_image.natural_height_px_hint, Some(10));
+    assert!(
+        parsed_bounded
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic
+                .message
+                .contains("from units-per-inch metadata clamped to 10 px")),
+        "inflated blipupi natural size should be clamped: {:?}",
+        parsed_bounded.diagnostics
+    );
+    for forbidden in ["picw", "pich", "blipupi", "jpegblip"] {
+        assert!(
+            !bounded_text.contains(forbidden),
+            "bounded picture units-per-inch metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &bounded,
+        &ConvertOptions {
+            diagnostics: true,
+            parse_options: options,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    for forbidden in [
+        b"picw".as_slice(),
+        b"pich",
+        b"blipupi",
+        b"jpegblip",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "bounded picture units-per-inch metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -21749,6 +22135,208 @@ fn indexed_png_picture_renders_passively_with_bounded_palette_without_control_le
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden indexed PNG content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn indexed_png_grayscale_metadata_updates_palette_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_indexed_png_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "pngblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureGray}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv indexed-hidden-fragment}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("pictureGray"));
+    assert!(!text.contains("pFragments"));
+    assert!(!text.contains("indexed-hidden-fragment"));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("picture grayscale property approximated")),
+        "indexed PNG grayscale should be applied to the safe palette: {:?}",
+        parsed.diagnostics
+    );
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+    assert_eq!(
+        image.format,
+        open_rtf_converter::model::ImageFormat::PngIndexed
+    );
+    assert_eq!(image.palette, vec![77, 77, 77, 149, 149, 149]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    assert!(
+        output
+            .pdf
+            .windows(b"/Indexed /DeviceRGB 1".len())
+            .any(|window| window == b"/Indexed /DeviceRGB 1")
+    );
+    for forbidden in [
+        b"pngblip".as_slice(),
+        b"picprop",
+        b"pictureGray",
+        b"pFragments",
+        b"indexed-hidden-fragment",
+        b"PLTE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "indexed PNG grayscale metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn indexed_png_bilevel_metadata_updates_palette_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_indexed_png_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "pngblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBiLevel}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureGray}{",
+        "\\",
+        "sv 1}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("pictureBiLevel"));
+    assert!(!text.contains("pictureGray"));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("picture bilevel property approximated")
+                && !diagnostic
+                    .message
+                    .contains("picture grayscale property approximated")
+        }),
+        "indexed PNG bilevel should be applied to the safe palette: {:?}",
+        parsed.diagnostics
+    );
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+    assert_eq!(
+        image.format,
+        open_rtf_converter::model::ImageFormat::PngIndexed
+    );
+    assert_eq!(image.palette, vec![0, 0, 0, 255, 255, 255]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for forbidden in [
+        b"pngblip".as_slice(),
+        b"picprop",
+        b"pictureBiLevel",
+        b"pictureGray",
+        b"PLTE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "indexed PNG bilevel metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -22167,6 +22755,192 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "visible picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn dib_picture_grayscale_metadata_renders_passively_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_24bit_dib_with_dimensions(2, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "dibitmap{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureGray}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-fragment}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("pictureGray"));
+    assert!(!text.contains("pFragments"));
+    assert!(!text.contains("hidden-fragment"));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("picture grayscale property approximated")),
+        "RGB DIB grayscale should be applied before the safe image model: {:?}",
+        parsed.diagnostics
+    );
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+    assert_eq!(image.format, open_rtf_converter::model::ImageFormat::Rgb8);
+    assert_eq!(image.bytes, vec![77, 77, 77, 149, 149, 149]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for forbidden in [
+        b"dibitmap".as_slice(),
+        b"picprop",
+        b"pictureGray",
+        b"pFragments",
+        b"hidden-fragment",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "DIB grayscale metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn dib_picture_bilevel_metadata_renders_passively_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_24bit_dib_with_dimensions(2, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "dibitmap{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBiLevel}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureGray}{",
+        "\\",
+        "sv 1}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("pictureBiLevel"));
+    assert!(!text.contains("pictureGray"));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("picture bilevel property approximated")
+                && !diagnostic
+                    .message
+                    .contains("picture grayscale property approximated")
+        }),
+        "RGB DIB bilevel should be applied before the safe image model: {:?}",
+        parsed.diagnostics
+    );
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+    assert_eq!(image.format, open_rtf_converter::model::ImageFormat::Rgb8);
+    assert_eq!(image.bytes, vec![0, 0, 0, 255, 255, 255]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    for forbidden in [
+        b"dibitmap".as_slice(),
+        b"picprop",
+        b"pictureBiLevel",
+        b"pictureGray",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "DIB bilevel metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

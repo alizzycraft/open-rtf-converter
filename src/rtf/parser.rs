@@ -735,6 +735,7 @@ struct PictureBuilder {
     bytes: Vec<u8>,
     pending_hex: Option<u8>,
     blip_uid_hex_nibbles_remaining: usize,
+    blip_units_per_inch: Option<u32>,
     width_px_hint: Option<u32>,
     height_px_hint: Option<u32>,
     display_width_twips: Option<i32>,
@@ -742,6 +743,8 @@ struct PictureBuilder {
     scale_x_percent: Option<i32>,
     scale_y_percent: Option<i32>,
     crop: ImageCrop,
+    grayscale: bool,
+    bilevel: bool,
 }
 
 impl Default for PictureBuilder {
@@ -752,6 +755,7 @@ impl Default for PictureBuilder {
             bytes: Vec::new(),
             pending_hex: None,
             blip_uid_hex_nibbles_remaining: 0,
+            blip_units_per_inch: None,
             width_px_hint: None,
             height_px_hint: None,
             display_width_twips: None,
@@ -759,6 +763,8 @@ impl Default for PictureBuilder {
             scale_x_percent: None,
             scale_y_percent: None,
             crop: ImageCrop::default(),
+            grayscale: false,
+            bilevel: false,
         }
     }
 }
@@ -3403,7 +3409,10 @@ impl Parser {
             {
                 self.set_picture_kind(PictureKind::Unsupported)
             }
-            "bliptag" | "blipupi" if self.state.destination == Destination::Picture => {}
+            "bliptag" if self.state.destination == Destination::Picture => {}
+            "blipupi" if self.state.destination == Destination::Picture => {
+                self.set_picture_blip_units_per_inch(control.parameter, offset)
+            }
             "blipuid" if self.state.destination == Destination::Picture => {
                 self.skip_picture_blip_uid(offset)
             }
@@ -10403,26 +10412,33 @@ impl Parser {
                     let width_px = jpeg.width_px;
                     let height_px = jpeg.height_px;
                     self.ensure_image_pixels(width_px, height_px, offset)?;
-                    self.push_static_image(
-                        picture.owner_destination,
-                        StaticImage {
-                            format: jpeg.format,
-                            bytes: picture.bytes,
-                            palette: Vec::new(),
-                            vector_commands: Vec::new(),
-                            width_px,
-                            height_px,
-                            natural_width_px_hint: picture.width_px_hint,
-                            natural_height_px_hint: picture.height_px_hint,
-                            display_width_twips: picture.display_width_twips,
-                            display_height_twips: picture.display_height_twips,
-                            scale_x_percent: picture.scale_x_percent,
-                            scale_y_percent: picture.scale_y_percent,
-                            crop: picture.crop,
-                            placement: None,
-                        },
+                    let natural_width_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, true, offset);
+                    let natural_height_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, false, offset);
+                    let mut image = StaticImage {
+                        format: jpeg.format,
+                        bytes: picture.bytes,
+                        palette: Vec::new(),
+                        vector_commands: Vec::new(),
+                        width_px,
+                        height_px,
+                        natural_width_px_hint,
+                        natural_height_px_hint,
+                        display_width_twips: picture.display_width_twips,
+                        display_height_twips: picture.display_height_twips,
+                        scale_x_percent: picture.scale_x_percent,
+                        scale_y_percent: picture.scale_y_percent,
+                        crop: picture.crop,
+                        placement: None,
+                    };
+                    self.apply_picture_color_mode(
+                        &mut image,
+                        picture.grayscale,
+                        picture.bilevel,
                         offset,
-                    )?;
+                    );
+                    self.push_static_image(picture.owner_destination, image, offset)?;
                     self.mark_shape_visual_result_rendered();
                 }
                 None => {
@@ -10436,26 +10452,33 @@ impl Parser {
             PictureKind::Png => match parse_png_image_data(&picture.bytes) {
                 Some(png) => {
                     self.ensure_image_pixels(png.width_px, png.height_px, offset)?;
-                    self.push_static_image(
-                        picture.owner_destination,
-                        StaticImage {
-                            format: png.format,
-                            bytes: png.idat,
-                            palette: png.palette,
-                            vector_commands: Vec::new(),
-                            width_px: png.width_px,
-                            height_px: png.height_px,
-                            natural_width_px_hint: picture.width_px_hint,
-                            natural_height_px_hint: picture.height_px_hint,
-                            display_width_twips: picture.display_width_twips,
-                            display_height_twips: picture.display_height_twips,
-                            scale_x_percent: picture.scale_x_percent,
-                            scale_y_percent: picture.scale_y_percent,
-                            crop: picture.crop,
-                            placement: None,
-                        },
+                    let natural_width_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, true, offset);
+                    let natural_height_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, false, offset);
+                    let mut image = StaticImage {
+                        format: png.format,
+                        bytes: png.idat,
+                        palette: png.palette,
+                        vector_commands: Vec::new(),
+                        width_px: png.width_px,
+                        height_px: png.height_px,
+                        natural_width_px_hint,
+                        natural_height_px_hint,
+                        display_width_twips: picture.display_width_twips,
+                        display_height_twips: picture.display_height_twips,
+                        scale_x_percent: picture.scale_x_percent,
+                        scale_y_percent: picture.scale_y_percent,
+                        crop: picture.crop,
+                        placement: None,
+                    };
+                    self.apply_picture_color_mode(
+                        &mut image,
+                        picture.grayscale,
+                        picture.bilevel,
                         offset,
-                    )?;
+                    );
+                    self.push_static_image(picture.owner_destination, image, offset)?;
                     self.mark_shape_visual_result_rendered();
                 }
                 None => {
@@ -10470,26 +10493,33 @@ impl Parser {
                 match parse_dib_image_data(&picture.bytes, self.limits().max_image_pixels) {
                     Some(dib) => {
                         self.ensure_image_pixels(dib.width_px, dib.height_px, offset)?;
-                        self.push_static_image(
-                            picture.owner_destination,
-                            StaticImage {
-                                format: ImageFormat::Rgb8,
-                                bytes: dib.rgb,
-                                palette: Vec::new(),
-                                vector_commands: Vec::new(),
-                                width_px: dib.width_px,
-                                height_px: dib.height_px,
-                                natural_width_px_hint: picture.width_px_hint,
-                                natural_height_px_hint: picture.height_px_hint,
-                                display_width_twips: picture.display_width_twips,
-                                display_height_twips: picture.display_height_twips,
-                                scale_x_percent: picture.scale_x_percent,
-                                scale_y_percent: picture.scale_y_percent,
-                                crop: picture.crop,
-                                placement: None,
-                            },
+                        let natural_width_px_hint =
+                            self.normalized_picture_natural_size_hint(&picture, true, offset);
+                        let natural_height_px_hint =
+                            self.normalized_picture_natural_size_hint(&picture, false, offset);
+                        let mut image = StaticImage {
+                            format: ImageFormat::Rgb8,
+                            bytes: dib.rgb,
+                            palette: Vec::new(),
+                            vector_commands: Vec::new(),
+                            width_px: dib.width_px,
+                            height_px: dib.height_px,
+                            natural_width_px_hint,
+                            natural_height_px_hint,
+                            display_width_twips: picture.display_width_twips,
+                            display_height_twips: picture.display_height_twips,
+                            scale_x_percent: picture.scale_x_percent,
+                            scale_y_percent: picture.scale_y_percent,
+                            crop: picture.crop,
+                            placement: None,
+                        };
+                        self.apply_picture_color_mode(
+                            &mut image,
+                            picture.grayscale,
+                            picture.bilevel,
                             offset,
-                        )?;
+                        );
+                        self.push_static_image(picture.owner_destination, image, offset)?;
                         self.mark_shape_visual_result_rendered();
                     }
                     None => {
@@ -10507,6 +10537,10 @@ impl Parser {
             PictureKind::Wmf => {
                 if let Some(wmf) = parse_wmf_vector_image_data(&picture.bytes) {
                     self.ensure_image_pixels(wmf.width_px, wmf.height_px, offset)?;
+                    let natural_width_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, true, offset);
+                    let natural_height_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, false, offset);
                     if wmf.skipped_record_count > 0 {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
@@ -10525,8 +10559,8 @@ impl Parser {
                             vector_commands: wmf.commands,
                             width_px: wmf.width_px,
                             height_px: wmf.height_px,
-                            natural_width_px_hint: picture.width_px_hint,
-                            natural_height_px_hint: picture.height_px_hint,
+                            natural_width_px_hint,
+                            natural_height_px_hint,
                             display_width_twips: picture.display_width_twips,
                             display_height_twips: picture.display_height_twips,
                             scale_x_percent: picture.scale_x_percent,
@@ -11465,27 +11499,78 @@ impl Parser {
         }
     }
 
-    fn apply_picture_metadata_property(&mut self, name: &str, value: &str, offset: usize) {
+    fn apply_picture_metadata_property(&mut self, name: &str, value: &str, _offset: usize) {
         let name = name.trim();
         let value = value.trim();
         match name {
             "pictureGray" => {
                 if parse_shape_property_i64(value).is_some_and(|enabled| enabled != 0) {
-                    self.diagnostics.push(Diagnostic::warning(
-                        "picture grayscale property approximated by passive original image",
-                        Some(offset),
-                    ));
+                    if let Some(picture) = self.current_picture.as_mut() {
+                        picture.grayscale = true;
+                    }
                 }
             }
             "pictureBiLevel" => {
                 if parse_shape_property_i64(value).is_some_and(|enabled| enabled != 0) {
-                    self.diagnostics.push(Diagnostic::warning(
-                        "picture bilevel property approximated by passive original image",
-                        Some(offset),
-                    ));
+                    if let Some(picture) = self.current_picture.as_mut() {
+                        picture.bilevel = true;
+                    }
                 }
             }
             _ => {}
+        }
+    }
+
+    fn apply_picture_color_mode(
+        &mut self,
+        image: &mut StaticImage,
+        grayscale: bool,
+        bilevel: bool,
+        offset: usize,
+    ) {
+        if !grayscale && !bilevel {
+            return;
+        }
+
+        if image.format == ImageFormat::Rgb8
+            && apply_rgb8_picture_color_mode(
+                &mut image.bytes,
+                image.width_px,
+                image.height_px,
+                grayscale,
+                bilevel,
+            )
+        {
+            return;
+        }
+
+        if image.format == ImageFormat::PngIndexed
+            && apply_indexed_palette_picture_color_mode(&mut image.palette, grayscale, bilevel)
+        {
+            return;
+        }
+
+        if grayscale
+            && !bilevel
+            && matches!(
+                image.format,
+                ImageFormat::JpegGrayscale | ImageFormat::PngGrayscale
+            )
+        {
+            return;
+        }
+
+        if grayscale {
+            self.diagnostics.push(Diagnostic::warning(
+                "picture grayscale property approximated by passive original image",
+                Some(offset),
+            ));
+        }
+        if bilevel {
+            self.diagnostics.push(Diagnostic::warning(
+                "picture bilevel property approximated by passive original image",
+                Some(offset),
+            ));
         }
     }
 
@@ -11584,6 +11669,58 @@ impl Parser {
             }
             picture.blip_uid_hex_nibbles_remaining = 32;
         }
+    }
+
+    fn set_picture_blip_units_per_inch(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0);
+        if value <= 0 {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("picture units-per-inch metadata ignored because value {value} is invalid"),
+                Some(offset),
+            ));
+            return;
+        }
+
+        const MAX_PASSIVE_PICTURE_UNITS_PER_INCH: i32 = 9_600;
+        let normalized = value.min(MAX_PASSIVE_PICTURE_UNITS_PER_INCH);
+        if normalized != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("picture units-per-inch metadata clamped from {value} to {normalized}"),
+                Some(offset),
+            ));
+        }
+        if let Some(picture) = self.current_picture.as_mut() {
+            picture.blip_units_per_inch = Some(normalized as u32);
+        }
+    }
+
+    fn normalized_picture_natural_size_hint(
+        &mut self,
+        picture: &PictureBuilder,
+        horizontal: bool,
+        offset: usize,
+    ) -> Option<u32> {
+        let hint = if horizontal {
+            picture.width_px_hint
+        } else {
+            picture.height_px_hint
+        }?;
+        let Some(units_per_inch) = picture.blip_units_per_inch else {
+            return Some(hint);
+        };
+
+        let raw = ((u128::from(hint) * 96) + (u128::from(units_per_inch) / 2))
+            / u128::from(units_per_inch);
+        let max = self.limits().max_image_dimension_hint_px.max(1);
+        let normalized = raw.clamp(1, u128::from(max)) as u32;
+        if raw > u128::from(max) {
+            let axis = if horizontal { "width" } else { "height" };
+            self.diagnostics.push(Diagnostic::warning(
+                format!("picture natural {axis} from units-per-inch metadata clamped to {max} px"),
+                Some(offset),
+            ));
+        }
+        Some(normalized)
     }
 
     fn set_picture_width_hint(&mut self, width: Option<i32>, offset: usize) {
@@ -17836,6 +17973,75 @@ fn passive_empty_picture_placeholder_image(
         image.display_height_twips = image.display_height_twips.or(Some(height));
     }
     Some(image)
+}
+
+fn apply_rgb8_picture_color_mode(
+    bytes: &mut [u8],
+    width_px: u32,
+    height_px: u32,
+    grayscale: bool,
+    bilevel: bool,
+) -> bool {
+    if !grayscale && !bilevel {
+        return true;
+    }
+    let Some(expected_len) = usize::try_from(width_px)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(height_px)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(3))
+    else {
+        return false;
+    };
+    if bytes.len() != expected_len {
+        return false;
+    }
+
+    for pixel in bytes.chunks_exact_mut(3) {
+        let gray = rgb_luminance(pixel[0], pixel[1], pixel[2]);
+        let value = if bilevel {
+            if gray >= 128 { 255 } else { 0 }
+        } else {
+            gray
+        };
+        pixel[0] = value;
+        pixel[1] = value;
+        pixel[2] = value;
+    }
+    true
+}
+
+fn rgb_luminance(red: u8, green: u8, blue: u8) -> u8 {
+    ((u32::from(red) * 77 + u32::from(green) * 150 + u32::from(blue) * 29 + 128) >> 8) as u8
+}
+
+fn apply_indexed_palette_picture_color_mode(
+    palette: &mut [u8],
+    grayscale: bool,
+    bilevel: bool,
+) -> bool {
+    if !grayscale && !bilevel {
+        return true;
+    }
+    if palette.is_empty() || palette.len() % 3 != 0 {
+        return false;
+    }
+
+    for entry in palette.chunks_exact_mut(3) {
+        let gray = rgb_luminance(entry[0], entry[1], entry[2]);
+        let value = if bilevel {
+            if gray >= 128 { 255 } else { 0 }
+        } else {
+            gray
+        };
+        entry[0] = value;
+        entry[1] = value;
+        entry[2] = value;
+    }
+    true
 }
 
 #[derive(Debug)]

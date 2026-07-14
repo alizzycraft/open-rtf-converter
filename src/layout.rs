@@ -1624,16 +1624,24 @@ fn image_display_size(image: &StaticImage, content_width: f32) -> (f32, f32) {
         .max(1);
     let natural_width = natural_width_px as f32 * 0.75;
     let natural_height = natural_height_px as f32 * 0.75;
-    let mut width = image
-        .display_width_twips
-        .map(twips_to_points)
-        .unwrap_or(natural_width)
-        .max(1.0);
-    let mut height = image
-        .display_height_twips
-        .map(twips_to_points)
-        .unwrap_or(natural_height)
-        .max(1.0);
+    let (mut width, mut height) = match (image.display_width_twips, image.display_height_twips) {
+        (Some(width_twips), Some(height_twips)) => {
+            (twips_to_points(width_twips), twips_to_points(height_twips))
+        }
+        (Some(width_twips), None) => {
+            let width = twips_to_points(width_twips);
+            let height = width * natural_height / natural_width;
+            (width, height)
+        }
+        (None, Some(height_twips)) => {
+            let height = twips_to_points(height_twips);
+            let width = height * natural_width / natural_height;
+            (width, height)
+        }
+        (None, None) => (natural_width, natural_height),
+    };
+    width = width.max(1.0);
+    height = height.max(1.0);
     width *= image.scale_x_percent.unwrap_or(100) as f32 / 100.0;
     height *= image.scale_y_percent.unwrap_or(100) as f32 / 100.0;
     width = width.max(1.0);
@@ -7940,6 +7948,67 @@ mod tests {
 
         assert!((image.width - 18.0).abs() < 0.01);
         assert!((image.height - 144.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn lays_out_one_sided_picture_goal_dimensions_with_natural_aspect_ratio() {
+        let mut width_only = Document::default();
+        width_only.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 200,
+            height_px: 100,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(1440),
+            display_height_twips: None,
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+        let width_layout = LayoutEngine::layout(&width_only);
+        let width_image = width_layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("width-goal image");
+        assert!((width_image.width - 72.0).abs() < 0.01);
+        assert!((width_image.height - 36.0).abs() < 0.01);
+
+        let mut height_only = Document::default();
+        height_only.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 200,
+            height_px: 100,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: None,
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+        let height_layout = LayoutEngine::layout(&height_only);
+        let height_image = height_layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("height-goal image");
+        assert!((height_image.width - 72.0).abs() < 0.01);
+        assert!((height_image.height - 36.0).abs() < 0.01);
     }
 
     #[test]
