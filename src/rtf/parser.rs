@@ -777,6 +777,7 @@ struct ShapeBuilder {
     stroke_color: Color,
     stroke_style: BorderStyle,
     fill_color: Option<Color>,
+    fill_color_from_foreground: bool,
     text: Vec<Paragraph>,
     current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
@@ -806,6 +807,7 @@ impl Default for ShapeBuilder {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            fill_color_from_foreground: false,
             text: Vec::new(),
             current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
@@ -2556,6 +2558,10 @@ impl Parser {
             {
                 self.state.destination = Destination::FontAlternate;
             }
+            "panose" if control_starts_group && self.in_font_table_metadata_group() => {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
             "colortbl" if destination_allows_safe_structural_content(&self.state) => {
                 self.state.destination = Destination::ColorTable
             }
@@ -2576,6 +2582,15 @@ impl Parser {
                 if let Some(feature) = html_metadata_feature(&control.name) {
                     self.reject_active_content_only(feature, offset)?;
                 }
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
+            "private"
+                if control_starts_group
+                    && destination_allows_safe_structural_content(&self.state)
+                    && self.state.destination != Destination::Ignored =>
+            {
+                self.handle_active_content("private metadata", offset)?;
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
@@ -2747,6 +2762,18 @@ impl Parser {
             {
                 self.set_current_list_level_format(control.parameter.unwrap_or(0));
             }
+            "levelnumbers"
+                if control_starts_group
+                    && (self.state.destination == Destination::ListTable
+                        || (self.state.destination == Destination::ListOverrideTable
+                            && self.state.list_context == ListContext::ListLevel)) =>
+            {
+                self.enter_list_metadata_destination();
+            }
+            "leveljc"
+                if self.state.destination == Destination::ListTable
+                    || (self.state.destination == Destination::ListOverrideTable
+                        && self.state.list_context == ListContext::ListLevel) => {}
             "levelstartat"
                 if self.state.destination == Destination::ListOverrideTable
                     && self.state.list_context == ListContext::ListOverrideLevel =>
@@ -3005,12 +3032,20 @@ impl Parser {
             "listid" if self.state.destination == Destination::ListTable => {
                 self.set_current_list_id(control.parameter.unwrap_or(0));
             }
+            "listtemplateid" | "listsimple" if self.state.destination == Destination::ListTable => {
+            }
+            "listname"
+                if control_starts_group && self.state.destination == Destination::ListTable =>
+            {
+                self.enter_list_metadata_destination();
+            }
             "listoverride" if self.state.destination == Destination::ListOverrideTable => {
                 self.start_list_override();
             }
             "listid" if self.state.destination == Destination::ListOverrideTable => {
                 self.set_current_list_override_list_id(control.parameter.unwrap_or(0));
             }
+            "listoverridecount" if self.state.destination == Destination::ListOverrideTable => {}
             "ls" if self.state.destination == Destination::ListOverrideTable => {
                 self.set_current_list_override_index(control.parameter.unwrap_or(0));
             }
@@ -3119,7 +3154,7 @@ impl Parser {
             {
                 self.state.destination = Destination::Shape;
             }
-            "shptxt" | "dptxbx"
+            "shptxt" | "dptxbx" | "dptxbxtext"
                 if self.state.inside_shape && destination_allows_visible_content(&self.state) =>
             {
                 self.state.shape_result_seen = true;
@@ -3144,6 +3179,7 @@ impl Parser {
                     ));
                 }
             }
+            "sp" if control_starts_group && self.state.destination == Destination::Shape => {}
             "sn" if control_starts_group && self.state.destination == Destination::Shape => {
                 self.state.shape_property_capture = Some(ShapePropertyCapture::Name);
                 self.state.shape_property_name.clear();
@@ -3241,8 +3277,24 @@ impl Parser {
             "dpfillfgcb" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_fill_blue(control.parameter);
             }
+            "dpfillbgcr" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_fallback_fill_red(control.parameter);
+            }
+            "dpfillbgcg" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_fallback_fill_green(control.parameter);
+            }
+            "dpfillbgcb" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_fallback_fill_blue(control.parameter);
+            }
             "dpfillpat" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_fill_pattern(control.parameter);
+            }
+            name if self.state.destination == Destination::Shape
+                && shape_layout_compatibility_control_message(name).is_some() =>
+            {
+                let message = shape_layout_compatibility_control_message(name).unwrap();
+                self.diagnostics
+                    .push(Diagnostic::warning(message, Some(offset)));
             }
             "jpegblip" if self.state.destination == Destination::Picture => {
                 self.set_picture_kind(PictureKind::Jpeg)
@@ -3337,6 +3389,7 @@ impl Parser {
             "pnstart" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_start(control.parameter.unwrap_or(1));
             }
+            "pnrnot" if destination_allows_visible_old_style_list_marker(&self.state) => {}
             "pnb" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_bold(control.parameter.unwrap_or(1) != 0);
             }
@@ -3553,6 +3606,7 @@ impl Parser {
                     control.parameter.unwrap_or(0),
                 ));
             }
+            "fttruetype" | "fbias" if self.state.destination == Destination::FontTable => {}
             "red" if self.state.destination == Destination::ColorTable => {
                 self.current_color.red = control.parameter.unwrap_or(0).clamp(0, 255) as u8;
                 self.current_color_seen = true;
@@ -10940,6 +10994,7 @@ impl Parser {
 
     fn set_current_shape_fill_red(&mut self, value: Option<i32>) {
         if let Some(shape) = self.current_shape.as_mut() {
+            shape.fill_color_from_foreground = true;
             let color = shape.fill_color.get_or_insert(Color {
                 red: 255,
                 green: 255,
@@ -10951,6 +11006,7 @@ impl Parser {
 
     fn set_current_shape_fill_green(&mut self, value: Option<i32>) {
         if let Some(shape) = self.current_shape.as_mut() {
+            shape.fill_color_from_foreground = true;
             let color = shape.fill_color.get_or_insert(Color {
                 red: 255,
                 green: 255,
@@ -10962,6 +11018,7 @@ impl Parser {
 
     fn set_current_shape_fill_blue(&mut self, value: Option<i32>) {
         if let Some(shape) = self.current_shape.as_mut() {
+            shape.fill_color_from_foreground = true;
             let color = shape.fill_color.get_or_insert(Color {
                 red: 255,
                 green: 255,
@@ -10971,10 +11028,50 @@ impl Parser {
         }
     }
 
+    fn set_current_shape_fallback_fill_red(&mut self, value: Option<i32>) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            if !shape.fill_color_from_foreground {
+                let color = shape.fill_color.get_or_insert(Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                });
+                color.red = value.unwrap_or(0).clamp(0, 255) as u8;
+            }
+        }
+    }
+
+    fn set_current_shape_fallback_fill_green(&mut self, value: Option<i32>) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            if !shape.fill_color_from_foreground {
+                let color = shape.fill_color.get_or_insert(Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                });
+                color.green = value.unwrap_or(0).clamp(0, 255) as u8;
+            }
+        }
+    }
+
+    fn set_current_shape_fallback_fill_blue(&mut self, value: Option<i32>) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            if !shape.fill_color_from_foreground {
+                let color = shape.fill_color.get_or_insert(Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                });
+                color.blue = value.unwrap_or(0).clamp(0, 255) as u8;
+            }
+        }
+    }
+
     fn set_current_shape_fill_pattern(&mut self, value: Option<i32>) {
         if let Some(shape) = self.current_shape.as_mut() {
             if value.unwrap_or(1) == 0 {
                 shape.fill_color = None;
+                shape.fill_color_from_foreground = false;
             } else {
                 shape.fill_color.get_or_insert(Color {
                     red: 255,
@@ -10998,6 +11095,7 @@ impl Parser {
                 if let Some(color) = parse_office_shape_color(value) {
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.fill_color = Some(color);
+                        shape.fill_color_from_foreground = true;
                     }
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
@@ -11501,6 +11599,21 @@ impl Parser {
         if let Some(font) = self.current_font.as_mut() {
             font.pitch = pitch;
         }
+    }
+
+    fn in_font_table_metadata_group(&self) -> bool {
+        self.state.destination == Destination::FontTable
+            || (self.state.destination == Destination::Ignored
+                && self
+                    .stack
+                    .last()
+                    .is_some_and(|state| state.destination == Destination::FontTable))
+    }
+
+    fn enter_list_metadata_destination(&mut self) {
+        self.state.destination = Destination::Metadata;
+        self.state.inside_metadata = true;
+        self.state.list_context = ListContext::None;
     }
 
     fn decode_text_hex_byte(&self, byte: u8) -> char {
@@ -12937,10 +13050,16 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "fdbminor"
                 | "fhimajor"
                 | "fhiminor"
+                | "fbias"
+                | "flddirty"
+                | "fldedit"
+                | "fldlock"
+                | "fldpriv"
                 | "flomajor"
                 | "flominor"
                 | "fromhtml"
                 | "fprq"
+                | "fttruetype"
                 | "fmodern"
                 | "fnil"
                 | "froman"
@@ -12985,6 +13104,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "pnqc"
                 | "pnql"
                 | "pnqr"
+                | "pnrnot"
                 | "pnrestart"
                 | "pnseclvl"
                 | "pnsp"
@@ -13006,6 +13126,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "rsidroot"
                 | "sectrsid"
                 | "sectunlocked"
+                | "softcol"
                 | "softline"
                 | "softpage"
                 | "saveinvalidxml"
@@ -13064,6 +13185,20 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
             Some("Word typography compatibility option approximated by passive layout")
         }
         "vertdoc" => Some("vertical document layout approximated by passive horizontal layout"),
+        _ => None,
+    }
+}
+
+fn shape_layout_compatibility_control_message(name: &str) -> Option<&'static str> {
+    match name {
+        "dobxcolumn" | "dobxmargin" | "dobxpage" | "dobypara" | "dobymargin" | "dobypage"
+        | "shpbxcolumn" | "shpbxmargin" | "shpbxpage" | "shpbypara" | "shpbymargin"
+        | "shpbypage" => Some("floating shape anchoring approximated by passive shape layout"),
+        "dodhgt" | "shpz" => Some("shape z-order approximated by passive document order"),
+        "shpfblwtxt" | "shpwr" | "shpwrk" => {
+            Some("shape text wrapping approximated by passive shape layout")
+        }
+        "shpfhdr" | "shplid" => Some("shape metadata interpreted for passive layout only"),
         _ => None,
     }
 }
@@ -13534,6 +13669,7 @@ fn skipped_destination_active_feature(name: &str) -> Option<&'static str> {
         name if is_annotation_destination(name) => {
             Some("annotation metadata in skipped destination")
         }
+        "private" => Some("private metadata in skipped destination"),
         _ => None,
     }
 }
@@ -13624,6 +13760,7 @@ fn metadata_nested_active_feature(name: &str) -> Option<&'static str> {
         name if is_object_metadata_destination(name) => Some("object metadata in metadata"),
         name if is_mail_merge_destination(name) => Some("mail merge data source in metadata"),
         name if is_annotation_destination(name) => Some("annotation metadata in metadata"),
+        "private" => Some("private metadata in metadata"),
         _ => None,
     }
 }
@@ -19537,8 +19674,10 @@ mod tests {
 
     #[test]
     fn strips_soft_line_and_page_break_layout_artifacts() {
-        let output =
-            parse_rtf(r"{\rtf1 Before \softline soft line \softpage soft page\par}").unwrap();
+        let output = parse_rtf(
+            r"{\rtf1 Before \softline soft line \softcol soft column \softpage soft page\par}",
+        )
+        .unwrap();
         let paragraph = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected paragraph"),
@@ -19549,7 +19688,7 @@ mod tests {
             .map(|run| run.text.as_str())
             .collect::<String>();
 
-        assert_eq!(text, "Before soft line soft page");
+        assert_eq!(text, "Before soft line soft column soft page");
         assert!(
             output
                 .diagnostics
@@ -19808,6 +19947,40 @@ mod tests {
         assert!(text.contains("Default"));
         assert!(!text.contains("fprq"));
         assert!(!text.contains("Mystery Fixed"));
+    }
+
+    #[test]
+    fn skips_inert_font_face_metadata_without_polluting_font_names() {
+        let input = r"{\rtf1{\fonttbl{\f0\fnil\fprq2\fttruetype\fbias0{\panose 02020603050405020304}Metadata Sans;}{\f1\froman{\*\panose 05050102010706020507}Metadata Serif;}}\f0 Sans\f1 Serif\par}";
+        let output = parse_rtf(input).unwrap();
+        let font_name_for = |index: i32| {
+            output
+                .document
+                .fonts
+                .iter()
+                .find(|font| font.index == index)
+                .map(|font| font.name.as_str())
+                .unwrap_or_else(|| panic!("missing font {index}"))
+        };
+        let text = document_text(&output.document);
+
+        assert_eq!(font_name_for(0), "Metadata Sans");
+        assert_eq!(font_name_for(1), "Metadata Serif");
+        assert!(text.contains("SansSerif"));
+        for forbidden in ["panose", "fttruetype", "fbias", "020206", "050501"] {
+            assert!(
+                !text.contains(forbidden),
+                "font metadata leaked into body text: {forbidden}"
+            );
+        }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+            "font metadata should not be unsupported: {:?}",
+            output.diagnostics
+        );
     }
 
     #[test]
@@ -23852,6 +24025,41 @@ After\par}"#;
     }
 
     #[test]
+    fn list_table_metadata_controls_do_not_pollute_synthesized_markers() {
+        let output = parse_rtf(
+            r#"{\rtf1{\*\listtable{\list\listtemplateid67698689\listsimple{\listlevel\levelnfc23\leveljc0{\leveltext\'01\u8226 ?;}{\levelnumbers{\object\objdata 414243};}}{\listname Hidden list name{\field{\*\fldinst HYPERLINK "https://example.com/list-name"}{\fldrslt Hidden link}}{\object\objdata 414243};}\listid7}}{\*\listoverridetable{\listoverride\listid7\listoverridecount0\ls2}}\pard\ls2\ilvl0 Bullet\par}"#,
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let text = document_text(&output.document);
+
+        assert_eq!(paragraph.runs[0].text, "\u{2022}\tBullet");
+        assert!(!text.contains("Hidden list name"));
+        assert!(!text.contains("Hidden link"));
+        assert!(!text.contains("https://example.com/list-name"));
+        assert!(!text.contains("objdata"));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| { !diagnostic.message.contains("unsupported RTF control") })
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("active content removed: field instruction in metadata")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("active content removed: object payload in metadata")
+        }));
+    }
+
+    #[test]
     fn list_definition_count_limit_is_enforced() {
         let options = RtfParseOptions {
             limits: RtfLimits {
@@ -25582,6 +25790,43 @@ After\par}"#;
                 .message
                 .contains("character kerning threshold clamped")
         }));
+    }
+
+    #[test]
+    fn renders_old_drawing_text_box_text_destination_as_safe_passive_paragraph() {
+        let output = parse_rtf(
+            r"{\rtf1 Before\par{\do\dobx720\doby720\dodhgt1{\dptxbx{\dptxbxtext Legacy box text\par}}}After\par}",
+        )
+        .unwrap();
+        let paragraph_text = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(
+                    paragraph
+                        .runs
+                        .iter()
+                        .map(|run| run.text.as_str())
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraph_text, vec!["Before", "Legacy box text", "After"]);
+        assert!(output.document.blocks.iter().all(|block| {
+            !matches!(
+                block,
+                Block::Placeholder(text) if text.contains("Shape skipped")
+            )
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("dptxbxtext"))
+        );
     }
 
     #[test]

@@ -52,6 +52,11 @@ fn fuzz_corpus_seeds_exercise_bounded_parser_and_passive_pdf_paths() {
             include_bytes!("../fuzz/corpus/rtf_to_pdf_passive/metadata-object-smuggling.rtf")
                 .as_slice(),
         ),
+        (
+            "passive list-name metadata smuggling",
+            include_bytes!("../fuzz/corpus/rtf_to_pdf_passive/listname-metadata-smuggling.rtf")
+                .as_slice(),
+        ),
     ] {
         let output = convert_rtf_to_pdf(seed, &convert_options)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
@@ -3102,8 +3107,117 @@ fn ignored_pn_metadata_after_explicit_markers_does_not_leak_or_override_visible_
 }
 
 #[test]
+fn list_table_metadata_controls_do_not_leak_or_override_visible_markers() {
+    let input = br#"{\rtf1{\*\listtable{\list\listtemplateid67698689\listsimple{\listlevel\levelnfc23\leveljc0\levelstartat1{\leveltext\'01\u8226 ?;}{\levelnumbers{\object\objdata 4142432f4a617661536372697074};}\f1\fbias0\fi-360\li360\jclisttab\tx360}{\listname Hidden list name{\field{\*\fldinst HYPERLINK "https://example.com/list-name"}{\fldrslt Hidden link}}{\object\objdata 4142432f4a617661536372697074};}\listid7}}{\*\listoverridetable{\listoverride\listid7\listoverridecount0\ls2}}\pard\ls2\ilvl0 Bullet item\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("\u{2022}\tBullet item"));
+    assert!(!text.contains("Hidden list name"));
+    assert!(!text.contains("Hidden link"));
+    assert!(!text.contains("https://example.com/list-name"));
+    for forbidden in [
+        "listtemplateid",
+        "listsimple",
+        "leveljc",
+        "levelnumbers",
+        "listname",
+        "listoverridecount",
+        "fldinst",
+        "objdata",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden list table metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "list table metadata should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("active content removed: field instruction in metadata")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("active content removed: object payload in metadata")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Bullet item"),
+        "decoded PDF text did not contain list item text: {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Hidden list name"),
+        "list name metadata leaked to rendered PDF text: {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Hidden link"),
+        "list name field result leaked to rendered PDF text: {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("https://example.com/list-name"),
+        "list name field instruction leaked to rendered PDF text: {rendered_text:?}"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "list table metadata should not be unsupported: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"listtemplateid".as_slice(),
+        b"listsimple",
+        b"leveljc",
+        b"levelnumbers",
+        b"listname",
+        b"Hidden list name",
+        b"Hidden link",
+        b"https://example.com/list-name",
+        b"listoverridecount",
+        b"fldinst",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "list table metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_style_list_format_controls_synthesize_passive_markers_without_leakage() {
-    let input = br"{\rtf1{\pn\pnucrm\pnstart4}Fourth item\par{\pn\pnlcltr\pnstart28}Lower alpha\par{\pn\pnord\pnstart13}Ordinal\par{\pn\pnbul}Bullet\par}".to_vec();
+    let input = br"{\rtf1{\pn\pnucrm\pnrnot0\pnstart4}Fourth item\par{\pn\pnlcltr\pnrnot0\pnstart28}Lower alpha\par{\pn\pnord\pnrnot0\pnstart13}Ordinal\par{\pn\pnbul\pnrnot0}Bullet\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
@@ -3111,7 +3225,15 @@ fn old_style_list_format_controls_synthesize_passive_markers_without_leakage() {
     assert!(text.contains("ab.\tLower alpha"));
     assert!(text.contains("13th.\tOrdinal"));
     assert!(text.contains("\u{2022}\tBullet"));
-    for forbidden in ["pnucrm", "pnlcltr", "pnord", "pnbul", "pnstart"] {
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "old-style list metadata should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["pnucrm", "pnlcltr", "pnord", "pnbul", "pnrnot", "pnstart"] {
         assert!(
             !text.contains(forbidden),
             "forbidden old-style list control leaked to text: {forbidden}"
@@ -3142,6 +3264,7 @@ fn old_style_list_format_controls_synthesize_passive_markers_without_leakage() {
         b"pnlcltr",
         b"pnord",
         b"pnbul",
+        b"pnrnot",
         b"pnstart",
         b"/JavaScript",
         b"/EmbeddedFile",
@@ -5818,6 +5941,96 @@ fn fields_render_result_without_executing_instruction() {
     assert!(text.contains("visible link"));
     assert!(!text.contains("HYPERLINK"));
     assert!(!text.contains("https://example.com"));
+}
+
+#[test]
+fn field_status_flags_do_not_update_execute_or_leak_into_passive_pdf() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "field",
+        "\\",
+        "flddirty",
+        "\\",
+        "fldedit",
+        "\\",
+        "fldlock",
+        "\\",
+        "fldpriv{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst HYPERLINK \"https://example.com/locked\"}{",
+        "\\",
+        "fldrslt Stored locked link}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before Stored locked link After"));
+    assert!(!text.contains("HYPERLINK"));
+    assert!(!text.contains("https://example.com"));
+    for forbidden in ["flddirty", "fldedit", "fldlock", "fldpriv"] {
+        assert!(
+            !text.contains(forbidden),
+            "field status flag leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "field status flags should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            parse_options: RtfParseOptions {
+                pdf_link_policy: PdfLinkPolicy::AllowSanitizedHttpLinks,
+                ..RtfParseOptions::default()
+            },
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before Stored locked link After"));
+    for forbidden in [
+        b"flddirty".as_slice(),
+        b"fldedit",
+        b"fldlock",
+        b"fldpriv",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "field status flag or active PDF content leaked: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
 }
 
 #[test]
@@ -11842,6 +12055,144 @@ fn encapsulated_html_metadata_obeys_reject_policy() {
 }
 
 #[test]
+fn private_metadata_destinations_do_not_reach_text_or_pdf() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Visible before {",
+        "\\",
+        "private Hidden private payload /JavaScript {",
+        "\\",
+        "object",
+        "\\",
+        "objdata ",
+        payload_hex(),
+        "}{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst HYPERLINK \"https://example.com/private\"}{",
+        "\\",
+        "fldrslt Hidden link}}} private word after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible before  private word after"));
+    for forbidden in [
+        "Hidden private payload",
+        "JavaScript",
+        "object",
+        "objdata",
+        payload_hex(),
+        "HYPERLINK",
+        "https://example.com/private",
+        "Hidden link",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "private metadata leaked to text: {forbidden}"
+        );
+    }
+    for expected in [
+        "active content removed: private metadata before safe model normalization",
+        "active content removed: object payload in metadata before safe model normalization",
+        "active content removed: field instruction in metadata before safe model normalization",
+    ] {
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing private metadata diagnostic {expected:?}: {:?}",
+            parsed.diagnostics
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "private metadata should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible before  private word after"));
+    for forbidden in [
+        b"Hidden private payload".as_slice(),
+        b"object",
+        b"objdata",
+        payload_hex().as_bytes(),
+        b"HYPERLINK",
+        b"https://example.com/private",
+        b"Hidden link",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "private metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn private_metadata_obeys_reject_policy() {
+    let reject_options = RtfParseOptions {
+        active_content_policy: ActiveContentPolicy::Reject,
+        ..RtfParseOptions::default()
+    };
+
+    for (input, expected_feature) in [
+        (
+            br"{\rtf1{\private Hidden private payload} Visible\par}".as_slice(),
+            "private metadata",
+        ),
+        (
+            br"{\rtf1{\info{\private Hidden private payload}} Visible\par}".as_slice(),
+            "private metadata in metadata",
+        ),
+        (
+            br"{\rtf1{\*\unknown{\private Hidden private payload}} Visible\par}".as_slice(),
+            "private metadata in skipped destination",
+        ),
+    ] {
+        assert!(
+            matches!(
+                parse_rtf_bytes_with_options(input, &reject_options),
+                Err(ParseError::ActiveContentRejected { feature, .. })
+                    if feature == expected_feature
+            ),
+            "expected {expected_feature:?} rejection"
+        );
+    }
+}
+
+#[test]
 fn review_bookmark_and_annotation_payloads_do_not_reach_text_or_pdf() {
     let input = rtf(&[
         "{",
@@ -13870,6 +14221,111 @@ fn font_alternate_name_guides_passive_fallback_without_control_leakage() {
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden),
             "{} leaked into PDF",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn font_face_metadata_is_stripped_before_passive_pdf_rendering() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "fonttbl{",
+        "\\",
+        "f0",
+        "\\",
+        "fnil",
+        "\\",
+        "fprq2",
+        "\\",
+        "fttruetype",
+        "\\",
+        "fbias0{",
+        "\\",
+        "panose 02020603050405020304 HOSTILE-PANOSE {",
+        "\\",
+        "object",
+        "\\",
+        "objdata ",
+        payload_hex(),
+        "}}Metadata Sans;}}",
+        "\\",
+        "f0 Visible font metadata body",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let font = parsed
+        .document
+        .fonts
+        .iter()
+        .find(|font| font.index == 0)
+        .expect("font");
+
+    assert_eq!(font.name, "Metadata Sans");
+    assert!(text.contains("Visible font metadata body"));
+    for forbidden in [
+        "panose",
+        "fttruetype",
+        "fbias",
+        "HOSTILE-PANOSE",
+        "objdata",
+        payload_hex(),
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "font metadata leaked to normalized text: {forbidden}"
+        );
+        assert!(
+            !font.name.contains(forbidden),
+            "font metadata polluted font name: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "font metadata should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible font metadata body"));
+    for forbidden in [
+        b"panose".as_slice(),
+        b"fttruetype",
+        b"fbias",
+        b"HOSTILE-PANOSE",
+        b"objdata",
+        payload_hex().as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "font metadata or active PDF content leaked: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -25438,13 +25894,15 @@ fn extreme_paragraph_indents_are_bounded_before_pdf_rendering() {
 }
 
 #[test]
-fn soft_line_and_page_breaks_are_stripped_without_forcing_pdf_breaks() {
+fn soft_line_page_and_column_breaks_are_stripped_without_forcing_pdf_breaks() {
     let input = rtf(&[
         "{",
         "\\",
         "rtf1 Before ",
         "\\",
         "softline soft line ",
+        "\\",
+        "softcol soft column ",
         "\\",
         "softpage soft page",
         "\\",
@@ -25453,8 +25911,9 @@ fn soft_line_and_page_breaks_are_stripped_without_forcing_pdf_breaks() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Before soft line soft page"));
+    assert!(text.contains("Before soft line soft column soft page"));
     assert!(!text.contains("softline"));
+    assert!(!text.contains("softcol"));
     assert!(!text.contains("softpage"));
     assert!(!parsed.document.blocks.iter().any(|block| matches!(
         block,
@@ -25481,9 +25940,10 @@ fn soft_line_and_page_breaks_are_stripped_without_forcing_pdf_breaks() {
     assert_eq!(parsed_pdf.get_pages().len(), 1);
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    assert!(decoded_pdf_text(&content).contains("Before soft line soft page"));
+    assert!(decoded_pdf_text(&content).contains("Before soft line soft column soft page"));
     for forbidden in [
         b"softline".as_slice(),
+        b"softcol",
         b"softpage",
         b"/JavaScript",
         b"/EmbeddedFile",
@@ -30821,13 +31281,29 @@ fn old_drawing_text_box_renders_passively_without_property_leakage() {
         "\\",
         "dobx720",
         "\\",
+        "dobxcolumn",
+        "\\",
         "doby720",
+        "\\",
+        "dobypara",
         "\\",
         "dodhgt1{",
         "\\",
-        "dptxbx Legacy box text",
+        "dptxbx{",
         "\\",
-        "par}{",
+        "dptxbxtext Legacy box text {",
+        "\\",
+        "object",
+        "\\",
+        "objemb{",
+        "\\",
+        "*",
+        "\\",
+        "objclass Word.Picture.8}{",
+        "\\",
+        "objdata 4142432f4a6176615363726970742f456d62656464656446696c65}}}",
+        "\\",
+        "par}}{{",
         "\\",
         "dpptx111 hostile-coordinate-payload}}After",
         "\\",
@@ -30841,9 +31317,14 @@ fn old_drawing_text_box_renders_passively_without_property_leakage() {
     assert!(text.contains("After"));
     for forbidden in [
         "dobx",
+        "dobxcolumn",
         "doby",
+        "dobypara",
         "dodhgt",
         "dptxbx",
+        "dptxbxtext",
+        "objdata",
+        "Word.Picture.8",
         "dpptx",
         "hostile-coordinate-payload",
         "[Shape skipped",
@@ -30858,7 +31339,7 @@ fn old_drawing_text_box_renders_passively_without_property_leakage() {
     let input_path = dir.path().join("old-drawing-text-box.rtf");
     let output_path = dir.path().join("old-drawing-text-box.pdf");
     fs::write(&input_path, input).unwrap();
-    convert_rtf_file_to_pdf(
+    let report = convert_rtf_file_to_pdf(
         &input_path,
         &output_path,
         &ConvertOptions {
@@ -30867,6 +31348,12 @@ fn old_drawing_text_box_renders_passively_without_property_leakage() {
         },
     )
     .unwrap();
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+    );
     let pdf = fs::read(&output_path).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
@@ -30878,9 +31365,14 @@ fn old_drawing_text_box_renders_passively_without_property_leakage() {
     assert!(rendered_text.contains("After"));
     for forbidden in [
         b"dobx".as_slice(),
+        b"dobxcolumn",
         b"doby",
+        b"dobypara",
         b"dodhgt",
         b"dptxbx",
+        b"dptxbxtext",
+        b"objdata",
+        b"Word.Picture.8",
         b"dpptx",
         b"hostile-coordinate-payload",
         b"/JavaScript",
@@ -31071,11 +31563,23 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
         "\\",
         "shpbxpage",
         "\\",
+        "shpbxcolumn",
+        "\\",
         "shpbypage",
+        "\\",
+        "shpbypara",
         "\\",
         "shpwr3",
         "\\",
+        "shpwrk0",
+        "\\",
         "shpfblwtxt1{",
+        "\\",
+        "shpfhdr0",
+        "\\",
+        "shpz0",
+        "\\",
+        "shplid1026",
         "\\",
         "sp{",
         "\\",
@@ -31154,6 +31658,14 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
         "fillColor",
         "lineColor",
         "lineWidth",
+        "shpbxcolumn",
+        "shpbypara",
+        "shpfblwtxt",
+        "shpfhdr",
+        "shplid",
+        "shpwr",
+        "shpwrk",
+        "shpz",
         "pFragments",
         "hostile-shape-payload",
         "[Shape skipped",
@@ -31182,11 +31694,27 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
             .message
             .contains("stripping unsupported/active drawing properties")
     }));
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating shape anchoring approximated")
+    }));
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("shape text wrapping approximated")
+    }));
     assert!(
         report
             .diagnostics
             .iter()
             .all(|diagnostic| !diagnostic.message.contains("stripping shape properties"))
+    );
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
     );
     let pdf = fs::read(&output_path).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
@@ -31214,6 +31742,14 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
         b"fillColor",
         b"lineColor",
         b"lineWidth",
+        b"shpbxcolumn",
+        b"shpbypara",
+        b"shpfblwtxt",
+        b"shpfhdr",
+        b"shplid",
+        b"shpwr",
+        b"shpwrk",
+        b"shpz",
         b"pFragments",
         b"hostile-shape-payload",
         b"[Shape skipped",
@@ -31750,6 +32286,169 @@ fn old_drawing_zero_width_outline_renders_fill_only_without_control_leakage() {
             String::from_utf8_lossy(forbidden)
         );
     }
+}
+
+#[test]
+fn old_drawing_background_fill_renders_when_foreground_is_absent() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dprect",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dplinew0",
+        "\\",
+        "dpfillbgcr40",
+        "\\",
+        "dpfillbgcg50",
+        "\\",
+        "dpfillbgcb60",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-background-fill-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("background-fill shape");
+    let color = shape.fill_color.expect("background fill color");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(color.red, 40);
+    assert_eq!(color.green, 50);
+    assert_eq!(color.blue, 60);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "dpfillbg",
+        "pFragments",
+        "hostile-background-fill-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden background fill drawing content leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("old-drawing-background-fill-shape.rtf");
+    let output_path = dir.path().join("old-drawing-background-fill-shape.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+    let stroke_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "S")
+        .count();
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(fill_count >= 1);
+    assert_eq!(stroke_count, 0);
+    for forbidden in [
+        b"dpfillbg".as_slice(),
+        b"pFragments",
+        b"hostile-background-fill-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden background fill drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn old_drawing_foreground_fill_takes_precedence_over_background_fill() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "do",
+        "\\",
+        "dprect",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dpfillfgcr10",
+        "\\",
+        "dpfillfgcg20",
+        "\\",
+        "dpfillfgcb30",
+        "\\",
+        "dpfillbgcr200",
+        "\\",
+        "dpfillbgcg210",
+        "\\",
+        "dpfillbgcb220}Visible",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("foreground-fill shape");
+    let color = shape.fill_color.expect("foreground fill color");
+
+    assert_eq!(color.red, 10);
+    assert_eq!(color.green, 20);
+    assert_eq!(color.blue, 30);
 }
 
 #[test]
