@@ -3309,11 +3309,14 @@ impl Parser {
                 self.set_current_shape_fill_pattern(control.parameter);
             }
             name if self.state.destination == Destination::Shape
-                && shape_layout_compatibility_control_message(name).is_some() =>
+                && is_shape_layout_compatibility_control(name) =>
             {
-                let message = shape_layout_compatibility_control_message(name).unwrap();
-                self.diagnostics
-                    .push(Diagnostic::warning(message, Some(offset)));
+                if let Some(message) =
+                    shape_layout_compatibility_control_message(name, control.parameter)
+                {
+                    self.diagnostics
+                        .push(Diagnostic::warning(message, Some(offset)));
+                }
             }
             "jpegblip" if self.state.destination == Destination::Picture => {
                 self.set_picture_kind(PictureKind::Jpeg)
@@ -13242,16 +13245,34 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
     }
 }
 
-fn shape_layout_compatibility_control_message(name: &str) -> Option<&'static str> {
+fn is_shape_layout_compatibility_control(name: &str) -> bool {
+    match name {
+        "dobxcolumn" | "dobxmargin" | "dobxpage" | "dobypara" | "dobymargin" | "dobypage"
+        | "shpbxcolumn" | "shpbxmargin" | "shpbxpage" | "shpbypara" | "shpbymargin"
+        | "shpbypage" | "dodhgt" | "shpz" | "shpfblwtxt" | "shpwr" | "shpwrk" | "shpfhdr"
+        | "shplid" => true,
+        _ => false,
+    }
+}
+
+fn shape_layout_compatibility_control_message(
+    name: &str,
+    parameter: Option<i32>,
+) -> Option<&'static str> {
     match name {
         "dobxcolumn" | "dobxmargin" | "dobxpage" | "dobypara" | "dobymargin" | "dobypage"
         | "shpbxcolumn" | "shpbxmargin" | "shpbxpage" | "shpbypara" | "shpbymargin"
         | "shpbypage" => Some("floating shape anchoring approximated by passive shape layout"),
-        "dodhgt" | "shpz" => Some("shape z-order approximated by passive document order"),
-        "shpfblwtxt" | "shpwr" | "shpwrk" => {
+        "dodhgt" | "shpz" if parameter.unwrap_or(0) != 0 => {
+            Some("shape z-order approximated by passive document order")
+        }
+        "shpfblwtxt" | "shpwr" if parameter.unwrap_or(1) != 0 => {
             Some("shape text wrapping approximated by passive shape layout")
         }
-        "shpfhdr" | "shplid" => Some("shape metadata interpreted for passive layout only"),
+        "shpwrk" if parameter.unwrap_or(0) != 0 => {
+            Some("shape text wrapping approximated by passive shape layout")
+        }
+        "dodhgt" | "shpz" | "shpfblwtxt" | "shpwr" | "shpwrk" | "shpfhdr" | "shplid" => None,
         _ => None,
     }
 }

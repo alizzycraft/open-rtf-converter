@@ -31961,6 +31961,142 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
 }
 
 #[test]
+fn neutral_shape_layout_metadata_is_consumed_without_false_approximation_warning() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop720",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1440",
+        "\\",
+        "shpwr0",
+        "\\",
+        "shpwrk0",
+        "\\",
+        "shpfblwtxt0",
+        "\\",
+        "shpz0",
+        "\\",
+        "shpfhdr0",
+        "\\",
+        "shplid1026{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Shape(_))),
+        "neutral shape metadata should still leave a passive static shape"
+    );
+    for forbidden in [
+        "shpwr",
+        "shpwrk",
+        "shpfblwtxt",
+        "shpz",
+        "shpfhdr",
+        "shplid",
+        "shapeType",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "neutral shape metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("neutral-shape-layout-metadata.rtf");
+    let output_path = dir.path().join("neutral-shape-layout-metadata.pdf");
+    fs::write(&input_path, input).unwrap();
+    let report = convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "neutral shape metadata should be classified: {:?}",
+        report.diagnostics
+    );
+    assert!(
+        report.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("shape text wrapping approximated")
+                && !diagnostic.message.contains("shape z-order approximated")
+                && !diagnostic.message.contains("shape metadata interpreted")
+        }),
+        "neutral layout metadata should not produce visible approximation warnings: {:?}",
+        report.diagnostics
+    );
+
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"shpwr".as_slice(),
+        b"shpwrk",
+        b"shpfblwtxt",
+        b"shpz",
+        b"shpfhdr",
+        b"shplid",
+        b"shapeType",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "neutral shape metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn background_static_shape_renders_passively_without_body_flow_or_payload_leakage() {
     let input = rtf(&[
         "{",
