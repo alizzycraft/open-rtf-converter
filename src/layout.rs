@@ -4076,18 +4076,24 @@ fn layout_paragraph(
         twips_to_points(effective_space_before_twips(&paragraph.style))
     };
     *cursor_y -= paragraph_top;
-    let mut wrap_content_width = content_width;
-    if let Some((_, adjusted_width)) =
-        wrapped_image_text_area_for_line(pages, margin_left, content_width, *cursor_y, 14.0)
-    {
-        wrap_content_width = adjusted_width;
-    }
-    let mut lines = wrap_paragraph_with_font_provider(
+    let mut lines = wrap_paragraph_with_font_provider_dynamic_width(
         paragraph,
-        wrap_content_width,
+        content_width,
         &markers,
         document,
         font_provider,
+        *cursor_y,
+        |line_top_y, line_height| {
+            wrapped_image_text_area_for_line(
+                pages,
+                margin_left,
+                content_width,
+                line_top_y,
+                line_height,
+            )
+            .map(|(_, width)| width)
+            .unwrap_or(content_width)
+        },
     );
     for line in &mut lines {
         line.height = apply_line_spacing_with_grid(line.height, &paragraph.style, *geometry);
@@ -4220,17 +4226,15 @@ fn wrapped_image_text_area_for_line(
     let page = pages.last()?;
     let content_right = margin_left + content_width;
     let line_bottom_y = line_top_y - line_height.max(0.0);
-    let gap = 6.0;
-    let mut best: Option<(f32, f32)> = None;
+    let mut free_intervals = vec![(margin_left, content_right)];
     for item in &page.items {
         let LayoutItem::Image(image) = item else {
             continue;
         };
-        if !image
-            .image
-            .placement
-            .is_some_and(|placement| placement.text_wrap)
-        {
+        let Some(placement) = image.image.placement else {
+            continue;
+        };
+        if !placement.text_wrap {
             continue;
         }
         let image_left = image.x.max(margin_left);
@@ -4243,19 +4247,37 @@ fn wrapped_image_text_area_for_line(
         if line_top_y <= image_bottom || line_bottom_y >= image_top {
             continue;
         }
-        let left_width = (image_left - gap - margin_left).max(0.0);
-        let right_left = (image_right + gap).min(content_right);
-        let right_width = (content_right - right_left).max(0.0);
-        let candidate = if right_width >= left_width {
-            (right_left, right_width)
-        } else {
-            (margin_left, left_width)
-        };
-        if candidate.1 >= 12.0 && best.is_none_or(|(_, width)| candidate.1 < width) {
-            best = Some(candidate);
+        let left_gap = twips_to_points(placement.wrap_margin_left_twips.max(0));
+        let right_gap = twips_to_points(placement.wrap_margin_right_twips.max(0));
+        let excluded_left = (image_left - left_gap).max(margin_left);
+        let excluded_right = (image_right + right_gap).min(content_right);
+        if excluded_left >= excluded_right {
+            continue;
         }
+        let mut next_intervals = Vec::with_capacity(free_intervals.len() + 1);
+        for (left, right) in free_intervals {
+            if excluded_right <= left || excluded_left >= right {
+                next_intervals.push((left, right));
+                continue;
+            }
+            if left < excluded_left {
+                next_intervals.push((left, excluded_left));
+            }
+            if excluded_right < right {
+                next_intervals.push((excluded_right, right));
+            }
+        }
+        free_intervals = next_intervals;
     }
-    best
+    free_intervals
+        .into_iter()
+        .map(|(left, right)| (left, (right - left).max(0.0)))
+        .filter(|(_, width)| *width >= 12.0)
+        .max_by(|(left_a, width_a), (left_b, width_b)| {
+            width_a
+                .total_cmp(width_b)
+                .then_with(|| left_b.total_cmp(left_a))
+        })
 }
 
 fn reset_line_numbers_for_section_restart(
@@ -4388,6 +4410,26 @@ fn wrap_paragraph_with_font_provider(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) -> Vec<Line> {
+    wrap_paragraph_with_font_provider_dynamic_width(
+        paragraph,
+        content_width,
+        markers,
+        document,
+        font_provider,
+        0.0,
+        |_, _| content_width,
+    )
+}
+
+fn wrap_paragraph_with_font_provider_dynamic_width(
+    paragraph: &Paragraph,
+    content_width: f32,
+    markers: &MarkerContext,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+    first_line_top_y: f32,
+    mut line_content_width: impl FnMut(f32, f32) -> f32,
+) -> Vec<Line> {
     let mut lines = Vec::new();
     let mut current = Line {
         runs: Vec::new(),
@@ -4395,6 +4437,7 @@ fn wrap_paragraph_with_font_provider(
         height: 14.0,
     };
     let mut is_first_line = true;
+    let mut current_line_top_y = first_line_top_y;
     let mut drop_cap_applied = false;
 
     for run in &paragraph.runs {
@@ -4415,7 +4458,9 @@ fn wrap_paragraph_with_font_provider(
         }
         for segment in segments {
             if segment.text == "\n" {
+                let finished_height = current.height;
                 lines.push(current);
+                current_line_top_y -= finished_height;
                 current = empty_line();
                 is_first_line = false;
                 continue;
@@ -4428,11 +4473,20 @@ fn wrap_paragraph_with_font_provider(
                 document,
                 font_provider,
             );
-            let line_width = paragraph_line_width(content_width, &paragraph.style, is_first_line);
+            let requested_content_width = line_content_width(current_line_top_y, current.height);
+            let active_content_width = if content_width >= 12.0 {
+                requested_content_width.clamp(12.0, content_width)
+            } else {
+                requested_content_width.clamp(0.0, content_width.max(0.0))
+            };
+            let line_width =
+                paragraph_line_width(active_content_width, &paragraph.style, is_first_line);
             if !paragraph.style.no_wrap && current.width > 0.0 && current.width + width > line_width
             {
                 materialize_line_end_soft_hyphen(&mut current, document, font_provider);
+                let finished_height = current.height;
                 lines.push(current);
+                current_line_top_y -= finished_height;
                 current = empty_line();
                 is_first_line = false;
                 let trimmed = segment.text.trim_start().to_string();
@@ -7707,6 +7761,8 @@ mod tests {
                 width_twips: 1440,
                 height_twips: 720,
                 text_wrap: false,
+                wrap_margin_left_twips: 120,
+                wrap_margin_right_twips: 120,
             }),
         })];
 
@@ -7750,6 +7806,8 @@ mod tests {
                     width_twips: 1440,
                     height_twips: 720,
                     text_wrap: true,
+                    wrap_margin_left_twips: 120,
+                    wrap_margin_right_twips: 120,
                 }),
             }),
             Block::Paragraph(Paragraph {
@@ -7787,6 +7845,227 @@ mod tests {
             image.x + image.width
         );
         assert!(text.baseline_y < image.y + image.height && text.baseline_y > image.y);
+    }
+
+    #[test]
+    fn wrapped_paragraph_honors_passive_shape_picture_wrap_margins() {
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Image(StaticImage {
+                format: ImageFormat::Jpeg,
+                bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+                palette: Vec::new(),
+                vector_commands: Vec::new(),
+                width_px: 100,
+                height_px: 50,
+                natural_width_px_hint: None,
+                natural_height_px_hint: None,
+                display_width_twips: None,
+                display_height_twips: None,
+                scale_x_percent: None,
+                scale_y_percent: None,
+                crop: ImageCrop::default(),
+                placement: Some(StaticImagePlacement {
+                    left_twips: 0,
+                    top_twips: 0,
+                    width_twips: 1440,
+                    height_twips: 720,
+                    text_wrap: true,
+                    wrap_margin_left_twips: 120,
+                    wrap_margin_right_twips: 720,
+                }),
+            }),
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Wrapped with larger margin".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let image = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("wrapped shape image");
+        let text = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.contains("Wrapped") => Some(text),
+                _ => None,
+            })
+            .expect("paragraph text");
+
+        assert!(
+            text.x >= image.x + image.width + 36.0 - 0.01,
+            "text should honor normalized right wrap margin: text {}, expected at least {}",
+            text.x,
+            image.x + image.width + 36.0
+        );
+    }
+
+    #[test]
+    fn wrapped_paragraph_returns_to_full_width_below_passive_shape_picture_frame() {
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Image(StaticImage {
+                format: ImageFormat::Jpeg,
+                bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+                palette: Vec::new(),
+                vector_commands: Vec::new(),
+                width_px: 100,
+                height_px: 50,
+                natural_width_px_hint: None,
+                natural_height_px_hint: None,
+                display_width_twips: None,
+                display_height_twips: None,
+                scale_x_percent: None,
+                scale_y_percent: None,
+                crop: ImageCrop::default(),
+                placement: Some(StaticImagePlacement {
+                    left_twips: 0,
+                    top_twips: 0,
+                    width_twips: 5760,
+                    height_twips: 560,
+                    text_wrap: true,
+                    wrap_margin_left_twips: 120,
+                    wrap_margin_right_twips: 120,
+                }),
+            }),
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let image = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("wrapped shape image");
+        let mut text_lines: Vec<(f32, f32, String)> = Vec::new();
+        for item in &page.items {
+            let LayoutItem::Text(fragment) = item else {
+                continue;
+            };
+            if let Some((_, _, text)) = text_lines
+                .iter_mut()
+                .find(|(baseline_y, _, _)| (*baseline_y - fragment.baseline_y).abs() < 0.01)
+            {
+                text.push_str(&fragment.text);
+            } else {
+                text_lines.push((fragment.baseline_y, fragment.x, fragment.text.clone()));
+            }
+        }
+
+        assert!(
+            text_lines
+                .iter()
+                .any(|(baseline_y, x, text)| *baseline_y > image.y
+                    && *baseline_y < image.y + image.height
+                    && *x > image.x + image.width
+                    && text.len() < 32),
+            "expected a short line beside the wrapped image: {:?}",
+            text_lines
+        );
+        assert!(
+            text_lines
+                .iter()
+                .any(|(baseline_y, x, text)| *baseline_y < image.y
+                    && (*x - page.geometry.margin_left).abs() < 0.01
+                    && text.len() > 40),
+            "expected a full-width line below the wrapped image: {:?}",
+            text_lines
+        );
+    }
+
+    #[test]
+    fn wrapped_paragraph_uses_free_interval_between_passive_shape_picture_frames() {
+        let wrapped_image = |left_twips| StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 100,
+            height_px: 50,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: None,
+            display_height_twips: None,
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: Some(StaticImagePlacement {
+                left_twips,
+                top_twips: 0,
+                width_twips: 2160,
+                height_twips: 720,
+                text_wrap: true,
+                wrap_margin_left_twips: 120,
+                wrap_margin_right_twips: 120,
+            }),
+        };
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Image(wrapped_image(0)),
+            Block::Image(wrapped_image(5760)),
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "center gap words should flow between the two passive picture frames before returning below them"
+                        .to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let images = page
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(images.len(), 2);
+        let text = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text)
+                    if text.baseline_y > images[0].y
+                        && text.baseline_y < images[0].y + images[0].height =>
+                {
+                    Some(text)
+                }
+                _ => None,
+            })
+            .expect("text beside wrapped images");
+
+        assert!(
+            text.x > images[0].x + images[0].width && text.x < images[1].x,
+            "text should use the free interval between wrapped images: text x {}, left image right {}, right image left {}",
+            text.x,
+            images[0].x + images[0].width,
+            images[1].x
+        );
     }
 
     #[test]

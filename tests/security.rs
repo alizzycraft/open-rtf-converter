@@ -19424,6 +19424,14 @@ fn opaque_metadata_payloads_obey_reject_policy() {
             "custom XML markup",
         ),
         (
+            br"{\rtf1{\info{\title Hidden {\xmlopen tagged}}}Visible body\par}".as_slice(),
+            "custom XML markup",
+        ),
+        (
+            br"{\rtf1{\*\unknown{\xmlclose hidden}}Visible body\par}".as_slice(),
+            "custom XML markup",
+        ),
+        (
             br"{\rtf1{\datafield 414243}Visible body\par}".as_slice(),
             "form field data payload",
         ),
@@ -22950,6 +22958,8 @@ fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
     assert_eq!(placement.width_twips, 1440);
     assert_eq!(placement.height_twips, 720);
     assert!(placement.text_wrap);
+    assert_eq!(placement.wrap_margin_left_twips, 120);
+    assert_eq!(placement.wrap_margin_right_twips, 120);
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     for forbidden in [
@@ -32231,6 +32241,98 @@ fn neutral_shape_layout_metadata_is_consumed_without_false_approximation_warning
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden),
             "neutral shape metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn square_shape_wrap_metadata_is_consumed_by_passive_line_exclusion() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft0",
+        "\\",
+        "shptop0",
+        "\\",
+        "shpright1440",
+        "\\",
+        "shpbottom720",
+        "\\",
+        "shpbxcolumn",
+        "\\",
+        "shpbypara",
+        "\\",
+        "shpwr1",
+        "\\",
+        "shpwrk0",
+        "\\",
+        "shpfblwtxt0",
+        "\\",
+        "shpz0{",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip ",
+        image_hex.as_str(),
+        "}}}} Wrapped text beside picture",
+        "\\",
+        "par}",
+    ]);
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("shape text wrapping approximated")
+        }),
+        "square wrapped shape picture should be handled by passive line exclusion: {:?}",
+        output.diagnostics
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("Wrapped text beside picture"));
+    for forbidden in [
+        b"shpwr".as_slice(),
+        b"shpwrk",
+        b"shppict",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden square-wrap shape content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

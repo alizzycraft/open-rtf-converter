@@ -319,7 +319,7 @@ fn load_cli_font_provider(
     browser_safe: bool,
 ) -> Result<FontProvider, CliFontError> {
     let mut provider = if browser_safe {
-        FontProvider::browser_safe_defaults()
+        FontProvider::browser_safe_with_bundled_fallback()
     } else {
         FontProvider::default()
     };
@@ -336,13 +336,30 @@ fn load_cli_font_provider(
                 count: usize::MAX,
                 limit: provider.limits.max_assets,
             }))?;
-    if requested_asset_count > provider.limits.max_assets {
+    let total_requested_asset_count = provider
+        .assets
+        .len()
+        .checked_add(requested_asset_count)
+        .ok_or(CliFontError::Provider(FontProviderError::TooManyAssets {
+            count: usize::MAX,
+            limit: provider.limits.max_assets,
+        }))?;
+    if total_requested_asset_count > provider.limits.max_assets {
         return Err(CliFontError::Provider(FontProviderError::TooManyAssets {
-            count: requested_asset_count,
+            count: total_requested_asset_count,
             limit: provider.limits.max_assets,
         }));
     }
-    let mut total_bytes = 0usize;
+    let mut total_bytes = provider.assets.iter().try_fold(0usize, |total, asset| {
+        total
+            .checked_add(asset.bytes.len())
+            .ok_or(CliFontError::Provider(
+                FontProviderError::TotalBytesTooLarge {
+                    size: usize::MAX,
+                    limit: provider.limits.max_total_bytes,
+                },
+            ))
+    })?;
     for spec in specs {
         let (families, style, path) = parse_font_spec(spec)?;
         let bytes = read_bounded_font_file(path, provider.limits.max_asset_bytes)?;
@@ -1563,6 +1580,12 @@ mod tests {
     fn browser_safe_cli_uses_stricter_font_provider_limits() {
         let provider = load_cli_font_provider(&[], &[], &[], &[], true).unwrap();
 
+        assert_eq!(provider.assets.len(), 1);
+        assert!(provider.has_asset_for_family("Unknown Word Font"));
+        assert_eq!(
+            provider.coverage_for_char("Times New Roman CE", 'ő'),
+            open_rtf_converter::FontCoverage::Covered
+        );
         assert_eq!(
             provider.limits.max_assets,
             FontProvider::browser_safe_defaults().limits.max_assets

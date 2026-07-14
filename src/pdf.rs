@@ -232,6 +232,7 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/FileAttachment", "/FileAttachment"),
     (b"/Filespec", "/Filespec"),
     (b"/GoTo", "/GoTo"),
+    (b"/GoTo3DView", "/GoTo3DView"),
     (b"/GoToE", "/GoToE"),
     (b"/GoToR", "/GoToR"),
     (b"/Hide", "/Hide"),
@@ -251,8 +252,10 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/ResetForm", "/ResetForm"),
     (b"/RichMedia", "/RichMedia"),
     (b"/Screen", "/Screen"),
+    (b"/SetOCGState", "/SetOCGState"),
     (b"/Sound", "/Sound"),
     (b"/SubmitForm", "/SubmitForm"),
+    (b"/Trans", "/Trans"),
     (b"/URI", "/URI"),
     (b"/Widget", "/Widget"),
     (b"/XRef", "/XRef"),
@@ -4518,12 +4521,21 @@ endobj
 << /S /Rendition /OP 0 >>
 endobj
 10 0 obj
-<< /Type /ObjStm /N 1 /First 8 /Length 16 >>
+<< /S /SetOCGState /State [/Toggle 1 0 R] >>
 endobj
 11 0 obj
-<< /Type /XRef /Size 11 /Length 0 >>
+<< /S /Trans /Trans << /S /Dissolve >> >>
 endobj
 12 0 obj
+<< /S /GoTo3DView /TA 1 0 R /V /Default >>
+endobj
+13 0 obj
+<< /Type /ObjStm /N 1 /First 8 /Length 16 >>
+endobj
+14 0 obj
+<< /Type /XRef /Size 14 /Length 0 >>
+endobj
+15 0 obj
 << /Names << /EmbeddedFiles [(payload.bin) 4 0 R] >> >>
 endobj
 %%EOF";
@@ -4581,6 +4593,19 @@ endobj
         assert!(error.issues.iter().any(|issue| issue.token == "/XRef"));
         assert!(error.issues.iter().any(|issue| issue.token == "/ResetForm"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Rendition"));
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == "/SetOCGState")
+        );
+        assert!(error.issues.iter().any(|issue| issue.token == "/Trans"));
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == "/GoTo3DView")
+        );
     }
 
     #[test]

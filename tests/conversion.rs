@@ -576,6 +576,7 @@ fn unused_font_table_entries_do_not_emit_passive_font_diagnostics() {
         input,
         &ConvertOptions {
             diagnostics: true,
+            font_provider: FontProvider::browser_safe_with_bundled_fallback(),
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -584,10 +585,11 @@ fn unused_font_table_entries_do_not_emit_passive_font_diagnostics() {
     assert_eq!(output.pages, 1);
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
     assert!(
-        output.diagnostics.iter().any(|diagnostic| diagnostic
-            .message
-            .contains("font 'Arial' approximated with passive PDF base font Helvetica")),
-        "used Word font should still report passive approximation: {:?}",
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("font 'Arial' approximated")),
+        "browser-safe bundled font should suppress Arial base-font approximation: {:?}",
         output.diagnostics
     );
     for unused in ["Calibri", "Cambria"] {
@@ -759,6 +761,68 @@ fn caller_wildcard_font_asset_embeds_unmatched_word_font_without_system_fonts() 
 }
 
 #[test]
+fn browser_safe_defaults_embed_bundled_passive_fallback_font() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f7\froman Unknown Word Serif;}}\f7 Bundled AB\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: FontProvider::browser_safe_with_bundled_fallback(),
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected bundled passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("Unknown Word Serif")
+            || !diagnostic.message.contains("substituted")),
+        "browser-safe bundled font should suppress base-font substitution diagnostics: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"Unknown Word Serif".as_slice(),
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/Launch",
+        b"/EmbeddedFile",
+        b"/Filespec",
+        b"/RichMedia",
+        b"/XFA",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active PDF or source font marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn caller_font_asset_matches_rtf_alternate_font_name_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Mystery Sans{\*\falt Tuffy;};}}\f0 Alternate AB\par}";
     let provider = FontProvider {
@@ -846,6 +910,9 @@ fn rtf_embedded_font_payload_does_not_become_pdf_font_file() {
         b"HOSTILE-FONT-PAYLOAD".as_slice(),
         b"fontemb".as_slice(),
         b"fontfile".as_slice(),
+        b"/EmbeddedFile".as_slice(),
+        b"/Launch".as_slice(),
+        b"/JavaScript".as_slice(),
     ] {
         assert!(
             !output

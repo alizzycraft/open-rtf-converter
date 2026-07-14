@@ -24,6 +24,7 @@ const DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS: i32 = -6;
 const DEFAULT_SCRIPT_FONT_SCALE_PERCENT: i32 = 65;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 60;
+const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
 const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
 
 #[derive(Debug, Error)]
@@ -3814,8 +3815,20 @@ impl Parser {
                 self.reject_active_content_only(feature, offset)?;
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
+            name if self.state.inside_metadata
+                && let Some(feature) = custom_xml_markup_feature(name) =>
+            {
+                self.reject_active_content_only(feature, offset)?;
+                self.count_skipped_destination_bytes(name.len(), offset)?;
+            }
             name if self.state.destination == Destination::Ignored
                 && let Some(feature) = opaque_metadata_payload_feature(name) =>
+            {
+                self.reject_active_content_only(feature, offset)?;
+                self.count_skipped_destination_bytes(name.len(), offset)?;
+            }
+            name if self.state.destination == Destination::Ignored
+                && let Some(feature) = custom_xml_markup_feature(name) =>
             {
                 self.reject_active_content_only(feature, offset)?;
                 self.count_skipped_destination_bytes(name.len(), offset)?;
@@ -10617,6 +10630,8 @@ impl Parser {
             width_twips,
             height_twips,
             text_wrap: shape.text_wrap,
+            wrap_margin_left_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
+            wrap_margin_right_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
         });
         self.diagnostics.push(Diagnostic::warning(
             "rendering shape picture result with bounded passive shape frame",
@@ -13333,7 +13348,10 @@ fn shape_layout_compatibility_control_message(
         "dodhgt" | "shpz" if parameter.unwrap_or(0) != 0 => {
             Some("shape z-order approximated by passive document order")
         }
-        "shpfblwtxt" | "shpwr" if parameter.unwrap_or(1) != 0 => {
+        "shpfblwtxt" if parameter.unwrap_or(1) != 0 => {
+            Some("shape text wrapping approximated by passive shape layout")
+        }
+        "shpwr" if !matches!(parameter.unwrap_or(1), 0 | 1) => {
             Some("shape text wrapping approximated by passive shape layout")
         }
         "shpwrk" if parameter.unwrap_or(0) != 0 => {

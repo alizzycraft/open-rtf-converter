@@ -3,6 +3,8 @@ use std::fmt;
 
 use ttf_parser::Face;
 
+const BUNDLED_BROWSER_SAFE_FALLBACK_FONT: &[u8] = include_bytes!("../fixtures/fonts/Tuffy.ttf");
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontProvider {
     pub assets: Vec<FontAsset>,
@@ -22,6 +24,17 @@ impl FontProvider {
     pub fn browser_safe_defaults() -> Self {
         Self {
             assets: Vec::new(),
+            limits: FontProviderLimits::browser_defaults(),
+        }
+    }
+
+    pub fn browser_safe_with_bundled_fallback() -> Self {
+        Self {
+            assets: vec![FontAsset {
+                family_names: vec!["*".to_string(), "Tuffy".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: BUNDLED_BROWSER_SAFE_FALLBACK_FONT.to_vec(),
+            }],
             limits: FontProviderLimits::browser_defaults(),
         }
     }
