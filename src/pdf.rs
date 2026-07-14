@@ -629,100 +629,13 @@ pub fn render_pdf_with_font_provider(
                     content.fill_nonzero();
                 }
                 LayoutItem::Text(fragment) => {
-                    if text_fragment_renders_as_passive_vector_only(fragment) {
-                        draw_passive_vector_only_dingbat_text(&mut content, fragment);
-                        continue;
-                    }
-                    let supplied_encoding = encode_supplied_text_fragment(
+                    draw_text_layout_item(
+                        &mut content,
                         fragment,
                         layout,
                         font_provider,
                         &supplied_fonts,
                     );
-                    let mut base_encoded = Vec::new();
-                    let font_resource = if let Some(supplied) = supplied_encoding.as_ref() {
-                        supplied_fonts[supplied.font_index].resource_name.as_slice()
-                    } else {
-                        base_encoded =
-                            encode_pdf_text_for_font(&fragment.text, fragment.font_family);
-                        font_name_for_style(fragment.font_family, &fragment.style).0
-                    };
-                    let passive_kerning_family =
-                        supplied_encoding.is_none().then_some(fragment.font_family);
-                    let encoded = supplied_encoding
-                        .as_ref()
-                        .map(|supplied| supplied.encoded.as_slice())
-                        .unwrap_or(base_encoded.as_slice());
-                    if fragment.style.shadow {
-                        set_fill_color(&mut content, shadow_color(fragment.color));
-                        write_text_fragment(
-                            &mut content,
-                            &fragment.text,
-                            font_resource,
-                            passive_kerning_family,
-                            &fragment.style,
-                            fragment.word_spacing,
-                            fragment.x + shadow_offset(&fragment.style),
-                            fragment.baseline_y - shadow_offset(&fragment.style),
-                            &encoded,
-                            TextRenderingMode::Fill,
-                        );
-                    }
-                    if fragment.style.relief != TextRelief::None {
-                        let offset = relief_offset(&fragment.style);
-                        let (first_color, first_dx, first_dy, second_color, second_dx, second_dy) =
-                            relief_layers(fragment.color, fragment.style.relief, offset);
-                        set_fill_color(&mut content, first_color);
-                        write_text_fragment(
-                            &mut content,
-                            &fragment.text,
-                            font_resource,
-                            passive_kerning_family,
-                            &fragment.style,
-                            fragment.word_spacing,
-                            fragment.x + first_dx,
-                            fragment.baseline_y + first_dy,
-                            &encoded,
-                            TextRenderingMode::Fill,
-                        );
-                        set_fill_color(&mut content, second_color);
-                        write_text_fragment(
-                            &mut content,
-                            &fragment.text,
-                            font_resource,
-                            passive_kerning_family,
-                            &fragment.style,
-                            fragment.word_spacing,
-                            fragment.x + second_dx,
-                            fragment.baseline_y + second_dy,
-                            &encoded,
-                            TextRenderingMode::Fill,
-                        );
-                    }
-                    set_fill_color(&mut content, fragment.color);
-                    if fragment.style.outline {
-                        set_stroke_color(&mut content, fragment.color);
-                        content.set_line_width(
-                            (fragment.style.font_size_points() * 0.035).clamp(0.25, 1.25),
-                        );
-                    }
-                    write_text_fragment(
-                        &mut content,
-                        &fragment.text,
-                        font_resource,
-                        passive_kerning_family,
-                        &fragment.style,
-                        fragment.word_spacing,
-                        fragment.x,
-                        fragment.baseline_y,
-                        &encoded,
-                        if fragment.style.outline {
-                            TextRenderingMode::Stroke
-                        } else {
-                            TextRenderingMode::Fill
-                        },
-                    );
-                    draw_passive_text_overlays(&mut content, fragment);
                 }
                 LayoutItem::Underline {
                     x,
@@ -891,6 +804,15 @@ pub fn render_pdf_with_font_provider(
                             *stroke_style,
                             StaticImageVectorFillRule::Winding,
                             *fill_color,
+                        );
+                    }
+                    LayoutItem::Text(fragment) => {
+                        draw_text_layout_item(
+                            &mut content,
+                            fragment,
+                            layout,
+                            font_provider,
+                            &supplied_fonts,
                         );
                     }
                     _ => {}
@@ -1064,6 +986,101 @@ pub fn render_pdf_with_font_provider(
     pdf.finish()
 }
 
+fn draw_text_layout_item(
+    content: &mut Content,
+    fragment: &TextFragment,
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+    supplied_fonts: &[SuppliedPdfFont],
+) {
+    if text_fragment_renders_as_passive_vector_only(fragment) {
+        draw_passive_vector_only_dingbat_text(content, fragment);
+        return;
+    }
+    let supplied_encoding =
+        encode_supplied_text_fragment(fragment, layout, font_provider, supplied_fonts);
+    let mut base_encoded = Vec::new();
+    let font_resource = if let Some(supplied) = supplied_encoding.as_ref() {
+        supplied_fonts[supplied.font_index].resource_name.as_slice()
+    } else {
+        base_encoded = encode_pdf_text_for_font(&fragment.text, fragment.font_family);
+        font_name_for_style(fragment.font_family, &fragment.style).0
+    };
+    let passive_kerning_family = supplied_encoding.is_none().then_some(fragment.font_family);
+    let encoded = supplied_encoding
+        .as_ref()
+        .map(|supplied| supplied.encoded.as_slice())
+        .unwrap_or(base_encoded.as_slice());
+    if fragment.style.shadow {
+        set_fill_color(content, shadow_color(fragment.color));
+        write_text_fragment(
+            content,
+            &fragment.text,
+            font_resource,
+            passive_kerning_family,
+            &fragment.style,
+            fragment.word_spacing,
+            fragment.x + shadow_offset(&fragment.style),
+            fragment.baseline_y - shadow_offset(&fragment.style),
+            encoded,
+            TextRenderingMode::Fill,
+        );
+    }
+    if fragment.style.relief != TextRelief::None {
+        let offset = relief_offset(&fragment.style);
+        let (first_color, first_dx, first_dy, second_color, second_dx, second_dy) =
+            relief_layers(fragment.color, fragment.style.relief, offset);
+        set_fill_color(content, first_color);
+        write_text_fragment(
+            content,
+            &fragment.text,
+            font_resource,
+            passive_kerning_family,
+            &fragment.style,
+            fragment.word_spacing,
+            fragment.x + first_dx,
+            fragment.baseline_y + first_dy,
+            encoded,
+            TextRenderingMode::Fill,
+        );
+        set_fill_color(content, second_color);
+        write_text_fragment(
+            content,
+            &fragment.text,
+            font_resource,
+            passive_kerning_family,
+            &fragment.style,
+            fragment.word_spacing,
+            fragment.x + second_dx,
+            fragment.baseline_y + second_dy,
+            encoded,
+            TextRenderingMode::Fill,
+        );
+    }
+    set_fill_color(content, fragment.color);
+    if fragment.style.outline {
+        set_stroke_color(content, fragment.color);
+        content.set_line_width((fragment.style.font_size_points() * 0.035).clamp(0.25, 1.25));
+    }
+    write_text_fragment(
+        content,
+        &fragment.text,
+        font_resource,
+        passive_kerning_family,
+        &fragment.style,
+        fragment.word_spacing,
+        fragment.x,
+        fragment.baseline_y,
+        encoded,
+        if fragment.style.outline {
+            TextRenderingMode::Stroke
+        } else {
+            TextRenderingMode::Fill
+        },
+    );
+    draw_passive_text_overlays(content, fragment);
+}
+
 fn next_ref(next_object_id: &mut i32) -> Ref {
     let reference = Ref::new(*next_object_id);
     *next_object_id += 1;
@@ -1097,23 +1114,23 @@ fn collect_used_font_indexes_for_page(
     font_provider: Option<&FontProvider>,
 ) -> Vec<usize> {
     let mut used = [false; 14];
+    for_each_layout_text_fragment_on_page(page, &mut |fragment| {
+        if text_fragment_renders_as_passive_vector_only(fragment) {
+            return;
+        }
+        if font_provider
+            .and_then(|provider| supplied_text_encoding_parts(fragment, layout, provider))
+            .is_some()
+        {
+            return;
+        }
+        mark_used_font_resource(
+            &mut used,
+            font_resource_for_style(fragment.font_family, &fragment.style),
+        );
+    });
     for item in &page.items {
         match item {
-            LayoutItem::Text(fragment) => {
-                if text_fragment_renders_as_passive_vector_only(fragment) {
-                    continue;
-                }
-                if font_provider
-                    .and_then(|provider| supplied_text_encoding_parts(fragment, layout, provider))
-                    .is_some()
-                {
-                    continue;
-                }
-                mark_used_font_resource(
-                    &mut used,
-                    font_resource_for_style(fragment.font_family, &fragment.style),
-                );
-            }
             LayoutItem::Image(fragment)
                 if fragment.image.format == ImageFormat::Placeholder
                     && fragment.width >= 96.0
@@ -1136,6 +1153,34 @@ fn collect_used_font_indexes_for_page(
     used_font_index_list(&used)
 }
 
+fn for_each_layout_text_fragment_on_page<F>(page: &crate::layout::LayoutPage, callback: &mut F)
+where
+    F: FnMut(&TextFragment),
+{
+    for item in &page.items {
+        for_each_layout_item_text_fragment(item, callback);
+    }
+}
+
+fn for_each_layout_item_text_fragment<F>(item: &LayoutItem, callback: &mut F)
+where
+    F: FnMut(&TextFragment),
+{
+    match item {
+        LayoutItem::Text(fragment) => callback(fragment),
+        LayoutItem::Drawing(fragment) => {
+            for_each_layout_item_text_fragment(&fragment.item, callback)
+        }
+        LayoutItem::Highlight { .. }
+        | LayoutItem::Underline { .. }
+        | LayoutItem::Line { .. }
+        | LayoutItem::Ellipse { .. }
+        | LayoutItem::RoundedRectangle { .. }
+        | LayoutItem::Polygon { .. }
+        | LayoutItem::Image(_) => {}
+    }
+}
+
 fn collect_supplied_pdf_fonts(
     layout: &LayoutDocument,
     font_provider: Option<&FontProvider>,
@@ -1146,14 +1191,11 @@ fn collect_supplied_pdf_fonts(
     };
     let mut fonts = Vec::<SuppliedPdfFont>::new();
     for page in &layout.pages {
-        for item in &page.items {
-            let LayoutItem::Text(fragment) = item else {
-                continue;
-            };
+        for_each_layout_text_fragment_on_page(page, &mut |fragment| {
             let Some((asset_index, glyphs, _encoded)) =
                 supplied_text_encoding_parts(fragment, layout, font_provider)
             else {
-                continue;
+                return;
             };
             let font_index = if let Some(index) = fonts
                 .iter()
@@ -1183,7 +1225,7 @@ fn collect_supplied_pdf_fonts(
             for glyph in glyphs {
                 add_supplied_glyph(&mut fonts[font_index].used_glyphs, glyph);
             }
-        }
+        });
     }
     fonts
 }
@@ -1197,19 +1239,16 @@ fn collect_used_supplied_font_asset_indexes(
     };
     let mut indexes = Vec::<usize>::new();
     for page in &layout.pages {
-        for item in &page.items {
-            let LayoutItem::Text(fragment) = item else {
-                continue;
-            };
+        for_each_layout_text_fragment_on_page(page, &mut |fragment| {
             let Some((asset_index, _glyphs, _encoded)) =
                 supplied_text_encoding_parts(fragment, layout, font_provider)
             else {
-                continue;
+                return;
             };
             if !indexes.contains(&asset_index) {
                 indexes.push(asset_index);
             }
-        }
+        });
     }
     indexes
 }
@@ -1224,19 +1263,16 @@ fn collect_page_supplied_font_indexes(
         .iter()
         .map(|page| {
             let mut indexes = Vec::new();
-            for item in &page.items {
-                let LayoutItem::Text(fragment) = item else {
-                    continue;
-                };
+            for_each_layout_text_fragment_on_page(page, &mut |fragment| {
                 let Some(encoding) =
                     encode_supplied_text_fragment(fragment, layout, font_provider, supplied_fonts)
                 else {
-                    continue;
+                    return;
                 };
                 if !indexes.contains(&encoding.font_index) {
                     indexes.push(encoding.font_index);
                 }
-            }
+            });
             indexes
         })
         .collect()
@@ -1246,23 +1282,20 @@ fn collect_extended_latin_font_usage(layout: &LayoutDocument) -> [ExtendedLatinU
     let mut usage: [ExtendedLatinUsage; 14] =
         std::array::from_fn(|_| ExtendedLatinUsage::default());
     for page in &layout.pages {
-        for item in &page.items {
-            let LayoutItem::Text(fragment) = item else {
-                continue;
-            };
+        for_each_layout_text_fragment_on_page(page, &mut |fragment| {
             let resource = font_resource_for_style(fragment.font_family, &fragment.style);
             let Some(font_idx) = font_index_for_resource(resource) else {
-                continue;
+                return;
             };
             if !is_normal_text_font_index(font_idx) {
-                continue;
+                return;
             }
             for ch in fragment.text.chars() {
                 if let Some(entry) = extended_latin_entry_for_char(ch) {
                     usage[font_idx].add(entry);
                 }
             }
-        }
+        });
     }
     usage
 }

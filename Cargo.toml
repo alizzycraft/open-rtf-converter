@@ -21,7 +21,7 @@ ttf-parser = { version = "0.25.1", default-features = false, features = ["no-std
 unicode-linebreak = { version = "0.1.5", default-features = false }
 
 [dev-dependencies]
-lopdf = "0.38.0"
+lopdf = { version = "0.38.0", default-features = false }
 tempfile = "3.24.0"
 
 [[bin]]

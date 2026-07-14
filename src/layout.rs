@@ -6,12 +6,13 @@ use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
     DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontDef, FontFamilyHint, FontPitch,
-    FootnotePlacement, LineNumberRestart, PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings,
-    PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER,
-    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellHorizontalMerge,
-    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment, UnderlineStyle,
+    FootnotePlacement, ImageFormat, LineNumberRestart, PAGE_NUMBER_MARKER, PageNumberFormat,
+    PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run,
+    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
+    StaticImageVectorCommand, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
+    StaticShapeKind, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table,
+    TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, UnderlineStyle,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -1961,7 +1962,6 @@ fn layout_shape(
             }
         }
     }
-    wrap_static_shape_items_with_order(page, shape_item_start, shape.z_order, shape.below_text);
     layout_shape_text(
         pages,
         shape,
@@ -1973,6 +1973,9 @@ fn layout_shape(
         document_stats,
         font_provider,
     );
+    if let Some(page) = pages.last_mut() {
+        wrap_static_shape_items_with_order(page, shape_item_start, shape.z_order, shape.below_text);
+    }
     *cursor_y -= block_height + 6.0;
 }
 
@@ -5087,6 +5090,9 @@ fn paragraph_contains_page_number_marker(paragraph: &Paragraph) -> bool {
 struct DocumentStatsBuilder {
     stats: DocumentStats,
     in_word: bool,
+    counted_repeating_paragraphs: Vec<(usize, usize)>,
+    counted_repeating_images: Vec<(usize, usize)>,
+    counted_repeating_shapes: Vec<(usize, usize)>,
 }
 
 impl DocumentStatsBuilder {
@@ -5110,41 +5116,139 @@ impl DocumentStatsBuilder {
     fn finish_text_boundary(&mut self) {
         self.in_word = false;
     }
+
+    fn push_repeating_paragraphs_once(&mut self, paragraphs: &[Paragraph]) {
+        if paragraphs.is_empty() {
+            return;
+        }
+        let key = (paragraphs.as_ptr() as usize, paragraphs.len());
+        if self.counted_repeating_paragraphs.contains(&key) {
+            return;
+        }
+        self.counted_repeating_paragraphs.push(key);
+        push_paragraphs_stats(self, paragraphs);
+    }
+
+    fn push_repeating_shapes_once(&mut self, shapes: &[StaticShape]) {
+        if shapes.is_empty() {
+            return;
+        }
+        let key = (shapes.as_ptr() as usize, shapes.len());
+        if self.counted_repeating_shapes.contains(&key) {
+            return;
+        }
+        self.counted_repeating_shapes.push(key);
+        push_shapes_stats(self, shapes);
+    }
+
+    fn push_repeating_images_once(&mut self, images: &[StaticImage], content_width: f32) {
+        if images.is_empty() {
+            return;
+        }
+        let key = (images.as_ptr() as usize, images.len());
+        if self.counted_repeating_images.contains(&key) {
+            return;
+        }
+        self.counted_repeating_images.push(key);
+        push_images_stats(self, images, content_width);
+    }
 }
 
 fn document_stats(document: &Document) -> DocumentStats {
     let mut builder = DocumentStatsBuilder::default();
-    for paragraph in &document.header {
-        push_paragraph_stats(&mut builder, paragraph);
-    }
-    for paragraph in &document.first_page_header {
-        push_paragraph_stats(&mut builder, paragraph);
-    }
-    for paragraph in &document.even_page_header {
-        push_paragraph_stats(&mut builder, paragraph);
-    }
-    for paragraph in &document.footer {
-        push_paragraph_stats(&mut builder, paragraph);
-    }
-    for paragraph in &document.first_page_footer {
-        push_paragraph_stats(&mut builder, paragraph);
-    }
-    for paragraph in &document.even_page_footer {
-        push_paragraph_stats(&mut builder, paragraph);
-    }
+    let page_visibility = estimate_document_page_variant_visibility(document);
+    let document_content_width = content_width_for_page_settings(&document.page);
+    push_repeating_paragraph_variant_stats(
+        &mut builder,
+        &document.header,
+        &document.first_page_header,
+        &document.even_page_header,
+        &document.header,
+        &document.first_page_header,
+        &document.even_page_header,
+        document.page.title_page,
+        page_visibility,
+    );
+    push_repeating_image_variant_stats(
+        &mut builder,
+        &document.header_images,
+        &document.first_page_header_images,
+        &document.even_page_header_images,
+        &document.header_images,
+        &document.first_page_header_images,
+        &document.even_page_header_images,
+        document.page.title_page,
+        page_visibility,
+        document_content_width,
+    );
+    push_repeating_shape_variant_stats(
+        &mut builder,
+        &document.header_shapes,
+        &document.first_page_header_shapes,
+        &document.even_page_header_shapes,
+        &document.header_shapes,
+        &document.first_page_header_shapes,
+        &document.even_page_header_shapes,
+        document.page.title_page,
+        page_visibility,
+    );
+    push_repeating_paragraph_variant_stats(
+        &mut builder,
+        &document.footer,
+        &document.first_page_footer,
+        &document.even_page_footer,
+        &document.footer,
+        &document.first_page_footer,
+        &document.even_page_footer,
+        document.page.title_page,
+        page_visibility,
+    );
+    push_repeating_image_variant_stats(
+        &mut builder,
+        &document.footer_images,
+        &document.first_page_footer_images,
+        &document.even_page_footer_images,
+        &document.footer_images,
+        &document.first_page_footer_images,
+        &document.even_page_footer_images,
+        document.page.title_page,
+        page_visibility,
+        document_content_width,
+    );
+    push_repeating_shape_variant_stats(
+        &mut builder,
+        &document.footer_shapes,
+        &document.first_page_footer_shapes,
+        &document.even_page_footer_shapes,
+        &document.footer_shapes,
+        &document.first_page_footer_shapes,
+        &document.even_page_footer_shapes,
+        document.page.title_page,
+        page_visibility,
+    );
+    push_background_shape_stats(
+        &mut builder,
+        &document.background_shapes,
+        &document.background_shapes,
+    );
     for paragraph in &document.footnotes {
         push_paragraph_stats(&mut builder, paragraph);
     }
     for paragraph in &document.endnotes {
         push_paragraph_stats(&mut builder, paragraph);
     }
-    for block in &document.blocks {
-        push_block_stats(&mut builder, block);
+    for (block_idx, block) in document.blocks.iter().enumerate() {
+        push_block_stats(&mut builder, document, block_idx, block);
     }
     builder.stats
 }
 
-fn push_block_stats(builder: &mut DocumentStatsBuilder, block: &Block) {
+fn push_block_stats(
+    builder: &mut DocumentStatsBuilder,
+    document: &Document,
+    block_idx: usize,
+    block: &Block,
+) {
     match block {
         Block::Paragraph(paragraph) => push_paragraph_stats(builder, paragraph),
         Block::Table(table) => {
@@ -5164,39 +5268,365 @@ fn push_block_stats(builder: &mut DocumentStatsBuilder, block: &Block) {
             builder.finish_text_boundary();
         }
         Block::SectionSettings(settings) => {
-            for paragraph in &settings.header {
-                push_paragraph_stats(builder, paragraph);
-            }
-            for paragraph in &settings.first_page_header {
-                push_paragraph_stats(builder, paragraph);
-            }
-            for paragraph in &settings.even_page_header {
-                push_paragraph_stats(builder, paragraph);
-            }
-            for paragraph in &settings.footer {
-                push_paragraph_stats(builder, paragraph);
-            }
-            for paragraph in &settings.first_page_footer {
-                push_paragraph_stats(builder, paragraph);
-            }
-            for paragraph in &settings.even_page_footer {
-                push_paragraph_stats(builder, paragraph);
-            }
+            let page_visibility = estimate_section_page_variant_visibility(document, block_idx);
+            let section_content_width = content_width_for_page_settings(settings);
+            push_repeating_paragraph_variant_stats(
+                builder,
+                &settings.header,
+                &settings.first_page_header,
+                &settings.even_page_header,
+                &document.header,
+                &document.first_page_header,
+                &document.even_page_header,
+                settings.title_page,
+                page_visibility,
+            );
+            push_repeating_image_variant_stats(
+                builder,
+                &settings.header_images,
+                &settings.first_page_header_images,
+                &settings.even_page_header_images,
+                &document.header_images,
+                &document.first_page_header_images,
+                &document.even_page_header_images,
+                settings.title_page,
+                page_visibility,
+                section_content_width,
+            );
+            push_repeating_shape_variant_stats(
+                builder,
+                &settings.header_shapes,
+                &settings.first_page_header_shapes,
+                &settings.even_page_header_shapes,
+                &document.header_shapes,
+                &document.first_page_header_shapes,
+                &document.even_page_header_shapes,
+                settings.title_page,
+                page_visibility,
+            );
+            push_repeating_paragraph_variant_stats(
+                builder,
+                &settings.footer,
+                &settings.first_page_footer,
+                &settings.even_page_footer,
+                &document.footer,
+                &document.first_page_footer,
+                &document.even_page_footer,
+                settings.title_page,
+                page_visibility,
+            );
+            push_repeating_image_variant_stats(
+                builder,
+                &settings.footer_images,
+                &settings.first_page_footer_images,
+                &settings.even_page_footer_images,
+                &document.footer_images,
+                &document.first_page_footer_images,
+                &document.even_page_footer_images,
+                settings.title_page,
+                page_visibility,
+                section_content_width,
+            );
+            push_repeating_shape_variant_stats(
+                builder,
+                &settings.footer_shapes,
+                &settings.first_page_footer_shapes,
+                &settings.even_page_footer_shapes,
+                &document.footer_shapes,
+                &document.first_page_footer_shapes,
+                &document.even_page_footer_shapes,
+                settings.title_page,
+                page_visibility,
+            );
+            push_background_shape_stats(
+                builder,
+                &settings.background_shapes,
+                &document.background_shapes,
+            );
+        }
+        Block::Image(image) => {
+            let content_width =
+                content_width_for_page_settings(page_settings_before_block(document, block_idx));
+            push_image_stats(builder, image, content_width);
         }
         Block::Shape(shape) => {
-            for paragraph in &shape.text {
-                push_paragraph_stats(builder, paragraph);
-            }
-            builder.finish_text_boundary();
+            push_shape_stats(builder, shape);
         }
-        Block::Image(_)
-        | Block::PageBreak
+        Block::PageBreak
         | Block::ColumnBreak
         | Block::ContinuousSectionBreak
         | Block::SectionBreak
         | Block::EvenPageSectionBreak
         | Block::OddPageSectionBreak => builder.finish_text_boundary(),
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct PageVariantVisibility {
+    first_page: usize,
+    last_page: usize,
+}
+
+fn estimate_document_page_variant_visibility(document: &Document) -> PageVariantVisibility {
+    let mut physical_page_number = 1usize;
+    for (block_idx, block) in document.blocks.iter().enumerate() {
+        if matches!(block, Block::SectionSettings(_))
+            || (section_breaks_end_current_section(block)
+                && next_block_is_section_settings(document, block_idx))
+        {
+            break;
+        }
+        physical_page_number =
+            advance_physical_page_for_variant_estimate(physical_page_number, block);
+    }
+    PageVariantVisibility {
+        first_page: 1,
+        last_page: physical_page_number.max(1),
+    }
+}
+
+fn estimate_section_page_variant_visibility(
+    document: &Document,
+    settings_block_idx: usize,
+) -> PageVariantVisibility {
+    let section_start_page = physical_page_before_block(document, settings_block_idx);
+    let mut section_last_page = section_start_page;
+    for block in document.blocks.iter().skip(settings_block_idx + 1) {
+        if section_breaks_end_current_section(block) {
+            break;
+        }
+        section_last_page = advance_physical_page_for_variant_estimate(section_last_page, block);
+    }
+    PageVariantVisibility {
+        first_page: section_start_page.max(1),
+        last_page: section_last_page.max(section_start_page.max(1)),
+    }
+}
+
+fn physical_page_before_block(document: &Document, block_idx: usize) -> usize {
+    let mut physical_page_number = 1usize;
+    for block in document.blocks.iter().take(block_idx) {
+        physical_page_number =
+            advance_physical_page_for_variant_estimate(physical_page_number, block);
+    }
+    physical_page_number
+}
+
+fn page_settings_before_block(document: &Document, block_idx: usize) -> &PageSettings {
+    let mut settings = &document.page;
+    for block in document.blocks.iter().take(block_idx) {
+        if let Block::SectionSettings(section_settings) = block {
+            settings = section_settings;
+        }
+    }
+    settings
+}
+
+fn content_width_for_page_settings(settings: &PageSettings) -> f32 {
+    PageGeometry::from_settings(
+        settings,
+        PageNumbering::from_page_settings(settings, 1),
+        1,
+        0,
+    )
+    .content_width
+}
+
+fn advance_physical_page_for_variant_estimate(physical_page_number: usize, block: &Block) -> usize {
+    match block {
+        Block::PageBreak | Block::SectionBreak => physical_page_number.saturating_add(1),
+        Block::EvenPageSectionBreak => {
+            let next_page = physical_page_number.saturating_add(1);
+            if next_page % 2 == 1 {
+                next_page.saturating_add(1)
+            } else {
+                next_page
+            }
+        }
+        Block::OddPageSectionBreak => {
+            let next_page = physical_page_number.saturating_add(1);
+            if next_page % 2 == 0 {
+                next_page.saturating_add(1)
+            } else {
+                next_page
+            }
+        }
+        Block::ColumnBreak
+        | Block::ContinuousSectionBreak
+        | Block::Paragraph(_)
+        | Block::Table(_)
+        | Block::Image(_)
+        | Block::Shape(_)
+        | Block::Placeholder(_)
+        | Block::SectionSettings(_) => physical_page_number,
+    }
+}
+
+fn section_breaks_end_current_section(block: &Block) -> bool {
+    matches!(
+        block,
+        Block::ContinuousSectionBreak
+            | Block::SectionBreak
+            | Block::EvenPageSectionBreak
+            | Block::OddPageSectionBreak
+    )
+}
+
+fn push_repeating_paragraph_variant_stats(
+    builder: &mut DocumentStatsBuilder,
+    default: &[Paragraph],
+    first: &[Paragraph],
+    even: &[Paragraph],
+    fallback_default: &[Paragraph],
+    fallback_first: &[Paragraph],
+    fallback_even: &[Paragraph],
+    title_page: bool,
+    visibility: PageVariantVisibility,
+) {
+    for physical_page_number in visibility.first_page..=visibility.last_page {
+        let is_first_section_page = title_page && physical_page_number == visibility.first_page;
+        if is_first_section_page {
+            let selected = first_non_empty(first, fallback_first);
+            if !selected.is_empty() {
+                builder.push_repeating_paragraphs_once(selected);
+                continue;
+            }
+        }
+        if physical_page_number % 2 == 0 {
+            let selected = first_non_empty(even, fallback_even);
+            if !selected.is_empty() {
+                builder.push_repeating_paragraphs_once(selected);
+                continue;
+            }
+        }
+        builder.push_repeating_paragraphs_once(first_non_empty(default, fallback_default));
+    }
+}
+
+fn push_repeating_shape_variant_stats(
+    builder: &mut DocumentStatsBuilder,
+    default: &[StaticShape],
+    first: &[StaticShape],
+    even: &[StaticShape],
+    fallback_default: &[StaticShape],
+    fallback_first: &[StaticShape],
+    fallback_even: &[StaticShape],
+    title_page: bool,
+    visibility: PageVariantVisibility,
+) {
+    for physical_page_number in visibility.first_page..=visibility.last_page {
+        let is_first_section_page = title_page && physical_page_number == visibility.first_page;
+        if is_first_section_page {
+            let selected = first_non_empty_shapes(first, fallback_first);
+            if !selected.is_empty() {
+                builder.push_repeating_shapes_once(selected);
+                continue;
+            }
+        }
+        if physical_page_number % 2 == 0 {
+            let selected = first_non_empty_shapes(even, fallback_even);
+            if !selected.is_empty() {
+                builder.push_repeating_shapes_once(selected);
+                continue;
+            }
+        }
+        builder.push_repeating_shapes_once(first_non_empty_shapes(default, fallback_default));
+    }
+}
+
+fn push_repeating_image_variant_stats(
+    builder: &mut DocumentStatsBuilder,
+    default: &[StaticImage],
+    first: &[StaticImage],
+    even: &[StaticImage],
+    fallback_default: &[StaticImage],
+    fallback_first: &[StaticImage],
+    fallback_even: &[StaticImage],
+    title_page: bool,
+    visibility: PageVariantVisibility,
+    content_width: f32,
+) {
+    for physical_page_number in visibility.first_page..=visibility.last_page {
+        let is_first_section_page = title_page && physical_page_number == visibility.first_page;
+        if is_first_section_page {
+            let selected = first_non_empty_images(first, fallback_first);
+            if !selected.is_empty() {
+                builder.push_repeating_images_once(selected, content_width);
+                continue;
+            }
+        }
+        if physical_page_number % 2 == 0 {
+            let selected = first_non_empty_images(even, fallback_even);
+            if !selected.is_empty() {
+                builder.push_repeating_images_once(selected, content_width);
+                continue;
+            }
+        }
+        builder.push_repeating_images_once(
+            first_non_empty_images(default, fallback_default),
+            content_width,
+        );
+    }
+}
+
+fn push_background_shape_stats(
+    builder: &mut DocumentStatsBuilder,
+    shapes: &[StaticShape],
+    fallback_shapes: &[StaticShape],
+) {
+    builder.push_repeating_shapes_once(first_non_empty_shapes(shapes, fallback_shapes));
+}
+
+fn push_paragraphs_stats(builder: &mut DocumentStatsBuilder, paragraphs: &[Paragraph]) {
+    for paragraph in paragraphs {
+        push_paragraph_stats(builder, paragraph);
+    }
+}
+
+fn push_shapes_stats(builder: &mut DocumentStatsBuilder, shapes: &[StaticShape]) {
+    for shape in shapes {
+        push_shape_stats(builder, shape);
+    }
+}
+
+fn push_images_stats(
+    builder: &mut DocumentStatsBuilder,
+    images: &[StaticImage],
+    content_width: f32,
+) {
+    for image in images {
+        push_image_stats(builder, image, content_width);
+    }
+}
+
+fn push_image_stats(builder: &mut DocumentStatsBuilder, image: &StaticImage, content_width: f32) {
+    if image_placeholder_label_is_visible(image, content_width) {
+        builder.push_text("Image skipped");
+        builder.finish_text_boundary();
+    }
+    if image.format == ImageFormat::WmfVector {
+        for command in &image.vector_commands {
+            if let StaticImageVectorCommand::Text { text, .. } = command {
+                builder.push_text(text);
+                builder.finish_text_boundary();
+            }
+        }
+    }
+}
+
+fn image_placeholder_label_is_visible(image: &StaticImage, content_width: f32) -> bool {
+    if image.format != ImageFormat::Placeholder {
+        return false;
+    }
+    let (_, _, width, height) = image_layout_frame(image, content_width);
+    width >= 96.0 && height >= 24.0
+}
+
+fn push_shape_stats(builder: &mut DocumentStatsBuilder, shape: &StaticShape) {
+    for paragraph in &shape.text {
+        push_paragraph_stats(builder, paragraph);
+    }
+    builder.finish_text_boundary();
 }
 
 fn table_cell_is_merge_continuation(cell: &TableCell) -> bool {
@@ -8620,6 +9050,63 @@ mod tests {
         assert_eq!(drawing_items[1].0, 30);
         assert!(matches!(drawing_items[0].1, LayoutItem::Drawing(_)));
         assert!(matches!(drawing_items[1].1, LayoutItem::Image(_)));
+    }
+
+    #[test]
+    fn z_ordered_shape_text_stays_in_shape_drawing_layer() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Shape(StaticShape {
+            kind: StaticShapeKind::Rectangle,
+            left_twips: 0,
+            top_twips: 0,
+            width_twips: 2160,
+            height_twips: 720,
+            z_order: 12,
+            below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
+            flip_horizontal: false,
+            flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
+            stroke_width_twips: 0,
+            stroke_color: Color::default(),
+            stroke_style: BorderStyle::Single,
+            fill_color: Some(Color {
+                red: 200,
+                green: 20,
+                blue: 20,
+            }),
+            text: vec![Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Layered Box".to_string(),
+                    style: Default::default(),
+                }],
+            }],
+            points: Vec::new(),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let layered_text = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Drawing(drawing) if drawing.z_order == 12 => {
+                    match drawing.item.as_ref() {
+                        LayoutItem::Text(fragment) => Some(fragment.text.as_str()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect::<String>();
+
+        assert_eq!(
+            layered_text, "Layered Box",
+            "z-ordered shape text should be wrapped in the shape drawing layer: {:?}",
+            layout.pages[0].items
+        );
     }
 
     #[test]

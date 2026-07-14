@@ -605,6 +605,124 @@ fn unused_font_table_entries_do_not_emit_passive_font_diagnostics() {
 }
 
 #[test]
+fn merged_table_continuations_do_not_emit_hidden_font_or_glyph_diagnostics() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial;}{\f1 Hidden Diagnostic Font;}{\f2 Hidden Glyph Font;}}\trowd\clmgf\cellx2000\f0 Visible left\cell\clmrg\cellx4000\f1 Hidden horizontal\cell\row\trowd\clvmgf\cellx2000\f0 Visible top\cell\clvmrg\cellx4000\f2 Hidden vertical \u945?\cell\row}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: FontProvider::browser_safe_with_bundled_fallback(),
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for hidden in [
+        "Hidden Diagnostic Font",
+        "Hidden Glyph Font",
+        "Hidden horizontal",
+        "Hidden vertical",
+    ] {
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains(hidden)),
+            "hidden merged-continuation content {hidden:?} should not produce diagnostics: {:?}",
+            output.diagnostics
+        );
+        assert!(
+            !output
+                .pdf
+                .windows(hidden.as_bytes().len())
+                .any(|window| window == hidden.as_bytes()),
+            "hidden merged-continuation content {hidden:?} leaked to PDF bytes"
+        );
+    }
+    for forbidden in [
+        b"clmgf".as_slice(),
+        b"clmrg".as_slice(),
+        b"clvmgf".as_slice(),
+        b"clvmrg".as_slice(),
+        b"fonttbl".as_slice(),
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "merged table/font control leaked to PDF bytes: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn unused_header_footer_variants_do_not_emit_hidden_font_or_glyph_diagnostics() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial;}{\f1 Hidden First Header Font;}{\f2 Hidden Even Header Font;}{\f3 Hidden First Footer Font;}{\f4 Hidden Even Footer Font;}}{\headerf\f1 Hidden first header \u945?\par}{\headerl\f2 Hidden even header \u1040?\par}{\footerf\f3 Hidden first footer \u945?\par}{\footerl\f4 Hidden even footer \u1040?\par}\f0 Visible body\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: FontProvider::browser_safe_with_bundled_fallback(),
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("Hidden")),
+        "unused header/footer variants should not produce diagnostics: {:?}",
+        output.diagnostics
+    );
+    for hidden in [
+        "Hidden First Header Font",
+        "Hidden Even Header Font",
+        "Hidden First Footer Font",
+        "Hidden Even Footer Font",
+        "Hidden first header",
+        "Hidden even header",
+        "Hidden first footer",
+        "Hidden even footer",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(hidden.as_bytes().len())
+                .any(|window| window == hidden.as_bytes()),
+            "unused header/footer variant content {hidden:?} leaked to PDF bytes"
+        );
+    }
+    for forbidden in [
+        b"headerf".as_slice(),
+        b"headerl".as_slice(),
+        b"footerf".as_slice(),
+        b"footerl".as_slice(),
+        b"fonttbl".as_slice(),
+        b"/JavaScript".as_slice(),
+        b"/Launch".as_slice(),
+        b"/EmbeddedFile".as_slice(),
+        b"/Filespec".as_slice(),
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unused header/footer control or active marker leaked to PDF bytes: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn caller_font_asset_aliases_embed_passive_font_for_multiple_word_names() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial Narrow;}{\f1 Book Antiqua;}}\f0 Narrow AB\par\f1 Serif CD\par}";
     let provider = FontProvider {
@@ -891,6 +1009,81 @@ fn caller_font_asset_matches_rtf_alternate_font_name_without_system_fonts() {
             .all(|diagnostic| !diagnostic.message.contains("Mystery Sans")
                 || !diagnostic.message.contains("substituted")),
         "alternate caller font should suppress substitution diagnostics: {:?}",
+        output.diagnostics
+    );
+}
+
+#[test]
+fn caller_font_asset_embeds_for_z_ordered_shape_text_without_system_fonts() {
+    let input = br#"{\rtf1\ansi{\fonttbl{\f0 Tuffy;}}{\shp{\*\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800\shpz12{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-font-payload}}}{\shptxt\f0 Layered AB\par}}}"#;
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected supplied passive font marker for z-ordered shape text {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"shpz",
+        b"shapeType",
+        b"pFragments",
+        b"hidden-font-payload",
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "z-ordered shape font metadata or active marker leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("Tuffy")
+                || !diagnostic.message.contains("substituted")),
+        "caller font should suppress substitution diagnostics for z-ordered shape text: {:?}",
         output.diagnostics
     );
 }

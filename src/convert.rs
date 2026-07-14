@@ -6,8 +6,11 @@ use thiserror::Error;
 use crate::config::RtfParseOptions;
 use crate::diagnostics::Diagnostic;
 use crate::fonts::{FontCoverage, FontProvider, FontProviderError};
-use crate::layout::{LayoutEngine, PdfFontFamily, passive_pdf_font_family_for_font};
-use crate::model::{Block, Document, FontDef, Paragraph, Run, StaticShape, Table};
+use crate::layout::{
+    ImageFragment, LayoutDocument, LayoutEngine, LayoutItem, PdfFontFamily, TextFragment,
+    passive_pdf_font_family_for_font,
+};
+use crate::model::{Document, FontDef, ImageFormat, StaticImageVectorCommand};
 use crate::pdf::{
     PassivePdfError, audit_passive_pdf_bytes, estimate_passive_pdf_object_count,
     render_pdf_with_font_provider,
@@ -91,18 +94,20 @@ pub fn convert_rtf_to_pdf(
     } else {
         Vec::new()
     };
+    let layout =
+        LayoutEngine::layout_with_font_provider(&parsed.document, Some(&options.font_provider));
     if options.diagnostics {
         diagnostics.extend(passive_font_substitution_diagnostics(
             &parsed.document,
+            &layout,
             &options.font_provider,
         ));
         diagnostics.extend(unsupported_passive_glyph_diagnostics(
             &parsed.document,
+            &layout,
             &options.font_provider,
         ));
     }
-    let layout =
-        LayoutEngine::layout_with_font_provider(&parsed.document, Some(&options.font_provider));
     let page_count = layout.pages.len();
     let layout_item_count = layout
         .pages
@@ -149,11 +154,12 @@ pub fn convert_rtf_to_pdf(
 
 fn passive_font_substitution_diagnostics(
     document: &Document,
+    layout: &LayoutDocument,
     font_provider: &FontProvider,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = Vec::<(String, PdfFontFamily)>::new();
-    let used_font_indexes = collect_visible_font_indexes(document);
+    let used_font_indexes = collect_visible_font_indexes(layout);
     for font in &document.fonts {
         if !used_font_indexes.contains(&font.index) {
             continue;
@@ -187,32 +193,13 @@ fn passive_font_substitution_diagnostics(
     diagnostics
 }
 
-fn collect_visible_font_indexes(document: &Document) -> Vec<i32> {
+fn collect_visible_font_indexes(layout: &LayoutDocument) -> Vec<i32> {
     let mut indexes = Vec::new();
-    collect_visible_font_indexes_from_blocks(&document.blocks, &mut indexes);
-    for paragraphs in [
-        &document.header,
-        &document.first_page_header,
-        &document.even_page_header,
-        &document.footer,
-        &document.first_page_footer,
-        &document.even_page_footer,
-        &document.footnotes,
-        &document.endnotes,
-    ] {
-        collect_visible_font_indexes_from_paragraphs(paragraphs, &mut indexes);
-    }
-    for shapes in [
-        &document.header_shapes,
-        &document.first_page_header_shapes,
-        &document.even_page_header_shapes,
-        &document.footer_shapes,
-        &document.first_page_footer_shapes,
-        &document.even_page_footer_shapes,
-        &document.background_shapes,
-    ] {
-        collect_visible_font_indexes_from_shapes(shapes, &mut indexes);
-    }
+    for_each_layout_text_fragment(layout, &mut |fragment| {
+        if !fragment.text.is_empty() {
+            push_visible_font_index(&mut indexes, fragment.style.font_index);
+        }
+    });
     indexes
 }
 
@@ -222,256 +209,39 @@ fn push_visible_font_index(indexes: &mut Vec<i32>, index: i32) {
     }
 }
 
-fn collect_visible_font_indexes_from_blocks(blocks: &[Block], indexes: &mut Vec<i32>) {
-    for block in blocks {
-        match block {
-            Block::Paragraph(paragraph) => {
-                collect_visible_font_indexes_from_paragraph(paragraph, indexes)
-            }
-            Block::Table(table) => collect_visible_font_indexes_from_table(table, indexes),
-            Block::Shape(shape) => collect_visible_font_indexes_from_shape(shape, indexes),
-            Block::Image(_)
-            | Block::Placeholder(_)
-            | Block::PageBreak
-            | Block::ColumnBreak
-            | Block::ContinuousSectionBreak
-            | Block::SectionBreak
-            | Block::EvenPageSectionBreak
-            | Block::OddPageSectionBreak
-            | Block::SectionSettings(_) => {}
-        }
-    }
-}
-
-fn collect_visible_font_indexes_from_table(table: &Table, indexes: &mut Vec<i32>) {
-    for row in &table.rows {
-        for cell in &row.cells {
-            collect_visible_font_indexes_from_paragraphs(&cell.paragraphs, indexes);
-        }
-    }
-}
-
-fn collect_visible_font_indexes_from_shapes(shapes: &[StaticShape], indexes: &mut Vec<i32>) {
-    for shape in shapes {
-        collect_visible_font_indexes_from_shape(shape, indexes);
-    }
-}
-
-fn collect_visible_font_indexes_from_shape(shape: &StaticShape, indexes: &mut Vec<i32>) {
-    collect_visible_font_indexes_from_paragraphs(&shape.text, indexes);
-}
-
-fn collect_visible_font_indexes_from_paragraphs(paragraphs: &[Paragraph], indexes: &mut Vec<i32>) {
-    for paragraph in paragraphs {
-        collect_visible_font_indexes_from_paragraph(paragraph, indexes);
-    }
-}
-
-fn collect_visible_font_indexes_from_paragraph(paragraph: &Paragraph, indexes: &mut Vec<i32>) {
-    for run in &paragraph.runs {
-        if !run.text.is_empty() {
-            push_visible_font_index(indexes, run.style.font_index);
-        }
-    }
-}
-
 fn unsupported_passive_glyph_diagnostics(
     document: &Document,
+    layout: &LayoutDocument,
     font_provider: &FontProvider,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = Vec::<(i32, &'static str)>::new();
 
-    collect_unsupported_glyph_diagnostics_from_blocks(
-        &document.blocks,
-        document,
-        font_provider,
-        &mut seen,
-        &mut diagnostics,
-    );
-    for paragraphs in [
-        &document.header,
-        &document.first_page_header,
-        &document.even_page_header,
-        &document.footer,
-        &document.first_page_footer,
-        &document.even_page_footer,
-        &document.footnotes,
-        &document.endnotes,
-    ] {
-        collect_unsupported_glyph_diagnostics_from_paragraphs(
-            paragraphs,
+    for_each_layout_text_fragment(layout, &mut |fragment| {
+        collect_unsupported_glyph_diagnostic_from_fragment(
+            fragment,
             document,
             font_provider,
             &mut seen,
             &mut diagnostics,
         );
-    }
-    for shapes in [
-        &document.header_shapes,
-        &document.first_page_header_shapes,
-        &document.even_page_header_shapes,
-        &document.footer_shapes,
-        &document.first_page_footer_shapes,
-        &document.even_page_footer_shapes,
-        &document.background_shapes,
-    ] {
-        collect_unsupported_glyph_diagnostics_from_shapes(
-            shapes,
-            document,
-            font_provider,
-            &mut seen,
-            &mut diagnostics,
-        );
-    }
+    });
+    collect_unsupported_glyph_diagnostics_from_vector_images(layout, &mut seen, &mut diagnostics);
 
     diagnostics
 }
 
-fn collect_unsupported_glyph_diagnostics_from_blocks(
-    blocks: &[Block],
+fn collect_unsupported_glyph_diagnostic_from_fragment(
+    fragment: &TextFragment,
     document: &Document,
     font_provider: &FontProvider,
     seen: &mut Vec<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for block in blocks {
-        match block {
-            Block::Paragraph(paragraph) => collect_unsupported_glyph_diagnostics_from_paragraph(
-                paragraph,
-                document,
-                font_provider,
-                seen,
-                diagnostics,
-            ),
-            Block::Table(table) => collect_unsupported_glyph_diagnostics_from_table(
-                table,
-                document,
-                font_provider,
-                seen,
-                diagnostics,
-            ),
-            Block::Shape(shape) => collect_unsupported_glyph_diagnostics_from_shape(
-                shape,
-                document,
-                font_provider,
-                seen,
-                diagnostics,
-            ),
-            Block::Image(_)
-            | Block::Placeholder(_)
-            | Block::PageBreak
-            | Block::ColumnBreak
-            | Block::ContinuousSectionBreak
-            | Block::SectionBreak
-            | Block::EvenPageSectionBreak
-            | Block::OddPageSectionBreak
-            | Block::SectionSettings(_) => {}
-        }
-    }
-}
-
-fn collect_unsupported_glyph_diagnostics_from_table(
-    table: &Table,
-    document: &Document,
-    font_provider: &FontProvider,
-    seen: &mut Vec<(i32, &'static str)>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for row in &table.rows {
-        for cell in &row.cells {
-            collect_unsupported_glyph_diagnostics_from_paragraphs(
-                &cell.paragraphs,
-                document,
-                font_provider,
-                seen,
-                diagnostics,
-            );
-        }
-    }
-}
-
-fn collect_unsupported_glyph_diagnostics_from_shapes(
-    shapes: &[StaticShape],
-    document: &Document,
-    font_provider: &FontProvider,
-    seen: &mut Vec<(i32, &'static str)>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for shape in shapes {
-        collect_unsupported_glyph_diagnostics_from_shape(
-            shape,
-            document,
-            font_provider,
-            seen,
-            diagnostics,
-        );
-    }
-}
-
-fn collect_unsupported_glyph_diagnostics_from_shape(
-    shape: &StaticShape,
-    document: &Document,
-    font_provider: &FontProvider,
-    seen: &mut Vec<(i32, &'static str)>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    collect_unsupported_glyph_diagnostics_from_paragraphs(
-        &shape.text,
-        document,
-        font_provider,
-        seen,
-        diagnostics,
-    );
-}
-
-fn collect_unsupported_glyph_diagnostics_from_paragraphs(
-    paragraphs: &[Paragraph],
-    document: &Document,
-    font_provider: &FontProvider,
-    seen: &mut Vec<(i32, &'static str)>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for paragraph in paragraphs {
-        collect_unsupported_glyph_diagnostics_from_paragraph(
-            paragraph,
-            document,
-            font_provider,
-            seen,
-            diagnostics,
-        );
-    }
-}
-
-fn collect_unsupported_glyph_diagnostics_from_paragraph(
-    paragraph: &Paragraph,
-    document: &Document,
-    font_provider: &FontProvider,
-    seen: &mut Vec<(i32, &'static str)>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for run in &paragraph.runs {
-        collect_unsupported_glyph_diagnostic_from_run(
-            run,
-            document,
-            font_provider,
-            seen,
-            diagnostics,
-        );
-    }
-}
-
-fn collect_unsupported_glyph_diagnostic_from_run(
-    run: &Run,
-    document: &Document,
-    font_provider: &FontProvider,
-    seen: &mut Vec<(i32, &'static str)>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let Some((script, sample_char)) = unsupported_passive_glyph_script(&run.text) else {
+    let Some((script, sample_char)) = unsupported_passive_glyph_script(&fragment.text) else {
         return;
     };
-    let key = (run.style.font_index, script);
+    let key = (fragment.style.font_index, script);
     if seen.contains(&key) {
         return;
     }
@@ -479,7 +249,7 @@ fn collect_unsupported_glyph_diagnostic_from_run(
     let Some(font) = document
         .fonts
         .iter()
-        .find(|font| font.index == run.style.font_index)
+        .find(|font| font.index == fragment.style.font_index)
     else {
         diagnostics.push(Diagnostic::warning(
             format!(
@@ -506,6 +276,98 @@ fn collect_unsupported_glyph_diagnostic_from_run(
         ),
     };
     diagnostics.push(Diagnostic::warning(message, None));
+}
+
+fn collect_unsupported_glyph_diagnostics_from_vector_images(
+    layout: &LayoutDocument,
+    seen: &mut Vec<(i32, &'static str)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for_each_layout_image_fragment(layout, &mut |fragment| {
+        if fragment.image.format != ImageFormat::WmfVector {
+            return;
+        }
+        for command in &fragment.image.vector_commands {
+            let StaticImageVectorCommand::Text { text, .. } = command else {
+                continue;
+            };
+            let Some((script, _sample_char)) = unsupported_passive_glyph_script(text) else {
+                continue;
+            };
+            let key = (i32::MIN, script);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            diagnostics.push(Diagnostic::warning(
+                format!(
+                    "{} characters in passive WMF vector text need passive vector font support; current PDF base-font fallback may render replacement or mismatched glyphs",
+                    script
+                ),
+                None,
+            ));
+        }
+    });
+}
+
+fn for_each_layout_text_fragment<F>(layout: &LayoutDocument, callback: &mut F)
+where
+    F: FnMut(&TextFragment),
+{
+    for page in &layout.pages {
+        for item in &page.items {
+            for_each_layout_item_text_fragment(item, callback);
+        }
+    }
+}
+
+fn for_each_layout_image_fragment<F>(layout: &LayoutDocument, callback: &mut F)
+where
+    F: FnMut(&ImageFragment),
+{
+    for page in &layout.pages {
+        for item in &page.items {
+            for_each_layout_item_image_fragment(item, callback);
+        }
+    }
+}
+
+fn for_each_layout_item_text_fragment<F>(item: &LayoutItem, callback: &mut F)
+where
+    F: FnMut(&TextFragment),
+{
+    match item {
+        LayoutItem::Text(fragment) => callback(fragment),
+        LayoutItem::Drawing(fragment) => {
+            for_each_layout_item_text_fragment(&fragment.item, callback)
+        }
+        LayoutItem::Highlight { .. }
+        | LayoutItem::Underline { .. }
+        | LayoutItem::Line { .. }
+        | LayoutItem::Ellipse { .. }
+        | LayoutItem::RoundedRectangle { .. }
+        | LayoutItem::Polygon { .. }
+        | LayoutItem::Image(_) => {}
+    }
+}
+
+fn for_each_layout_item_image_fragment<F>(item: &LayoutItem, callback: &mut F)
+where
+    F: FnMut(&ImageFragment),
+{
+    match item {
+        LayoutItem::Image(fragment) => callback(fragment),
+        LayoutItem::Drawing(fragment) => {
+            for_each_layout_item_image_fragment(&fragment.item, callback)
+        }
+        LayoutItem::Text(_)
+        | LayoutItem::Highlight { .. }
+        | LayoutItem::Underline { .. }
+        | LayoutItem::Line { .. }
+        | LayoutItem::Ellipse { .. }
+        | LayoutItem::RoundedRectangle { .. }
+        | LayoutItem::Polygon { .. } => {}
+    }
 }
 
 fn font_provider_has_asset_for_font(font_provider: &FontProvider, font: &FontDef) -> bool {

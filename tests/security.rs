@@ -6932,6 +6932,481 @@ fn document_stat_fields_ignore_hidden_merged_table_continuations() {
 }
 
 #[test]
+fn document_stat_fields_ignore_unused_header_footer_variants() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "headerf HiddenFirst",
+        "\\",
+        "par}{",
+        "\\",
+        "headerl HiddenEven",
+        "\\",
+        "par}{",
+        "\\",
+        "footerf HiddenFooterFirst",
+        "\\",
+        "par}{",
+        "\\",
+        "footerl HiddenFooterEven",
+        "\\",
+        "par}Body Words:{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst NUMWORDS}}",
+        "\\",
+        "par}",
+    ]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Body Words:2"),
+        "unused first/even header/footer variants should not change NUMWORDS; got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Body Words:6"),
+        "unused header/footer variant text changed passive NUMWORDS: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"HiddenFirst".as_slice(),
+        b"HiddenEven",
+        b"HiddenFooterFirst",
+        b"HiddenFooterEven",
+        b"NUMWORDS",
+        b"fldinst",
+        b"headerf",
+        b"headerl",
+        b"footerf",
+        b"footerl",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unused header/footer stat field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn document_stat_fields_ignore_unused_later_section_even_variants() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 First",
+        "\\",
+        "par",
+        "\\",
+        "sbkodd",
+        "\\",
+        "sect",
+        "\\",
+        "sectd{",
+        "\\",
+        "headerl HiddenSectionEven",
+        "\\",
+        "par}{",
+        "\\",
+        "footerl HiddenSectionFooterEven",
+        "\\",
+        "par}Second Words:{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst NUMWORDS}}",
+        "\\",
+        "par}",
+    ]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = parsed_pdf
+        .get_pages()
+        .values()
+        .last()
+        .copied()
+        .expect("last page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Second Words:3"),
+        "unused later-section even variants should not change NUMWORDS; got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Second Words:5"),
+        "unused later-section even variant text changed passive NUMWORDS: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"HiddenSectionEven".as_slice(),
+        b"HiddenSectionFooterEven",
+        b"NUMWORDS",
+        b"fldinst",
+        b"headerl",
+        b"footerl",
+        b"sbkodd",
+        b"sectd",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unused later-section stat field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn document_stat_fields_count_visible_section_fallback_header_footer_variants() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "headerf Fallback First Header",
+        "\\",
+        "par}{",
+        "\\",
+        "footerf Fallback First Footer",
+        "\\",
+        "par}First",
+        "\\",
+        "par",
+        "\\",
+        "sect",
+        "\\",
+        "sectd",
+        "\\",
+        "titlepg Second Words:{",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst NUMWORDS}}",
+        "\\",
+        "par}",
+    ]);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = parsed_pdf
+        .get_pages()
+        .values()
+        .last()
+        .copied()
+        .expect("last page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Fallback First Header"),
+        "section title page should render document first-header fallback; got {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Fallback First Footer"),
+        "section title page should render document first-footer fallback; got {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Second Words:9"),
+        "visible section fallback header/footer variants should count in NUMWORDS; got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Second Words:3"),
+        "visible section fallback header/footer variants were omitted from NUMWORDS: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"NUMWORDS".as_slice(),
+        b"fldinst",
+        b"headerf",
+        b"footerf",
+        b"titlepg",
+        b"sectd",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "section fallback stat field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn document_stat_fields_count_visible_header_shape_text() {
+    let input = br#"{\rtf1{\header{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hostile-shape-stat-payload}}}{\shptxt Header Box\par}}\par}Body Words:{\field{\*\fldinst NUMWORDS}}\par}"#.to_vec();
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Header Box"),
+        "header shape text should render visibly; got {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Body Words:4"),
+        "visible header shape text should count in NUMWORDS; got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Body Words:2"),
+        "visible header shape text was omitted from NUMWORDS: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"NUMWORDS".as_slice(),
+        b"fldinst",
+        b"shpinst",
+        b"shapeType",
+        b"pFragments",
+        b"hostile-shape-stat-payload",
+        b"shptxt",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "header shape stat field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn document_stat_fields_count_visible_background_shape_text() {
+    let input = br#"{\rtf1{\background{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hostile-background-stat-payload}}}{\shptxt Water Mark\par}}}Body Words:{\field{\*\fldinst NUMWORDS}}\par}"#.to_vec();
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Water Mark"),
+        "background shape text should render visibly; got {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Body Words:4"),
+        "visible background shape text should count in NUMWORDS; got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Body Words:2"),
+        "visible background shape text was omitted from NUMWORDS: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"NUMWORDS".as_slice(),
+        b"fldinst",
+        b"background",
+        b"shpinst",
+        b"shapeType",
+        b"pFragments",
+        b"hostile-background-stat-payload",
+        b"shptxt",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "background shape stat field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn document_stat_fields_count_visible_image_placeholder_text() {
+    let input = br"{\rtf1{\pict\emfblip\picw100\pich50\picwgoal2160\pichgoal720 41424344}Body Words:{\field{\*\fldinst NUMWORDS}}\par}".to_vec();
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Image skipped"),
+        "unsupported image placeholder text should render visibly; got {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Body Words:4"),
+        "visible image placeholder text should count in NUMWORDS; got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Body Words:2"),
+        "visible image placeholder text was omitted from NUMWORDS: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"NUMWORDS".as_slice(),
+        b"fldinst",
+        b"pict",
+        b"emfblip",
+        b"41424344",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "image placeholder stat field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn document_stat_fields_count_visible_wmf_vector_text() {
+    let wmf_hex = concat!(
+        "0100090000032d00000001000c0000000000",
+        "050000000c026400c800",
+        "050000000902ff000000",
+        "0c000000fb02f4ff00000000000000000000000000000000",
+        "040000002d010000",
+        "0700000021050200486914002800",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1{{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}}Body Words:{{\\field{{\\*\\fldinst NUMWORDS}}}}\\par}}"
+    )
+    .into_bytes();
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Hi"),
+        "visible WMF vector text should render in passive PDF text; got {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Body Words:3"),
+        "visible WMF vector text should count in NUMWORDS; got {rendered_text:?}"
+    );
+    assert!(
+        !rendered_text.contains("Body Words:2"),
+        "visible WMF vector text was omitted from NUMWORDS: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"NUMWORDS".as_slice(),
+        b"fldinst",
+        b"pict",
+        b"wmetafile",
+        b"0521",
+        b"fb02",
+        b"ff0000",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF vector stat field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn section_numbers_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
@@ -26285,6 +26760,13 @@ fn wmf_exttextout_uses_selected_font_charset_and_stays_passive() {
         },
     )
     .unwrap();
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("Latin Extended characters in passive WMF vector text")),
+        "visible WMF Latin Extended vector text should produce a passive glyph diagnostic: {:?}",
+        output.diagnostics
+    );
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
@@ -33555,6 +34037,66 @@ fn shape_z_order_controls_are_bounded_and_do_not_leak() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "shape z-order control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn z_ordered_shape_text_renders_passively_without_control_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800\shpz23{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-z-text-payload}}}{\shptxt Layered Box\par}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("Layered Box"));
+    assert!(text.contains("After"));
+    for forbidden in ["shpz", "shapeType", "pFragments", "hidden-z-text-payload"] {
+        assert!(
+            !text.contains(forbidden),
+            "z-ordered shape control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Layered Box"),
+        "z-ordered shape text should render through passive PDF text operations: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Before") && rendered_text.contains("After"),
+        "body text around z-ordered shape should still render: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"shpz".as_slice(),
+        b"shapeType",
+        b"pFragments",
+        b"hidden-z-text-payload",
+        b"shptxt",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "z-ordered shape text leaked controls or active PDF content: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
