@@ -14,8 +14,8 @@ use crate::model::{
     StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint,
     StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell,
     TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
-    TableCellSpacing, TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TextRelief, UnderlineStyle,
+    TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge,
+    TableRow, TableRowAlignment, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -639,6 +639,7 @@ struct TableRowBuilder {
     current_cell_vertical_merge: TableCellVerticalMerge,
     height_twips: Option<i32>,
     left_offset_twips: i32,
+    vertical_offset_twips: i32,
     cell_gap_twips: i32,
     alignment: TableRowAlignment,
     repeat_header: bool,
@@ -670,14 +671,6 @@ enum PreferredTableWidthUnit {
     Auto,
     FiftiethsPercent,
     Twips,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-enum TableCellTextDirection {
-    #[default]
-    LeftToRightTopToBottom,
-    TopToBottomRightToLeft,
-    BottomToTopLeftToRight,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -4053,6 +4046,47 @@ impl Parser {
             "trowd" => self.start_table_row(offset)?,
             "trrh" => self.set_current_table_row_height(control.parameter, offset),
             "trleft" => self.set_current_table_row_left_offset(control.parameter, offset),
+            "tposx" => self.add_current_table_row_horizontal_position_offset(
+                control.parameter.unwrap_or(0),
+                offset,
+            ),
+            "tposnegx" => self.add_current_table_row_horizontal_position_offset(
+                control
+                    .parameter
+                    .unwrap_or(0)
+                    .checked_abs()
+                    .and_then(|value| value.checked_neg())
+                    .unwrap_or(i32::MIN),
+                offset,
+            ),
+            "tposxl" | "tposxi" => self.set_current_table_row_floating_alignment(
+                TableRowAlignment::Left,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposxc" => self.set_current_table_row_floating_alignment(
+                TableRowAlignment::Center,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposxr" => self.set_current_table_row_floating_alignment(
+                TableRowAlignment::Right,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposy" => self.add_current_table_row_vertical_position_offset(
+                control.parameter.unwrap_or(0),
+                offset,
+            ),
+            "tposnegy" => self.add_current_table_row_vertical_position_offset(
+                control
+                    .parameter
+                    .unwrap_or(0)
+                    .checked_abs()
+                    .and_then(|value| value.checked_neg())
+                    .unwrap_or(i32::MIN),
+                offset,
+            ),
             "trgaph" => self.set_current_table_cell_gap(control.parameter, offset),
             "trql" => self.set_current_table_row_alignment(TableRowAlignment::Left),
             "trqc" => self.set_current_table_row_alignment(TableRowAlignment::Center),
@@ -9294,6 +9328,7 @@ impl Parser {
             current_cell_vertical_merge: TableCellVerticalMerge::None,
             height_twips: None,
             left_offset_twips: 0,
+            vertical_offset_twips: 0,
             cell_gap_twips: DEFAULT_TABLE_CELL_GAP_TWIPS,
             alignment: TableRowAlignment::Left,
             repeat_header: false,
@@ -10155,6 +10190,54 @@ impl Parser {
         row.left_offset_twips = clamped;
     }
 
+    fn add_current_table_row_horizontal_position_offset(&mut self, value: i32, offset: usize) {
+        let max_table_row_offset_twips = self.limits().max_table_row_offset_twips;
+        let Some(row) = self.current_table_row.as_mut() else {
+            return;
+        };
+        let requested = i64::from(row.left_offset_twips) + i64::from(value);
+        let min = i64::from(-max_table_row_offset_twips);
+        let max = i64::from(max_table_row_offset_twips);
+        let clamped = requested.clamp(min, max) as i32;
+        if i64::from(clamped) != requested {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "floating table horizontal position clamped from {requested} to {clamped} twips"
+                ),
+                Some(offset),
+            ));
+        }
+        self.diagnostics.push(Diagnostic::warning(
+            "floating table horizontal position interpreted as bounded passive row offset",
+            Some(offset),
+        ));
+        row.left_offset_twips = clamped;
+    }
+
+    fn add_current_table_row_vertical_position_offset(&mut self, value: i32, offset: usize) {
+        let max_table_row_offset_twips = self.limits().max_table_row_offset_twips;
+        let Some(row) = self.current_table_row.as_mut() else {
+            return;
+        };
+        let requested = i64::from(row.vertical_offset_twips) + i64::from(value);
+        let min = i64::from(-max_table_row_offset_twips);
+        let max = i64::from(max_table_row_offset_twips);
+        let clamped = requested.clamp(min, max) as i32;
+        if i64::from(clamped) != requested {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "floating table vertical position clamped from {requested} to {clamped} twips"
+                ),
+                Some(offset),
+            ));
+        }
+        self.diagnostics.push(Diagnostic::warning(
+            "floating table vertical position interpreted as bounded passive row offset",
+            Some(offset),
+        ));
+        row.vertical_offset_twips = clamped;
+    }
+
     fn set_current_table_cell_gap(&mut self, value: Option<i32>, offset: usize) {
         let max_table_cell_gap_twips = self.limits().max_table_cell_gap_twips;
         let Some(row) = self.current_table_row.as_mut() else {
@@ -10174,6 +10257,21 @@ impl Parser {
     fn set_current_table_row_alignment(&mut self, alignment: TableRowAlignment) {
         if let Some(row) = self.current_table_row.as_mut() {
             row.alignment = alignment;
+        }
+    }
+
+    fn set_current_table_row_floating_alignment(
+        &mut self,
+        alignment: TableRowAlignment,
+        control_name: &str,
+        offset: usize,
+    ) {
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.alignment = alignment;
+            self.diagnostics.push(Diagnostic::warning(
+                format!("floating table horizontal alignment \\{control_name} interpreted through passive row alignment"),
+                Some(offset),
+            ));
         }
     }
 
@@ -10281,7 +10379,6 @@ impl Parser {
             .get(cell_index)
             .copied()
             .unwrap_or_default();
-        normalize_table_cell_text_direction(&mut paragraphs, text_direction);
         let vertical_align = row
             .cell_vertical_alignments
             .get(cell_index)
@@ -10306,6 +10403,7 @@ impl Parser {
             spacing,
             borders,
             fit_text,
+            text_direction,
             vertical_align,
             horizontal_merge,
             vertical_merge,
@@ -10382,6 +10480,7 @@ impl Parser {
             cells: row.cells,
             height_twips: row.height_twips,
             left_offset_twips: row.left_offset_twips,
+            vertical_offset_twips: row.vertical_offset_twips,
             cell_gap_twips: row.cell_gap_twips,
             alignment: row.alignment,
             repeat_header: row.repeat_header,
@@ -15200,54 +15299,6 @@ fn merge_child_form_dropdown_entries(
         push_form_dropdown_entry(target, entry, limit, offset)?;
     }
     Ok(())
-}
-
-fn normalize_table_cell_text_direction(
-    paragraphs: &mut [Paragraph],
-    direction: TableCellTextDirection,
-) {
-    if direction == TableCellTextDirection::LeftToRightTopToBottom {
-        return;
-    }
-
-    let reverse = direction == TableCellTextDirection::BottomToTopLeftToRight;
-    for paragraph in paragraphs {
-        let source_runs = std::mem::take(&mut paragraph.runs);
-        let mut output_runs = Vec::with_capacity(source_runs.len());
-        let mut needs_separator = false;
-        let iterator: Box<dyn Iterator<Item = Run>> = if reverse {
-            Box::new(source_runs.into_iter().rev())
-        } else {
-            Box::new(source_runs.into_iter())
-        };
-
-        for run in iterator {
-            if run.style.hidden || run.text.is_empty() {
-                output_runs.push(run);
-                continue;
-            }
-
-            let chars = if reverse {
-                run.text.chars().rev().collect::<Vec<_>>()
-            } else {
-                run.text.chars().collect::<Vec<_>>()
-            };
-            let mut text = String::with_capacity(run.text.len() + chars.len());
-            for ch in chars {
-                if needs_separator {
-                    text.push('\n');
-                }
-                text.push(ch);
-                needs_separator = true;
-            }
-            output_runs.push(Run {
-                text,
-                style: run.style,
-            });
-        }
-
-        paragraph.runs = output_runs;
-    }
 }
 
 struct PassiveFieldResult {
@@ -21974,6 +22025,41 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_floating_table_horizontal_position_as_bounded_row_offset() {
+        let output =
+            parse_rtf(r"{\rtf1\trowd\trleft360\tposx720\cellx2000 Offset\cell\row}").unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].left_offset_twips, 1080);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "floating table horizontal position interpreted as bounded passive row offset",
+            )
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_negative_floating_table_horizontal_position() {
+        let output =
+            parse_rtf(r"{\rtf1\trowd\trleft360\tposnegx720\cellx2000 Offset\cell\row}").unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].left_offset_twips, -360);
+    }
+
+    #[test]
     fn clamps_extreme_table_row_left_offset_controls() {
         let options = RtfParseOptions {
             limits: RtfLimits {
@@ -21997,6 +22083,86 @@ mod tests {
     }
 
     #[test]
+    fn clamps_extreme_floating_table_horizontal_position_controls() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_table_row_offset_twips: 720,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\trowd\trleft360\tposx9999\cellx2000 Offset\cell\row}",
+            &options,
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].left_offset_twips, 720);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table horizontal position clamped")
+        }));
+    }
+
+    #[test]
+    fn normalizes_floating_table_vertical_position_as_bounded_row_offset() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\tposy360\cellx2000 Down\cell\row\trowd\tposnegy240\cellx2000 Up\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].vertical_offset_twips, 360);
+        assert_eq!(table.rows[1].vertical_offset_twips, -240);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "floating table vertical position interpreted as bounded passive row offset",
+            )
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn clamps_extreme_floating_table_vertical_position_controls() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_table_row_offset_twips: 720,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\trowd\tposy9999\cellx2000 Offset\cell\row}",
+            &options,
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].vertical_offset_twips, 720);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table vertical position clamped")
+        }));
+    }
+
+    #[test]
     fn normalizes_table_row_alignment_controls() {
         let output = parse_rtf(
             r"{\rtf1\trowd\trqc\cellx2000 Center\cell\row\trowd\trqr\cellx2000 Right\cell\row}",
@@ -22009,6 +22175,34 @@ mod tests {
 
         assert_eq!(table.rows[0].alignment, TableRowAlignment::Center);
         assert_eq!(table.rows[1].alignment, TableRowAlignment::Right);
+    }
+
+    #[test]
+    fn normalizes_floating_table_horizontal_alignment_controls() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\tposxc\cellx2000 Center\cell\row\trowd\tposxr\cellx2000 Right\cell\row\trowd\tposxl\cellx2000 Left\cell\row\trowd\tposxi\cellx2000 Inside\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].alignment, TableRowAlignment::Center);
+        assert_eq!(table.rows[1].alignment, TableRowAlignment::Right);
+        assert_eq!(table.rows[2].alignment, TableRowAlignment::Left);
+        assert_eq!(table.rows[3].alignment, TableRowAlignment::Left);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table horizontal alignment \\tposxc")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
@@ -22506,7 +22700,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_table_cell_text_direction_controls_as_passive_lines() {
+    fn normalizes_table_cell_text_direction_controls_as_safe_layout_metadata() {
         let output = parse_rtf(
             r"{\rtf1\trowd\cltxtbrlv\cellx2000 ABC\cell\cltxbtlr\cellx4000 XY\cell\cltxlrtb\cellx6000 Flat\cell\row}",
         )
@@ -22516,9 +22710,21 @@ mod tests {
             _ => panic!("expected table block"),
         };
 
-        assert_eq!(table.rows[0].cells[0].paragraphs[0].runs[0].text, "A\nB\nC");
-        assert_eq!(table.rows[0].cells[1].paragraphs[0].runs[0].text, "Y\nX");
+        assert_eq!(table.rows[0].cells[0].paragraphs[0].runs[0].text, "ABC");
+        assert_eq!(
+            table.rows[0].cells[0].text_direction,
+            TableCellTextDirection::TopToBottomRightToLeft
+        );
+        assert_eq!(table.rows[0].cells[1].paragraphs[0].runs[0].text, "XY");
+        assert_eq!(
+            table.rows[0].cells[1].text_direction,
+            TableCellTextDirection::BottomToTopLeftToRight
+        );
         assert_eq!(table.rows[0].cells[2].paragraphs[0].runs[0].text, "Flat");
+        assert_eq!(
+            table.rows[0].cells[2].text_direction,
+            TableCellTextDirection::LeftToRightTopToBottom
+        );
         assert!(!document_text(&output.document).contains("cltxtbrlv"));
         assert!(!document_text(&output.document).contains("cltxbtlr"));
     }

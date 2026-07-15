@@ -1,4 +1,4 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
 use std::path::Path;
 
 use thiserror::Error;
@@ -59,10 +59,10 @@ pub struct ConversionOutput {
 
 #[derive(Debug, Error)]
 pub enum ConvertError {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
     #[error("failed to read input: {0}")]
     ReadInput(#[source] std::io::Error),
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
     #[error("failed to write output: {0}")]
     WriteOutput(#[source] std::io::Error),
     #[error(transparent)]
@@ -575,7 +575,7 @@ pub fn convert_rtf_bytes_to_pdf(
     convert_rtf_to_pdf(input, options)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
 pub fn convert_rtf_file_to_pdf(
     input: impl AsRef<Path>,
     output: impl AsRef<Path>,

@@ -11,8 +11,8 @@ use crate::model::{
     SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImageVectorCommand, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
     StaticShapeKind, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table,
-    TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, UnderlineStyle,
+    TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
+    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment, UnderlineStyle,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -122,10 +122,19 @@ pub struct TextFragment {
     pub text: String,
     pub x: f32,
     pub baseline_y: f32,
+    pub rotation: TextRotation,
     pub color: PdfColor,
     pub font_family: PdfFontFamily,
     pub word_spacing: f32,
     pub style: CharacterStyle,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum TextRotation {
+    #[default]
+    None,
+    Clockwise90,
+    CounterClockwise90,
 }
 
 #[derive(Debug, Clone)]
@@ -662,6 +671,7 @@ struct PreparedTableRow {
     cell_lines: Vec<Vec<PreparedCellLine>>,
     cell_paddings: Vec<ResolvedCellPadding>,
     cell_spacings: Vec<ResolvedCellSpacing>,
+    cell_text_directions: Vec<TableCellTextDirection>,
     row_height: f32,
 }
 
@@ -3192,6 +3202,7 @@ fn layout_table(
             document,
             font_provider,
         );
+        let top_offset = table_row_vertical_offset_points(row);
 
         if should_split_tall_table_row(row, &prepared, *geometry, margin_bottom) {
             if *cursor_y - 14.0 < margin_bottom {
@@ -3238,7 +3249,7 @@ fn layout_table(
             continue;
         }
 
-        if *cursor_y - prepared.row_height < margin_bottom {
+        if *cursor_y - top_offset - prepared.row_height < margin_bottom {
             advance_column_or_page(pages, cursor_y, geometry, current_column);
             margin_left = geometry.body_left(*current_column);
 
@@ -3278,11 +3289,12 @@ fn layout_table(
             current_marker_context(pages, document_stats),
             document,
             font_provider,
-            (*cursor_y - geometry.margin_bottom).max(prepared.row_height),
+            (*cursor_y - top_offset - geometry.margin_bottom).max(prepared.row_height),
         );
+        let mut row_cursor_y = *cursor_y - top_offset;
         push_table_row(
             pages,
-            cursor_y,
+            &mut row_cursor_y,
             row,
             &prepared,
             &vertical_span_heights,
@@ -3293,6 +3305,7 @@ fn layout_table(
             table.borders_visible,
             next_row,
         );
+        *cursor_y = row_cursor_y;
     }
 
     *cursor_y -= 6.0;
@@ -3349,7 +3362,11 @@ fn should_split_tall_table_row(
     geometry: PageGeometry,
     margin_bottom: f32,
 ) -> bool {
-    if row.keep_together || row.repeat_header || row.height_twips.is_some_and(|height| height < 0) {
+    if row.keep_together
+        || row.repeat_header
+        || row.vertical_offset_twips != 0
+        || row.height_twips.is_some_and(|height| height < 0)
+    {
         return false;
     }
     if prepared
@@ -3442,6 +3459,7 @@ fn split_prepared_table_row_fragment(
         cell_lines: Vec::with_capacity(remaining.cell_lines.len()),
         cell_paddings: remaining.cell_paddings.clone(),
         cell_spacings: remaining.cell_spacings.clone(),
+        cell_text_directions: remaining.cell_text_directions.clone(),
         row_height: 14.0,
     };
     let mut consumed = Vec::with_capacity(remaining.cell_lines.len());
@@ -3455,8 +3473,14 @@ fn split_prepared_table_row_fragment(
         let capacity = (max_height - fixed).max(0.0);
         let mut used = 0.0;
         let mut take = 0usize;
+        let direction = remaining
+            .cell_text_directions
+            .get(idx)
+            .copied()
+            .unwrap_or_default();
         for line in lines {
-            let height = prepared_cell_line_height(line);
+            let height =
+                prepared_cell_line_extent(line, direction) + line.space_before + line.space_after;
             if take == 0 || used + height <= capacity {
                 take += 1;
                 used += height;
@@ -3494,10 +3518,11 @@ fn prepared_table_row_content_height(prepared: &PreparedTableRow) -> f32 {
     prepared
         .cell_lines
         .iter()
+        .zip(prepared.cell_text_directions.iter())
         .zip(prepared.cell_paddings.iter())
         .zip(prepared.cell_spacings.iter())
-        .map(|((lines, padding), spacing)| {
-            lines.iter().map(prepared_cell_line_height).sum::<f32>()
+        .map(|(((lines, direction), padding), spacing)| {
+            prepared_cell_lines_height(lines, *direction)
                 + padding.top
                 + padding.bottom
                 + spacing.top
@@ -3507,8 +3532,55 @@ fn prepared_table_row_content_height(prepared: &PreparedTableRow) -> f32 {
         .max(14.0)
 }
 
-fn prepared_cell_line_height(line: &PreparedCellLine) -> f32 {
-    line.space_before + line.line.height + line.space_after
+fn prepared_cell_lines_height(
+    lines: &[PreparedCellLine],
+    direction: TableCellTextDirection,
+) -> f32 {
+    lines
+        .iter()
+        .map(|line| {
+            prepared_cell_line_extent(line, direction) + line.space_before + line.space_after
+        })
+        .sum::<f32>()
+}
+
+fn prepared_cell_line_extent(line: &PreparedCellLine, direction: TableCellTextDirection) -> f32 {
+    match direction {
+        TableCellTextDirection::LeftToRightTopToBottom => line.line.height,
+        TableCellTextDirection::TopToBottomRightToLeft
+        | TableCellTextDirection::BottomToTopLeftToRight => line.line.width.max(line.line.height),
+    }
+}
+
+fn table_cell_text_rotation(direction: TableCellTextDirection) -> TextRotation {
+    match direction {
+        TableCellTextDirection::LeftToRightTopToBottom => TextRotation::None,
+        TableCellTextDirection::TopToBottomRightToLeft => TextRotation::Clockwise90,
+        TableCellTextDirection::BottomToTopLeftToRight => TextRotation::CounterClockwise90,
+    }
+}
+
+fn table_row_vertical_offset_points(row: &TableRow) -> f32 {
+    twips_to_points(row.vertical_offset_twips)
+}
+
+fn rotated_table_cell_line_origin(
+    content_left: f32,
+    content_width: f32,
+    line_top: f32,
+    line: &Line,
+    direction: TableCellTextDirection,
+) -> (f32, f32) {
+    match direction {
+        TableCellTextDirection::LeftToRightTopToBottom => (content_left, line_top),
+        TableCellTextDirection::TopToBottomRightToLeft => (
+            content_left + content_width - (line.height * 0.25),
+            line_top,
+        ),
+        TableCellTextDirection::BottomToTopLeftToRight => {
+            (content_left + (line.height * 0.75), line_top - line.width)
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3585,6 +3657,10 @@ fn prepare_table_row(
     let cell_spacings = visual_cells
         .iter()
         .map(|visual_cell| resolve_cell_spacing(&row.cells[visual_cell.cell_index]))
+        .collect::<Vec<_>>();
+    let cell_text_directions = visual_cells
+        .iter()
+        .map(|visual_cell| row.cells[visual_cell.cell_index].text_direction)
         .collect::<Vec<_>>();
     let cell_lines = visual_cells
         .iter()
@@ -3666,10 +3742,12 @@ fn prepare_table_row(
 
     let row_height = cell_lines
         .iter()
+        .zip(visual_cells.iter())
         .zip(cell_paddings.iter())
         .zip(cell_spacings.iter())
-        .map(|((lines, padding), spacing)| {
-            lines.iter().map(prepared_cell_line_height).sum::<f32>()
+        .map(|(((lines, visual_cell), padding), spacing)| {
+            let cell = &row.cells[visual_cell.cell_index];
+            prepared_cell_lines_height(lines, cell.text_direction)
                 + padding.top
                 + padding.bottom
                 + spacing.top
@@ -3690,6 +3768,7 @@ fn prepare_table_row(
         cell_lines,
         cell_paddings,
         cell_spacings,
+        cell_text_directions,
         row_height,
     }
 }
@@ -3814,7 +3893,7 @@ fn push_table_row(
             .get(idx)
             .copied()
             .unwrap_or(prepared.row_height);
-        let content_height = lines.iter().map(prepared_cell_line_height).sum::<f32>();
+        let content_height = prepared_cell_lines_height(lines, cell.text_direction);
         let available_height =
             (span_height - spacing.top - spacing.bottom - padding.top - padding.bottom).max(0.0);
         let extra_height = (available_height - content_height).max(0.0);
@@ -3827,7 +3906,8 @@ fn push_table_row(
         let mut line_top = top - spacing.top - padding.top - vertical_offset;
         for prepared_line in lines {
             line_top -= prepared_line.space_before;
-            if line_top - prepared_line.line.height < content_bottom {
+            let line_extent = prepared_cell_line_extent(prepared_line, cell.text_direction);
+            if line_top - line_extent < content_bottom {
                 break;
             }
             let content_left = row_left + visual_cell.x_offset + spacing.left + padding.left;
@@ -3890,22 +3970,42 @@ fn push_table_row(
                 document,
                 false,
             );
-            push_bar_tab_stops(
-                pages,
-                &prepared_line.style,
-                x,
-                line_top,
-                prepared_line.line.height,
-            );
-            push_line(
-                pages,
-                &prepared_line.line,
-                x,
-                line_top,
-                document,
-                word_spacing,
-            );
-            line_top -= prepared_line.line.height + prepared_line.space_after;
+            let rotation = table_cell_text_rotation(cell.text_direction);
+            if rotation == TextRotation::None {
+                push_bar_tab_stops(
+                    pages,
+                    &prepared_line.style,
+                    x,
+                    line_top,
+                    prepared_line.line.height,
+                );
+                push_line(
+                    pages,
+                    &prepared_line.line,
+                    x,
+                    line_top,
+                    document,
+                    word_spacing,
+                );
+            } else {
+                let (rotated_x, rotated_y) = rotated_table_cell_line_origin(
+                    content_left,
+                    cell_content_width,
+                    line_top,
+                    &prepared_line.line,
+                    cell.text_direction,
+                );
+                push_line_with_rotation(
+                    pages,
+                    &prepared_line.line,
+                    rotated_x,
+                    rotated_y,
+                    document,
+                    word_spacing,
+                    rotation,
+                );
+            }
+            line_top -= line_extent + prepared_line.space_after;
         }
     }
 
@@ -4563,6 +4663,7 @@ fn push_passive_line_number(
         text,
         x,
         baseline_y,
+        rotation: TextRotation::None,
         color: PdfColor {
             red: 0.35,
             green: 0.35,
@@ -6756,6 +6857,26 @@ fn push_line(
     document: &Document,
     word_spacing: f32,
 ) {
+    push_line_with_rotation(
+        pages,
+        line,
+        x,
+        top_y,
+        document,
+        word_spacing,
+        TextRotation::None,
+    );
+}
+
+fn push_line_with_rotation(
+    pages: &mut [LayoutPage],
+    line: &Line,
+    x: f32,
+    top_y: f32,
+    document: &Document,
+    word_spacing: f32,
+    rotation: TextRotation,
+) {
     let baseline_y = top_y - line.height + (line.height * 0.25);
     let mut cursor_x = x;
     let page = pages.last_mut().expect("layout always has a page");
@@ -6768,6 +6889,7 @@ fn push_line(
                 text: run.text.clone(),
                 x: cursor_x,
                 baseline_y,
+                rotation,
                 color: style_color(document, &run.style),
                 font_family: font_family_for_style(document, &run.style),
                 word_spacing: 0.0,
@@ -6826,6 +6948,7 @@ fn push_line(
             text: text.clone(),
             x: cursor_x,
             baseline_y: run_baseline_y,
+            rotation,
             color,
             font_family,
             word_spacing,
@@ -7034,6 +7157,7 @@ fn push_tab_leader(
                 text: leader.repeat(count.min(512)),
                 x: cursor_x,
                 baseline_y: baseline_y + style.baseline_shift_points(),
+                rotation: TextRotation::None,
                 color,
                 font_family: family,
                 word_spacing: 0.0,
@@ -8371,6 +8495,7 @@ mod tests {
             text: text.to_string(),
             x,
             baseline_y,
+            rotation: TextRotation::None,
             color: PdfColor::default(),
             font_family: PdfFontFamily::Helvetica,
             word_spacing: 0.0,
@@ -10228,6 +10353,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10241,6 +10367,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -10260,6 +10387,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -10323,6 +10451,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10335,6 +10464,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10371,6 +10501,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10392,6 +10523,7 @@ mod tests {
                         ..TableCellBorders::default()
                     },
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10427,6 +10559,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: Some(720),
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10457,6 +10590,7 @@ mod tests {
                         ..TableCellBorders::default()
                     },
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10490,6 +10624,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: Some(720),
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10524,6 +10659,7 @@ mod tests {
                         },
                     },
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10572,6 +10708,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10595,6 +10732,7 @@ mod tests {
                         ..TableCellBorders::default()
                     },
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10710,6 +10848,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10722,6 +10861,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10802,6 +10942,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: Some(720),
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10814,6 +10955,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10859,6 +11001,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: Some(-360),
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10871,6 +11014,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10900,6 +11044,80 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_table_cell_text_direction_as_rotated_passive_text() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Table(Table {
+            borders_visible: true,
+            preserve_authored_widths: true,
+            column_widths_twips: vec![1440, 1440],
+            rows: vec![TableRow {
+                height_twips: Some(1440),
+                left_offset_twips: 0,
+                vertical_offset_twips: 0,
+                cell_gap_twips: 0,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![
+                    TableCell {
+                        shading_color_index: None,
+                        shading_basis_points: 10_000,
+                        shading_pattern: crate::model::ShadingPattern::None,
+                        padding: TableCellPadding::default(),
+                        spacing: Default::default(),
+                        borders: TableCellBorders::default(),
+                        fit_text: false,
+                        text_direction: TableCellTextDirection::TopToBottomRightToLeft,
+                        vertical_align: TableCellVerticalAlign::Top,
+                        horizontal_merge: TableCellHorizontalMerge::None,
+                        vertical_merge: TableCellVerticalMerge::None,
+                        paragraphs: vec![Paragraph {
+                            style: Default::default(),
+                            runs: vec![Run {
+                                text: "ABC".to_string(),
+                                style: Default::default(),
+                            }],
+                        }],
+                    },
+                    TableCell {
+                        shading_color_index: None,
+                        shading_basis_points: 10_000,
+                        shading_pattern: crate::model::ShadingPattern::None,
+                        padding: TableCellPadding::default(),
+                        spacing: Default::default(),
+                        borders: TableCellBorders::default(),
+                        fit_text: false,
+                        text_direction: TableCellTextDirection::BottomToTopLeftToRight,
+                        vertical_align: TableCellVerticalAlign::Top,
+                        horizontal_merge: TableCellHorizontalMerge::None,
+                        vertical_merge: TableCellVerticalMerge::None,
+                        paragraphs: vec![Paragraph {
+                            style: Default::default(),
+                            runs: vec![Run {
+                                text: "XY".to_string(),
+                                style: Default::default(),
+                            }],
+                        }],
+                    },
+                ],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert!(layout.pages[0].items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Text(fragment)
+                if fragment.text == "ABC" && fragment.rotation == TextRotation::Clockwise90
+        )));
+        assert!(layout.pages[0].items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Text(fragment)
+                if fragment.text == "XY" && fragment.rotation == TextRotation::CounterClockwise90
+        )));
+    }
+
+    #[test]
     fn clips_table_cell_lines_to_exact_row_height() {
         let mut document = Document::default();
         document.colors = vec![
@@ -10917,6 +11135,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: Some(-360),
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10929,6 +11148,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -10962,6 +11182,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10974,6 +11195,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11016,6 +11238,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11028,6 +11251,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11089,6 +11313,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11101,6 +11326,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11145,6 +11371,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 720,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11157,6 +11384,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11185,6 +11413,63 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_table_row_vertical_offset_as_passive_top_adjustment() {
+        fn baseline_for_row_offset(vertical_offset_twips: i32) -> f32 {
+            let mut document = Document::default();
+            document.blocks = vec![Block::Table(Table {
+                column_widths_twips: vec![1440],
+                borders_visible: true,
+                preserve_authored_widths: false,
+                rows: vec![TableRow {
+                    height_twips: None,
+                    left_offset_twips: 0,
+                    vertical_offset_twips,
+                    cell_gap_twips: 60,
+                    alignment: TableRowAlignment::Left,
+                    repeat_header: false,
+                    keep_together: false,
+                    cells: vec![TableCell {
+                        shading_color_index: None,
+                        shading_basis_points: 10_000,
+                        shading_pattern: crate::model::ShadingPattern::None,
+                        padding: TableCellPadding::default(),
+                        spacing: Default::default(),
+                        borders: TableCellBorders::default(),
+                        fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
+                        vertical_align: TableCellVerticalAlign::Top,
+                        horizontal_merge: TableCellHorizontalMerge::None,
+                        vertical_merge: TableCellVerticalMerge::None,
+                        paragraphs: vec![Paragraph {
+                            style: Default::default(),
+                            runs: vec![Run {
+                                text: "Offset".to_string(),
+                                style: Default::default(),
+                            }],
+                        }],
+                    }],
+                }],
+            })];
+
+            LayoutEngine::layout(&document).pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text == "Offset" => {
+                        Some(fragment.baseline_y)
+                    }
+                    _ => None,
+                })
+                .expect("offset text")
+        }
+
+        let default_baseline = baseline_for_row_offset(0);
+        let offset_baseline = baseline_for_row_offset(720);
+
+        assert!((default_baseline - offset_baseline - 36.0).abs() < 0.01);
+    }
+
+    #[test]
     fn lays_out_table_row_horizontal_alignment() {
         let mut document = Document::default();
         document.blocks = vec![Block::Table(Table {
@@ -11195,6 +11480,7 @@ mod tests {
                 TableRow {
                     height_twips: None,
                     left_offset_twips: 0,
+                    vertical_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Center,
                     repeat_header: false,
@@ -11207,6 +11493,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11222,6 +11509,7 @@ mod tests {
                 TableRow {
                     height_twips: None,
                     left_offset_twips: 0,
+                    vertical_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Right,
                     repeat_header: false,
@@ -11234,6 +11522,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11275,6 +11564,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 240,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11287,6 +11577,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11332,6 +11623,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: Some(489),
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 108,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11344,6 +11636,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11456,6 +11749,7 @@ mod tests {
                 TableRow {
                     height_twips: None,
                     left_offset_twips: 0,
+                    vertical_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -11468,6 +11762,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11483,6 +11778,7 @@ mod tests {
                 TableRow {
                     height_twips: None,
                     left_offset_twips: 0,
+                    vertical_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -11495,6 +11791,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11549,6 +11846,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11561,6 +11859,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11597,6 +11896,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11609,6 +11909,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11649,6 +11950,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11661,6 +11963,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: true,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11716,6 +12019,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11733,6 +12037,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -11780,6 +12085,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 0,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11798,6 +12104,7 @@ mod tests {
                         },
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11822,6 +12129,7 @@ mod tests {
                         },
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11878,6 +12186,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: Some(1440),
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11891,6 +12200,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11910,6 +12220,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Center,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11929,6 +12240,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Bottom,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -11972,6 +12284,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11985,6 +12298,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::First,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -12004,6 +12318,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::Continuation,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -12023,6 +12338,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -12077,6 +12393,7 @@ mod tests {
                 TableRow {
                     height_twips: Some(720),
                     left_offset_twips: 0,
+                    vertical_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -12090,6 +12407,7 @@ mod tests {
                             spacing: Default::default(),
                             borders: TableCellBorders::default(),
                             fit_text: false,
+                            text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                             vertical_align: TableCellVerticalAlign::Bottom,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::First,
@@ -12109,6 +12427,7 @@ mod tests {
                             spacing: Default::default(),
                             borders: TableCellBorders::default(),
                             fit_text: false,
+                            text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                             vertical_align: TableCellVerticalAlign::Top,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::None,
@@ -12125,6 +12444,7 @@ mod tests {
                 TableRow {
                     height_twips: Some(720),
                     left_offset_twips: 0,
+                    vertical_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -12138,6 +12458,7 @@ mod tests {
                             spacing: Default::default(),
                             borders: TableCellBorders::default(),
                             fit_text: false,
+                            text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                             vertical_align: TableCellVerticalAlign::Top,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::Continuation,
@@ -12157,6 +12478,7 @@ mod tests {
                             spacing: Default::default(),
                             borders: TableCellBorders::default(),
                             fit_text: false,
+                            text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                             vertical_align: TableCellVerticalAlign::Top,
                             horizontal_merge: TableCellHorizontalMerge::None,
                             vertical_merge: TableCellVerticalMerge::None,
@@ -12216,6 +12538,7 @@ mod tests {
             TableRow {
                 height_twips: Some(720),
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header,
@@ -12228,6 +12551,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -12276,6 +12600,7 @@ mod tests {
             TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header,
@@ -12288,6 +12613,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -12335,6 +12661,7 @@ mod tests {
             TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header,
@@ -12347,6 +12674,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -12389,6 +12717,7 @@ mod tests {
             TableRow {
                 height_twips,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -12401,6 +12730,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -13697,6 +14027,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 0,
                 alignment: Default::default(),
                 repeat_header: false,
@@ -13709,6 +14040,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: Default::default(),
                     horizontal_merge: Default::default(),
                     vertical_merge: Default::default(),
@@ -13979,6 +14311,7 @@ mod tests {
                 rows: vec![TableRow {
                     height_twips: None,
                     left_offset_twips: 0,
+                    vertical_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -13991,6 +14324,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -14068,6 +14402,7 @@ mod tests {
                 rows: vec![TableRow {
                     height_twips: None,
                     left_offset_twips: 0,
+                    vertical_offset_twips: 0,
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -14080,6 +14415,7 @@ mod tests {
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
                         fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                         vertical_align: TableCellVerticalAlign::Top,
                         horizontal_merge: TableCellHorizontalMerge::None,
                         vertical_merge: TableCellVerticalMerge::None,
@@ -14309,6 +14645,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -14321,6 +14658,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,
@@ -14713,6 +15051,7 @@ mod tests {
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -14725,6 +15064,7 @@ mod tests {
                     spacing: Default::default(),
                     borders: TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
                     horizontal_merge: TableCellHorizontalMerge::None,
                     vertical_merge: TableCellVerticalMerge::None,

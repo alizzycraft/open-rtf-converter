@@ -584,6 +584,7 @@ pub struct TableRow {
     pub cells: Vec<TableCell>,
     pub height_twips: Option<i32>,
     pub left_offset_twips: i32,
+    pub vertical_offset_twips: i32,
     pub cell_gap_twips: i32,
     pub alignment: TableRowAlignment,
     pub repeat_header: bool,
@@ -608,9 +609,18 @@ pub struct TableCell {
     pub spacing: TableCellSpacing,
     pub borders: TableCellBorders,
     pub fit_text: bool,
+    pub text_direction: TableCellTextDirection,
     pub vertical_align: TableCellVerticalAlign,
     pub horizontal_merge: TableCellHorizontalMerge,
     pub vertical_merge: TableCellVerticalMerge,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum TableCellTextDirection {
+    #[default]
+    LeftToRightTopToBottom,
+    TopToBottomRightToLeft,
+    BottomToTopLeftToRight,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

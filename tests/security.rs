@@ -1,6 +1,10 @@
 use std::fs;
+#[cfg(not(feature = "cli"))]
+use std::path::Path;
 
 use lopdf::Document as PdfDocument;
+#[cfg(feature = "cli")]
+use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, DOCUMENT_CHARS_MARKER,
@@ -8,7 +12,8 @@ use open_rtf_converter::model::{
     FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageWrapSide, TOTAL_PAGES_MARKER, TabAlignment, TextRelief, UnderlineStyle,
+    StaticImageWrapSide, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
+    TableRowAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -16,9 +21,26 @@ use open_rtf_converter::rtf::{
 };
 use open_rtf_converter::{
     ActiveContentPolicy, ConvertOptions, Diagnostic, FontAsset, FontAssetStyle, FontProvider,
-    PdfLinkPolicy, RtfLimits, RtfParseOptions, convert_rtf_file_to_pdf, convert_rtf_to_pdf,
+    PdfLinkPolicy, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
 };
+#[cfg(not(feature = "cli"))]
+use open_rtf_converter::{ConvertError, ConvertReport};
 use tempfile::tempdir;
+
+#[cfg(not(feature = "cli"))]
+fn convert_rtf_file_to_pdf(
+    input: impl AsRef<Path>,
+    output: impl AsRef<Path>,
+    options: &ConvertOptions,
+) -> Result<ConvertReport, ConvertError> {
+    let input = fs::read(input).expect("test fixture should be readable");
+    let converted = convert_rtf_to_pdf(&input, options)?;
+    fs::write(output, &converted.pdf).expect("test output should be writable");
+    Ok(ConvertReport {
+        diagnostics: converted.diagnostics,
+        pages: converted.pages,
+    })
+}
 
 #[test]
 fn fuzz_corpus_seeds_exercise_bounded_parser_and_passive_pdf_paths() {
@@ -1210,6 +1232,8 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "\\",
         "tposx720",
         "\\",
+        "tposxr",
+        "\\",
         "tpvmrg",
         "\\",
         "tposy360",
@@ -1249,6 +1273,9 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
     assert!(text.contains("Positioned left"));
     assert!(text.contains("Positioned right"));
     assert!(text.contains("After table"));
+    assert_eq!(table.rows[0].left_offset_twips, 1080);
+    assert_eq!(table.rows[0].vertical_offset_twips, 360);
+    assert_eq!(table.rows[0].alignment, TableRowAlignment::Right);
     assert!(!table.rows[0].cells[0].fit_text);
     assert!(table.rows[0].cells[1].fit_text);
     for forbidden in [
@@ -1259,6 +1286,7 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "tdfrmtxtBottom",
         "tphmrg",
         "tposx",
+        "tposxr",
         "tpvmrg",
         "tposy",
         "clFitText",
@@ -1280,6 +1308,21 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         diagnostic
             .message
             .contains("floating table positioning approximated by passive table flow")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "floating table horizontal position interpreted as bounded passive row offset",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating table horizontal alignment \\tposxr")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating table vertical position interpreted as bounded passive row offset")
     }));
     assert!(parsed.diagnostics.iter().all(|diagnostic| {
         !diagnostic
@@ -1304,6 +1347,7 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         b"tdfrmtxtBottom",
         b"tphmrg",
         b"tposx",
+        b"tposxr",
         b"tpvmrg",
         b"tposy",
         b"clFitText",
@@ -2202,9 +2246,26 @@ fn table_cell_text_direction_renders_passively_without_control_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
 
-    assert!(text.contains("A\nB\nC"));
-    assert!(text.contains("Y\nX"));
+    assert!(text.contains("ABC"));
+    assert_eq!(
+        table.rows[0].cells[0].text_direction,
+        TableCellTextDirection::TopToBottomRightToLeft
+    );
+    assert!(text.contains("XY"));
+    assert_eq!(
+        table.rows[0].cells[1].text_direction,
+        TableCellTextDirection::BottomToTopLeftToRight
+    );
     assert!(text.contains("Flat"));
     for forbidden in ["cltxtbrlv", "cltxbtlr", "cltxlrtb"] {
         assert!(

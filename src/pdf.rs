@@ -9,7 +9,7 @@ use ttf_parser::{Face, name_id};
 
 use crate::fonts::{FontAsset, FontProvider};
 use crate::layout::{
-    LayoutDocument, LayoutItem, LineStyle, PdfColor, PdfFontFamily, TextFragment,
+    LayoutDocument, LayoutItem, LineStyle, PdfColor, PdfFontFamily, TextFragment, TextRotation,
     passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
@@ -939,6 +939,7 @@ fn draw_text_layout_item(
             fragment.word_spacing,
             fragment.x + shadow_offset(&fragment.style),
             fragment.baseline_y - shadow_offset(&fragment.style),
+            fragment.rotation,
             encoded,
             TextRenderingMode::Fill,
         );
@@ -957,6 +958,7 @@ fn draw_text_layout_item(
             fragment.word_spacing,
             fragment.x + first_dx,
             fragment.baseline_y + first_dy,
+            fragment.rotation,
             encoded,
             TextRenderingMode::Fill,
         );
@@ -970,6 +972,7 @@ fn draw_text_layout_item(
             fragment.word_spacing,
             fragment.x + second_dx,
             fragment.baseline_y + second_dy,
+            fragment.rotation,
             encoded,
             TextRenderingMode::Fill,
         );
@@ -988,6 +991,7 @@ fn draw_text_layout_item(
         fragment.word_spacing,
         fragment.x,
         fragment.baseline_y,
+        fragment.rotation,
         encoded,
         if fragment.style.outline {
             TextRenderingMode::Stroke
@@ -2440,6 +2444,7 @@ fn draw_passive_vector_text(
         0.0,
         metrics.x,
         metrics.baseline_y,
+        TextRotation::None,
         &encoded,
         TextRenderingMode::Fill,
     );
@@ -2600,6 +2605,7 @@ fn draw_passive_image_placeholder(content: &mut Content, fragment: &crate::layou
         0.0,
         fragment.x + 6.0,
         fragment.y + (height / 2.0) - 3.0,
+        TextRotation::None,
         &encoded,
         TextRenderingMode::Fill,
     );
@@ -4346,6 +4352,7 @@ fn write_text_fragment(
     word_spacing: f32,
     x: f32,
     baseline_y: f32,
+    rotation: TextRotation,
     encoded: &[u8],
     rendering_mode: TextRenderingMode,
 ) {
@@ -4357,7 +4364,7 @@ fn write_text_fragment(
     content.set_word_spacing(word_spacing);
     content.set_char_spacing(twips_to_points(style.character_spacing_twips));
     content.set_horizontal_scaling(style.character_scaling_percent as f32);
-    content.next_line(x, baseline_y);
+    set_text_position(content, x, baseline_y, rotation);
     if let Some(font_family) = passive_kerning_family
         && style_uses_passive_kerning(style)
         && text_has_passive_kerning(text, font_family, style)
@@ -4373,6 +4380,20 @@ fn write_text_fragment(
         content.set_text_rendering_mode(TextRenderingMode::Fill);
     }
     content.end_text();
+}
+
+fn set_text_position(content: &mut Content, x: f32, baseline_y: f32, rotation: TextRotation) {
+    match rotation {
+        TextRotation::None => {
+            content.next_line(x, baseline_y);
+        }
+        TextRotation::Clockwise90 => {
+            content.set_text_matrix([0.0, -1.0, 1.0, 0.0, x, baseline_y]);
+        }
+        TextRotation::CounterClockwise90 => {
+            content.set_text_matrix([0.0, 1.0, -1.0, 0.0, x, baseline_y]);
+        }
+    }
 }
 
 fn text_has_passive_kerning(
@@ -6729,6 +6750,7 @@ endstream
             rows: vec![TableRow {
                 height_twips: None,
                 left_offset_twips: 0,
+                vertical_offset_twips: 0,
                 cell_gap_twips: 60,
                 alignment: crate::model::TableRowAlignment::Left,
                 repeat_header: false,
@@ -6741,6 +6763,7 @@ endstream
                     spacing: Default::default(),
                     borders: crate::model::TableCellBorders::default(),
                     fit_text: false,
+                    text_direction: crate::model::TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: crate::model::TableCellVerticalAlign::Top,
                     horizontal_merge: crate::model::TableCellHorizontalMerge::None,
                     vertical_merge: crate::model::TableCellVerticalMerge::None,

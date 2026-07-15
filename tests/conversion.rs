@@ -1,12 +1,33 @@
 use std::fs;
+#[cfg(not(feature = "cli"))]
+use std::path::Path;
 
 use lopdf::Document as PdfDocument;
+#[cfg(not(feature = "cli"))]
+use open_rtf_converter::ConvertReport;
+#[cfg(feature = "cli")]
+use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::rtf::ParseError;
 use open_rtf_converter::{
     ConvertError, ConvertOptions, FontAsset, FontAssetStyle, FontProvider, FontProviderLimits,
-    RtfLimits, RtfParseOptions, convert_rtf_file_to_pdf, convert_rtf_to_pdf,
+    RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
 };
 use tempfile::tempdir;
+
+#[cfg(not(feature = "cli"))]
+fn convert_rtf_file_to_pdf(
+    input: impl AsRef<Path>,
+    output: impl AsRef<Path>,
+    options: &ConvertOptions,
+) -> Result<ConvertReport, ConvertError> {
+    let input = fs::read(input).expect("test fixture should be readable");
+    let converted = convert_rtf_to_pdf(&input, options)?;
+    fs::write(output, &converted.pdf).expect("test output should be writable");
+    Ok(ConvertReport {
+        diagnostics: converted.diagnostics,
+        pages: converted.pages,
+    })
+}
 
 #[test]
 fn converts_simple_fixture_to_valid_two_page_pdf() {
