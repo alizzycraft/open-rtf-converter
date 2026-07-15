@@ -15,7 +15,7 @@ use crate::model::{
     StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell,
     TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
     TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge,
-    TableRow, TableRowAlignment, TextRelief, UnderlineStyle,
+    TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -640,6 +640,7 @@ struct TableRowBuilder {
     height_twips: Option<i32>,
     left_offset_twips: i32,
     vertical_offset_twips: i32,
+    wrap_margins: TableRowWrapMargins,
     cell_gap_twips: i32,
     alignment: TableRowAlignment,
     repeat_header: bool,
@@ -683,6 +684,14 @@ enum TableCellBorderSide {
     DiagonalUp,
     RowHorizontal,
     RowVertical,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum TableRowWrapMarginSide {
+    Left,
+    Right,
+    Top,
+    Bottom,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -4085,6 +4094,26 @@ impl Parser {
                     .checked_abs()
                     .and_then(|value| value.checked_neg())
                     .unwrap_or(i32::MIN),
+                offset,
+            ),
+            "tdfrmtxtLeft" => self.set_current_table_row_wrap_margin(
+                TableRowWrapMarginSide::Left,
+                control.parameter,
+                offset,
+            ),
+            "tdfrmtxtRight" => self.set_current_table_row_wrap_margin(
+                TableRowWrapMarginSide::Right,
+                control.parameter,
+                offset,
+            ),
+            "tdfrmtxtTop" => self.set_current_table_row_wrap_margin(
+                TableRowWrapMarginSide::Top,
+                control.parameter,
+                offset,
+            ),
+            "tdfrmtxtBottom" => self.set_current_table_row_wrap_margin(
+                TableRowWrapMarginSide::Bottom,
+                control.parameter,
                 offset,
             ),
             "trgaph" => self.set_current_table_cell_gap(control.parameter, offset),
@@ -9329,6 +9358,7 @@ impl Parser {
             height_twips: None,
             left_offset_twips: 0,
             vertical_offset_twips: 0,
+            wrap_margins: TableRowWrapMargins::default(),
             cell_gap_twips: DEFAULT_TABLE_CELL_GAP_TWIPS,
             alignment: TableRowAlignment::Left,
             repeat_header: false,
@@ -10238,6 +10268,36 @@ impl Parser {
         row.vertical_offset_twips = clamped;
     }
 
+    fn set_current_table_row_wrap_margin(
+        &mut self,
+        side: TableRowWrapMarginSide,
+        value: Option<i32>,
+        offset: usize,
+    ) {
+        let max_table_cell_gap_twips = self.limits().max_table_cell_gap_twips;
+        let Some(row) = self.current_table_row.as_mut() else {
+            return;
+        };
+        let value = value.unwrap_or(0).max(0);
+        let clamped = value.min(max_table_cell_gap_twips);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("floating table wrap margin clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        match side {
+            TableRowWrapMarginSide::Left => row.wrap_margins.left_twips = clamped,
+            TableRowWrapMarginSide::Right => row.wrap_margins.right_twips = clamped,
+            TableRowWrapMarginSide::Top => row.wrap_margins.top_twips = clamped,
+            TableRowWrapMarginSide::Bottom => row.wrap_margins.bottom_twips = clamped,
+        }
+        self.diagnostics.push(Diagnostic::warning(
+            "floating table wrap distance interpreted as bounded passive row margin",
+            Some(offset),
+        ));
+    }
+
     fn set_current_table_cell_gap(&mut self, value: Option<i32>, offset: usize) {
         let max_table_cell_gap_twips = self.limits().max_table_cell_gap_twips;
         let Some(row) = self.current_table_row.as_mut() else {
@@ -10481,6 +10541,7 @@ impl Parser {
             height_twips: row.height_twips,
             left_offset_twips: row.left_offset_twips,
             vertical_offset_twips: row.vertical_offset_twips,
+            wrap_margins: row.wrap_margins,
             cell_gap_twips: row.cell_gap_twips,
             alignment: row.alignment,
             repeat_header: row.repeat_header,
@@ -14028,10 +14089,9 @@ fn table_layout_compatibility_control_message(name: &str) -> Option<&'static str
         | "clspdft" | "clspdfb" => {
             Some("table padding and spacing units interpreted through bounded twip layout")
         }
-        "tabsnoovrlp" | "tdfrmtxtLeft" | "tdfrmtxtRight" | "tdfrmtxtTop" | "tdfrmtxtBottom"
-        | "tphcol" | "tphmrg" | "tphpg" | "tpvmrg" | "tpvpara" | "tpvpg" | "tposx" | "tposnegx"
-        | "tposxc" | "tposxi" | "tposxl" | "tposxo" | "tposxr" | "tposy" | "tposnegy"
-        | "tposyb" | "tposyc" | "tposyil" | "tposyin" | "tposyout" | "tposyt" => {
+        "tabsnoovrlp" | "tphcol" | "tphmrg" | "tphpg" | "tpvmrg" | "tpvpara" | "tpvpg"
+        | "tposx" | "tposnegx" | "tposxc" | "tposxi" | "tposxl" | "tposxo" | "tposxr" | "tposy"
+        | "tposnegy" | "tposyb" | "tposyc" | "tposyil" | "tposyin" | "tposyout" | "tposyt" => {
             Some("floating table positioning approximated by passive table flow")
         }
         _ => None,
@@ -22159,6 +22219,62 @@ mod tests {
             diagnostic
                 .message
                 .contains("floating table vertical position clamped")
+        }));
+    }
+
+    #[test]
+    fn normalizes_floating_table_wrap_distances_as_bounded_row_margins() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\tdfrmtxtLeft180\tdfrmtxtRight240\tdfrmtxtTop120\tdfrmtxtBottom300\cellx2000 Wrapped\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].wrap_margins.left_twips, 180);
+        assert_eq!(table.rows[0].wrap_margins.right_twips, 240);
+        assert_eq!(table.rows[0].wrap_margins.top_twips, 120);
+        assert_eq!(table.rows[0].wrap_margins.bottom_twips, 300);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table wrap distance interpreted")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn clamps_extreme_floating_table_wrap_distance_controls() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_table_cell_gap_twips: 240,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\trowd\tdfrmtxtLeft9999\tdfrmtxtTop9999\cellx2000 Wrapped\cell\row}",
+            &options,
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].wrap_margins.left_twips, 240);
+        assert_eq!(table.rows[0].wrap_margins.top_twips, 240);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table wrap margin clamped")
         }));
     }
 

@@ -12,7 +12,8 @@ use crate::model::{
     StaticImageVectorCommand, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
     StaticShapeKind, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table,
     TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
-    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment, UnderlineStyle,
+    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TableRowWrapMargins, UnderlineStyle,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -3203,6 +3204,9 @@ fn layout_table(
             font_provider,
         );
         let top_offset = table_row_vertical_offset_points(row);
+        let row_wrap_margins = table_row_wrap_margin_points(row);
+        let top_margin = row_wrap_margins.top.max(0.0);
+        let bottom_margin = row_wrap_margins.bottom.max(0.0);
 
         if should_split_tall_table_row(row, &prepared, *geometry, margin_bottom) {
             if *cursor_y - 14.0 < margin_bottom {
@@ -3249,7 +3253,7 @@ fn layout_table(
             continue;
         }
 
-        if *cursor_y - top_offset - prepared.row_height < margin_bottom {
+        if *cursor_y - top_offset - top_margin - prepared.row_height < margin_bottom {
             advance_column_or_page(pages, cursor_y, geometry, current_column);
             margin_left = geometry.body_left(*current_column);
 
@@ -3289,9 +3293,9 @@ fn layout_table(
             current_marker_context(pages, document_stats),
             document,
             font_provider,
-            (*cursor_y - top_offset - geometry.margin_bottom).max(prepared.row_height),
+            (*cursor_y - top_offset - top_margin - geometry.margin_bottom).max(prepared.row_height),
         );
-        let mut row_cursor_y = *cursor_y - top_offset;
+        let mut row_cursor_y = *cursor_y - top_offset - top_margin;
         push_table_row(
             pages,
             &mut row_cursor_y,
@@ -3305,7 +3309,7 @@ fn layout_table(
             table.borders_visible,
             next_row,
         );
-        *cursor_y = row_cursor_y;
+        *cursor_y = row_cursor_y - bottom_margin;
     }
 
     *cursor_y -= 6.0;
@@ -3365,6 +3369,7 @@ fn should_split_tall_table_row(
     if row.keep_together
         || row.repeat_header
         || row.vertical_offset_twips != 0
+        || table_row_has_wrap_margins(row)
         || row.height_twips.is_some_and(|height| height < 0)
     {
         return false;
@@ -3562,6 +3567,33 @@ fn table_cell_text_rotation(direction: TableCellTextDirection) -> TextRotation {
 
 fn table_row_vertical_offset_points(row: &TableRow) -> f32 {
     twips_to_points(row.vertical_offset_twips)
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+struct TableRowWrapMarginPoints {
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+}
+
+fn table_row_wrap_margin_points(row: &TableRow) -> TableRowWrapMarginPoints {
+    TableRowWrapMarginPoints {
+        left: twips_to_points(row.wrap_margins.left_twips.max(0)),
+        right: twips_to_points(row.wrap_margins.right_twips.max(0)),
+        top: twips_to_points(row.wrap_margins.top_twips.max(0)),
+        bottom: twips_to_points(row.wrap_margins.bottom_twips.max(0)),
+    }
+}
+
+fn table_row_has_wrap_margins(row: &TableRow) -> bool {
+    let TableRowWrapMargins {
+        left_twips,
+        right_twips,
+        top_twips,
+        bottom_twips,
+    } = row.wrap_margins;
+    left_twips > 0 || right_twips > 0 || top_twips > 0 || bottom_twips > 0
 }
 
 fn rotated_table_cell_line_origin(
@@ -3840,8 +3872,17 @@ fn push_table_row(
     borders_visible: bool,
     next_row: Option<&TableRow>,
 ) {
-    let row_left = table_row_left(margin_left, content_width, table_width, row.alignment)
-        + twips_to_points(row.left_offset_twips);
+    let wrap_margins = table_row_wrap_margin_points(row);
+    let effective_margin_left = margin_left + wrap_margins.left;
+    let effective_content_width = (content_width - wrap_margins.left - wrap_margins.right)
+        .max(table_width)
+        .max(1.0);
+    let row_left = table_row_left(
+        effective_margin_left,
+        effective_content_width,
+        table_width,
+        row.alignment,
+    ) + twips_to_points(row.left_offset_twips);
     let top = *cursor_y;
     let bottom = top - prepared.row_height;
 
@@ -8453,7 +8494,7 @@ mod tests {
         PageNumberFormat, PageSettings, Paragraph, Run, SECTION_PAGES_MARKER, StaticImagePlacement,
         StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, Table, TableCell,
         TableCellBorder, TableCellBorders, TableCellPadding, TableCellSpacing,
-        TableCellVerticalMerge, TableRow,
+        TableCellVerticalMerge, TableRow, TableRowWrapMargins,
     };
 
     use super::*;
@@ -10354,6 +10395,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10452,6 +10494,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10502,6 +10545,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10560,6 +10604,7 @@ mod tests {
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10625,6 +10670,7 @@ mod tests {
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10709,6 +10755,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10849,6 +10896,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -10943,6 +10991,7 @@ mod tests {
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11002,6 +11051,7 @@ mod tests {
                 height_twips: Some(-360),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11054,6 +11104,7 @@ mod tests {
                 height_twips: Some(1440),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 0,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11136,6 +11187,7 @@ mod tests {
                 height_twips: Some(-360),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11183,6 +11235,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11239,6 +11292,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11314,6 +11368,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11372,6 +11427,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 720,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11424,6 +11480,7 @@ mod tests {
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -11470,6 +11527,91 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_table_row_wrap_margins_as_passive_outer_spacing() {
+        fn row(text: &str, wrap_margins: TableRowWrapMargins) -> TableRow {
+            TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                vertical_offset_twips: 0,
+                wrap_margins,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    spacing: Default::default(),
+                    borders: TableCellBorders::default(),
+                    fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text: text.to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }
+        }
+
+        fn positions(wrap_margins: TableRowWrapMargins) -> (f32, f32, f32) {
+            let mut document = Document::default();
+            document.blocks = vec![Block::Table(Table {
+                column_widths_twips: vec![1440],
+                borders_visible: true,
+                preserve_authored_widths: false,
+                rows: vec![
+                    row("First", wrap_margins),
+                    row("Second", TableRowWrapMargins::default()),
+                ],
+            })];
+
+            let layout = LayoutEngine::layout(&document);
+            let mut first = None;
+            let mut second_baseline = None;
+            for item in &layout.pages[0].items {
+                match item {
+                    LayoutItem::Text(fragment) if fragment.text == "First" => {
+                        first = Some((fragment.x, fragment.baseline_y));
+                    }
+                    LayoutItem::Text(fragment) if fragment.text == "Second" => {
+                        second_baseline = Some(fragment.baseline_y);
+                    }
+                    _ => {}
+                }
+            }
+            let (first_x, first_baseline) = first.expect("first row text");
+            (
+                first_x,
+                first_baseline,
+                second_baseline.expect("second row text"),
+            )
+        }
+
+        let default = positions(TableRowWrapMargins::default());
+        let wrapped = positions(TableRowWrapMargins {
+            left_twips: 240,
+            right_twips: 0,
+            top_twips: 120,
+            bottom_twips: 240,
+        });
+
+        assert!((wrapped.0 - default.0 - 12.0).abs() < 0.01);
+        assert!((default.1 - wrapped.1 - 6.0).abs() < 0.01);
+
+        let default_gap = default.1 - default.2;
+        let wrapped_gap = wrapped.1 - wrapped.2;
+        assert!((wrapped_gap - default_gap - 12.0).abs() < 0.01);
+    }
+
+    #[test]
     fn lays_out_table_row_horizontal_alignment() {
         let mut document = Document::default();
         document.blocks = vec![Block::Table(Table {
@@ -11481,6 +11623,7 @@ mod tests {
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Center,
                     repeat_header: false,
@@ -11510,6 +11653,7 @@ mod tests {
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Right,
                     repeat_header: false,
@@ -11565,6 +11709,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 240,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11624,6 +11769,7 @@ mod tests {
                 height_twips: Some(489),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 108,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11750,6 +11896,7 @@ mod tests {
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -11779,6 +11926,7 @@ mod tests {
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -11847,6 +11995,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11897,6 +12046,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -11951,6 +12101,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -12020,6 +12171,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -12086,6 +12238,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 0,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -12187,6 +12340,7 @@ mod tests {
                 height_twips: Some(1440),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -12285,6 +12439,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -12394,6 +12549,7 @@ mod tests {
                     height_twips: Some(720),
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -12445,6 +12601,7 @@ mod tests {
                     height_twips: Some(720),
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -12539,6 +12696,7 @@ mod tests {
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header,
@@ -12601,6 +12759,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header,
@@ -12662,6 +12821,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header,
@@ -12718,6 +12878,7 @@ mod tests {
                 height_twips,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -14028,6 +14189,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 0,
                 alignment: Default::default(),
                 repeat_header: false,
@@ -14312,6 +14474,7 @@ mod tests {
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -14403,6 +14566,7 @@ mod tests {
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins::default(),
                     cell_gap_twips: 60,
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
@@ -14646,6 +14810,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
@@ -15052,6 +15217,7 @@ mod tests {
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,

@@ -1275,6 +1275,10 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
     assert!(text.contains("After table"));
     assert_eq!(table.rows[0].left_offset_twips, 1080);
     assert_eq!(table.rows[0].vertical_offset_twips, 360);
+    assert_eq!(table.rows[0].wrap_margins.left_twips, 180);
+    assert_eq!(table.rows[0].wrap_margins.right_twips, 180);
+    assert_eq!(table.rows[0].wrap_margins.top_twips, 120);
+    assert_eq!(table.rows[0].wrap_margins.bottom_twips, 120);
     assert_eq!(table.rows[0].alignment, TableRowAlignment::Right);
     assert!(!table.rows[0].cells[0].fit_text);
     assert!(table.rows[0].cells[1].fit_text);
@@ -1323,6 +1327,11 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         diagnostic
             .message
             .contains("floating table vertical position interpreted as bounded passive row offset")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating table wrap distance interpreted as bounded passive row margin")
     }));
     assert!(parsed.diagnostics.iter().all(|diagnostic| {
         !diagnostic

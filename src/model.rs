@@ -585,10 +585,19 @@ pub struct TableRow {
     pub height_twips: Option<i32>,
     pub left_offset_twips: i32,
     pub vertical_offset_twips: i32,
+    pub wrap_margins: TableRowWrapMargins,
     pub cell_gap_twips: i32,
     pub alignment: TableRowAlignment,
     pub repeat_header: bool,
     pub keep_together: bool,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub struct TableRowWrapMargins {
+    pub left_twips: i32,
+    pub right_twips: i32,
+    pub top_twips: i32,
+    pub bottom_twips: i32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

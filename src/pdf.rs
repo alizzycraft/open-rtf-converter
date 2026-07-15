@@ -4485,7 +4485,7 @@ mod tests {
         FontPitch, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER, PageSettings, Paragraph,
         ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticShape, StaticShapeArrowhead,
         StaticShapeKind, TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder, TableRow,
-        UnderlineStyle,
+        TableRowWrapMargins, UnderlineStyle,
     };
     use lopdf::{Dictionary, Object};
 
@@ -6751,6 +6751,7 @@ endstream
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
                 cell_gap_twips: 60,
                 alignment: crate::model::TableRowAlignment::Left,
                 repeat_header: false,
