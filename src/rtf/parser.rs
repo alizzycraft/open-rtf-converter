@@ -86,6 +86,7 @@ struct ParserState {
     inside_object: bool,
     object_owner_destination: Destination,
     object_result_seen: bool,
+    object_result_has_visible_content: bool,
     object_width_twips: Option<i32>,
     object_height_twips: Option<i32>,
     inside_shape: bool,
@@ -238,6 +239,7 @@ impl Default for ParserState {
             inside_object: false,
             object_owner_destination: Destination::Body,
             object_result_seen: false,
+            object_result_has_visible_content: false,
             object_width_twips: None,
             object_height_twips: None,
             inside_shape: false,
@@ -1569,6 +1571,8 @@ impl Parser {
 
             if self.state.inside_object && previous.inside_object {
                 previous.object_result_seen |= self.state.object_result_seen;
+                previous.object_result_has_visible_content |=
+                    self.state.object_result_has_visible_content;
                 previous.object_width_twips = previous
                     .object_width_twips
                     .or(self.state.object_width_twips);
@@ -1576,7 +1580,7 @@ impl Parser {
                     .object_height_twips
                     .or(self.state.object_height_twips);
             } else if self.state.inside_object && !previous.inside_object {
-                if !self.state.object_result_seen
+                if !(self.state.object_result_seen && self.state.object_result_has_visible_content)
                     && self.options.active_content_policy == ActiveContentPolicy::Placeholder
                     && !self.state.character.hidden
                 {
@@ -2576,7 +2580,13 @@ impl Parser {
                     ));
                 }
             }
-            "fonttbl" if destination_allows_safe_structural_content(&self.state) => {
+            "fonttbl"
+                if destination_allows_structural_destination_start(
+                    &self.state,
+                    &self.stack,
+                    control_follows_ignorable_destination_marker,
+                ) =>
+            {
                 self.state.destination = Destination::FontTable
             }
             "falt"
@@ -2593,17 +2603,41 @@ impl Parser {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
-            "colortbl" if destination_allows_safe_structural_content(&self.state) => {
+            "colortbl"
+                if destination_allows_structural_destination_start(
+                    &self.state,
+                    &self.stack,
+                    control_follows_ignorable_destination_marker,
+                ) =>
+            {
                 self.state.destination = Destination::ColorTable
             }
-            "stylesheet" if destination_allows_safe_structural_content(&self.state) => {
+            "stylesheet"
+                if destination_allows_structural_destination_start(
+                    &self.state,
+                    &self.stack,
+                    control_follows_ignorable_destination_marker,
+                ) =>
+            {
                 self.state.destination = Destination::StyleSheet
             }
-            "latentstyles" if destination_allows_safe_structural_content(&self.state) => {
+            "latentstyles"
+                if destination_allows_structural_destination_start(
+                    &self.state,
+                    &self.stack,
+                    control_follows_ignorable_destination_marker,
+                ) =>
+            {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
-            "background" if destination_allows_safe_structural_content(&self.state) => {
+            "background"
+                if destination_allows_structural_destination_start(
+                    &self.state,
+                    &self.stack,
+                    control_follows_ignorable_destination_marker,
+                ) =>
+            {
                 self.state.destination = Destination::Background;
             }
             "htmltag" | "htmlbase"
@@ -2745,6 +2779,14 @@ impl Parser {
                 self.state.user_property_capture = Some(UserPropertyCapture::Value);
                 self.state.user_property_capture_text.clear();
             }
+            "formfield"
+                if control_starts_group
+                    && self.state.inside_field
+                    && self.state.destination == Destination::FieldInstruction =>
+            {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
             name if is_metadata_destination(name)
                 && destination_allows_visible_content(&self.state) =>
             {
@@ -2757,10 +2799,22 @@ impl Parser {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
-            "listtable" if destination_allows_safe_structural_content(&self.state) => {
+            "listtable"
+                if destination_allows_structural_destination_start(
+                    &self.state,
+                    &self.stack,
+                    control_follows_ignorable_destination_marker,
+                ) =>
+            {
                 self.state.destination = Destination::ListTable;
             }
-            "listoverridetable" if destination_allows_safe_structural_content(&self.state) => {
+            "listoverridetable"
+                if destination_allows_structural_destination_start(
+                    &self.state,
+                    &self.stack,
+                    control_follows_ignorable_destination_marker,
+                ) =>
+            {
                 self.state.destination = Destination::ListOverrideTable;
             }
             "list" if self.state.destination == Destination::ListTable => {
@@ -3557,6 +3611,7 @@ impl Parser {
                     self.state.inside_object = true;
                     self.state.object_owner_destination = owner_destination;
                     self.state.object_result_seen = false;
+                    self.state.object_result_has_visible_content = false;
                     self.state.object_width_twips = None;
                     self.state.object_height_twips = None;
                     self.state.destination = Destination::ObjectData;
@@ -3603,13 +3658,12 @@ impl Parser {
                 self.state.destination = Destination::FieldInstruction;
             }
             "fldinst"
-                if self.state.inside_field
-                    && destination_allows_safe_structural_content(&self.state) =>
+                if self.state.inside_field && destination_allows_field_instruction(&self.state) =>
             {
                 self.state.destination = Destination::FieldInstruction
             }
             "fldrslt"
-                if self.state.inside_field && destination_allows_visible_content(&self.state) =>
+                if self.state.inside_field && destination_allows_field_result(&self.state) =>
             {
                 self.state.field_result_seen = true;
                 self.state.field_result_form_field_shading = self.form_field_shading
@@ -7050,6 +7104,7 @@ impl Parser {
             self.count_skipped_destination_bytes(text.len(), offset)?;
             return Ok(());
         }
+        self.mark_object_result_visible_content();
         self.mark_field_result_visible_content();
         let pending_marker = self.take_pending_or_synthesized_list_marker(offset)?;
         let marker_run_chars = pending_marker
@@ -9014,6 +9069,12 @@ impl Parser {
         }
     }
 
+    fn mark_object_result_visible_content(&mut self) {
+        if self.state.inside_object && self.state.object_result_seen {
+            self.state.object_result_has_visible_content = true;
+        }
+    }
+
     fn mark_field_result_visible_content(&mut self) {
         if self.state.inside_field && self.state.field_result_seen {
             self.state.field_result_has_visible_content = true;
@@ -9022,6 +9083,8 @@ impl Parser {
 
     fn push_placeholder(&mut self, text: String, offset: usize) -> Result<(), ParseError> {
         self.finish_paragraph(offset)?;
+        self.mark_object_result_visible_content();
+        self.mark_field_result_visible_content();
         self.push_document_block(Block::Placeholder(text), offset)?;
         Ok(())
     }
@@ -9032,6 +9095,12 @@ impl Parser {
         text: String,
         offset: usize,
     ) -> Result<(), ParseError> {
+        if self.state.inside_object
+            && self.state.object_result_seen
+            && text == "[Field removed: no passive result]"
+        {
+            return Ok(());
+        }
         match destination {
             destination
                 if is_header_destination(destination) || is_footer_destination(destination) =>
@@ -10624,6 +10693,7 @@ impl Parser {
         offset: usize,
     ) -> Result<(), ParseError> {
         let image = self.apply_current_shape_image_placement(image, offset);
+        self.mark_object_result_visible_content();
         self.mark_field_result_visible_content();
         if is_header_destination(destination) {
             self.finish_header_paragraph(offset)?;
@@ -12643,8 +12713,7 @@ impl Parser {
     }
 
     fn apply_current_list_level_character_style(&mut self, index: i32, offset: usize) -> bool {
-        let mut visited = Vec::new();
-        if let Some(style) = self.resolve_style(index, &mut visited) {
+        if let Some(style) = self.resolve_style(index) {
             self.update_current_list_level_character_style(|current| {
                 *current = inherit_character_style(current, &style.character);
             });
@@ -13126,8 +13195,7 @@ impl Parser {
     }
 
     fn apply_paragraph_style(&mut self, index: i32, offset: usize) -> bool {
-        let mut visited = Vec::new();
-        if let Some(style) = self.resolve_style(index, &mut visited) {
+        if let Some(style) = self.resolve_style(index) {
             if style.kind != StyleKind::Paragraph {
                 self.diagnostics.push(Diagnostic::warning(
                     format!("RTF character style {index} ignored as paragraph style"),
@@ -13154,8 +13222,7 @@ impl Parser {
     }
 
     fn apply_character_style(&mut self, index: i32, offset: usize) -> bool {
-        let mut visited = Vec::new();
-        if let Some(style) = self.resolve_style(index, &mut visited) {
+        if let Some(style) = self.resolve_style(index) {
             self.state.character = inherit_character_style(&self.state.character, &style.character);
             true
         } else if index == 0 {
@@ -13175,8 +13242,7 @@ impl Parser {
         let Some(current_style_index) = self.state.paragraph_style_index else {
             return;
         };
-        let mut visited = Vec::new();
-        let Some(current_style) = self.resolve_style(current_style_index, &mut visited) else {
+        let Some(current_style) = self.resolve_style(current_style_index) else {
             self.state.paragraph_style_index = None;
             return;
         };
@@ -13185,34 +13251,47 @@ impl Parser {
         }
     }
 
-    fn resolve_style(&self, index: i32, visited: &mut Vec<i32>) -> Option<StyleDefinition> {
-        if visited.contains(&index) {
-            return None;
+    fn resolve_style(&self, index: i32) -> Option<StyleDefinition> {
+        let mut chain = Vec::new();
+        let mut visited = Vec::new();
+        let mut current_index = index;
+
+        loop {
+            if visited.contains(&current_index) {
+                break;
+            }
+            let Some(style) = self
+                .styles
+                .iter()
+                .find(|style| style.index == current_index)
+                .cloned()
+            else {
+                break;
+            };
+            visited.push(current_index);
+            let base_index = style.based_on;
+            let style_index = style.index;
+            chain.push(style);
+            match base_index {
+                Some(base_index) if base_index != style_index => current_index = base_index,
+                _ => break,
+            }
         }
-        visited.push(index);
-        let style = self
-            .styles
-            .iter()
-            .find(|style| style.index == index)?
-            .clone();
-        let Some(base_index) = style.based_on else {
-            return Some(style);
-        };
-        if base_index == style.index {
-            return Some(style);
+
+        let mut chain = chain.into_iter().rev();
+        let mut resolved = chain.next()?;
+        for style in chain {
+            resolved = StyleDefinition {
+                index: style.index,
+                name: style.name.clone(),
+                based_on: style.based_on,
+                next_style: style.next_style,
+                kind: style.kind,
+                paragraph: inherit_paragraph_style(&resolved.paragraph, &style.paragraph),
+                character: inherit_character_style(&resolved.character, &style.character),
+            };
         }
-        let Some(base) = self.resolve_style(base_index, visited) else {
-            return Some(style);
-        };
-        Some(StyleDefinition {
-            index: style.index,
-            name: style.name.clone(),
-            based_on: style.based_on,
-            next_style: style.next_style,
-            kind: style.kind,
-            paragraph: inherit_paragraph_style(&base.paragraph, &style.paragraph),
-            character: inherit_character_style(&base.character, &style.character),
-        })
+        Some(resolved)
     }
 
     fn handle_active_content(&mut self, feature: &str, offset: usize) -> Result<(), ParseError> {
@@ -14437,8 +14516,20 @@ fn destination_allows_visible_content(state: &ParserState) -> bool {
     !state.inside_metadata
         && !matches!(
             state.destination,
+            Destination::Ignored | Destination::ObjectData | Destination::FieldInstruction
+        )
+}
+
+fn destination_allows_field_result(state: &ParserState) -> bool {
+    !state.inside_metadata
+        && !matches!(
+            state.destination,
             Destination::Ignored | Destination::ObjectData
         )
+}
+
+fn destination_allows_field_instruction(state: &ParserState) -> bool {
+    !state.inside_metadata && state.destination != Destination::ObjectData
 }
 
 fn destination_allows_object_result(state: &ParserState) -> bool {
@@ -14446,7 +14537,32 @@ fn destination_allows_object_result(state: &ParserState) -> bool {
 }
 
 fn destination_allows_safe_structural_content(state: &ParserState) -> bool {
-    !state.inside_metadata && state.destination != Destination::ObjectData
+    !state.inside_metadata
+        && !matches!(
+            state.destination,
+            Destination::ObjectData | Destination::FieldInstruction
+        )
+}
+
+fn destination_allows_structural_destination_start(
+    state: &ParserState,
+    stack: &[ParserState],
+    control_follows_ignorable_destination_marker: bool,
+) -> bool {
+    if !destination_allows_safe_structural_content(state) {
+        return false;
+    }
+    if state.destination != Destination::Ignored {
+        return true;
+    }
+    control_follows_ignorable_destination_marker
+        && stack.last().is_some_and(|parent| {
+            !parent.inside_metadata
+                && !matches!(
+                    parent.destination,
+                    Destination::Ignored | Destination::ObjectData | Destination::FieldInstruction
+                )
+        })
 }
 
 fn destination_allows_visible_old_style_list_marker(state: &ParserState) -> bool {
@@ -20816,7 +20932,53 @@ mod tests {
         };
 
         assert!(paragraph.runs[0].style.bold);
+        assert!(paragraph.runs[0].style.italic);
         assert_eq!(paragraph.runs[0].text, "Safe");
+    }
+
+    #[test]
+    fn deep_stylesheet_based_on_chain_resolves_iteratively() {
+        let mut parser = Parser::new(Vec::new(), RtfParseOptions::default());
+        let mut base_paragraph = ParagraphStyle {
+            alignment: Alignment::Center,
+            left_indent_twips: 720,
+            ..ParagraphStyle::default()
+        };
+        let mut base_character = CharacterStyle {
+            bold: true,
+            ..CharacterStyle::default()
+        };
+        parser.styles.push(StyleDefinition {
+            index: 1,
+            name: None,
+            based_on: None,
+            next_style: None,
+            kind: StyleKind::Paragraph,
+            paragraph: base_paragraph.clone(),
+            character: base_character.clone(),
+        });
+        for index in 2..=512 {
+            base_paragraph = ParagraphStyle::default();
+            base_character = CharacterStyle::default();
+            if index == 512 {
+                base_character.italic = true;
+            }
+            parser.styles.push(StyleDefinition {
+                index,
+                name: None,
+                based_on: Some(index - 1),
+                next_style: None,
+                kind: StyleKind::Paragraph,
+                paragraph: base_paragraph.clone(),
+                character: base_character.clone(),
+            });
+        }
+        let resolved = parser.resolve_style(512).expect("deep style chain");
+
+        assert_eq!(resolved.paragraph.alignment, Alignment::Center);
+        assert_eq!(resolved.paragraph.left_indent_twips, 720);
+        assert!(resolved.character.bold);
+        assert!(resolved.character.italic);
     }
 
     #[test]

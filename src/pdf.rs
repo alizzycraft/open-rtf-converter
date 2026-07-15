@@ -264,6 +264,8 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
 const MAX_AUDITED_PDF_NAME_BYTES: usize = 128;
 const OVERLONG_PDF_NAME_TOKEN: &str = "<overlong PDF name>";
 const MALFORMED_PDF_NAME_ESCAPE_TOKEN: &str = "<malformed PDF name escape>";
+const MISSING_STREAM_LENGTH_TOKEN: &str = "<missing direct stream length>";
+const DUPLICATE_STREAM_LENGTH_TOKEN: &str = "<duplicate direct stream length>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PassivePdfIssue {
@@ -375,15 +377,19 @@ pub fn audit_passive_pdf_bytes(pdf: &[u8]) -> Result<(), PassivePdfError> {
                     });
                     break;
                 }
+                Some(DeclaredStreamEnd::DuplicateLength) => {
+                    issues.push(PassivePdfIssue {
+                        token: DUPLICATE_STREAM_LENGTH_TOKEN,
+                        offset,
+                    });
+                    break;
+                }
                 None => {
-                    let Some(stream_end) = find_endstream_marker(pdf, stream_start) else {
-                        issues.push(PassivePdfIssue {
-                            token: "<unterminated stream>",
-                            offset,
-                        });
-                        break;
-                    };
-                    stream_end
+                    issues.push(PassivePdfIssue {
+                        token: MISSING_STREAM_LENGTH_TOKEN,
+                        offset,
+                    });
+                    break;
                 }
             };
             offset = stream_end + b"endstream".len();
@@ -508,7 +514,7 @@ pub fn estimate_passive_pdf_object_count(
 ) -> usize {
     let page_used_font_indexes = collect_page_used_font_indexes(layout, font_provider);
     let used_font_indexes = collect_used_font_indexes(&page_used_font_indexes);
-    let extended_latin_usage = collect_extended_latin_font_usage(layout);
+    let extended_latin_usage = collect_extended_latin_font_usage(layout, font_provider);
     2usize
         .saturating_add(layout.pages.len().saturating_mul(2))
         .saturating_add(used_font_indexes.len())
@@ -558,7 +564,7 @@ pub fn render_pdf_with_font_provider(
     let zapf_dingbats_to_unicode_ref = font_index_for_resource(ZAPF_DINGBATS_REGULAR)
         .and_then(|index| font_refs[index])
         .map(|_| next_ref(&mut next_object_id));
-    let extended_latin_usage = collect_extended_latin_font_usage(layout);
+    let extended_latin_usage = collect_extended_latin_font_usage(layout, font_provider);
     let mut extended_latin_to_unicode_refs = [None; 14];
     for (font_idx, usage) in extended_latin_usage.iter().enumerate() {
         if !usage.is_empty() {
@@ -615,235 +621,18 @@ pub fn render_pdf_with_font_provider(
         page_writer.finish();
 
         let mut content = Content::new();
-        for (item_idx, item) in page.items.iter().enumerate() {
-            match item {
-                LayoutItem::Highlight {
-                    x,
-                    y,
-                    width,
-                    height,
-                    color,
-                } => {
-                    set_fill_color(&mut content, *color);
-                    content.rect(*x, *y, *width, *height);
-                    content.fill_nonzero();
-                }
-                LayoutItem::Text(fragment) => {
-                    draw_text_layout_item(
-                        &mut content,
-                        fragment,
-                        layout,
-                        font_provider,
-                        &supplied_fonts,
-                    );
-                }
-                LayoutItem::Underline {
-                    x,
-                    y,
-                    width,
-                    color,
-                    style,
-                } => {
-                    draw_underline(&mut content, *x, *y, *width, *color, *style);
-                }
-                LayoutItem::Line {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    width,
-                    color,
-                    style,
-                } => {
-                    draw_passive_line(&mut content, *x1, *y1, *x2, *y2, *width, *color, *style);
-                }
-                LayoutItem::Ellipse {
-                    x,
-                    y,
-                    width,
-                    height,
-                    stroke_width,
-                    stroke_color,
-                    stroke_style,
-                    fill_color,
-                } => {
-                    draw_passive_ellipse(
-                        &mut content,
-                        *x,
-                        *y,
-                        *width,
-                        *height,
-                        *stroke_width,
-                        *stroke_color,
-                        *stroke_style,
-                        *fill_color,
-                    );
-                }
-                LayoutItem::RoundedRectangle {
-                    x,
-                    y,
-                    width,
-                    height,
-                    radius,
-                    stroke_width,
-                    stroke_color,
-                    stroke_style,
-                    fill_color,
-                } => {
-                    draw_passive_rounded_rectangle(
-                        &mut content,
-                        *x,
-                        *y,
-                        *width,
-                        *height,
-                        *radius,
-                        *stroke_width,
-                        *stroke_color,
-                        *stroke_style,
-                        *fill_color,
-                    );
-                }
-                LayoutItem::Polygon {
-                    points,
-                    stroke_width,
-                    stroke_color,
-                    stroke_style,
-                    fill_color,
-                } => {
-                    draw_passive_polygon(
-                        &mut content,
-                        points,
-                        *stroke_width,
-                        *stroke_color,
-                        *stroke_style,
-                        StaticImageVectorFillRule::Winding,
-                        *fill_color,
-                    );
-                }
-                LayoutItem::Drawing(fragment) => match fragment.item.as_ref() {
-                    LayoutItem::Highlight {
-                        x,
-                        y,
-                        width,
-                        height,
-                        color,
-                    } => {
-                        set_fill_color(&mut content, *color);
-                        content.rect(*x, *y, *width, *height);
-                        content.fill_nonzero();
-                    }
-                    LayoutItem::Line {
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                        width,
-                        color,
-                        style,
-                    } => {
-                        draw_passive_line(&mut content, *x1, *y1, *x2, *y2, *width, *color, *style);
-                    }
-                    LayoutItem::Ellipse {
-                        x,
-                        y,
-                        width,
-                        height,
-                        stroke_width,
-                        stroke_color,
-                        stroke_style,
-                        fill_color,
-                    } => {
-                        draw_passive_ellipse(
-                            &mut content,
-                            *x,
-                            *y,
-                            *width,
-                            *height,
-                            *stroke_width,
-                            *stroke_color,
-                            *stroke_style,
-                            *fill_color,
-                        );
-                    }
-                    LayoutItem::RoundedRectangle {
-                        x,
-                        y,
-                        width,
-                        height,
-                        radius,
-                        stroke_width,
-                        stroke_color,
-                        stroke_style,
-                        fill_color,
-                    } => {
-                        draw_passive_rounded_rectangle(
-                            &mut content,
-                            *x,
-                            *y,
-                            *width,
-                            *height,
-                            *radius,
-                            *stroke_width,
-                            *stroke_color,
-                            *stroke_style,
-                            *fill_color,
-                        );
-                    }
-                    LayoutItem::Polygon {
-                        points,
-                        stroke_width,
-                        stroke_color,
-                        stroke_style,
-                        fill_color,
-                    } => {
-                        draw_passive_polygon(
-                            &mut content,
-                            points,
-                            *stroke_width,
-                            *stroke_color,
-                            *stroke_style,
-                            StaticImageVectorFillRule::Winding,
-                            *fill_color,
-                        );
-                    }
-                    LayoutItem::Text(fragment) => {
-                        draw_text_layout_item(
-                            &mut content,
-                            fragment,
-                            layout,
-                            font_provider,
-                            &supplied_fonts,
-                        );
-                    }
-                    _ => {}
-                },
-                LayoutItem::Image(fragment) => {
-                    if fragment.image.format == ImageFormat::Placeholder {
-                        draw_passive_image_placeholder(&mut content, fragment);
-                        continue;
-                    }
-                    if fragment.image.format == ImageFormat::WmfVector {
-                        draw_passive_wmf_vector_image(&mut content, fragment);
-                        continue;
-                    }
-                    if let Some(image_ref) = image_refs.get(idx).and_then(|page_images| {
-                        page_images
-                            .iter()
-                            .find(|image| image.item_index == item_idx)
-                    }) {
-                        let draw = image_draw_rect(fragment);
-                        content.save_state();
-                        if draw.clipped {
-                            content.rect(fragment.x, fragment.y, fragment.width, fragment.height);
-                            content.clip_nonzero();
-                            content.end_path();
-                        }
-                        content.transform([draw.width, 0.0, 0.0, draw.height, draw.x, draw.y]);
-                        content.x_object(Name(&image_ref.name));
-                        content.restore_state();
-                    }
-                }
-            }
+        let mut image_ref_cursor = 0usize;
+        let page_images = image_refs.get(idx).map(Vec::as_slice).unwrap_or(&[]);
+        for item in &page.items {
+            draw_layout_item(
+                &mut content,
+                item,
+                layout,
+                font_provider,
+                &supplied_fonts,
+                page_images,
+                &mut image_ref_cursor,
+            );
         }
         pdf.stream(content_id, &content.finish());
     }
@@ -904,17 +693,16 @@ pub fn render_pdf_with_font_provider(
     write_supplied_pdf_fonts(&mut pdf, font_provider, &supplied_fonts);
 
     for (page_idx, page) in layout.pages.iter().enumerate() {
-        for (item_idx, item) in page.items.iter().enumerate() {
-            let LayoutItem::Image(fragment) = item else {
-                continue;
+        let page_images = image_refs.get(page_idx).map(Vec::as_slice).unwrap_or(&[]);
+        let mut image_ref_cursor = 0usize;
+        for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+            if !image_format_uses_xobject(fragment.image.format) {
+                return;
+            }
+            let Some(image_ref) = page_images.get(image_ref_cursor) else {
+                return;
             };
-            let Some(image_ref) = image_refs.get(page_idx).and_then(|page_images| {
-                page_images
-                    .iter()
-                    .find(|image| image.item_index == item_idx)
-            }) else {
-                continue;
-            };
+            image_ref_cursor = image_ref_cursor.saturating_add(1);
             match fragment.image.format {
                 ImageFormat::Jpeg | ImageFormat::JpegGrayscale | ImageFormat::JpegCmyk => {
                     let mut image = pdf.image_xobject(image_ref.id, &fragment.image.bytes);
@@ -980,10 +768,137 @@ pub fn render_pdf_with_font_provider(
                 }
                 ImageFormat::WmfVector | ImageFormat::Placeholder => {}
             }
-        }
+        });
     }
 
     pdf.finish()
+}
+
+fn draw_layout_item(
+    content: &mut Content,
+    item: &LayoutItem,
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+    supplied_fonts: &[SuppliedPdfFont],
+    page_images: &[PdfImageRef],
+    image_ref_cursor: &mut usize,
+) {
+    let mut item = item;
+    loop {
+        match item {
+            LayoutItem::Highlight {
+                x,
+                y,
+                width,
+                height,
+                color,
+            } => {
+                set_fill_color(content, *color);
+                content.rect(*x, *y, *width, *height);
+                content.fill_nonzero();
+                return;
+            }
+            LayoutItem::Text(fragment) => {
+                draw_text_layout_item(content, fragment, layout, font_provider, supplied_fonts);
+                return;
+            }
+            LayoutItem::Underline {
+                x,
+                y,
+                width,
+                color,
+                style,
+            } => {
+                draw_underline(content, *x, *y, *width, *color, *style);
+                return;
+            }
+            LayoutItem::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                width,
+                color,
+                style,
+            } => {
+                draw_passive_line(content, *x1, *y1, *x2, *y2, *width, *color, *style);
+                return;
+            }
+            LayoutItem::Ellipse {
+                x,
+                y,
+                width,
+                height,
+                stroke_width,
+                stroke_color,
+                stroke_style,
+                fill_color,
+            } => {
+                draw_passive_ellipse(
+                    content,
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                    *stroke_width,
+                    *stroke_color,
+                    *stroke_style,
+                    *fill_color,
+                );
+                return;
+            }
+            LayoutItem::RoundedRectangle {
+                x,
+                y,
+                width,
+                height,
+                radius,
+                stroke_width,
+                stroke_color,
+                stroke_style,
+                fill_color,
+            } => {
+                draw_passive_rounded_rectangle(
+                    content,
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                    *radius,
+                    *stroke_width,
+                    *stroke_color,
+                    *stroke_style,
+                    *fill_color,
+                );
+                return;
+            }
+            LayoutItem::Polygon {
+                points,
+                stroke_width,
+                stroke_color,
+                stroke_style,
+                fill_color,
+            } => {
+                draw_passive_polygon(
+                    content,
+                    points,
+                    *stroke_width,
+                    *stroke_color,
+                    *stroke_style,
+                    StaticImageVectorFillRule::Winding,
+                    *fill_color,
+                );
+                return;
+            }
+            LayoutItem::Image(fragment) => {
+                draw_image_layout_item(content, fragment, page_images, image_ref_cursor);
+                return;
+            }
+            LayoutItem::Drawing(fragment) => {
+                item = &fragment.item;
+            }
+        }
+    }
 }
 
 fn draw_text_layout_item(
@@ -1081,6 +996,39 @@ fn draw_text_layout_item(
     draw_passive_text_overlays(content, fragment);
 }
 
+fn draw_image_layout_item(
+    content: &mut Content,
+    fragment: &crate::layout::ImageFragment,
+    page_images: &[PdfImageRef],
+    image_ref_cursor: &mut usize,
+) {
+    if fragment.image.format == ImageFormat::Placeholder {
+        draw_passive_image_placeholder(content, fragment);
+        return;
+    }
+    if fragment.image.format == ImageFormat::WmfVector {
+        draw_passive_wmf_vector_image(content, fragment);
+        return;
+    }
+    if !image_format_uses_xobject(fragment.image.format) {
+        return;
+    }
+    let Some(image_ref) = page_images.get(*image_ref_cursor) else {
+        return;
+    };
+    *image_ref_cursor = (*image_ref_cursor).saturating_add(1);
+    let draw = image_draw_rect(fragment);
+    content.save_state();
+    if draw.clipped {
+        content.rect(fragment.x, fragment.y, fragment.width, fragment.height);
+        content.clip_nonzero();
+        content.end_path();
+    }
+    content.transform([draw.width, 0.0, 0.0, draw.height, draw.x, draw.y]);
+    content.x_object(Name(&image_ref.name));
+    content.restore_state();
+}
+
 fn next_ref(next_object_id: &mut i32) -> Ref {
     let reference = Ref::new(*next_object_id);
     *next_object_id += 1;
@@ -1129,27 +1077,22 @@ fn collect_used_font_indexes_for_page(
             font_resource_for_style(fragment.font_family, &fragment.style),
         );
     });
-    for item in &page.items {
-        match item {
-            LayoutItem::Image(fragment)
-                if fragment.image.format == ImageFormat::Placeholder
-                    && fragment.width >= 96.0
-                    && fragment.height >= 24.0 =>
-            {
-                mark_used_font_resource(&mut used, HELVETICA_REGULAR);
-            }
-            LayoutItem::Image(fragment)
-                if fragment
-                    .image
-                    .vector_commands
-                    .iter()
-                    .any(|command| matches!(command, StaticImageVectorCommand::Text { .. })) =>
-            {
-                mark_used_font_resource(&mut used, HELVETICA_REGULAR);
-            }
-            _ => {}
+    for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+        if fragment.image.format == ImageFormat::Placeholder
+            && fragment.width >= 96.0
+            && fragment.height >= 24.0
+        {
+            mark_used_font_resource(&mut used, HELVETICA_REGULAR);
         }
-    }
+        if fragment
+            .image
+            .vector_commands
+            .iter()
+            .any(|command| matches!(command, StaticImageVectorCommand::Text { .. }))
+        {
+            mark_used_font_resource(&mut used, HELVETICA_REGULAR);
+        }
+    });
     used_font_index_list(&used)
 }
 
@@ -1166,18 +1109,58 @@ fn for_each_layout_item_text_fragment<F>(item: &LayoutItem, callback: &mut F)
 where
     F: FnMut(&TextFragment),
 {
-    match item {
-        LayoutItem::Text(fragment) => callback(fragment),
-        LayoutItem::Drawing(fragment) => {
-            for_each_layout_item_text_fragment(&fragment.item, callback)
+    let mut item = item;
+    loop {
+        match item {
+            LayoutItem::Text(fragment) => {
+                callback(fragment);
+                return;
+            }
+            LayoutItem::Drawing(fragment) => {
+                item = &fragment.item;
+            }
+            LayoutItem::Highlight { .. }
+            | LayoutItem::Underline { .. }
+            | LayoutItem::Line { .. }
+            | LayoutItem::Ellipse { .. }
+            | LayoutItem::RoundedRectangle { .. }
+            | LayoutItem::Polygon { .. }
+            | LayoutItem::Image(_) => return,
         }
-        LayoutItem::Highlight { .. }
-        | LayoutItem::Underline { .. }
-        | LayoutItem::Line { .. }
-        | LayoutItem::Ellipse { .. }
-        | LayoutItem::RoundedRectangle { .. }
-        | LayoutItem::Polygon { .. }
-        | LayoutItem::Image(_) => {}
+    }
+}
+
+fn for_each_layout_image_fragment_on_page<F>(page: &crate::layout::LayoutPage, callback: &mut F)
+where
+    F: FnMut(&crate::layout::ImageFragment),
+{
+    for item in &page.items {
+        for_each_layout_item_image_fragment(item, callback);
+    }
+}
+
+fn for_each_layout_item_image_fragment<F>(item: &LayoutItem, callback: &mut F)
+where
+    F: FnMut(&crate::layout::ImageFragment),
+{
+    let mut item = item;
+    loop {
+        match item {
+            LayoutItem::Image(fragment) => {
+                callback(fragment);
+                return;
+            }
+            LayoutItem::Drawing(fragment) => {
+                item = &fragment.item;
+            }
+            LayoutItem::Text(_)
+            | LayoutItem::Highlight { .. }
+            | LayoutItem::Underline { .. }
+            | LayoutItem::Line { .. }
+            | LayoutItem::Ellipse { .. }
+            | LayoutItem::RoundedRectangle { .. }
+            | LayoutItem::Polygon { .. } => return,
+        }
     }
 }
 
@@ -1278,11 +1261,23 @@ fn collect_page_supplied_font_indexes(
         .collect()
 }
 
-fn collect_extended_latin_font_usage(layout: &LayoutDocument) -> [ExtendedLatinUsage; 14] {
+fn collect_extended_latin_font_usage(
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+) -> [ExtendedLatinUsage; 14] {
     let mut usage: [ExtendedLatinUsage; 14] =
         std::array::from_fn(|_| ExtendedLatinUsage::default());
     for page in &layout.pages {
         for_each_layout_text_fragment_on_page(page, &mut |fragment| {
+            if text_fragment_renders_as_passive_vector_only(fragment) {
+                return;
+            }
+            if font_provider
+                .and_then(|provider| supplied_text_encoding_parts(fragment, layout, provider))
+                .is_some()
+            {
+                return;
+            }
             let resource = font_resource_for_style(fragment.font_family, &fragment.style);
             let Some(font_idx) = font_index_for_resource(resource) else {
                 return;
@@ -1543,7 +1538,6 @@ fn clamp_crop_pair(first: &mut f32, second: &mut f32) {
 
 #[derive(Debug, Clone)]
 struct PdfImageRef {
-    item_index: usize,
     name: Vec<u8>,
     id: Ref,
 }
@@ -1554,25 +1548,16 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
         .pages
         .iter()
         .map(|page| {
-            page.items
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, item)| {
-                    if matches!(item, LayoutItem::Image(fragment) if image_format_uses_xobject(fragment.image.format))
-                    {
-                        let id = Ref::new(next_id);
-                        let name = format!("Im{}", next_id - first_image_id + 1).into_bytes();
-                        next_id += 1;
-                        Some(PdfImageRef {
-                            item_index: idx,
-                            name,
-                            id,
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+            let mut refs = Vec::new();
+            for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+                if image_format_uses_xobject(fragment.image.format) {
+                    let id = Ref::new(next_id);
+                    let name = format!("Im{}", next_id - first_image_id + 1).into_bytes();
+                    next_id += 1;
+                    refs.push(PdfImageRef { name, id });
+                }
+            });
+            refs
         })
         .collect()
 }
@@ -1595,12 +1580,13 @@ fn count_image_xobjects(layout: &LayoutDocument) -> usize {
         .pages
         .iter()
         .map(|page| {
-            page.items
-                .iter()
-                .filter(|item| {
-                    matches!(item, LayoutItem::Image(fragment) if image_format_uses_xobject(fragment.image.format))
-                })
-                .count()
+            let mut count = 0usize;
+            for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+                if image_format_uses_xobject(fragment.image.format) {
+                    count = count.saturating_add(1);
+                }
+            });
+            count
         })
         .sum()
 }
@@ -2650,6 +2636,7 @@ fn stream_data_start(pdf: &[u8], stream_offset: usize) -> Option<usize> {
 enum DeclaredStreamEnd {
     Found(usize),
     Malformed,
+    DuplicateLength,
 }
 
 fn stream_end_from_declared_length(
@@ -2658,7 +2645,11 @@ fn stream_end_from_declared_length(
     stream_start: usize,
 ) -> Option<DeclaredStreamEnd> {
     let (dictionary_start, dictionary_end) = stream_dictionary_bounds(pdf, stream_offset)?;
-    let declared_length = pdf_dictionary_direct_length(pdf, dictionary_start, dictionary_end)?;
+    let declared_length = match pdf_dictionary_direct_length(pdf, dictionary_start, dictionary_end)?
+    {
+        PdfStreamLength::Direct(length) => length,
+        PdfStreamLength::Duplicate => return Some(DeclaredStreamEnd::DuplicateLength),
+    };
     let Some(stream_data_end) = stream_start.checked_add(declared_length) else {
         return Some(DeclaredStreamEnd::Malformed);
     };
@@ -2679,76 +2670,240 @@ fn stream_dictionary_bounds(pdf: &[u8], stream_offset: usize) -> Option<(usize, 
         return None;
     }
     let dictionary_end = cursor + 1;
+    let mut offset = pdf_object_scan_start_before_stream(pdf, stream_offset);
     let mut depth = 0usize;
-    let mut idx = cursor.checked_sub(2)?;
-    loop {
-        if pdf.get(idx).copied() == Some(b'>')
-            && idx
-                .checked_sub(1)
-                .and_then(|previous| pdf.get(previous))
-                .copied()
-                == Some(b'>')
-        {
-            depth = depth.checked_add(1)?;
-            idx = idx.checked_sub(2)?;
-            continue;
-        }
-        if pdf.get(idx).copied() == Some(b'<') && pdf.get(idx + 1).copied() == Some(b'<') {
-            if depth == 0 {
-                return Some((idx, dictionary_end));
+    let mut dictionary_start = None;
+    while offset < dictionary_end {
+        match pdf[offset] {
+            b'%' => {
+                offset = skip_pdf_comment(pdf, offset, dictionary_end);
+                continue;
             }
-            depth -= 1;
-            idx = idx.checked_sub(1)?;
-            continue;
+            b'(' => {
+                offset = skip_pdf_literal_string(pdf, offset, dictionary_end);
+                continue;
+            }
+            b'<' if pdf.get(offset + 1).copied() == Some(b'<') => {
+                if depth == 0 {
+                    dictionary_start = Some(offset);
+                }
+                depth = depth.checked_add(1)?;
+                offset += 2;
+                continue;
+            }
+            b'<' => {
+                offset = skip_pdf_hex_string(pdf, offset, dictionary_end);
+                continue;
+            }
+            b'>' if pdf.get(offset + 1).copied() == Some(b'>') => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                let close_end = offset + 2;
+                if depth == 0 {
+                    if close_end == dictionary_end {
+                        return dictionary_start.map(|start| (start, dictionary_end));
+                    }
+                    dictionary_start = None;
+                }
+                offset = close_end;
+                continue;
+            }
+            _ => {}
         }
-        let Some(previous) = idx.checked_sub(1) else {
-            break;
-        };
-        idx = previous;
+        offset += 1;
     }
     None
+}
+
+fn pdf_object_scan_start_before_stream(pdf: &[u8], stream_offset: usize) -> usize {
+    let mut cursor = stream_offset.saturating_sub(b"obj".len());
+    while cursor > 0 {
+        if pdf
+            .get(cursor..cursor + b"obj".len())
+            .is_some_and(|candidate| candidate == b"obj")
+            && cursor
+                .checked_sub(1)
+                .and_then(|idx| pdf.get(idx))
+                .copied()
+                .is_some_and(is_pdf_whitespace)
+            && pdf
+                .get(cursor + b"obj".len())
+                .copied()
+                .is_some_and(is_pdf_whitespace)
+        {
+            return cursor + b"obj".len();
+        }
+        cursor -= 1;
+    }
+    0
+}
+
+fn skip_pdf_comment(pdf: &[u8], mut offset: usize, limit: usize) -> usize {
+    offset += 1;
+    while offset < limit {
+        match pdf[offset] {
+            b'\r' => {
+                offset += 1;
+                if offset < limit && pdf[offset] == b'\n' {
+                    offset += 1;
+                }
+                return offset;
+            }
+            b'\n' => return offset + 1,
+            _ => offset += 1,
+        }
+    }
+    offset
+}
+
+fn skip_pdf_literal_string(pdf: &[u8], mut offset: usize, limit: usize) -> usize {
+    offset += 1;
+    let mut depth = 1usize;
+    while offset < limit {
+        match pdf[offset] {
+            b'\\' => {
+                offset = offset.saturating_add(2).min(limit);
+            }
+            b'(' => {
+                depth = depth.saturating_add(1);
+                offset += 1;
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                offset += 1;
+                if depth == 0 {
+                    return offset;
+                }
+            }
+            _ => offset += 1,
+        }
+    }
+    offset
+}
+
+fn skip_pdf_hex_string(pdf: &[u8], mut offset: usize, limit: usize) -> usize {
+    offset += 1;
+    while offset < limit {
+        if pdf[offset] == b'>' {
+            return offset + 1;
+        }
+        offset += 1;
+    }
+    offset
+}
+
+fn skip_pdf_whitespace_and_comments(pdf: &[u8], mut offset: usize, limit: usize) -> usize {
+    loop {
+        while offset < limit && pdf.get(offset).copied().is_some_and(is_pdf_whitespace) {
+            offset += 1;
+        }
+        if offset < limit && pdf[offset] == b'%' {
+            offset = skip_pdf_comment(pdf, offset, limit);
+            continue;
+        }
+        return offset;
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum PdfStreamLength {
+    Direct(usize),
+    Duplicate,
 }
 
 fn pdf_dictionary_direct_length(
     pdf: &[u8],
     dictionary_start: usize,
     dictionary_end: usize,
-) -> Option<usize> {
+) -> Option<PdfStreamLength> {
     let mut offset = dictionary_start.checked_add(2)?;
     let mut depth = 0usize;
+    let mut array_depth = 0usize;
+    let mut length = None;
     while offset < dictionary_end {
-        if pdf.get(offset).copied() == Some(b'<') && pdf.get(offset + 1).copied() == Some(b'<') {
-            depth = depth.checked_add(1)?;
-            offset += 2;
-            continue;
-        }
-        if pdf.get(offset).copied() == Some(b'>') && pdf.get(offset + 1).copied() == Some(b'>') {
-            if depth == 0 {
-                break;
+        match pdf[offset] {
+            b'%' => {
+                offset = skip_pdf_comment(pdf, offset, dictionary_end);
+                continue;
             }
-            depth -= 1;
-            offset += 2;
-            continue;
+            b'(' => {
+                offset = skip_pdf_literal_string(pdf, offset, dictionary_end);
+                continue;
+            }
+            b'<' if pdf.get(offset + 1).copied() == Some(b'<') => {
+                depth = depth.checked_add(1)?;
+                offset += 2;
+                continue;
+            }
+            b'<' => {
+                offset = skip_pdf_hex_string(pdf, offset, dictionary_end);
+                continue;
+            }
+            b'>' if pdf.get(offset + 1).copied() == Some(b'>') => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+                offset += 2;
+                continue;
+            }
+            b'[' if depth == 0 => {
+                array_depth = array_depth.checked_add(1)?;
+                offset += 1;
+                continue;
+            }
+            b']' if depth == 0 && array_depth > 0 => {
+                array_depth -= 1;
+                offset += 1;
+                continue;
+            }
+            _ => {}
         }
         if depth == 0
+            && array_depth == 0
             && pdf[offset] == b'/'
             && let Some(parsed_name) = parse_pdf_name_token(pdf, offset)
         {
             if parsed_name.name == b"/Length" {
-                return parse_pdf_unsigned_integer(pdf, parsed_name.end, dictionary_end);
+                let parsed_length =
+                    parse_pdf_direct_unsigned_integer(pdf, parsed_name.end, dictionary_end)?;
+                if length.replace(parsed_length).is_some() {
+                    return Some(PdfStreamLength::Duplicate);
+                }
             }
             offset = parsed_name.end;
             continue;
         }
         offset += 1;
     }
-    None
+    length.map(PdfStreamLength::Direct)
 }
 
-fn parse_pdf_unsigned_integer(pdf: &[u8], mut offset: usize, limit: usize) -> Option<usize> {
-    while offset < limit && is_pdf_whitespace(*pdf.get(offset)?) {
-        offset += 1;
+#[derive(Debug, Copy, Clone)]
+struct ParsedPdfUnsignedInteger {
+    value: usize,
+    end: usize,
+}
+
+fn parse_pdf_direct_unsigned_integer(pdf: &[u8], offset: usize, limit: usize) -> Option<usize> {
+    let parsed = parse_pdf_unsigned_integer(pdf, offset, limit)?;
+    if !is_pdf_direct_integer_value_boundary(pdf.get(parsed.end).copied()) {
+        return None;
     }
+    if pdf_indirect_reference_after_integer(pdf, parsed.end, limit) {
+        return None;
+    }
+    Some(parsed.value)
+}
+
+fn parse_pdf_unsigned_integer(
+    pdf: &[u8],
+    mut offset: usize,
+    limit: usize,
+) -> Option<ParsedPdfUnsignedInteger> {
+    offset = skip_pdf_whitespace_and_comments(pdf, offset, limit);
     let mut value = 0usize;
     let mut digits = 0usize;
     while offset < limit {
@@ -2762,7 +2917,47 @@ fn parse_pdf_unsigned_integer(pdf: &[u8], mut offset: usize, limit: usize) -> Op
         digits += 1;
         offset += 1;
     }
-    if digits == 0 { None } else { Some(value) }
+    if digits == 0 {
+        None
+    } else {
+        Some(ParsedPdfUnsignedInteger { value, end: offset })
+    }
+}
+
+fn pdf_indirect_reference_after_integer(pdf: &[u8], offset: usize, limit: usize) -> bool {
+    let mut cursor = offset;
+    if cursor >= limit
+        || !(pdf.get(cursor).copied().is_some_and(is_pdf_whitespace)
+            || pdf.get(cursor).copied() == Some(b'%'))
+    {
+        return false;
+    }
+    cursor = skip_pdf_whitespace_and_comments(pdf, cursor, limit);
+    let Some(generation) = parse_pdf_unsigned_integer(pdf, cursor, limit) else {
+        return false;
+    };
+    if !is_pdf_direct_integer_value_boundary(pdf.get(generation.end).copied()) {
+        return false;
+    }
+    cursor = generation.end;
+    if cursor >= limit
+        || !(pdf.get(cursor).copied().is_some_and(is_pdf_whitespace)
+            || pdf.get(cursor).copied() == Some(b'%'))
+    {
+        return false;
+    }
+    cursor = skip_pdf_whitespace_and_comments(pdf, cursor, limit);
+    pdf.get(cursor).copied() == Some(b'R')
+        && is_pdf_direct_integer_value_boundary(pdf.get(cursor + 1).copied())
+}
+
+fn is_pdf_direct_integer_value_boundary(byte: Option<u8>) -> bool {
+    match byte {
+        None => true,
+        Some(byte) if is_pdf_whitespace(byte) => true,
+        Some(b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%') => true,
+        _ => false,
+    }
 }
 
 fn stream_end_marker_after_declared_data(pdf: &[u8], stream_data_end: usize) -> Option<usize> {
@@ -2785,23 +2980,6 @@ fn stream_end_marker_after_declared_data(pdf: &[u8], stream_data_end: usize) -> 
     } else {
         None
     }
-}
-
-fn find_endstream_marker(pdf: &[u8], stream_start: usize) -> Option<usize> {
-    let mut offset = stream_start;
-    while offset < pdf.len() {
-        if pdf[offset..].starts_with(b"endstream")
-            && offset
-                .checked_sub(1)
-                .and_then(|idx| pdf.get(idx))
-                .is_some_and(|byte| is_pdf_whitespace(*byte))
-            && is_pdf_whitespace_or_eof(pdf.get(offset + b"endstream".len()).copied())
-        {
-            return Some(offset);
-        }
-        offset += 1;
-    }
-    None
 }
 
 fn is_pdf_name_boundary(byte: Option<u8>) -> bool {
@@ -4245,7 +4423,7 @@ fn lighten_color(color: PdfColor) -> PdfColor {
 #[cfg(test)]
 mod tests {
     use crate::fonts::{FontAsset, FontAssetStyle, FontProvider};
-    use crate::layout::LayoutEngine;
+    use crate::layout::{DrawingFragment, LayoutEngine, LayoutItem};
     use crate::model::{
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
         FontPitch, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER, PageSettings, Paragraph,
@@ -4419,6 +4597,270 @@ mod tests {
         assert!(
             pdf.windows(b"/Subtype /Image".len())
                 .any(|window| window == b"/Subtype /Image")
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn supplied_extended_latin_text_does_not_emit_unused_base_font_cmap() {
+        let mut document = Document {
+            fonts: vec![FontDef {
+                index: 0,
+                name: "Tuffy".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Variable,
+            }],
+            ..Document::default()
+        };
+        let mut style = CharacterStyle::default();
+        style.font_index = 0;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: ParagraphStyle::default(),
+            runs: vec![Run {
+                text: "Covered ő".to_string(),
+                style,
+            }],
+        })];
+        let provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["Tuffy".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: Default::default(),
+        };
+
+        let layout = LayoutEngine::layout_with_font_provider(&document, Some(&provider));
+        let estimated = estimate_passive_pdf_object_count(&layout, Some(&provider));
+        let pdf = render_pdf_with_font_provider(&layout, Some(&provider));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_fonts = page_font_resource_names(&pdf, 0);
+
+        assert_eq!(estimated, parsed.objects.len());
+        assert_eq!(estimated, 9);
+        assert!(page_fonts.iter().any(|name| name == b"TF1"));
+        assert!(!page_fonts.iter().any(|name| name == b"F1"));
+        assert!(
+            pdf.windows(b"/Subtype /Type0".len())
+                .any(|window| window == b"/Subtype /Type0")
+        );
+        assert!(
+            !pdf.windows(b"OpenRtfConverter-ExtendedLatin".len())
+                .any(|window| window == b"OpenRtfConverter-ExtendedLatin"),
+            "supplied Type0 font text should not allocate an unused base-font Extended Latin CMap"
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn drawing_wrapped_placeholder_image_renders_passive_label() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Placeholder,
+            bytes: Vec::new(),
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(2160),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+        let mut layout = LayoutEngine::layout(&document);
+        let image_index = layout.pages[0]
+            .items
+            .iter()
+            .position(|item| matches!(item, LayoutItem::Image(_)))
+            .expect("laid-out placeholder image");
+        let image = layout.pages[0].items[image_index].clone();
+        layout.pages[0].items[image_index] = LayoutItem::Drawing(DrawingFragment {
+            z_order: 7,
+            below_text: false,
+            item: Box::new(image),
+        });
+
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+
+        assert_eq!(content_text(&content), "Image skipped");
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "S"),
+            "drawing-wrapped placeholder image should render passive frame"
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn drawing_wrapped_rgb_image_writes_passive_xobject() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Rgb8,
+            bytes: vec![255, 0, 0, 0, 0, 255],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 2,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(1440),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+        let mut layout = LayoutEngine::layout(&document);
+        let image_index = layout.pages[0]
+            .items
+            .iter()
+            .position(|item| matches!(item, LayoutItem::Image(_)))
+            .expect("laid-out RGB image");
+        let image = layout.pages[0].items[image_index].clone();
+        layout.pages[0].items[image_index] = LayoutItem::Drawing(DrawingFragment {
+            z_order: 7,
+            below_text: false,
+            item: Box::new(image),
+        });
+
+        let estimated = estimate_passive_pdf_object_count(&layout, None);
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+
+        assert_eq!(estimated, parsed.objects.len());
+        assert!(
+            pdf.windows(b"/Subtype /Image".len())
+                .any(|window| window == b"/Subtype /Image")
+        );
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "Do"),
+            "drawing-wrapped RGB image should invoke a passive image XObject"
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn nested_drawing_wrapped_rgb_image_writes_passive_xobject() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Rgb8,
+            bytes: vec![255, 0, 0, 0, 0, 255],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 2,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(1440),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+        let mut layout = LayoutEngine::layout(&document);
+        let image_index = layout.pages[0]
+            .items
+            .iter()
+            .position(|item| matches!(item, LayoutItem::Image(_)))
+            .expect("laid-out RGB image");
+        let image = layout.pages[0].items[image_index].clone();
+        layout.pages[0].items[image_index] = LayoutItem::Drawing(DrawingFragment {
+            z_order: 9,
+            below_text: false,
+            item: Box::new(LayoutItem::Drawing(DrawingFragment {
+                z_order: 7,
+                below_text: false,
+                item: Box::new(image),
+            })),
+        });
+
+        let estimated = estimate_passive_pdf_object_count(&layout, None);
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+
+        assert_eq!(estimated, parsed.objects.len());
+        assert!(
+            pdf.windows(b"/Subtype /Image".len())
+                .any(|window| window == b"/Subtype /Image")
+        );
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "Do"),
+            "nested drawing-wrapped RGB image should invoke a passive image XObject"
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn deep_drawing_wrapped_rgb_image_renders_with_stack_bounded_traversal() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Rgb8,
+            bytes: vec![255, 0, 0, 0, 0, 255],
+            palette: Vec::new(),
+            vector_commands: Vec::new(),
+            width_px: 2,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(1440),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+        let mut layout = LayoutEngine::layout(&document);
+        let image_index = layout.pages[0]
+            .items
+            .iter()
+            .position(|item| matches!(item, LayoutItem::Image(_)))
+            .expect("laid-out RGB image");
+        let mut image = layout.pages[0].items[image_index].clone();
+        for z_order in 0..512 {
+            image = LayoutItem::Drawing(DrawingFragment {
+                z_order,
+                below_text: false,
+                item: Box::new(image),
+            });
+        }
+        layout.pages[0].items[image_index] = image;
+
+        let estimated = estimate_passive_pdf_object_count(&layout, None);
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+
+        assert_eq!(estimated, parsed.objects.len());
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "Do"),
+            "deep drawing-wrapped RGB image should invoke a passive image XObject"
         );
         audit_passive_pdf_bytes(&pdf).unwrap();
     }
@@ -4884,6 +5326,68 @@ endobj
     }
 
     #[test]
+    fn passive_pdf_audit_ignores_fake_lengths_inside_dictionary_strings() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< /Info (<< /Length 12 >>) >>
+stream
+BT (visible text) Tj ET
+endstream
+endobj
+%%EOF";
+
+        let error = audit_passive_pdf_bytes(pdf)
+            .expect_err("string content must not provide stream audit bounds");
+
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == MISSING_STREAM_LENGTH_TOKEN),
+            "issues were {:?}",
+            error.issues
+        );
+    }
+
+    #[test]
+    fn passive_pdf_audit_ignores_fake_lengths_inside_dictionary_arrays() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< /Info [/Length 12 <2f4c656e677468203132>] >>
+stream
+BT (visible text) Tj ET
+endstream
+endobj
+%%EOF";
+
+        let error =
+            audit_passive_pdf_bytes(pdf).expect_err("array content must not provide stream bounds");
+
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == MISSING_STREAM_LENGTH_TOKEN),
+            "issues were {:?}",
+            error.issues
+        );
+    }
+
+    #[test]
+    fn passive_pdf_audit_accepts_stream_length_after_comments() {
+        let stream = b"BT (visible text) Tj ET\n";
+        let mut pdf = format!(
+            "%PDF-1.7\n1 0 obj\n<< /Info (<< /Length 999 >>) /Length % harmless comment\n{} >>\nstream\n",
+            stream.len()
+        )
+        .into_bytes();
+        pdf.extend_from_slice(stream);
+        pdf.extend_from_slice(b"endstream\nendobj\n%%EOF");
+
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
     fn passive_pdf_audit_rejects_mismatched_direct_stream_length() {
         let pdf = b"%PDF-1.7
 1 0 obj
@@ -4902,6 +5406,105 @@ endobj
                 .issues
                 .iter()
                 .any(|issue| issue.token == "<malformed stream length>"),
+            "issues were {:?}",
+            error.issues
+        );
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_missing_direct_stream_length() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< >>
+stream
+BT (visible text) Tj ET
+endstream
+endobj
+%%EOF";
+
+        let error = audit_passive_pdf_bytes(pdf)
+            .expect_err("stream without direct length has ambiguous passive audit bounds");
+
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == MISSING_STREAM_LENGTH_TOKEN),
+            "issues were {:?}",
+            error.issues
+        );
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_duplicate_direct_stream_length() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< /Length 0 /Length 22 >>
+stream
+BT (visible text) Tj ET
+endstream
+endobj
+%%EOF";
+
+        let error = audit_passive_pdf_bytes(pdf)
+            .expect_err("duplicate direct stream lengths have ambiguous passive audit bounds");
+
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == DUPLICATE_STREAM_LENGTH_TOKEN),
+            "issues were {:?}",
+            error.issues
+        );
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_indirect_stream_length() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< /Length 2 0 R >>
+stream
+BT (visible text) Tj ET
+endstream
+endobj
+2 0 obj
+22
+endobj
+%%EOF";
+
+        let error = audit_passive_pdf_bytes(pdf)
+            .expect_err("indirect stream length has ambiguous passive audit bounds");
+
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == MISSING_STREAM_LENGTH_TOKEN),
+            "issues were {:?}",
+            error.issues
+        );
+    }
+
+    #[test]
+    fn passive_pdf_audit_rejects_malformed_stream_length_token() {
+        let pdf = b"%PDF-1.7
+1 0 obj
+<< /Length 12abc >>
+stream
+BT (visible text) Tj ET
+endstream
+endobj
+%%EOF";
+
+        let error = audit_passive_pdf_bytes(pdf)
+            .expect_err("malformed stream length has ambiguous passive audit bounds");
+
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == MISSING_STREAM_LENGTH_TOKEN),
             "issues were {:?}",
             error.issues
         );

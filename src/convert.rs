@@ -109,10 +109,7 @@ pub fn convert_rtf_to_pdf(
         ));
     }
     let page_count = layout.pages.len();
-    let layout_item_count = layout
-        .pages
-        .iter()
-        .fold(0usize, |count, page| count.saturating_add(page.items.len()));
+    let layout_item_count = count_layout_items(&layout);
     let item_limit = options.parse_options.limits.max_pdf_layout_items;
     if layout_item_count > item_limit {
         return Err(ConvertError::TooManyLayoutItems {
@@ -150,6 +147,35 @@ pub fn convert_rtf_to_pdf(
         diagnostics,
         pages: page_count,
     })
+}
+
+fn count_layout_items(layout: &LayoutDocument) -> usize {
+    layout.pages.iter().fold(0usize, |count, page| {
+        page.items.iter().fold(count, |count, item| {
+            count.saturating_add(count_layout_item(item))
+        })
+    })
+}
+
+fn count_layout_item(item: &LayoutItem) -> usize {
+    let mut count = 0usize;
+    let mut item = item;
+    loop {
+        count = count.saturating_add(1);
+        match item {
+            LayoutItem::Drawing(fragment) => {
+                item = &fragment.item;
+            }
+            LayoutItem::Text(_)
+            | LayoutItem::Highlight { .. }
+            | LayoutItem::Underline { .. }
+            | LayoutItem::Line { .. }
+            | LayoutItem::Ellipse { .. }
+            | LayoutItem::RoundedRectangle { .. }
+            | LayoutItem::Polygon { .. }
+            | LayoutItem::Image(_) => return count,
+        }
+    }
 }
 
 fn passive_font_substitution_diagnostics(
@@ -336,18 +362,24 @@ fn for_each_layout_item_text_fragment<F>(item: &LayoutItem, callback: &mut F)
 where
     F: FnMut(&TextFragment),
 {
-    match item {
-        LayoutItem::Text(fragment) => callback(fragment),
-        LayoutItem::Drawing(fragment) => {
-            for_each_layout_item_text_fragment(&fragment.item, callback)
+    let mut item = item;
+    loop {
+        match item {
+            LayoutItem::Text(fragment) => {
+                callback(fragment);
+                return;
+            }
+            LayoutItem::Drawing(fragment) => {
+                item = &fragment.item;
+            }
+            LayoutItem::Highlight { .. }
+            | LayoutItem::Underline { .. }
+            | LayoutItem::Line { .. }
+            | LayoutItem::Ellipse { .. }
+            | LayoutItem::RoundedRectangle { .. }
+            | LayoutItem::Polygon { .. }
+            | LayoutItem::Image(_) => return,
         }
-        LayoutItem::Highlight { .. }
-        | LayoutItem::Underline { .. }
-        | LayoutItem::Line { .. }
-        | LayoutItem::Ellipse { .. }
-        | LayoutItem::RoundedRectangle { .. }
-        | LayoutItem::Polygon { .. }
-        | LayoutItem::Image(_) => {}
     }
 }
 
@@ -355,18 +387,24 @@ fn for_each_layout_item_image_fragment<F>(item: &LayoutItem, callback: &mut F)
 where
     F: FnMut(&ImageFragment),
 {
-    match item {
-        LayoutItem::Image(fragment) => callback(fragment),
-        LayoutItem::Drawing(fragment) => {
-            for_each_layout_item_image_fragment(&fragment.item, callback)
+    let mut item = item;
+    loop {
+        match item {
+            LayoutItem::Image(fragment) => {
+                callback(fragment);
+                return;
+            }
+            LayoutItem::Drawing(fragment) => {
+                item = &fragment.item;
+            }
+            LayoutItem::Text(_)
+            | LayoutItem::Highlight { .. }
+            | LayoutItem::Underline { .. }
+            | LayoutItem::Line { .. }
+            | LayoutItem::Ellipse { .. }
+            | LayoutItem::RoundedRectangle { .. }
+            | LayoutItem::Polygon { .. } => return,
         }
-        LayoutItem::Text(_)
-        | LayoutItem::Highlight { .. }
-        | LayoutItem::Underline { .. }
-        | LayoutItem::Line { .. }
-        | LayoutItem::Ellipse { .. }
-        | LayoutItem::RoundedRectangle { .. }
-        | LayoutItem::Polygon { .. } => {}
     }
 }
 
@@ -521,4 +559,65 @@ pub fn convert_rtf_file_to_pdf(
         diagnostics: converted.diagnostics,
         pages: converted.pages,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::DrawingFragment;
+    use crate::model::{Block, Document, Paragraph, Run};
+
+    #[test]
+    fn layout_item_limit_count_recurses_through_drawing_wrappers() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Nested drawing text".to_string(),
+                style: Default::default(),
+            }],
+        })];
+        let mut layout = LayoutEngine::layout(&document);
+        let top_level_count = layout.pages[0].items.len();
+        let item = layout.pages[0].items[0].clone();
+        layout.pages[0].items[0] = LayoutItem::Drawing(DrawingFragment {
+            z_order: 3,
+            below_text: false,
+            item: Box::new(LayoutItem::Drawing(DrawingFragment {
+                z_order: 2,
+                below_text: false,
+                item: Box::new(item),
+            })),
+        });
+
+        assert_eq!(layout.pages[0].items.len(), top_level_count);
+        assert_eq!(count_layout_items(&layout), top_level_count + 2);
+    }
+
+    #[test]
+    fn layout_item_limit_count_handles_deep_drawing_wrapper_chain_iteratively() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Deep drawing text".to_string(),
+                style: Default::default(),
+            }],
+        })];
+        let mut layout = LayoutEngine::layout(&document);
+        let top_level_count = layout.pages[0].items.len();
+        let wrapper_count = 512usize;
+        let mut item = layout.pages[0].items[0].clone();
+        for z_order in 0..wrapper_count {
+            item = LayoutItem::Drawing(DrawingFragment {
+                z_order: z_order as i32,
+                below_text: false,
+                item: Box::new(item),
+            });
+        }
+        layout.pages[0].items[0] = item;
+
+        assert_eq!(layout.pages[0].items.len(), top_level_count);
+        assert_eq!(count_layout_items(&layout), top_level_count + wrapper_count);
+    }
 }

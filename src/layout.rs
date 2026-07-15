@@ -2546,28 +2546,43 @@ fn layout_item_vertical_bounds(item: &LayoutItem) -> Option<VerticalBounds> {
             top: image.y + image.height,
             bottom: image.y,
         }),
-        LayoutItem::Drawing(drawing) => layout_item_vertical_bounds(&drawing.item),
+        LayoutItem::Drawing(drawing) => {
+            let mut current = drawing.item.as_ref();
+            loop {
+                match current {
+                    LayoutItem::Drawing(nested) => current = nested.item.as_ref(),
+                    leaf => return layout_item_vertical_bounds(leaf),
+                }
+            }
+        }
     }
 }
 
 fn translate_layout_item_y(item: &mut LayoutItem, delta_y: f32) {
-    match item {
-        LayoutItem::Highlight { y, .. } => *y += delta_y,
-        LayoutItem::Text(fragment) => fragment.baseline_y += delta_y,
-        LayoutItem::Underline { y, .. } => *y += delta_y,
-        LayoutItem::Line { y1, y2, .. } => {
-            *y1 += delta_y;
-            *y2 += delta_y;
-        }
-        LayoutItem::Ellipse { y, .. } => *y += delta_y,
-        LayoutItem::RoundedRectangle { y, .. } => *y += delta_y,
-        LayoutItem::Polygon { points, .. } => {
-            for point in points {
-                point.y += delta_y;
+    let mut current = item;
+    loop {
+        match current {
+            LayoutItem::Highlight { y, .. } => *y += delta_y,
+            LayoutItem::Text(fragment) => fragment.baseline_y += delta_y,
+            LayoutItem::Underline { y, .. } => *y += delta_y,
+            LayoutItem::Line { y1, y2, .. } => {
+                *y1 += delta_y;
+                *y2 += delta_y;
+            }
+            LayoutItem::Ellipse { y, .. } => *y += delta_y,
+            LayoutItem::RoundedRectangle { y, .. } => *y += delta_y,
+            LayoutItem::Polygon { points, .. } => {
+                for point in points {
+                    point.y += delta_y;
+                }
+            }
+            LayoutItem::Image(image) => image.y += delta_y,
+            LayoutItem::Drawing(drawing) => {
+                current = drawing.item.as_mut();
+                continue;
             }
         }
-        LayoutItem::Image(image) => image.y += delta_y,
-        LayoutItem::Drawing(drawing) => translate_layout_item_y(&mut drawing.item, delta_y),
+        break;
     }
 }
 
@@ -5776,7 +5791,7 @@ struct LateMarkerGeometry {
 fn replace_late_page_marker(page: &mut LayoutPage, marker: &str, replacement: &str) {
     let mut adjustments = Vec::new();
     for (idx, item) in page.items.iter_mut().enumerate() {
-        let LayoutItem::Text(fragment) = item else {
+        let Some(fragment) = layout_item_text_fragment_mut(item) else {
             continue;
         };
         if !fragment.text.contains(marker) {
@@ -5823,9 +5838,7 @@ fn late_marker_geometry(
     page: &LayoutPage,
     adjustment: LateMarkerWidthAdjustment,
 ) -> Option<LateMarkerGeometry> {
-    let LayoutItem::Text(fragment) = page.items.get(adjustment.text_index)? else {
-        return None;
-    };
+    let fragment = layout_item_text_fragment(page.items.get(adjustment.text_index)?)?;
     Some(LateMarkerGeometry {
         x: fragment.x,
         baseline_y: fragment.baseline_y,
@@ -5979,7 +5992,13 @@ fn item_starts_after_late_marker_on_line(
                 && (*y1 - geometry.baseline_y).abs() <= geometry.font_size
         }
         LayoutItem::Drawing(drawing) => {
-            item_starts_after_late_marker_on_line(&drawing.item, old_end, geometry)
+            let mut current = drawing.item.as_ref();
+            loop {
+                match current {
+                    LayoutItem::Drawing(nested) => current = nested.item.as_ref(),
+                    leaf => return item_starts_after_late_marker_on_line(leaf, old_end, geometry),
+                }
+            }
         }
         _ => false,
     }
@@ -5992,21 +6011,58 @@ fn same_late_marker_line(baseline_y: f32, geometry: LateMarkerGeometry) -> bool 
 fn starts_new_text_line(item: &LayoutItem, geometry: LateMarkerGeometry) -> bool {
     match item {
         LayoutItem::Text(fragment) if !same_late_marker_line(fragment.baseline_y, geometry) => true,
-        LayoutItem::Drawing(drawing) => starts_new_text_line(&drawing.item, geometry),
+        LayoutItem::Drawing(drawing) => {
+            let mut current = drawing.item.as_ref();
+            loop {
+                match current {
+                    LayoutItem::Drawing(nested) => current = nested.item.as_ref(),
+                    leaf => return starts_new_text_line(leaf, geometry),
+                }
+            }
+        }
         _ => false,
     }
 }
 
 fn shift_layout_item_x(item: &mut LayoutItem, delta: f32) {
-    match item {
-        LayoutItem::Text(fragment) => fragment.x += delta,
-        LayoutItem::Highlight { x, .. } | LayoutItem::Underline { x, .. } => *x += delta,
-        LayoutItem::Line { x1, x2, .. } => {
-            *x1 += delta;
-            *x2 += delta;
+    let mut current = item;
+    loop {
+        match current {
+            LayoutItem::Text(fragment) => fragment.x += delta,
+            LayoutItem::Highlight { x, .. } | LayoutItem::Underline { x, .. } => *x += delta,
+            LayoutItem::Line { x1, x2, .. } => {
+                *x1 += delta;
+                *x2 += delta;
+            }
+            LayoutItem::Drawing(drawing) => {
+                current = drawing.item.as_mut();
+                continue;
+            }
+            _ => {}
         }
-        LayoutItem::Drawing(drawing) => shift_layout_item_x(&mut drawing.item, delta),
-        _ => {}
+        break;
+    }
+}
+
+fn layout_item_text_fragment(item: &LayoutItem) -> Option<&TextFragment> {
+    let mut current = item;
+    loop {
+        match current {
+            LayoutItem::Text(fragment) => return Some(fragment),
+            LayoutItem::Drawing(drawing) => current = drawing.item.as_ref(),
+            _ => return None,
+        }
+    }
+}
+
+fn layout_item_text_fragment_mut(item: &mut LayoutItem) -> Option<&mut TextFragment> {
+    let mut current = item;
+    loop {
+        match current {
+            LayoutItem::Text(fragment) => return Some(fragment),
+            LayoutItem::Drawing(drawing) => current = drawing.item.as_mut(),
+            _ => return None,
+        }
     }
 }
 
@@ -6026,7 +6082,7 @@ fn resolve_bookmark_page_ref_markers(
     let mut page_for_bookmark = Vec::<(usize, String)>::new();
     for page in pages.iter() {
         for item in &page.items {
-            if let LayoutItem::Text(fragment) = item
+            if let Some(fragment) = layout_item_text_fragment(item)
                 && let Some(id) =
                     parse_bookmark_page_marker_id(&fragment.text, BOOKMARK_PAGE_ANCHOR_MARKER)
             {
@@ -6045,7 +6101,7 @@ fn resolve_bookmark_page_ref_markers(
     for page in pages {
         let mut shifts = Vec::<(usize, f32, f32, f32)>::new();
         for (item_idx, item) in page.items.iter_mut().enumerate() {
-            if let LayoutItem::Text(fragment) = item {
+            if let Some(fragment) = layout_item_text_fragment_mut(item) {
                 if parse_bookmark_page_marker_id(&fragment.text, BOOKMARK_PAGE_ANCHOR_MARKER)
                     .is_some()
                 {
@@ -6075,7 +6131,7 @@ fn resolve_bookmark_page_ref_markers(
                 continue;
             }
             for item in page.items.iter_mut().skip(marker_idx.saturating_add(1)) {
-                if let LayoutItem::Text(fragment) = item
+                if let Some(fragment) = layout_item_text_fragment_mut(item)
                     && (fragment.baseline_y - baseline_y).abs() < 0.01
                     && fragment.x >= marker_x
                 {
@@ -8248,10 +8304,12 @@ pub fn twips_to_points(twips: i32) -> f32 {
 mod tests {
     use crate::fonts::{FontAsset, FontAssetStyle, FontProviderLimits};
     use crate::model::{
-        Block, Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat,
-        PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, Paragraph, Run, StaticImagePlacement,
-        StaticShape, StaticShapeKind, StaticShapePoint, Table, TableCell, TableCellBorder,
-        TableCellBorders, TableCellPadding, TableCellSpacing, TableCellVerticalMerge, TableRow,
+        BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER, Block,
+        Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER,
+        PageNumberFormat, PageSettings, Paragraph, Run, SECTION_PAGES_MARKER, StaticImagePlacement,
+        StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, Table, TableCell,
+        TableCellBorder, TableCellBorders, TableCellPadding, TableCellSpacing,
+        TableCellVerticalMerge, TableRow,
     };
 
     use super::*;
@@ -8264,6 +8322,179 @@ mod tests {
             document_chars: "0".to_string(),
             document_chars_with_spaces: "0".to_string(),
         }
+    }
+
+    fn deep_drawing_wrapped_item(mut item: LayoutItem, depth: usize) -> LayoutItem {
+        for layer in 0..depth {
+            item = LayoutItem::Drawing(DrawingFragment {
+                z_order: layer.min(i32::MAX as usize) as i32,
+                below_text: false,
+                item: Box::new(item),
+            });
+        }
+        item
+    }
+
+    fn leaf_text_fragment(item: &LayoutItem) -> &TextFragment {
+        let mut current = item;
+        loop {
+            match current {
+                LayoutItem::Drawing(drawing) => current = drawing.item.as_ref(),
+                LayoutItem::Text(fragment) => return fragment,
+                _ => panic!("expected text leaf"),
+            }
+        }
+    }
+
+    fn passive_text_item(text: &str, x: f32, baseline_y: f32) -> LayoutItem {
+        LayoutItem::Text(TextFragment {
+            text: text.to_string(),
+            x,
+            baseline_y,
+            color: PdfColor::default(),
+            font_family: PdfFontFamily::Helvetica,
+            word_spacing: 0.0,
+            style: CharacterStyle::default(),
+        })
+    }
+
+    #[test]
+    fn deep_drawing_wrapped_vertical_bounds_are_iterative() {
+        let item = deep_drawing_wrapped_item(passive_text_item("Layered", 18.0, 64.0), 2048);
+
+        let bounds = layout_item_vertical_bounds(&item).expect("vertical bounds");
+
+        assert!(bounds.top > 64.0);
+        assert!(bounds.bottom < 64.0);
+    }
+
+    #[test]
+    fn deep_drawing_wrapped_layout_shifts_are_iterative() {
+        let mut item = deep_drawing_wrapped_item(passive_text_item("Shifted", 18.0, 64.0), 2048);
+
+        translate_layout_item_y(&mut item, -12.0);
+        shift_layout_item_x(&mut item, 7.5);
+
+        let fragment = leaf_text_fragment(&item);
+        assert!((fragment.x - 25.5).abs() < 0.01);
+        assert!((fragment.baseline_y - 52.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn deep_drawing_wrapped_late_marker_checks_are_iterative() {
+        let same_line = deep_drawing_wrapped_item(passive_text_item("After", 72.0, 64.0), 2048);
+        let next_line = deep_drawing_wrapped_item(passive_text_item("Next", 72.0, 40.0), 2048);
+        let geometry = LateMarkerGeometry {
+            x: 36.0,
+            baseline_y: 64.0,
+            old_width: 24.0,
+            new_width: 30.0,
+            font_size: 12.0,
+        };
+
+        assert!(item_starts_after_late_marker_on_line(
+            &same_line,
+            geometry.x + geometry.old_width,
+            geometry
+        ));
+        assert!(!starts_new_text_line(&same_line, geometry));
+        assert!(starts_new_text_line(&next_line, geometry));
+    }
+
+    #[test]
+    fn drawing_wrapped_bookmark_page_markers_resolve_without_internal_marker_leakage() {
+        let settings = PageSettings::default();
+        let geometry = PageGeometry::from_settings(
+            &settings,
+            PageNumbering::from_page_settings(&settings, 1),
+            1,
+            0,
+        );
+        let mut pages = vec![
+            new_layout_page(geometry, 1),
+            new_layout_page(geometry.for_physical_page(2), 2),
+        ];
+        pages[0].items.push(deep_drawing_wrapped_item(
+            passive_text_item(
+                &format!("{BOOKMARK_PAGE_ANCHOR_MARKER}7{BOOKMARK_PAGE_MARKER_END}"),
+                36.0,
+                64.0,
+            ),
+            2048,
+        ));
+        pages[1].items.push(deep_drawing_wrapped_item(
+            passive_text_item(
+                &format!("{BOOKMARK_PAGE_REF_MARKER}7{BOOKMARK_PAGE_MARKER_END}"),
+                36.0,
+                64.0,
+            ),
+            2048,
+        ));
+        pages[1].items.push(deep_drawing_wrapped_item(
+            passive_text_item(" after", 44.0, 64.0),
+            2048,
+        ));
+        let old_suffix_x = leaf_text_fragment(&pages[1].items[1]).x;
+        let document = Document::default();
+
+        resolve_bookmark_page_ref_markers(&mut pages, &document, None);
+
+        assert_eq!(leaf_text_fragment(&pages[0].items[0]).text, "");
+        let resolved = leaf_text_fragment(&pages[1].items[0]);
+        assert_eq!(resolved.text, "1");
+        assert!(!resolved.text.contains(BOOKMARK_PAGE_REF_MARKER));
+        assert!(!resolved.text.contains(BOOKMARK_PAGE_MARKER_END));
+        assert!(leaf_text_fragment(&pages[1].items[1]).x > old_suffix_x);
+    }
+
+    #[test]
+    fn drawing_wrapped_late_page_count_markers_resolve_without_internal_marker_leakage() {
+        let settings = PageSettings::default();
+        let geometry = PageGeometry::from_settings(
+            &settings,
+            PageNumbering::from_page_settings(&settings, 1),
+            1,
+            0,
+        );
+        let mut pages = vec![
+            new_layout_page(geometry, 1),
+            new_layout_page(geometry.for_physical_page(2), 2),
+        ];
+        let marker_x = 36.0;
+        let marker_baseline = 64.0;
+        let old_marker_width = measure_text_with_family(
+            LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+            &CharacterStyle::default(),
+            PdfFontFamily::Helvetica,
+        );
+        pages[0].items.push(deep_drawing_wrapped_item(
+            passive_text_item(TOTAL_PAGES_MARKER, marker_x, marker_baseline),
+            2048,
+        ));
+        pages[0].items.push(deep_drawing_wrapped_item(
+            passive_text_item(" after", marker_x + old_marker_width + 2.0, marker_baseline),
+            2048,
+        ));
+        pages[0].items.push(deep_drawing_wrapped_item(
+            passive_text_item(SECTION_PAGES_MARKER, 36.0, 40.0),
+            2048,
+        ));
+        let old_suffix_x = leaf_text_fragment(&pages[0].items[1]).x;
+
+        resolve_section_page_markers(&mut pages);
+        resolve_total_page_markers(&mut pages);
+
+        let total = leaf_text_fragment(&pages[0].items[0]);
+        let suffix = leaf_text_fragment(&pages[0].items[1]);
+        let section_pages = leaf_text_fragment(&pages[0].items[2]);
+        assert_eq!(total.text, "2");
+        assert_eq!(section_pages.text, "2");
+        assert!(!total.text.contains(TOTAL_PAGES_MARKER));
+        assert!(!section_pages.text.contains(SECTION_PAGES_MARKER));
+        assert!(
+            suffix.x < old_suffix_x,
+            "suffix should shift left after replacing the bounded page-count placeholder"
+        );
     }
 
     #[test]
