@@ -3979,33 +3979,30 @@ impl Parser {
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
             "par" => self.finish_current_paragraph_for_destination(offset)?,
-            "line" => self.push_text("\n", offset)?,
-            "chpgn" => self.push_text(PAGE_NUMBER_MARKER, offset)?,
-            "sectnum" => self.push_text(SECTION_NUMBER_MARKER, offset)?,
+            "line" => self.push_visible_control_text("\n", offset)?,
+            "chpgn" => self.push_visible_control_text(PAGE_NUMBER_MARKER, offset)?,
+            "sectnum" => self.push_visible_control_text(SECTION_NUMBER_MARKER, offset)?,
             "chftn" => self.push_note_reference(offset)?,
             "chdate" | "chtime" | "chdpa" | "chdpl" => {
                 self.handle_dynamic_date_time_control(control.name.as_str(), offset)?
             }
-            "emdash" => self.push_text("\u{2014}", offset)?,
-            "endash" => self.push_text("\u{2013}", offset)?,
-            "bullet" => self.push_text("\u{2022}", offset)?,
-            "lquote" => self.push_text("\u{2018}", offset)?,
-            "rquote" => self.push_text("\u{2019}", offset)?,
-            "ldblquote" => self.push_text("\u{201c}", offset)?,
-            "rdblquote" => self.push_text("\u{201d}", offset)?,
-            "emspace" => self.push_text("\u{2003}", offset)?,
-            "enspace" => self.push_text("\u{2002}", offset)?,
-            "qmspace" => self.push_text("\u{2005}", offset)?,
-            "zwbo" => self.push_text("\u{200b}", offset)?,
-            "zwnbo" => self.push_text("\u{feff}", offset)?,
-            "zwnj" => self.push_text("\u{200c}", offset)?,
-            "zwj" => self.push_text("\u{200d}", offset)?,
-            "ltrmark" => self.push_text("\u{200e}", offset)?,
-            "rtlmark" => self.push_text("\u{200f}", offset)?,
-            "tab" if self.state.destination == Destination::ListText => {
-                self.push_list_marker_text("\t", offset)?
-            }
-            "tab" => self.push_text("\t", offset)?,
+            "emdash" => self.push_visible_control_text("\u{2014}", offset)?,
+            "endash" => self.push_visible_control_text("\u{2013}", offset)?,
+            "bullet" => self.push_visible_control_text("\u{2022}", offset)?,
+            "lquote" => self.push_visible_control_text("\u{2018}", offset)?,
+            "rquote" => self.push_visible_control_text("\u{2019}", offset)?,
+            "ldblquote" => self.push_visible_control_text("\u{201c}", offset)?,
+            "rdblquote" => self.push_visible_control_text("\u{201d}", offset)?,
+            "emspace" => self.push_visible_control_text("\u{2003}", offset)?,
+            "enspace" => self.push_visible_control_text("\u{2002}", offset)?,
+            "qmspace" => self.push_visible_control_text("\u{2005}", offset)?,
+            "zwbo" => self.push_visible_control_text("\u{200b}", offset)?,
+            "zwnbo" => self.push_visible_control_text("\u{feff}", offset)?,
+            "zwnj" => self.push_visible_control_text("\u{200c}", offset)?,
+            "zwj" => self.push_visible_control_text("\u{200d}", offset)?,
+            "ltrmark" => self.push_visible_control_text("\u{200e}", offset)?,
+            "rtlmark" => self.push_visible_control_text("\u{200f}", offset)?,
+            "tab" => self.push_visible_control_text("\t", offset)?,
             "intbl" if control.parameter.unwrap_or(1) != 0 => self.ensure_carried_table_row(),
             "trowd" => self.start_table_row(offset)?,
             "trrh" => self.set_current_table_row_height(control.parameter, offset),
@@ -7227,6 +7224,67 @@ impl Parser {
         }
         push_text_to_paragraph(paragraph, text, &self.state.paragraph, &style);
         Ok(())
+    }
+
+    fn push_visible_control_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        match self.state.destination {
+            Destination::Body => {
+                if self.current_table.is_some() && self.current_table_row.is_none() {
+                    self.finish_table(offset)?;
+                }
+                if self.state.character.hidden {
+                    self.count_skipped_destination_bytes(text.len(), offset)
+                } else {
+                    self.push_text(text, offset)
+                }
+            }
+            Destination::ListText => {
+                if self.state.character.hidden {
+                    self.count_skipped_destination_bytes(text.len(), offset)
+                } else {
+                    self.push_list_marker_text(text, offset)
+                }
+            }
+            Destination::Header
+            | Destination::FirstPageHeader
+            | Destination::EvenPageHeader
+            | Destination::Footer
+            | Destination::FirstPageFooter
+            | Destination::EvenPageFooter
+            | Destination::ShapeText
+            | Destination::Footnote
+            | Destination::Endnote => {
+                if self.state.character.hidden {
+                    self.count_skipped_destination_bytes(text.len(), offset)
+                } else {
+                    self.push_text(text, offset)
+                }
+            }
+            Destination::BookmarkStart | Destination::BookmarkEnd => {
+                self.push_bookmark_name_text(text, offset)
+            }
+            Destination::StyleSheet => self.push_style_name_text(text, offset),
+            Destination::FontTable => self.push_font_text(text, offset),
+            Destination::FontAlternate => self.push_font_alternate_text(text, offset),
+            Destination::ListTable if self.state.list_context == ListContext::ListLevelText => {
+                self.push_list_level_text(text, offset)
+            }
+            Destination::ListOverrideTable
+                if self.state.list_context == ListContext::ListLevelText =>
+            {
+                self.push_list_level_text(text, offset)
+            }
+            Destination::Picture
+            | Destination::ListTable
+            | Destination::ListOverrideTable
+            | Destination::ColorTable
+            | Destination::FieldInstruction
+            | Destination::Shape
+            | Destination::Background
+            | Destination::Ignored
+            | Destination::Metadata
+            | Destination::ObjectData => self.count_skipped_destination_bytes(text.len(), offset),
+        }
     }
 
     fn map_symbol_like_font_text(&self, text: &str) -> Option<String> {
@@ -20771,7 +20829,7 @@ mod tests {
     #[test]
     fn hidden_text_controls_do_not_become_body_text() {
         let output = parse_rtf(
-            r"{\rtf1 Visible {\v hidden \emdash \u8217? \'41}{\v0 shown} {\vanish hidden2}{\vanish0 visible2}\par}",
+            r"{\rtf1 Visible {\v hidden \emdash \bullet \tab \line \u8217? \'41}{\v0 shown} {\vanish hidden2}{\vanish0 visible2}\par}",
         )
         .unwrap();
         let text = document_text(&output.document);
@@ -20782,6 +20840,9 @@ mod tests {
         assert!(!text.contains("hidden"));
         assert!(!text.contains("hidden2"));
         assert!(!text.contains("\u{2014}"));
+        assert!(!text.contains("\u{2022}"));
+        assert!(!text.contains('\t'));
+        assert!(!text.contains('\n'));
         assert!(!text.contains("\u{2019}"));
         assert!(!text.contains('A'));
     }

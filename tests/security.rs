@@ -3080,6 +3080,58 @@ fn formatted_explicit_listtext_marker_renders_passively_without_control_leakage(
 }
 
 #[test]
+fn named_control_explicit_list_marker_renders_as_marker_without_control_leakage() {
+    let input = br"{\rtf1{\*\pntext\bullet\tab}Named bullet marker\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("\u{2022}\tNamed bullet marker"),
+        "named control list marker should precede item text: {text:?}"
+    );
+    for forbidden in ["pntext"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden named list marker control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Named bullet marker"),
+        "decoded PDF text did not contain named list item text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"pntext".as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden named list marker content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn mixed_formatted_explicit_listtext_marker_renders_passively_without_control_leakage() {
     let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtext\b 1\b0\cf1 .\cf0\tab}Styled explicit\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
