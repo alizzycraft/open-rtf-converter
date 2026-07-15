@@ -8,6 +8,7 @@ pub const BOOKMARK_PAGE_MARKER_END: &str = "\u{f0007}";
 pub const DOCUMENT_WORDS_MARKER: &str = "\u{f0008}";
 pub const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
 pub const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
+pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {

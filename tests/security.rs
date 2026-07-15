@@ -9,8 +9,8 @@ use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint,
-    FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
+    FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment,
+    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
     StaticImageWrapSide, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
     TableRowAlignment, TextRelief, UnderlineStyle,
@@ -6974,6 +6974,61 @@ fn fields_render_result_without_executing_instruction() {
     assert!(text.contains("visible link"));
     assert!(!text.contains("HYPERLINK"));
     assert!(!text.contains("https://example.com"));
+}
+
+#[test]
+fn advance_field_offsets_passively_without_instruction_or_marker_pdf_leakage() {
+    let input = br#"{\rtf1 Before {\field{\*\fldinst ADVANCE \\r 240 \\d 120}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(text.contains(PASSIVE_ADVANCE_MARKER));
+    for forbidden in ["ADVANCE", "fldinst", "\\r", "\\d"] {
+        assert!(
+            !text.contains(forbidden),
+            "ADVANCE field instruction leaked to normalized text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "layout field ADVANCE interpreted as bounded passive horizontal cursor advance",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("layout field ADVANCE vertical cursor movement stripped")
+    }));
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(!rendered_text.contains(PASSIVE_ADVANCE_MARKER));
+    for forbidden in [
+        b"ADVANCE".as_slice(),
+        b"fldinst",
+        PASSIVE_ADVANCE_MARKER.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "ADVANCE field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
 }
 
 #[test]

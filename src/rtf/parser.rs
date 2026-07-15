@@ -7,15 +7,16 @@ use crate::model::{
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontDef,
     FontFamilyHint, FontPitch, FootnotePlacement, ImageCrop, ImageFormat, LineNumberRestart,
-    PAGE_NUMBER_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
-    ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
-    StaticImagePlacement, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageWrapSide, StaticShape,
-    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint,
-    StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell,
-    TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
-    TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge,
-    TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
+    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
+    PageVerticalAlignment, Paragraph, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImagePlacement,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint, StaticShapeVerticalAnchor,
+    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
+    TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
+    TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
+    TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -1766,12 +1767,7 @@ impl Parser {
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_layout_positioning_resultless_field(name)
                     {
-                        self.diagnostics.push(Diagnostic::warning(
-                            format!(
-                                "layout field {name} stripped without applying cursor positioning"
-                            ),
-                            Some(offset),
-                        ));
+                        self.handle_resultless_layout_field(name, &field_instruction, offset)?;
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_active_non_visible_resultless_field(name)
                     {
@@ -1973,12 +1969,7 @@ impl Parser {
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_layout_positioning_resultless_field(name)
                     {
-                        self.diagnostics.push(Diagnostic::warning(
-                            format!(
-                                "layout field {name} stripped without applying cursor positioning"
-                            ),
-                            Some(offset),
-                        ));
+                        self.handle_resultless_layout_field(name, &field_instruction, offset)?;
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_active_non_visible_resultless_field(name)
                     {
@@ -7831,7 +7822,7 @@ impl Parser {
     }
 
     fn capture_bookmark_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
-        if is_bookmark_page_marker(text) {
+        if is_bookmark_page_marker(text) || text == PASSIVE_ADVANCE_MARKER {
             return Ok(());
         }
         let max_text_run_len = self.limits().max_text_run_len;
@@ -8381,6 +8372,58 @@ impl Parser {
         self.state.character.baseline_shift_half_points = previous_baseline_shift;
         self.state.character.font_size_scale_percent = previous_font_size_scale;
         self.state.character.overline = previous_overline;
+        result
+    }
+
+    fn handle_resultless_layout_field(
+        &mut self,
+        name: &str,
+        instruction: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if name == "ADVANCE" {
+            let advance = passive_advance_field_offset_twips(
+                instruction,
+                self.limits().max_character_spacing_twips,
+            );
+            if advance.horizontal_twips != 0 {
+                self.push_passive_advance_marker(advance.horizontal_twips, offset)?;
+                self.diagnostics.push(Diagnostic::warning(
+                    "layout field ADVANCE interpreted as bounded passive horizontal cursor advance",
+                    Some(offset),
+                ));
+            }
+            if advance.ignored_vertical {
+                self.diagnostics.push(Diagnostic::warning(
+                    "layout field ADVANCE vertical cursor movement stripped without applying vertical positioning",
+                    Some(offset),
+                ));
+            }
+            if advance.horizontal_twips == 0 && !advance.ignored_vertical {
+                self.diagnostics.push(Diagnostic::warning(
+                    "layout field ADVANCE stripped without applying cursor positioning",
+                    Some(offset),
+                ));
+            }
+            return Ok(());
+        }
+
+        self.diagnostics.push(Diagnostic::warning(
+            format!("layout field {name} stripped without applying cursor positioning"),
+            Some(offset),
+        ));
+        Ok(())
+    }
+
+    fn push_passive_advance_marker(
+        &mut self,
+        horizontal_twips: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let previous_spacing = self.state.character.character_spacing_twips;
+        self.state.character.character_spacing_twips = horizontal_twips;
+        let result = self.push_text(PASSIVE_ADVANCE_MARKER, offset);
+        self.state.character.character_spacing_twips = previous_spacing;
         result
     }
 
@@ -15375,6 +15418,12 @@ struct PassiveFieldSegment {
     overline: bool,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+struct PassiveAdvanceFieldOffset {
+    horizontal_twips: i32,
+    ignored_vertical: bool,
+}
+
 struct FieldSequenceInstruction {
     name: String,
     repeat_current: bool,
@@ -15436,6 +15485,21 @@ impl PassiveFieldResult {
             font_size_half_points: None,
             form_field: false,
         }
+    }
+}
+
+fn passive_advance_field_offset_twips(
+    instruction: &str,
+    max_advance_twips: i32,
+) -> PassiveAdvanceFieldOffset {
+    let right = field_switch_i32_value(instruction, 'r').unwrap_or(0);
+    let left = field_switch_i32_value(instruction, 'l').unwrap_or(0);
+    let horizontal = i64::from(right) - i64::from(left);
+    let limit = i64::from(max_advance_twips.max(0));
+    PassiveAdvanceFieldOffset {
+        horizontal_twips: horizontal.clamp(-limit, limit) as i32,
+        ignored_vertical: field_switch_i32_value(instruction, 'u').unwrap_or(0) != 0
+            || field_switch_i32_value(instruction, 'd').unwrap_or(0) != 0,
     }
 }
 
@@ -17606,6 +17670,7 @@ fn is_internal_marker(text: &str) -> bool {
             | DOCUMENT_WORDS_MARKER
             | DOCUMENT_CHARS_MARKER
             | DOCUMENT_CHARS_WITH_SPACES_MARKER
+            | PASSIVE_ADVANCE_MARKER
             | PENDING_NOTE_REFERENCE_MARKER
     ) || is_bookmark_page_marker(text)
 }
@@ -17618,6 +17683,7 @@ fn contains_internal_marker(text: &str) -> bool {
         || text.contains(DOCUMENT_WORDS_MARKER)
         || text.contains(DOCUMENT_CHARS_MARKER)
         || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
+        || text.contains(PASSIVE_ADVANCE_MARKER)
         || text.contains(PENDING_NOTE_REFERENCE_MARKER)
         || text.contains(BOOKMARK_PAGE_ANCHOR_MARKER)
         || text.contains(BOOKMARK_PAGE_REF_MARKER)
@@ -17632,6 +17698,7 @@ fn sanitize_internal_markers(text: &str) -> String {
         .replace(DOCUMENT_WORDS_MARKER, "\u{fffd}")
         .replace(DOCUMENT_CHARS_MARKER, "\u{fffd}")
         .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "\u{fffd}")
+        .replace(PASSIVE_ADVANCE_MARKER, "\u{fffd}")
         .replace(PENDING_NOTE_REFERENCE_MARKER, "\u{fffd}")
         .replace(BOOKMARK_PAGE_ANCHOR_MARKER, "\u{fffd}")
         .replace(BOOKMARK_PAGE_REF_MARKER, "\u{fffd}")
@@ -24050,11 +24117,22 @@ After\par}"#;
 
     #[test]
     fn resultless_layout_advance_fields_strip_without_visible_placeholder() {
-        let input = r#"{\rtf1 Before {\field{\*\fldinst ADVANCE \r 240 \d 120}} after\par}"#;
+        let input = r#"{\rtf1 Before {\field{\*\fldinst ADVANCE \\r 240 \\d 120}} after\par}"#;
         let output = parse_rtf(input).unwrap();
         let text = document_text(&output.document);
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let advance = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text == PASSIVE_ADVANCE_MARKER)
+            .expect("passive advance marker");
 
-        assert!(text.contains("Before  after"), "text was {text:?}");
+        assert!(text.contains("Before"), "text was {text:?}");
+        assert!(text.contains("after"), "text was {text:?}");
+        assert_eq!(advance.style.character_spacing_twips, 240);
         assert!(!text.contains("[Field removed"));
         for forbidden in ["ADVANCE", "\\r", "\\d", "fldinst"] {
             assert!(
@@ -24063,10 +24141,42 @@ After\par}"#;
             );
         }
         assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "layout field ADVANCE interpreted as bounded passive horizontal cursor advance",
+            )
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("layout field ADVANCE stripped without applying cursor positioning")
+                .contains("layout field ADVANCE vertical cursor movement stripped")
         }));
+    }
+
+    #[test]
+    fn resultless_layout_advance_field_horizontal_offset_is_bounded() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_character_spacing_twips: 120,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1 Before {\field{\*\fldinst ADVANCE \\r 9999 \\l 20}} after\par}",
+            &options,
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let advance = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text == PASSIVE_ADVANCE_MARKER)
+            .expect("passive advance marker");
+
+        assert_eq!(advance.style.character_spacing_twips, 120);
     }
 
     #[test]

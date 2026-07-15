@@ -6,9 +6,9 @@ use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
     DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontDef, FontFamilyHint, FontPitch,
-    FootnotePlacement, ImageFormat, LineNumberRestart, PAGE_NUMBER_MARKER, PageNumberFormat,
-    PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run,
-    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
+    FootnotePlacement, ImageFormat, LineNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
+    PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
+    ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImageVectorCommand, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
     StaticShapeKind, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table,
     TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
@@ -4719,6 +4719,7 @@ fn push_passive_line_number(
 fn line_has_visible_text(line: &Line) -> bool {
     line.runs.iter().any(|run| {
         !run.style.hidden
+            && !is_passive_advance_marker(&run.text)
             && !run.text.trim().is_empty()
             && parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_none()
             && parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_none()
@@ -5237,6 +5238,7 @@ fn contains_inline_marker(text: &str) -> bool {
         || text.contains(DOCUMENT_WORDS_MARKER)
         || text.contains(DOCUMENT_CHARS_MARKER)
         || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
+        || text.contains(PASSIVE_ADVANCE_MARKER)
 }
 
 fn paragraph_contains_page_number_marker(paragraph: &Paragraph) -> bool {
@@ -5812,7 +5814,8 @@ fn remove_internal_stat_markers(text: &str) -> String {
         .replace(SECTION_PAGES_MARKER, "")
         .replace(DOCUMENT_WORDS_MARKER, "")
         .replace(DOCUMENT_CHARS_MARKER, "")
-        .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "");
+        .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "")
+        .replace(PASSIVE_ADVANCE_MARKER, "");
     while let Some((start, end)) = next_bookmark_page_marker_range(&cleaned, 0) {
         cleaned.replace_range(start..end, "");
     }
@@ -6328,12 +6331,27 @@ fn push_text_segments_preserving_tabs(
 ) {
     let mut start = 0;
     for (idx, ch) in text.char_indices() {
-        if ch == '\t' {
+        let is_passive_advance = ch.to_string() == PASSIVE_ADVANCE_MARKER;
+        if ch == '\t' || is_passive_advance {
             if start < idx {
                 let text = text[start..idx].replace('\u{00ad}', "");
                 if !text.is_empty() {
                     push_display_text_segment(output, &text, style, false);
                 }
+            }
+            if is_passive_advance {
+                output.push(FlowRun {
+                    text: PASSIVE_ADVANCE_MARKER.to_string(),
+                    style: style.clone(),
+                    width: passive_advance_width_points(style),
+                    line_height_points: 0.0,
+                    tab_leader: TabLeader::None,
+                    tab_alignment: TabAlignment::Left,
+                    tab_stop_position: None,
+                    soft_hyphen_after: false,
+                });
+                start = idx + ch.len_utf8();
+                continue;
             }
             output.push(FlowRun {
                 text: "\t".to_string(),
@@ -6679,6 +6697,9 @@ fn flow_run_line_height(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
+    if is_passive_advance_marker(&run.text) {
+        return 0.0;
+    }
     let fallback = fallback_flow_run_line_height(run);
     let passive_base14_fallback = || passive_base14_fallback_flow_run_line_height(run, document);
     let Some(provider) = font_provider else {
@@ -6736,6 +6757,9 @@ fn measure_flow_run(
     {
         return 0.0;
     }
+    if is_passive_advance_marker(&run.text) {
+        return passive_advance_width_points(&run.style);
+    }
     if run.text == "\t" {
         return next_tab_position(current_line_width, paragraph_style, document)
             - current_line_width;
@@ -6751,6 +6775,14 @@ fn measure_flow_run(
         document,
         font_provider,
     )
+}
+
+fn is_passive_advance_marker(text: &str) -> bool {
+    text == PASSIVE_ADVANCE_MARKER
+}
+
+fn passive_advance_width_points(style: &CharacterStyle) -> f32 {
+    twips_to_points(style.character_spacing_twips)
 }
 
 fn next_tab_position(
@@ -6923,6 +6955,10 @@ fn push_line_with_rotation(
     let page = pages.last_mut().expect("layout always has a page");
 
     for run in &line.runs {
+        if is_passive_advance_marker(&run.text) {
+            cursor_x += run.width;
+            continue;
+        }
         if parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
             || parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_some()
         {
@@ -13725,6 +13761,64 @@ mod tests {
             .expect("expanded text");
 
         assert_eq!(fragment.style.character_spacing_twips, 200);
+    }
+
+    #[test]
+    fn passive_advance_marker_offsets_following_text_without_rendering_marker() {
+        fn x_for_after(runs: Vec<Run>) -> (f32, bool) {
+            let mut document = Document::default();
+            document.blocks = vec![Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs,
+            })];
+            let layout = LayoutEngine::layout(&document);
+            let mut marker_rendered = false;
+            let mut after_x = None;
+            for item in &layout.pages[0].items {
+                if let LayoutItem::Text(fragment) = item {
+                    if fragment.text == PASSIVE_ADVANCE_MARKER {
+                        marker_rendered = true;
+                    }
+                    if fragment.text == "After" {
+                        after_x = Some(fragment.x);
+                    }
+                }
+            }
+            (after_x.expect("After text"), marker_rendered)
+        }
+
+        let base_runs = vec![
+            Run {
+                text: "Before ".to_string(),
+                style: Default::default(),
+            },
+            Run {
+                text: "After".to_string(),
+                style: Default::default(),
+            },
+        ];
+        let mut advance_style = CharacterStyle::default();
+        advance_style.character_spacing_twips = 240;
+        let advanced_runs = vec![
+            Run {
+                text: "Before ".to_string(),
+                style: Default::default(),
+            },
+            Run {
+                text: PASSIVE_ADVANCE_MARKER.to_string(),
+                style: advance_style,
+            },
+            Run {
+                text: "After".to_string(),
+                style: Default::default(),
+            },
+        ];
+
+        let (base_x, _) = x_for_after(base_runs);
+        let (advanced_x, marker_rendered) = x_for_after(advanced_runs);
+
+        assert!(!marker_rendered);
+        assert!((advanced_x - base_x - 12.0).abs() < 0.01);
     }
 
     #[test]
