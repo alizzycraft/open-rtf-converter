@@ -4017,11 +4017,12 @@ fn push_table_borders(
         let cell_bottom = (bottom + spacing.bottom).min(cell_top - 1.0);
         if cell.borders.top.visible && cell.vertical_merge != TableCellVerticalMerge::Continuation {
             let (width, color, style) = table_border_stroke(&cell.borders.top, document);
+            let border_y = cell_top + twips_to_points(cell.borders.top.spacing_twips.max(0));
             page.items.push(LayoutItem::Line {
                 x1,
-                y1: cell_top,
+                y1: border_y,
                 x2,
-                y2: cell_top,
+                y2: border_y,
                 width,
                 color,
                 style,
@@ -4031,11 +4032,12 @@ fn push_table_borders(
             && !next_row_continues_vertical_merge(row, next_row, visual_cell.cell_index)
         {
             let (width, color, style) = table_border_stroke(&cell.borders.bottom, document);
+            let border_y = cell_bottom - twips_to_points(cell.borders.bottom.spacing_twips.max(0));
             page.items.push(LayoutItem::Line {
                 x1,
-                y1: cell_bottom,
+                y1: border_y,
                 x2,
-                y2: cell_bottom,
+                y2: border_y,
                 width,
                 color,
                 style,
@@ -4043,10 +4045,11 @@ fn push_table_borders(
         }
         if cell.borders.left.visible {
             let (width, color, style) = table_border_stroke(&cell.borders.left, document);
+            let border_x = x1 - twips_to_points(cell.borders.left.spacing_twips.max(0));
             page.items.push(LayoutItem::Line {
-                x1,
+                x1: border_x,
                 y1: cell_top,
-                x2: x1,
+                x2: border_x,
                 y2: cell_bottom,
                 width,
                 color,
@@ -4055,10 +4058,11 @@ fn push_table_borders(
         }
         if cell.borders.right.visible {
             let (width, color, style) = table_border_stroke(&cell.borders.right, document);
+            let border_x = x2 + twips_to_points(cell.borders.right.spacing_twips.max(0));
             page.items.push(LayoutItem::Line {
-                x1: x2,
+                x1: border_x,
                 y1: cell_top,
-                x2,
+                x2: border_x,
                 y2: cell_bottom,
                 width,
                 color,
@@ -10411,6 +10415,69 @@ mod tests {
             item,
             LayoutItem::Line { y1, y2, .. } if (*y1 - *y2).abs() < 0.01
         )));
+    }
+
+    #[test]
+    fn lays_out_table_cell_border_spacing_as_passive_offsets() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Table(Table {
+            column_widths_twips: vec![1440],
+            borders_visible: true,
+            preserve_authored_widths: false,
+            rows: vec![TableRow {
+                height_twips: Some(720),
+                left_offset_twips: 0,
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    spacing: Default::default(),
+                    borders: TableCellBorders {
+                        left: TableCellBorder {
+                            spacing_twips: 240,
+                            ..TableCellBorder::default()
+                        },
+                        right: TableCellBorder {
+                            spacing_twips: 120,
+                            ..TableCellBorder::default()
+                        },
+                        top: TableCellBorder {
+                            spacing_twips: 60,
+                            ..TableCellBorder::default()
+                        },
+                        bottom: TableCellBorder {
+                            spacing_twips: 180,
+                            ..TableCellBorder::default()
+                        },
+                        ..TableCellBorders::default()
+                    },
+                    fit_text: false,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text: "Spaced borders".to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+
+        assert!(has_vertical_line_at(page, 60.0));
+        assert!(has_vertical_line_at(page, 150.0));
+        assert!(has_horizontal_line_at(page, 72.0, 144.0, 723.0));
+        assert!(has_horizontal_line_at(page, 72.0, 144.0, 675.0));
     }
 
     #[test]
@@ -17685,6 +17752,24 @@ mod tests {
                 item,
                 LayoutItem::Line { x1, x2, .. }
                     if (*x1 - x).abs() < 0.01 && (*x2 - x).abs() < 0.01
+            )
+        })
+    }
+
+    fn has_horizontal_line_at(page: &LayoutPage, x1: f32, x2: f32, y: f32) -> bool {
+        page.items.iter().any(|item| {
+            matches!(
+                item,
+                LayoutItem::Line {
+                    x1: line_x1,
+                    y1,
+                    x2: line_x2,
+                    y2,
+                    ..
+                } if (*line_x1 - x1).abs() < 0.01
+                    && (*line_x2 - x2).abs() < 0.01
+                    && (*y1 - y).abs() < 0.01
+                    && (*y2 - y).abs() < 0.01
             )
         })
     }

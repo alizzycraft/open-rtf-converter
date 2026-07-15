@@ -10032,7 +10032,12 @@ impl Parser {
                 Some(offset),
             ));
         }
-        if !self.update_current_paragraph_or_character_border_spacing(clamped) {
+        if !self.update_current_cell_border(|border| {
+            border.spacing_twips = clamped;
+        }) && !self.update_current_table_row_border(|border| {
+            border.spacing_twips = clamped;
+        }) && !self.update_current_paragraph_or_character_border_spacing(clamped)
+        {
             self.update_current_page_border_spacing(clamped);
         }
     }

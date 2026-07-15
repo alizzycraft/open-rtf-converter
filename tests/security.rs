@@ -32418,6 +32418,107 @@ fn border_spacing_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn table_border_spacing_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "trowd",
+        "\\",
+        "trbrdrt",
+        "\\",
+        "brdrs",
+        "\\",
+        "brsp60",
+        "\\",
+        "clbrdrl",
+        "\\",
+        "brdrs",
+        "\\",
+        "brsp240",
+        "\\",
+        "clbrdrr",
+        "\\",
+        "brdrs",
+        "\\",
+        "brsp120",
+        "\\",
+        "cellx1440 Spaced cell",
+        "\\",
+        "cell",
+        "\\",
+        "row}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+    let cell = &table.rows[0].cells[0];
+
+    assert_eq!(cell.borders.top.spacing_twips, 60);
+    assert_eq!(cell.borders.left.spacing_twips, 240);
+    assert_eq!(cell.borders.right.spacing_twips, 120);
+    assert!(text.contains("Spaced cell"));
+    for forbidden in ["trbrdrt", "clbrdrl", "clbrdrr", "brsp"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden table border spacing control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Spaced cell"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "table border spacing should still render passive stroked borders"
+    );
+    for forbidden in [
+        b"trbrdrt".as_slice(),
+        b"clbrdrl",
+        b"clbrdrr",
+        b"brsp",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden table border spacing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+}
+
+#[test]
 fn extended_word_borders_stay_passive_without_control_leakage() {
     let input = rtf(&[
         "{",
