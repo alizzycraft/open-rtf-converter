@@ -64,6 +64,7 @@ struct ParserState {
     style_next: Option<i32>,
     style_kind: StyleKind,
     style_name_text: String,
+    style_name_terminated: bool,
     paragraph_style_index: Option<i32>,
     list_override_index: Option<i32>,
     list_level_index: usize,
@@ -217,6 +218,7 @@ impl Default for ParserState {
             style_next: None,
             style_kind: StyleKind::Paragraph,
             style_name_text: String::new(),
+            style_name_terminated: false,
             paragraph_style_index: None,
             list_override_index: None,
             list_level_index: 0,
@@ -917,6 +919,8 @@ enum ListNumberFormat {
     UpperLetter,
     LowerLetter,
     Ordinal,
+    CardinalText,
+    OrdinalText,
     DecimalLeadingZero(usize),
     Bullet,
     Other,
@@ -1076,6 +1080,7 @@ struct Parser {
     stack: Vec<ParserState>,
     diagnostics: Vec<Diagnostic>,
     current_font: Option<FontDef>,
+    current_font_alternate_terminated: bool,
     current_color: Color,
     current_color_seen: bool,
     current_table: Option<TableBuilder>,
@@ -1197,6 +1202,7 @@ impl Parser {
             stack: Vec::new(),
             diagnostics: Vec::new(),
             current_font: None,
+            current_font_alternate_terminated: false,
             current_color: Color::default(),
             current_color_seen: false,
             current_table: None,
@@ -2137,15 +2143,22 @@ impl Parser {
         if self.handle_nested_table_control(control, offset)? {
             return Ok(());
         }
+        let visible_ignorable_list_marker_destination = control_follows_ignorable_destination_marker
+            && matches!(control.name.as_str(), "listtext" | "pntext")
+            && destination_allows_visible_old_style_list_marker(&self.state);
         if control_follows_ignorable_destination_marker
             && control.name != "*"
+            && !visible_ignorable_list_marker_destination
             && ignorable_destination_marker_applies_to_control(
                 control.name.as_str(),
                 control_starts_group,
             )
         {
             self.state.destination = Destination::Ignored;
-        } else if control_follows_ignorable_destination_marker && control.name != "*" {
+        } else if control_follows_ignorable_destination_marker
+            && control.name != "*"
+            && !visible_ignorable_list_marker_destination
+        {
             self.diagnostics.push(Diagnostic::warning(
                 "ignorable destination marker before a non-destination control was ignored",
                 Some(offset),
@@ -2968,6 +2981,15 @@ impl Parser {
                     TextRelief::Engrave
                 });
             }
+            "accdot" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_emphasis_mark(CharacterEmphasisMark::Dot);
+            }
+            "acccomma" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_emphasis_mark(CharacterEmphasisMark::Comma);
+            }
+            "accnone" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_emphasis_mark(CharacterEmphasisMark::None);
+            }
             "caps" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_caps(control.parameter.unwrap_or(1) != 0);
             }
@@ -3176,8 +3198,7 @@ impl Parser {
                 self.start_note_destination(Destination::Endnote, offset)?
             }
             "shppict"
-                if self.state.destination == Destination::Ignored
-                    || destination_allows_visible_content(&self.state) =>
+                if destination_allows_shape_picture_destination_start(&self.state, &self.stack) =>
             {
                 self.state.destination = self
                     .current_shape
@@ -3191,8 +3212,7 @@ impl Parser {
                 }
             }
             "nonshppict"
-                if self.state.destination == Destination::Ignored
-                    || destination_allows_visible_content(&self.state) =>
+                if destination_allows_shape_picture_destination_start(&self.state, &self.stack) =>
             {
                 if self.state.shape_picture_rendered {
                     self.state.destination = Destination::Ignored;
@@ -3505,7 +3525,9 @@ impl Parser {
             "piccropb" if self.state.destination == Destination::Picture => {
                 self.set_picture_crop_bottom(control.parameter, offset)
             }
-            "listtext" | "pntext" if destination_allows_safe_structural_content(&self.state) => {
+            "listtext" | "pntext"
+                if destination_allows_visible_old_style_list_marker(&self.state) =>
+            {
                 self.pending_list_marker.clear();
                 self.pending_list_marker_runs.clear();
                 self.pending_old_style_list_marker = None;
@@ -3514,8 +3536,11 @@ impl Parser {
             "pn" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.start_old_style_list_marker();
             }
-            "pncard" | "pndec" if destination_allows_visible_old_style_list_marker(&self.state) => {
+            "pndec" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::Decimal);
+            }
+            "pncard" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.set_old_style_list_marker_format(ListNumberFormat::CardinalText);
             }
             "pnucrm" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::UpperRoman);
@@ -3531,6 +3556,9 @@ impl Parser {
             }
             "pnord" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::Ordinal);
+            }
+            "pnordt" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.set_old_style_list_marker_format(ListNumberFormat::OrdinalText);
             }
             "pnbul" | "pnlvlblt"
                 if destination_allows_visible_old_style_list_marker(&self.state) =>
@@ -3574,33 +3602,27 @@ impl Parser {
             "pnsp" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_spacing(control.parameter, offset);
             }
-            "pntxtb" if destination_allows_safe_structural_content(&self.state) => {
-                if self.state.destination != Destination::Ignored {
-                    self.pending_list_marker.clear();
-                    self.pending_old_style_list_marker = None;
-                    self.state.destination = Destination::ListText;
-                }
+            "pntxtb" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.pending_list_marker.clear();
+                self.pending_old_style_list_marker = None;
+                self.state.destination = Destination::ListText;
             }
-            "pntxta" if destination_allows_safe_structural_content(&self.state) => {
-                if self.state.destination != Destination::Ignored {
-                    self.state.destination = Destination::ListText;
-                }
+            "pntxta" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.state.destination = Destination::ListText;
             }
             "bkmkstart"
-                if self.state.destination == Destination::Ignored
-                    || destination_allows_safe_structural_content(&self.state) =>
+                if destination_allows_bookmark_destination_start(&self.state, &self.stack) =>
             {
                 self.state.destination = Destination::BookmarkStart;
                 self.state.bookmark_name_text.clear();
             }
             "bkmkend"
-                if self.state.destination == Destination::Ignored
-                    || destination_allows_safe_structural_content(&self.state) =>
+                if destination_allows_bookmark_destination_start(&self.state, &self.stack) =>
             {
                 self.state.destination = Destination::BookmarkEnd;
                 self.state.bookmark_name_text.clear();
             }
-            "object" if destination_allows_visible_content(&self.state) => {
+            "object" if destination_allows_embedded_object_start(&self.state) => {
                 let owner_destination = self.state.destination;
                 if self.state.inside_shape && self.state.shape_visual_result_rendered {
                     self.handle_duplicate_shape_object_alternate(offset)?;
@@ -3647,7 +3669,7 @@ impl Parser {
                     Some(offset),
                 ));
             }
-            "field" if destination_allows_visible_content(&self.state) => {
+            "field" if destination_allows_field_start(&self.state) => {
                 let owner_destination = self.state.destination;
                 self.handle_field_boundary(offset)?;
                 self.state.inside_field = true;
@@ -3689,6 +3711,7 @@ impl Parser {
             }
             "f" if self.state.destination == Destination::FontTable => {
                 self.flush_font(offset)?;
+                self.current_font_alternate_terminated = false;
                 self.current_font = Some(FontDef {
                     index: control.parameter.unwrap_or(0),
                     name: String::new(),
@@ -3865,6 +3888,28 @@ impl Parser {
             {
                 self.push_list_level_unicode(control.parameter.unwrap_or(0), offset)?
             }
+            "u" if self.state.destination == Destination::FieldInstruction => {
+                self.push_field_instruction_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if matches!(
+                self.state.destination,
+                Destination::BookmarkStart | Destination::BookmarkEnd
+            ) =>
+            {
+                self.push_bookmark_name_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if self.state.destination == Destination::StyleSheet => {
+                self.push_style_name_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if self.state.destination == Destination::ColorTable => {
+                self.push_color_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if self.state.destination == Destination::FontTable => {
+                self.push_font_unicode(control.parameter.unwrap_or(0), offset)?
+            }
+            "u" if self.state.destination == Destination::FontAlternate => {
+                self.push_font_alternate_unicode(control.parameter.unwrap_or(0), offset)?
+            }
             "u" if matches!(
                 self.state.destination,
                 Destination::Body
@@ -4004,6 +4049,7 @@ impl Parser {
             "rtlmark" => self.push_visible_control_text("\u{200f}", offset)?,
             "tab" => self.push_visible_control_text("\t", offset)?,
             "intbl" if control.parameter.unwrap_or(1) != 0 => self.ensure_carried_table_row(),
+            "intbl" => {}
             "trowd" => self.start_table_row(offset)?,
             "trrh" => self.set_current_table_row_height(control.parameter, offset),
             "trleft" => self.set_current_table_row_left_offset(control.parameter, offset),
@@ -4411,11 +4457,13 @@ impl Parser {
                 self.state.style_index = Some(control.parameter.unwrap_or(0));
                 self.state.style_kind = StyleKind::Paragraph;
                 self.state.style_name_text.clear();
+                self.state.style_name_terminated = false;
             }
             "cs" if self.state.destination == Destination::StyleSheet => {
                 self.state.style_index = Some(control.parameter.unwrap_or(0));
                 self.state.style_kind = StyleKind::Character;
                 self.state.style_name_text.clear();
+                self.state.style_name_terminated = false;
             }
             "s" => {
                 self.apply_paragraph_style(control.parameter.unwrap_or(0), offset);
@@ -4706,7 +4754,7 @@ impl Parser {
                 self.upsert_current_section_settings();
             }
             "landscape" | "lndscpsxn" => {
-                self.current_section_page.landscape = true;
+                self.current_section_page.landscape = control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
             "cols" => {
@@ -4963,71 +5011,18 @@ impl Parser {
             return self.push_document_property_text(text, offset);
         }
 
-        match self.state.destination {
-            Destination::Body => {
-                if self.current_table.is_some() && self.current_table_row.is_none() {
-                    self.finish_table(offset)?;
-                }
-                if self.state.character.hidden {
-                    self.count_skipped_destination_bytes(text.len(), offset)?;
-                } else {
-                    self.push_text(text, offset)?;
-                }
-            }
-            Destination::ListText => {
-                if self.state.character.hidden {
-                    self.count_skipped_destination_bytes(text.len(), offset)?;
-                } else {
-                    self.push_list_marker_text(text, offset)?;
-                }
-            }
-            Destination::Header
-            | Destination::FirstPageHeader
-            | Destination::EvenPageHeader
-            | Destination::Footer
-            | Destination::FirstPageFooter
-            | Destination::EvenPageFooter
-            | Destination::ShapeText
-            | Destination::Footnote
-            | Destination::Endnote => {
-                if self.state.character.hidden {
-                    self.count_skipped_destination_bytes(text.len(), offset)?;
-                } else {
-                    self.push_text(text, offset)?
-                }
-            }
-            Destination::Picture => self.push_picture_hex_text(text, offset)?,
-            Destination::FontTable => self.push_font_text(text, offset)?,
-            Destination::FontAlternate => self.push_font_alternate_text(text, offset)?,
-            Destination::ColorTable => self.push_color_text(text, offset)?,
-            Destination::ListTable if self.state.list_context == ListContext::ListLevelText => {
-                self.push_list_level_text(text, offset)?
-            }
-            Destination::ListOverrideTable
-                if self.state.list_context == ListContext::ListLevelText =>
-            {
-                self.push_list_level_text(text, offset)?
-            }
-            Destination::FieldInstruction => self.push_field_instruction_text(text, offset)?,
-            Destination::BookmarkStart | Destination::BookmarkEnd => {
-                self.push_bookmark_name_text(text, offset)?
-            }
-            Destination::StyleSheet => self.push_style_name_text(text, offset)?,
-            Destination::ListTable
-            | Destination::ListOverrideTable
-            | Destination::Shape
-            | Destination::Background
-            | Destination::Ignored
-            | Destination::Metadata
-            | Destination::ObjectData => {
-                self.count_skipped_destination_bytes(text.len(), offset)?;
-            }
-        }
-        Ok(())
+        self.push_escaped_text(text, offset)
     }
 
     fn apply_raw_text(&mut self, bytes: &[u8], offset: usize) -> Result<(), ParseError> {
         self.state.at_group_start = false;
+        if self.state.pending_ignorable_destination {
+            self.state.pending_ignorable_destination = false;
+            self.diagnostics.push(Diagnostic::warning(
+                "ignorable destination marker without a following destination control was ignored",
+                Some(offset),
+            ));
+        }
         if self.state.skip_bytes > 0 {
             let skip = self.state.skip_bytes.min(bytes.len());
             self.state.skip_bytes -= skip;
@@ -5352,6 +5347,10 @@ impl Parser {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_user_property_text(&ch.to_string(), offset);
         }
+        if self.state.document_variable_capture.is_some() {
+            let ch = self.decode_text_hex_byte(byte);
+            return self.push_document_variable_text(&ch.to_string(), offset);
+        }
         if self.state.metadata_property.is_some() {
             let ch = self.decode_text_hex_byte(byte);
             return self.push_document_property_text(&ch.to_string(), offset);
@@ -5420,9 +5419,15 @@ impl Parser {
                 let ch = decode_hex_byte(byte, self.state.code_page);
                 self.push_bookmark_name_text(&ch.to_string(), offset)?;
             }
-            Destination::ColorTable
-            | Destination::StyleSheet
-            | Destination::ListTable
+            Destination::StyleSheet => {
+                let ch = decode_hex_byte(byte, self.state.code_page);
+                self.push_style_name_text(&ch.to_string(), offset)?;
+            }
+            Destination::ColorTable => {
+                let ch = decode_hex_byte(byte, self.state.code_page);
+                self.push_color_text(&ch.to_string(), offset)?;
+            }
+            Destination::ListTable
             | Destination::ListOverrideTable
             | Destination::Shape
             | Destination::Background
@@ -7287,6 +7292,14 @@ impl Parser {
         }
     }
 
+    fn push_escaped_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        match self.state.destination {
+            Destination::FieldInstruction => self.push_field_instruction_text(text, offset),
+            Destination::ColorTable => self.push_color_text(text, offset),
+            _ => self.push_visible_control_text(text, offset),
+        }
+    }
+
     fn map_symbol_like_font_text(&self, text: &str) -> Option<String> {
         let font = self
             .document
@@ -7311,6 +7324,8 @@ impl Parser {
             self.count_skipped_destination_bytes(text.len(), offset)?;
             return Ok(());
         }
+        self.mark_object_result_visible_content();
+        self.mark_field_result_visible_content();
         let font_mapped_text;
         let text = if !contains_internal_marker(text)
             && let Some(mapped) = self.map_symbol_like_font_text(text)
@@ -7345,6 +7360,20 @@ impl Parser {
         self.count_skipped_destination_bytes(text.len(), offset)?;
         let limit = self.limits().max_field_instruction_chars;
         append_field_instruction(&mut self.state.field_instruction, text, limit, offset)
+    }
+
+    fn push_field_instruction_unicode(
+        &mut self,
+        value: i32,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_field_instruction_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
     }
 
     fn push_office_math_delimiter_text(
@@ -7634,9 +7663,22 @@ impl Parser {
         Ok(())
     }
 
+    fn push_bookmark_name_unicode(&mut self, value: i32, offset: usize) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_bookmark_name_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
     fn push_style_name_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes(text.len(), offset)?;
         if self.state.style_index.is_none() {
+            return Ok(());
+        }
+        if self.state.style_name_terminated {
             return Ok(());
         }
         let Some(style_name) = text.split(';').next() else {
@@ -7656,6 +7698,19 @@ impl Parser {
             });
         }
         self.state.style_name_text.push_str(style_name);
+        if text.contains(';') {
+            self.state.style_name_terminated = true;
+        }
+        Ok(())
+    }
+
+    fn push_style_name_unicode(&mut self, value: i32, offset: usize) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_style_name_text(&ch.to_string(), offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
     }
 
@@ -12099,7 +12154,7 @@ impl Parser {
 
     fn push_font_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         if let Some(font) = self.current_font.as_mut() {
-            for segment in text.split(';') {
+            if let Some(segment) = text.split(';').next() {
                 let trimmed = segment.trim();
                 if !trimmed.is_empty() {
                     if !font.name.is_empty() {
@@ -12115,9 +12170,26 @@ impl Parser {
         Ok(())
     }
 
+    fn push_font_unicode(&mut self, value: i32, offset: usize) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            if ch == ';' {
+                self.flush_font(offset)?;
+            } else if let Some(font) = self.current_font.as_mut() {
+                font.name.push(ch);
+            }
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
     fn push_font_alternate_text(&mut self, text: &str, _offset: usize) -> Result<(), ParseError> {
+        if self.current_font_alternate_terminated {
+            return Ok(());
+        }
         if let Some(font) = self.current_font.as_mut() {
-            for segment in text.split(';') {
+            if let Some(segment) = text.split(';').next() {
                 let trimmed = segment.trim();
                 if !trimmed.is_empty() {
                     let alternate = font.alternate_name.get_or_insert_with(String::new);
@@ -12127,7 +12199,28 @@ impl Parser {
                     alternate.push_str(trimmed);
                 }
             }
+            if text.contains(';') {
+                self.current_font_alternate_terminated = true;
+            }
         }
+        Ok(())
+    }
+
+    fn push_font_alternate_unicode(
+        &mut self,
+        value: i32,
+        _offset: usize,
+    ) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            if ch == ';' {
+                self.push_font_alternate_text(";", _offset)?;
+            } else if let Some(font) = self.current_font.as_mut() {
+                font.alternate_name.get_or_insert_with(String::new).push(ch);
+            }
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
         Ok(())
     }
 
@@ -12247,6 +12340,18 @@ impl Parser {
         Ok(())
     }
 
+    fn push_color_unicode(&mut self, value: i32, offset: usize) -> Result<(), ParseError> {
+        if let Some(ch) =
+            take_rtf_unicode_char(&mut self.state.pending_unicode_high_surrogate, value)
+        {
+            self.push_color_text(&ch.to_string(), offset)?;
+        } else {
+            self.count_skipped_destination_bytes(1, offset)?;
+        }
+        self.state.skip_bytes = self.state.unicode_skip;
+        Ok(())
+    }
+
     fn take_pending_or_synthesized_list_marker(
         &mut self,
         offset: usize,
@@ -12341,6 +12446,8 @@ impl Parser {
             | ListNumberFormat::UpperLetter
             | ListNumberFormat::LowerLetter
             | ListNumberFormat::Ordinal
+            | ListNumberFormat::CardinalText
+            | ListNumberFormat::OrdinalText
             | ListNumberFormat::DecimalLeadingZero(_)
             | ListNumberFormat::Other => {
                 let start_at = list_level_start_at(&list_override, &level, level_index);
@@ -12693,6 +12800,8 @@ impl Parser {
                 3 => ListNumberFormat::UpperLetter,
                 4 => ListNumberFormat::LowerLetter,
                 5 => ListNumberFormat::Ordinal,
+                6 => ListNumberFormat::CardinalText,
+                7 => ListNumberFormat::OrdinalText,
                 22 => ListNumberFormat::DecimalLeadingZero(2),
                 23 => ListNumberFormat::Bullet,
                 62 => ListNumberFormat::DecimalLeadingZero(3),
@@ -12830,6 +12939,10 @@ impl Parser {
 
     fn set_current_list_level_relief(&mut self, relief: TextRelief) {
         self.update_current_list_level_character_style(|style| style.relief = relief);
+    }
+
+    fn set_current_list_level_emphasis_mark(&mut self, mark: CharacterEmphasisMark) {
+        self.update_current_list_level_character_style(|style| style.emphasis_mark = mark);
     }
 
     fn set_current_list_level_caps(&mut self, enabled: bool) {
@@ -13686,6 +13799,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "pnlvlblt"
                 | "pnlvlbody"
                 | "pnlvlcont"
+                | "pnordt"
                 | "pnqc"
                 | "pnql"
                 | "pnqr"
@@ -14590,8 +14704,87 @@ fn destination_allows_field_instruction(state: &ParserState) -> bool {
     !state.inside_metadata && state.destination != Destination::ObjectData
 }
 
+fn destination_allows_field_start(state: &ParserState) -> bool {
+    !state.inside_metadata
+        && matches!(
+            state.destination,
+            Destination::Body
+                | Destination::ListText
+                | Destination::Header
+                | Destination::FirstPageHeader
+                | Destination::EvenPageHeader
+                | Destination::Footer
+                | Destination::FirstPageFooter
+                | Destination::EvenPageFooter
+                | Destination::ShapeText
+                | Destination::Footnote
+                | Destination::Endnote
+        )
+}
+
+fn destination_allows_bookmark_destination_start(
+    state: &ParserState,
+    stack: &[ParserState],
+) -> bool {
+    if state.inside_metadata {
+        return false;
+    }
+    if state.destination == Destination::Ignored {
+        return stack
+            .last()
+            .is_some_and(|parent| destination_allows_bookmark_destination_start(parent, &[]));
+    }
+    matches!(
+        state.destination,
+        Destination::Body
+            | Destination::ListText
+            | Destination::Header
+            | Destination::FirstPageHeader
+            | Destination::EvenPageHeader
+            | Destination::Footer
+            | Destination::FirstPageFooter
+            | Destination::EvenPageFooter
+            | Destination::ShapeText
+            | Destination::Footnote
+            | Destination::Endnote
+    )
+}
+
+fn destination_allows_shape_picture_destination_start(
+    state: &ParserState,
+    stack: &[ParserState],
+) -> bool {
+    if state.inside_metadata {
+        return false;
+    }
+    if state.destination == Destination::Ignored {
+        return stack
+            .last()
+            .is_some_and(|parent| destination_allows_shape_picture_destination_start(parent, &[]));
+    }
+    destination_allows_visible_content(state)
+}
+
 fn destination_allows_object_result(state: &ParserState) -> bool {
     !state.inside_metadata && state.destination != Destination::Ignored
+}
+
+fn destination_allows_embedded_object_start(state: &ParserState) -> bool {
+    !state.inside_metadata
+        && matches!(
+            state.destination,
+            Destination::Body
+                | Destination::Header
+                | Destination::FirstPageHeader
+                | Destination::EvenPageHeader
+                | Destination::Footer
+                | Destination::FirstPageFooter
+                | Destination::EvenPageFooter
+                | Destination::Shape
+                | Destination::ShapeText
+                | Destination::Footnote
+                | Destination::Endnote
+        )
 }
 
 fn destination_allows_safe_structural_content(state: &ParserState) -> bool {
@@ -14624,7 +14817,21 @@ fn destination_allows_structural_destination_start(
 }
 
 fn destination_allows_visible_old_style_list_marker(state: &ParserState) -> bool {
-    destination_allows_safe_structural_content(state) && state.destination != Destination::Ignored
+    !state.inside_metadata
+        && matches!(
+            state.destination,
+            Destination::Body
+                | Destination::ListText
+                | Destination::Header
+                | Destination::FirstPageHeader
+                | Destination::EvenPageHeader
+                | Destination::Footer
+                | Destination::FirstPageFooter
+                | Destination::EvenPageFooter
+                | Destination::ShapeText
+                | Destination::Footnote
+                | Destination::Endnote
+        )
 }
 
 fn is_header_destination(destination: Destination) -> bool {
@@ -17343,6 +17550,12 @@ fn format_list_counter(value: i32, format: ListNumberFormat) -> String {
         ListNumberFormat::UpperLetter => format_alpha_counter(value, false),
         ListNumberFormat::LowerLetter => format_alpha_counter(value, true),
         ListNumberFormat::Ordinal => format_ordinal_counter(value),
+        ListNumberFormat::CardinalText => {
+            format_cardinal_text_counter(value).unwrap_or_else(|| value.to_string())
+        }
+        ListNumberFormat::OrdinalText => {
+            format_ordinal_text_counter(value).unwrap_or_else(|| value.to_string())
+        }
         ListNumberFormat::DecimalLeadingZero(width) => {
             format_zero_padded_decimal_counter(value, width)
         }
@@ -17780,11 +17993,11 @@ fn replace_all_pending_note_markers_in_paragraphs(paragraphs: &mut [Paragraph], 
 
 fn normalize_list_level_template(template: &str) -> String {
     let mut chars = template.chars().collect::<Vec<_>>();
-    if chars
-        .first()
-        .is_some_and(|ch| ch.is_control() && *ch != '\0')
-    {
-        chars.remove(0);
+    if let Some(length) = chars.first().and_then(|ch| {
+        (ch.is_control() && *ch != '\0')
+            .then_some((*ch as usize).min(chars.len().saturating_sub(1)))
+    }) {
+        return chars.into_iter().skip(1).take(length).collect();
     }
     while chars.last().is_some_and(|ch| *ch == ';') {
         chars.pop();
@@ -18083,6 +18296,7 @@ fn map_wingdings_codepoint(codepoint: u32) -> Option<char> {
         0xa3 => Some('\u{2610}'),
         0xfb => Some('\u{2717}'),
         0xfc => Some('\u{2713}'),
+        0xfd => Some('\u{2612}'),
         0xfe => Some('\u{2611}'),
         _ => None,
     }
@@ -20801,6 +21015,30 @@ mod tests {
     }
 
     #[test]
+    fn escaped_special_visible_characters_obey_hidden_text() {
+        let output = parse_rtf(r"{\rtf1 Visible {\v \~ \- \_ \\ \{ \}}{\v0 shown}\par}").unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Visible"));
+        assert!(text.contains("shown"));
+        assert!(!text.contains('\u{00a0}'));
+        assert!(!text.contains('\u{00ad}'));
+        assert!(!text.contains('\u{2011}'));
+        assert!(!text.contains('\\'));
+        assert!(!text.contains('{'));
+        assert!(!text.contains('}'));
+    }
+
+    #[test]
+    fn escaped_special_characters_in_explicit_list_marker_stay_marker_text() {
+        let output = parse_rtf(r"{\rtf1{\*\pntext\~\_\tab}List item\par}").unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.starts_with("\u{00a0}\u{2011}\tList item"));
+        assert!(!text.contains("pntext"));
+    }
+
+    #[test]
     fn normalizes_zero_width_formatting_controls() {
         let output =
             parse_rtf(r"{\rtf1 A\zwbo B\zwnbo C\zwnj D\zwj E\ltrmark L\rtlmark R\par}").unwrap();
@@ -20829,7 +21067,7 @@ mod tests {
     #[test]
     fn hidden_text_controls_do_not_become_body_text() {
         let output = parse_rtf(
-            r"{\rtf1 Visible {\v hidden \emdash \bullet \tab \line \u8217? \'41}{\v0 shown} {\vanish hidden2}{\vanish0 visible2}\par}",
+            r"{\rtf1 Visible {\v hidden \emdash \bullet \tab \line \u8217? \'41 \~ \- \_ \\ \{ \}}{\v0 shown} {\vanish hidden2}{\vanish0 visible2}\par}",
         )
         .unwrap();
         let text = document_text(&output.document);
@@ -20845,6 +21083,12 @@ mod tests {
         assert!(!text.contains('\n'));
         assert!(!text.contains("\u{2019}"));
         assert!(!text.contains('A'));
+        assert!(!text.contains('\u{00a0}'));
+        assert!(!text.contains('\u{00ad}'));
+        assert!(!text.contains('\u{2011}'));
+        assert!(!text.contains('\\'));
+        assert!(!text.contains('{'));
+        assert!(!text.contains('}'));
     }
 
     #[test]
@@ -20898,6 +21142,110 @@ mod tests {
                 blue: 0
             }
         );
+    }
+
+    #[test]
+    fn unicode_font_table_names_skip_fallback_bytes() {
+        let input =
+            r"{\rtf1{\fonttbl{\f0 Tuff\u121?;}{\f1 Mystery{\*\falt Tuff\u121?;};}}\f0 A\f1 B\par}";
+        let output = parse_rtf(input).unwrap();
+
+        let primary = output
+            .document
+            .fonts
+            .iter()
+            .find(|font| font.index == 0)
+            .expect("primary font");
+        let alternate = output
+            .document
+            .fonts
+            .iter()
+            .find(|font| font.index == 1)
+            .expect("alternate font");
+
+        assert_eq!(primary.name, "Tuffy");
+        assert_eq!(alternate.alternate_name.as_deref(), Some("Tuffy"));
+        for forbidden in ["u121", "?", "Tuff?"] {
+            assert!(
+                output
+                    .document
+                    .fonts
+                    .iter()
+                    .all(|font| !font.name.contains(forbidden)
+                        && !font
+                            .alternate_name
+                            .as_deref()
+                            .is_some_and(|name| name.contains(forbidden))),
+                "Unicode font-table fallback leaked into font metadata: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_font_table_separators_flush_font_entries() {
+        let input = r"{\rtf1{\fonttbl{\f0 Tuff\u121?\u59?}{\f1 Mystery{\*\falt Tuff\u121?\u59?};}}\f0 A\f1 B\par}";
+        let output = parse_rtf(input).unwrap();
+
+        let primary = output
+            .document
+            .fonts
+            .iter()
+            .find(|font| font.index == 0)
+            .expect("primary font");
+        let alternate = output
+            .document
+            .fonts
+            .iter()
+            .find(|font| font.index == 1)
+            .expect("alternate font");
+
+        assert_eq!(primary.name, "Tuffy");
+        assert_eq!(alternate.name, "Mystery");
+        assert_eq!(alternate.alternate_name.as_deref(), Some("Tuffy"));
+        for forbidden in ["u121", "u59", "?", ";", "Tuff?"] {
+            assert!(
+                output
+                    .document
+                    .fonts
+                    .iter()
+                    .all(|font| !font.name.contains(forbidden)
+                        && !font
+                            .alternate_name
+                            .as_deref()
+                            .is_some_and(|name| name.contains(forbidden))),
+                "Unicode font-table separator/fallback leaked into font metadata: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn primary_font_name_stops_at_first_separator() {
+        let input = r"{\rtf1{\fonttbl{\f0 Tuffy;Ignored;}{\f1 Tuff\u121?\'3bIgnored;}{\f2 Tuff\u121?\u59?Ignored;}}\f0 A\f1 B\f2 C\par}";
+        let output = parse_rtf(input).unwrap();
+
+        for index in [0, 1, 2] {
+            let font = output
+                .document
+                .fonts
+                .iter()
+                .find(|font| font.index == index)
+                .unwrap_or_else(|| panic!("missing font {index}"));
+            assert_eq!(font.name, "Tuffy");
+        }
+        for forbidden in ["Ignored", "u121", "u59", "?", ";", "Tuff?"] {
+            assert!(
+                output
+                    .document
+                    .fonts
+                    .iter()
+                    .all(|font| !font.name.contains(forbidden)
+                        && !font
+                            .alternate_name
+                            .as_deref()
+                            .is_some_and(|name| name.contains(forbidden))),
+                "primary font terminator/fallback leaked into font metadata: {forbidden}"
+            );
+        }
     }
 
     #[test]
@@ -21068,6 +21416,36 @@ mod tests {
     }
 
     #[test]
+    fn font_alternate_name_stops_at_first_separator() {
+        let input = r"{\rtf1{\fonttbl{\f0 Mystery Raw{\*\falt Tuff\u121?;Ignored;};}{\f1 Mystery Hex{\*\falt Tuff\u121?\'3bIgnored;};}{\f2 Mystery Unicode{\*\falt Tuff\u121?\u59?Ignored;};}}\f0 A\f1 B\f2 C\par}";
+        let output = parse_rtf(input).unwrap();
+
+        for name in ["Mystery Raw", "Mystery Hex", "Mystery Unicode"] {
+            let font = output
+                .document
+                .fonts
+                .iter()
+                .find(|font| font.name == name)
+                .unwrap_or_else(|| panic!("missing font {name}"));
+            assert_eq!(font.alternate_name.as_deref(), Some("Tuffy"));
+        }
+        for forbidden in ["Ignored", "u121", "u59", "?", ";", "Tuff?"] {
+            assert!(
+                output
+                    .document
+                    .fonts
+                    .iter()
+                    .all(|font| !font.name.contains(forbidden)
+                        && !font
+                            .alternate_name
+                            .as_deref()
+                            .is_some_and(|name| name.contains(forbidden))),
+                "font alternate terminator/fallback leaked into font metadata: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
     fn normalizes_font_switches_on_runs() {
         let input = r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}\f1 Mono\par}";
         let output = parse_rtf(input).unwrap();
@@ -21118,9 +21496,10 @@ mod tests {
 
     #[test]
     fn normalizes_wingdings_checkbox_glyphs_to_safe_unicode() {
-        let output =
-            parse_rtf(r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\f1 \'a3 \'fe \'fc \'fb\par}")
-                .unwrap();
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\f1 \'a3 \'fe \'fc \'fb \'fd \u61693?\par}",
+        )
+        .unwrap();
         let paragraph = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected paragraph"),
@@ -21128,7 +21507,7 @@ mod tests {
 
         assert_eq!(
             paragraph.runs[0].text,
-            "\u{2610} \u{2611} \u{2713} \u{2717}"
+            "\u{2610} \u{2611} \u{2713} \u{2717} \u{2612} \u{2612}"
         );
         assert_eq!(paragraph.runs[0].style.font_index, 1);
     }
@@ -21468,6 +21847,35 @@ mod tests {
                 .diagnostics
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn intbl_zero_does_not_carry_table_state_into_body_text() {
+        let output =
+            parse_rtf(r"{\rtf1\trowd\cellx1200 A\cell\row\pard\intbl0 Outside table\par}").unwrap();
+
+        let first_table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected first table block"),
+        };
+        assert_eq!(first_table.rows.len(), 1);
+        assert_eq!(first_table.rows[0].cells[0].paragraphs[0].runs[0].text, "A");
+
+        let paragraph = match &output.document.blocks[1] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected body paragraph after intbl0"),
+        };
+        assert_eq!(paragraph.runs[0].text, "Outside table");
+
+        assert_eq!(output.document.blocks.len(), 2);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+            "intbl0 should be consumed as a known table-state-off control: {:?}",
+            output.diagnostics
         );
     }
 
@@ -22784,6 +23192,62 @@ mod tests {
     }
 
     #[test]
+    fn resultless_ref_fields_resolve_unicode_bookmark_names() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\*\bkmkstart Caf\u233?Bookmark}Marked text{\*\bkmkend Caf\u233?Bookmark} ref {\field{\*\fldinst REF "Caf\u233?Bookmark"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before Marked text ref Marked text"),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "Caf\u{00e9}Bookmark",
+            "bkmkstart",
+            "bkmkend",
+            "fldinst",
+            "REF",
+            "?",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "Unicode bookmark REF leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn structural_metadata_bookmarks_do_not_feed_ref_fields() {
+        let output = parse_rtf(
+            r#"{\rtf1{\fonttbl{\f0 Arial;}{\*\bkmkstart HiddenMeta}Hidden font payload{\*\bkmkend HiddenMeta}}\f0 Body {\*\bkmkstart VisibleMark}Marked text{\*\bkmkend VisibleMark} visible {\field{\*\fldinst REF VisibleMark}} hidden {\field{\*\fldinst REF HiddenMeta}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Body Marked text visible Marked text hidden [Field removed: no passive result]"
+            ),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "Hidden font payload",
+            "HiddenMeta",
+            "bkmkstart",
+            "bkmkend",
+            "fldinst",
+            "REF VisibleMark",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "structural metadata bookmark leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
     fn resultless_set_fields_strip_complex_values_without_side_effects() {
         let output = parse_rtf(
             r#"{\rtf1 Before {\field{\*\fldinst SET Unsafe "Hidden value" HYPERLINK "https://example.com/payload"}} after {\field{\*\fldinst REF Unsafe}}\par}"#,
@@ -22956,6 +23420,81 @@ mod tests {
                 .message
                 .contains("rendering passive field STYLEREF without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_styleref_fields_resolve_unicode_style_names() {
+        let output = parse_rtf(
+            r#"{\rtf1{\stylesheet{\s1 Caf\u233? Style;}}\s1 Styled heading\par\pard Ref {\field{\*\fldinst STYLEREF "Caf\u233? Style"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Styled headingRef Styled heading"),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "Caf\u{00e9} Style",
+            "STYLEREF",
+            "fldinst",
+            "stylesheet",
+            "?",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "Unicode STYLEREF leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_stylesheet_name_terminator_ignores_trailing_text() {
+        let output = parse_rtf(
+            r#"{\rtf1{\stylesheet{\s1 Code\u65? Style\u59?Ignored;}}\s1 Styled heading\par\pard Ref {\field{\*\fldinst STYLEREF "Code\u65? Style" \\* Upper}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Styled headingRef STYLED HEADING"),
+            "Unicode style-name terminator should allow STYLEREF to resolve: {text:?}"
+        );
+        for forbidden in [
+            "CodeA Style",
+            "Ignored",
+            "STYLEREF",
+            "fldinst",
+            "stylesheet",
+            "u65",
+            "u59",
+            "?",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "Unicode stylesheet terminator leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_styleref_fields_resolve_hex_style_names() {
+        let output = parse_rtf(
+            r#"{\rtf1{\stylesheet{\s1 Cod\'65 Style;}}\s1 Styled heading\par\pard Ref {\field{\*\fldinst STYLEREF "Cod\'65 Style"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Styled headingRef Styled heading"),
+            "hex-escaped STYLEREF style names should resolve to prior styled text: {text:?}"
+        );
+        for forbidden in ["Code Style", "STYLEREF", "fldinst", "stylesheet", "\\'65"] {
+            assert!(
+                !text.contains(forbidden),
+                "hex STYLEREF leaked unsafe text: {forbidden}"
+            );
+        }
     }
 
     #[test]
@@ -23874,6 +24413,20 @@ After\par}"#;
     }
 
     #[test]
+    fn resultless_quote_field_instruction_unicode_renders_passive_literal() {
+        let output =
+            parse_rtf(r#"{\rtf1 Before {\field{\*\fldinst QUOTE "Caf\u233? \u937?"}} After\par}"#)
+                .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Before Caf\u{00e9} \u{03a9} After"));
+        assert!(!text.contains("QUOTE"));
+        assert!(!text.contains("fldinst"));
+        assert!(!text.contains('?'));
+        assert!(!text.contains("[Field removed"));
+    }
+
+    #[test]
     fn resultless_if_fields_render_passive_literal_branch() {
         let output = parse_rtf(
             r#"{\rtf1 Before {\field{\*\fldinst IF 5 > 3 "Greater" "Lower"}} and {\field{\*\fldinst IF "Alpha" = "Beta" "Match" "Different"}} After\par}"#,
@@ -24398,6 +24951,50 @@ After\par}"#;
     }
 
     #[test]
+    fn explicit_list_marker_field_result_remains_marker_text() {
+        let output = parse_rtf(
+            r#"{\rtf1{\pntext{\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Link marker}}\tab}Body\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Link marker\tBody"), "text: {text:?}");
+        for forbidden in [
+            "HYPERLINK",
+            "https://example.com",
+            "fldinst",
+            "fldrslt",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "explicit list marker field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn old_style_list_markers_in_structural_destinations_do_not_prefix_body_text() {
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0 Arial;{\pntext Hidden\tab}{\pn\pndec\pnstart9{\pntxtb 9}{\pntxta .\tab}}}}Visible\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let text = paragraph
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(text, "Visible");
+        assert!(!document_text(&output.document).contains("Hidden"));
+        assert!(!document_text(&output.document).contains("9.\t"));
+    }
+
+    #[test]
     fn ignored_pn_metadata_does_not_override_explicit_pntext_marker() {
         let output = parse_rtf(
             r"{\rtf1{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}{\pntext\pard\plain\f1 \'b7\tab}{\*\pn\pnlvlblt\pnf1{\pntxtb \'b7}}\pard\fi-360\li360\tx360 Bullet item\par{\pntext I.\tab}{\*\pn\pnucrm{\pntxta .}}\pard\fi-720\li720\tx720 Roman item\par}",
@@ -24865,6 +25462,40 @@ After\par}"#;
     }
 
     #[test]
+    fn applies_list_level_marker_emphasis_marks_to_marker_runs_only() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\accdot{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\acccomma{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\accdot\accnone{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}}\pard\ls1\ilvl0 Dot marker\par\pard\ls2\ilvl0 Comma marker\par\pard\ls3\ilvl0\b Plain marker\par}",
+        )
+        .unwrap();
+
+        let marker_style = |index: usize, text: &str| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => {
+                assert_eq!(paragraph.runs[0].text, "1.\t");
+                assert_eq!(paragraph.runs[1].text, text);
+                assert_eq!(
+                    paragraph.runs[1].style.emphasis_mark,
+                    CharacterEmphasisMark::None
+                );
+                paragraph.runs[0].style.emphasis_mark
+            }
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(marker_style(0, "Dot marker"), CharacterEmphasisMark::Dot);
+        assert_eq!(
+            marker_style(1, "Comma marker"),
+            CharacterEmphasisMark::Comma
+        );
+        assert_eq!(marker_style(2, "Plain marker"), CharacterEmphasisMark::None);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
     fn applies_list_level_marker_script_and_spacing_to_marker_runs_only() {
         let output = parse_rtf(
             r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par}",
@@ -25196,6 +25827,50 @@ After\par}"#;
     }
 
     #[test]
+    fn synthesizes_cardinal_and_ordinal_text_markers_from_list_tables() {
+        let output = parse_rtf(
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc6\levelstartat21{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid21}{\list{\listlevel\levelnfc7\levelstartat22{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid22}{\list{\listlevel\levelnfc6\levelstartat1000{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid23}}{\*\listoverridetable{\listoverride\listid21\ls21}{\listoverride\listid22\ls22}{\listoverride\listid23\ls23}}\pard\ls21\ilvl0 Cardinal text\par\pard\ls22\ilvl0 Ordinal text\par\pard\ls23\ilvl0 Fallback text\par}",
+        )
+        .unwrap();
+        let paragraph_text = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph.runs[0].text.as_str(),
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph_text(0), "twenty-one.\tCardinal text");
+        assert_eq!(paragraph_text(1), "twenty-second.\tOrdinal text");
+        assert_eq!(paragraph_text(2), "1000.\tFallback text");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn synthesizes_cardinal_and_ordinal_text_old_style_markers() {
+        let output = parse_rtf(
+            r"{\rtf1{\pn\pncard\pnstart21}Cardinal old style\par{\pn\pnordt\pnstart22}Ordinal old style\par{\pn\pncard\pnstart1000}Fallback old style\par}",
+        )
+        .unwrap();
+        let paragraph_text = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph.runs[0].text.as_str(),
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph_text(0), "twenty-one.\tCardinal old style");
+        assert_eq!(paragraph_text(1), "twenty-second.\tOrdinal old style");
+        assert_eq!(paragraph_text(2), "1000.\tFallback old style");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
     fn ordinal_list_markers_handle_teen_suffix_exceptions() {
         let output = parse_rtf(
             r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc5\levelstartat11{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid15}}{\*\listoverridetable{\listoverride\listid15\ls15}}\pard\ls15\ilvl0 Eleventh\par\pard\ls15\ilvl0 Twelfth\par\pard\ls15\ilvl0 Thirteenth\par\pard\ls15\ilvl0 Fourteenth\par}",
@@ -25258,6 +25933,35 @@ After\par}"#;
     }
 
     #[test]
+    fn list_level_template_length_ignores_trailing_metadata() {
+        for input in [
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1{\leveltext\'02\'00.;Hidden payload;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Hex item\par}",
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1{\leveltext\u2?\u0?.;Hidden payload;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Unicode item\par}",
+        ] {
+            let output = parse_rtf(input).unwrap();
+            let text = document_text(&output.document);
+
+            assert!(
+                text.contains("1.\t"),
+                "list level template length should preserve authored marker: {text:?}"
+            );
+            for forbidden in [
+                "Hidden payload",
+                "leveltext",
+                "levelnumbers",
+                "listtable",
+                "u2",
+                "u0",
+            ] {
+                assert!(
+                    !text.contains(forbidden),
+                    "trailing list template metadata leaked to visible text: {forbidden}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn list_table_metadata_controls_do_not_pollute_synthesized_markers() {
         let output = parse_rtf(
             r#"{\rtf1{\*\listtable{\list\listtemplateid67698689\listsimple{\listlevel\levelnfc23\leveljc0{\leveltext\'01\u8226 ?;}{\levelnumbers{\object\objdata 414243};}}{\listname Hidden list name{\field{\*\fldinst HYPERLINK "https://example.com/list-name"}{\fldrslt Hidden link}}{\object\objdata 414243};}\listid7}}{\*\listoverridetable{\listoverride\listid7\listoverridecount0\ls2}}\pard\ls2\ilvl0 Bullet\par}"#,
@@ -25273,6 +25977,7 @@ After\par}"#;
         assert!(!text.contains("Hidden list name"));
         assert!(!text.contains("Hidden link"));
         assert!(!text.contains("https://example.com/list-name"));
+        assert!(!text.contains("[Field removed"));
         assert!(!text.contains("objdata"));
         assert!(
             output
@@ -25591,6 +26296,35 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "document variable leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_docvariable_fields_render_hex_metadata_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\*\docvar {Client}{Con\'74oso {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} ta\'69l}}Client: {\field{\*\fldinst DOCVARIABLE Client}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Client: Contoso  tail"),
+            "hex-escaped document variable text should be captured for passive field rendering: {text:?}"
+        );
+        for forbidden in [
+            "DOCVARIABLE",
+            "docvar",
+            "fldinst",
+            "HYPERLINK",
+            "https://example.com",
+            "Hidden link",
+            "\\'74",
+            "\\'69",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "document variable hex metadata leaked unsafe text: {forbidden}"
             );
         }
     }
@@ -26037,6 +26771,39 @@ After\par}"#;
         assert!(!text.contains("Image skipped"));
         assert!(!text.contains("Shape skipped"));
         assert!(!text.contains("Field removed"));
+    }
+
+    #[test]
+    fn metadata_ignored_shape_pictures_do_not_reenter_body_flow() {
+        let output = parse_rtf(
+            r"{\rtf1 Start{\info{\title Hidden {\*\shppict{\pict\pngblip 00}}{\*\nonshppict{\pict\wmetafile8 41424344}}}} End\par}",
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(text, "Start End");
+        assert!(
+            output
+                .document
+                .blocks
+                .iter()
+                .all(|block| !matches!(block, Block::Image(_)))
+        );
+        for forbidden in [
+            "Image skipped",
+            "unsupported picture",
+            "shppict",
+            "nonshppict",
+            "pict",
+            "pngblip",
+            "wmetafile",
+            "41424344",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "metadata shape-picture fallback leaked to body text: {forbidden}"
+            );
+        }
     }
 
     #[test]
@@ -27542,6 +28309,30 @@ After\par}"#;
     }
 
     #[test]
+    fn landscape_zero_keeps_portrait_page_geometry() {
+        let output = parse_rtf(
+            r"{\rtf1\landscape0\paperw12240\paperh15840 Body\par\sect\sectd\lndscpsxn0\pgwsxn12240\pghsxn15840 Later\par}",
+        )
+        .unwrap();
+
+        assert!(!output.document.page.landscape);
+        assert_eq!(output.document.page.width_twips, 12_240);
+        assert_eq!(output.document.page.height_twips, 15_840);
+        let Block::SectionSettings(settings) = &output.document.blocks[2] else {
+            panic!("expected later section settings");
+        };
+        assert!(!settings.landscape);
+        assert_eq!(settings.width_twips, 12_240);
+        assert_eq!(settings.height_twips, 15_840);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
     fn zero_line_number_distance_does_not_enable_line_numbering() {
         let output = parse_rtf(r"{\rtf1\sectd\linex0 Body\par}").unwrap();
 
@@ -28196,6 +28987,88 @@ After\par}"#;
             .expect("tinted run");
         assert_eq!(tinted.style.highlight_index, Some(2));
         assert_eq!(tinted.style.highlight_shading_basis_points, 5_000);
+    }
+
+    #[test]
+    fn normalizes_hex_color_table_separators() {
+        let output = parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0\'3b\red0\green255\blue0\'3b}{\cf1 Red} {\highlight2 Marked}\par}",
+        )
+        .unwrap();
+        assert_eq!(
+            output.document.colors[1],
+            Color {
+                red: 255,
+                green: 0,
+                blue: 0
+            }
+        );
+        assert_eq!(
+            output.document.colors[2],
+            Color {
+                red: 0,
+                green: 255,
+                blue: 0
+            }
+        );
+
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let red = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.trim() == "Red")
+            .expect("red run");
+        assert_eq!(red.style.color_index, 1);
+        let marked = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.trim() == "Marked")
+            .expect("marked run");
+        assert_eq!(marked.style.highlight_index, Some(2));
+    }
+
+    #[test]
+    fn normalizes_unicode_color_table_separators() {
+        let output = parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0\u59?\red0\green255\blue0\u59?}{\cf1 Red} {\highlight2 Marked}\par}",
+        )
+        .unwrap();
+        assert_eq!(
+            output.document.colors[1],
+            Color {
+                red: 255,
+                green: 0,
+                blue: 0
+            }
+        );
+        assert_eq!(
+            output.document.colors[2],
+            Color {
+                red: 0,
+                green: 255,
+                blue: 0
+            }
+        );
+
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let red = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.trim() == "Red")
+            .expect("red run");
+        assert_eq!(red.style.color_index, 1);
+        let marked = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.trim() == "Marked")
+            .expect("marked run");
+        assert_eq!(marked.style.highlight_index, Some(2));
     }
 
     #[test]

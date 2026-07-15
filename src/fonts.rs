@@ -4,6 +4,30 @@ use std::fmt;
 use ttf_parser::Face;
 
 const BUNDLED_BROWSER_SAFE_FALLBACK_FONT: &[u8] = include_bytes!("../fixtures/fonts/Tuffy.ttf");
+const BUNDLED_BROWSER_SAFE_SANS_REGULAR_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/LiberationSans-Regular.ttf");
+const BUNDLED_BROWSER_SAFE_SANS_BOLD_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/LiberationSans-Bold.ttf");
+const BUNDLED_BROWSER_SAFE_SANS_ITALIC_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/LiberationSans-Italic.ttf");
+const BUNDLED_BROWSER_SAFE_SANS_BOLD_ITALIC_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/LiberationSans-BoldItalic.ttf");
+const BUNDLED_BROWSER_SAFE_SERIF_REGULAR_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/Tinos-Regular.ttf");
+const BUNDLED_BROWSER_SAFE_SERIF_BOLD_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/Tinos-Bold.ttf");
+const BUNDLED_BROWSER_SAFE_SERIF_ITALIC_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/Tinos-Italic.ttf");
+const BUNDLED_BROWSER_SAFE_SERIF_BOLD_ITALIC_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/Tinos-BoldItalic.ttf");
+const BUNDLED_BROWSER_SAFE_MONO_REGULAR_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/Cousine-Regular.ttf");
+const BUNDLED_BROWSER_SAFE_MONO_BOLD_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/Cousine-Bold.ttf");
+const BUNDLED_BROWSER_SAFE_MONO_ITALIC_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/Cousine-Italic.ttf");
+const BUNDLED_BROWSER_SAFE_MONO_BOLD_ITALIC_FONT: &[u8] =
+    include_bytes!("../fixtures/fonts/Cousine-BoldItalic.ttf");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontProvider {
@@ -22,8 +46,12 @@ impl Default for FontProvider {
 
 impl FontProvider {
     pub fn browser_safe_defaults() -> Self {
+        Self::browser_safe_with_bundled_metric_fonts()
+    }
+
+    pub fn browser_safe_with_bundled_metric_fonts() -> Self {
         Self {
-            assets: Vec::new(),
+            assets: bundled_browser_safe_metric_assets(),
             limits: FontProviderLimits::browser_defaults(),
         }
     }
@@ -167,6 +195,131 @@ impl FontProvider {
             .filter(|asset| glyph_metrics_for_asset(asset, ch).is_some())
             .min_by_key(|asset| supplied_font_style_mismatch_score(asset.style, style))
     }
+}
+
+fn bundled_browser_safe_metric_assets() -> Vec<FontAsset> {
+    let mut assets = Vec::new();
+    push_bundled_browser_safe_style_set(
+        &mut assets,
+        bundled_browser_safe_sans_aliases(),
+        BUNDLED_BROWSER_SAFE_SANS_REGULAR_FONT,
+        BUNDLED_BROWSER_SAFE_SANS_BOLD_FONT,
+        BUNDLED_BROWSER_SAFE_SANS_ITALIC_FONT,
+        BUNDLED_BROWSER_SAFE_SANS_BOLD_ITALIC_FONT,
+    );
+    push_bundled_browser_safe_style_set(
+        &mut assets,
+        bundled_browser_safe_serif_aliases(),
+        BUNDLED_BROWSER_SAFE_SERIF_REGULAR_FONT,
+        BUNDLED_BROWSER_SAFE_SERIF_BOLD_FONT,
+        BUNDLED_BROWSER_SAFE_SERIF_ITALIC_FONT,
+        BUNDLED_BROWSER_SAFE_SERIF_BOLD_ITALIC_FONT,
+    );
+    push_bundled_browser_safe_style_set(
+        &mut assets,
+        bundled_browser_safe_mono_aliases(),
+        BUNDLED_BROWSER_SAFE_MONO_REGULAR_FONT,
+        BUNDLED_BROWSER_SAFE_MONO_BOLD_FONT,
+        BUNDLED_BROWSER_SAFE_MONO_ITALIC_FONT,
+        BUNDLED_BROWSER_SAFE_MONO_BOLD_ITALIC_FONT,
+    );
+    assets.push(FontAsset {
+        family_names: bundled_browser_safe_symbol_aliases(),
+        style: FontAssetStyle::default(),
+        bytes: BUNDLED_BROWSER_SAFE_FALLBACK_FONT.to_vec(),
+    });
+    assets
+}
+
+fn push_bundled_browser_safe_style_set(
+    assets: &mut Vec<FontAsset>,
+    aliases: Vec<String>,
+    regular: &[u8],
+    bold: &[u8],
+    italic: &[u8],
+    bold_italic: &[u8],
+) {
+    assets.extend([
+        FontAsset {
+            family_names: aliases.clone(),
+            style: FontAssetStyle::default(),
+            bytes: regular.to_vec(),
+        },
+        FontAsset {
+            family_names: aliases.clone(),
+            style: FontAssetStyle {
+                bold: true,
+                italic: false,
+            },
+            bytes: bold.to_vec(),
+        },
+        FontAsset {
+            family_names: aliases.clone(),
+            style: FontAssetStyle {
+                bold: false,
+                italic: true,
+            },
+            bytes: italic.to_vec(),
+        },
+        FontAsset {
+            family_names: aliases,
+            style: FontAssetStyle {
+                bold: true,
+                italic: true,
+            },
+            bytes: bold_italic.to_vec(),
+        },
+    ]);
+}
+
+fn bundled_browser_safe_sans_aliases() -> Vec<String> {
+    [
+        "Liberation Sans",
+        "Arial",
+        "Arial CE",
+        "Arial Cyr",
+        "Arial Greek",
+        "Arial Tur",
+        "Arial Baltic",
+        "Arial Narrow",
+        "Helvetica Narrow",
+        "Helvetica",
+        "MS Sans Serif",
+        "Microsoft Sans Serif",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn bundled_browser_safe_serif_aliases() -> Vec<String> {
+    [
+        "Tinos",
+        "Times New Roman",
+        "Times New Roman CE",
+        "Times New Roman Cyr",
+        "Times New Roman Greek",
+        "Times New Roman Tur",
+        "Times New Roman Baltic",
+        "Times",
+        "Times-Roman",
+        "MS Serif",
+        "Book Antiqua",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn bundled_browser_safe_mono_aliases() -> Vec<String> {
+    ["Cousine", "Courier New", "Courier", "Courier Std"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn bundled_browser_safe_symbol_aliases() -> Vec<String> {
+    ["Symbol"].into_iter().map(str::to_string).collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -489,6 +642,63 @@ mod tests {
                 "{family}"
             );
         }
+    }
+
+    #[test]
+    fn browser_safe_defaults_bundle_bounded_metric_assets() {
+        let provider = FontProvider::browser_safe_defaults();
+        provider.validate().unwrap();
+
+        assert_eq!(provider.assets.len(), 13);
+        assert!(provider.has_asset_for_family("Arial"));
+        assert!(provider.has_asset_for_family("Arial CE"));
+        assert!(provider.has_asset_for_family("Arial Narrow"));
+        assert!(provider.has_asset_for_family("Helvetica Narrow"));
+        assert!(provider.has_asset_for_family("MS Sans Serif"));
+        assert!(provider.has_asset_for_family("Times New Roman"));
+        assert!(provider.has_asset_for_family("Times New Roman CE"));
+        assert!(provider.has_asset_for_family("MS Serif"));
+        assert!(provider.has_asset_for_family("Book Antiqua"));
+        assert!(provider.has_asset_for_family("Courier New"));
+        assert!(provider.has_asset_for_family("Courier"));
+        assert!(provider.has_asset_for_family("Symbol"));
+        assert_eq!(
+            provider.coverage_for_char("Arial", 'A'),
+            FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Arial Narrow", 'A'),
+            FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Times New Roman CE", '\u{0151}'),
+            FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Courier New", 'A'),
+            FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Symbol", '\u{221a}'),
+            FontCoverage::Covered
+        );
+        assert!(
+            provider
+                .glyph_metrics_for_char_with_style(
+                    "Arial",
+                    FontAssetStyle {
+                        bold: true,
+                        italic: true,
+                    },
+                    'A'
+                )
+                .is_some()
+        );
+        assert!(!provider.has_asset_for_family("Unknown Word Font"));
+        assert_eq!(
+            provider.coverage_for_char("Unknown Word Font", 'A'),
+            FontCoverage::NoAsset
+        );
     }
 
     #[test]

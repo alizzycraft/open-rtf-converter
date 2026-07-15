@@ -201,7 +201,7 @@ fn content_text(content: &Content) -> String {
             "Tj" | "'" | "\"" => {
                 for operand in &operation.operands {
                     if let Ok(bytes) = operand.as_str() {
-                        text.push_str(&String::from_utf8_lossy(bytes));
+                        text.push_str(&decode_pdf_text_bytes(bytes));
                     }
                 }
             }
@@ -210,7 +210,7 @@ fn content_text(content: &Content) -> String {
                     if let Ok(items) = operand.as_array() {
                         for item in items {
                             if let Ok(bytes) = item.as_str() {
-                                text.push_str(&String::from_utf8_lossy(bytes));
+                                text.push_str(&decode_pdf_text_bytes(bytes));
                             }
                         }
                     }
@@ -220,4 +220,26 @@ fn content_text(content: &Content) -> String {
         }
     }
     text
+}
+
+fn decode_pdf_text_bytes(bytes: &[u8]) -> String {
+    if bytes_look_like_utf16be_cids(bytes) {
+        let utf16 = bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        if let Ok(decoded) = String::from_utf16(&utf16) {
+            return decoded;
+        }
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn bytes_look_like_utf16be_cids(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+        return false;
+    }
+    let chunks = bytes.len() / 2;
+    let zero_high_bytes = bytes.chunks_exact(2).filter(|chunk| chunk[0] == 0).count();
+    zero_high_bytes * 2 >= chunks
 }

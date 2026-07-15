@@ -234,7 +234,7 @@ fn hex_escapes_inside_object_data_do_not_become_text() {
 }
 
 #[test]
-fn cyrillic_charset_text_is_decoded_but_unrenderable_font_gap_is_reported() {
+fn cyrillic_charset_text_uses_bundled_serif_asset() {
     let input = rtf(&[
         "{",
         "\\",
@@ -281,7 +281,9 @@ fn cyrillic_charset_text_is_decoded_but_unrenderable_font_gap_is_reported() {
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
     assert!(output.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains("Cyrillic characters")
-            && diagnostic.message.contains("passive font asset support")
+            && diagnostic
+                .message
+                .contains("caller-provided passive font asset")
             && diagnostic.message.contains("Times New Roman Cyr")
     }));
 
@@ -305,7 +307,7 @@ fn cyrillic_charset_text_is_decoded_but_unrenderable_font_gap_is_reported() {
 }
 
 #[test]
-fn central_european_charset_text_reports_browser_safe_font_gap() {
+fn central_european_charset_text_uses_bundled_serif_asset() {
     let input = rtf(&[
         "{",
         "\\",
@@ -346,9 +348,18 @@ fn central_european_charset_text_reports_browser_safe_font_gap() {
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
     assert!(output.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains("Latin Extended characters")
-            && diagnostic.message.contains("passive font asset support")
+            && diagnostic
+                .message
+                .contains("caller-provided passive font asset")
             && diagnostic.message.contains("Times New Roman CE")
     }));
+    assert!(
+        !output
+            .pdf
+            .windows(b"OpenRtfConverter-ExtendedLatin".len())
+            .any(|window| window == b"OpenRtfConverter-ExtendedLatin"),
+        "bundled serif asset should avoid the base-font Extended Latin CMap"
+    );
 
     for forbidden in [
         b"Times New Roman CE".as_slice(),
@@ -364,6 +375,46 @@ fn central_european_charset_text_reports_browser_safe_font_gap() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden Central European/source content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn unsupported_latin_extended_text_still_reports_browser_safe_font_gap() {
+    let input = r"{\rtf1\ansi{\fonttbl{\f0\froman Unknown Word Serif;}}\f0 Unsupported \u384?\par}"
+        .as_bytes()
+        .to_vec();
+    let mut options = ConvertOptions::browser_safe_defaults();
+    options.diagnostics = true;
+    let output = convert_rtf_to_pdf(&input, &options).unwrap();
+
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("Latin Extended characters")
+            && diagnostic.message.contains("passive font asset support")
+            && diagnostic.message.contains("Unknown Word Serif")
+    }));
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("bounded passive PDF base-font encoding")),
+        "unsupported Latin Extended glyph should not be reported as base-font covered: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"Unknown Word Serif",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden unsupported Latin Extended/source content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -2371,6 +2422,179 @@ fn shading_intensity_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn hex_color_table_separators_render_passively_without_control_leakage() {
+    let input =
+        br"{\rtf1{\colortbl;\red255\green0\blue0\'3b\red0\green255\blue0\'3b}{\cf1 Red} {\highlight2 Marked}\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Red"));
+    assert!(text.contains("Marked"));
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let red = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.trim() == "Red")
+        .expect("red run");
+    let marked = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.trim() == "Marked")
+        .expect("marked run");
+    assert_eq!(red.style.color_index, 1);
+    assert_eq!(marked.style.highlight_index, Some(2));
+    for forbidden in [
+        "colortbl",
+        "red255",
+        "green255",
+        "\\'3b",
+        "cf1",
+        "highlight2",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden hex color-table content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Red") && rendered_text.contains("Marked"),
+        "decoded PDF text did not contain hex color-table text: {rendered_text:?}"
+    );
+    assert!(content.operations.iter().any(|operation| {
+        operation.operator == "rg"
+            && operation.operands.len() == 3
+            && pdf_operand_number(&operation.operands[0]).is_some_and(|value| value > 0.9)
+            && pdf_operand_number(&operation.operands[1]).is_some_and(|value| value < 0.01)
+            && pdf_operand_number(&operation.operands[2]).is_some_and(|value| value < 0.01)
+    }));
+    for forbidden in [
+        b"colortbl".as_slice(),
+        b"red255",
+        b"green255",
+        b"\\'3b",
+        b"cf1",
+        b"highlight2",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden hex color-table content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn unicode_color_table_separators_render_passively_without_control_leakage() {
+    let input =
+        br"{\rtf1{\colortbl;\red255\green0\blue0\u59?\red0\green255\blue0\u59?}{\cf1 Red} {\highlight2 Marked}\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Red"));
+    assert!(text.contains("Marked"));
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let red = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.trim() == "Red")
+        .expect("red run");
+    let marked = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.trim() == "Marked")
+        .expect("marked run");
+    assert_eq!(red.style.color_index, 1);
+    assert_eq!(marked.style.highlight_index, Some(2));
+    for forbidden in [
+        "colortbl",
+        "red255",
+        "green255",
+        "u59",
+        "?",
+        "cf1",
+        "highlight2",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden Unicode color-table content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Red") && rendered_text.contains("Marked"),
+        "decoded PDF text did not contain Unicode color-table text: {rendered_text:?}"
+    );
+    assert!(content.operations.iter().any(|operation| {
+        operation.operator == "rg"
+            && operation.operands.len() == 3
+            && pdf_operand_number(&operation.operands[0]).is_some_and(|value| value > 0.9)
+            && pdf_operand_number(&operation.operands[1]).is_some_and(|value| value < 0.01)
+            && pdf_operand_number(&operation.operands[2]).is_some_and(|value| value < 0.01)
+    }));
+    for forbidden in [
+        b"colortbl".as_slice(),
+        b"red255",
+        b"green255",
+        b"u59",
+        b"cf1",
+        b"highlight2",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Unicode color-table content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn table_row_borders_render_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
@@ -3026,6 +3250,70 @@ fn old_style_list_marker_text_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn structural_old_style_list_markers_do_not_cross_pdf_boundary() {
+    let input = br"{\rtf1{\fonttbl{\f0 Arial;{\pntext HiddenFontMarker\tab}}}{\stylesheet{\s1 VisibleStyle;{\pn\pndec\pnstart9{\pntxtb HiddenStyleMarker}{\pntxta .\tab}}}}{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers;}{\pntext HiddenListMarker\tab}}\listid7}}Visible body\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible body"));
+    for forbidden in [
+        "HiddenFontMarker",
+        "HiddenStyleMarker",
+        "HiddenListMarker",
+        "9.",
+        "pntext",
+        "pntxtb",
+        "pntxta",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "structural old-style list marker leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Visible body"),
+        "rendered text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"HiddenFontMarker".as_slice(),
+        b"HiddenStyleMarker",
+        b"HiddenListMarker",
+        b"pntext",
+        b"pntxtb",
+        b"pntxta",
+        b"/Annots",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "structural old-style list marker leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+}
+
+#[test]
 fn formatted_explicit_listtext_marker_renders_passively_without_control_leakage() {
     let input =
         br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtext\b\cf1 1.\tab}Styled explicit\par}"
@@ -3126,6 +3414,62 @@ fn named_control_explicit_list_marker_renders_as_marker_without_control_leakage(
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden named list marker content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn escaped_control_symbols_in_hidden_text_do_not_cross_pdf_boundary() {
+    let input = br"{\rtf1 Visible {\v \~ \- \_ \\ \{ \}}{\v0 shown}\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible"));
+    assert!(text.contains("shown"));
+    for forbidden in ["\u{00a0}", "\u{00ad}", "\u{2011}", "\\", "{", "}"] {
+        assert!(
+            !text.contains(forbidden),
+            "hidden escaped symbol leaked to normalized text: {forbidden:?}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible"));
+    assert!(rendered_text.contains("shown"));
+    for forbidden in ["\u{00a0}", "\u{00ad}", "\u{2011}", "\\", "{", "}"] {
+        assert!(
+            !rendered_text.contains(forbidden),
+            "hidden escaped symbol leaked to decoded PDF text: {forbidden:?}"
+        );
+    }
+    for forbidden in [
+        b"\\~".as_slice(),
+        b"\\-",
+        b"\\_",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden hidden escaped symbol content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -4128,6 +4472,76 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn list_level_marker_emphasis_marks_render_passively_without_control_leakage() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\accdot{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\acccomma{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\accdot\accnone{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}}\pard\ls1\ilvl0 Dot marker\par\pard\ls2\ilvl0 Comma marker\par\pard\ls3\ilvl0\b Plain marker\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+
+    for (index, expected) in [
+        CharacterEmphasisMark::Dot,
+        CharacterEmphasisMark::Comma,
+        CharacterEmphasisMark::None,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let paragraph = match &parsed.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert_eq!(paragraph.runs[0].style.emphasis_mark, expected);
+        assert_eq!(
+            paragraph.runs[1].style.emphasis_mark,
+            CharacterEmphasisMark::None
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for expected in ["1.Dot marker", "1.Comma marker", "1.Plain marker"] {
+        assert!(
+            rendered_text.contains(expected),
+            "decoded PDF text missing {expected:?}: {rendered_text:?}"
+        );
+    }
+
+    for forbidden in [
+        b"accdot".as_slice(),
+        b"acccomma",
+        b"accnone",
+        b"levelnfc",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level marker emphasis control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+}
+
+#[test]
 fn list_level_marker_script_and_spacing_render_passively_without_control_leakage() {
     let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -4653,6 +5067,80 @@ fn ordinal_list_markers_render_as_passive_pdf_text() {
 }
 
 #[test]
+fn cardinal_and_ordinal_text_list_markers_render_as_passive_pdf_text() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc6\levelstartat21{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid21}{\list{\listlevel\levelnfc7\levelstartat22{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid22}{\list{\listlevel\levelnfc6\levelstartat1000{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid23}}{\*\listoverridetable{\listoverride\listid21\ls21}{\listoverride\listid22\ls22}{\listoverride\listid23\ls23}}\pard\ls21\ilvl0 Cardinal text\par\pard\ls22\ilvl0 Ordinal text\par\pard\ls23\ilvl0 Fallback text\par{\pn\pncard\pnstart21}Old cardinal\par{\pn\pnordt\pnstart22}Old ordinal\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    for expected in [
+        "twenty-one.\tCardinal text",
+        "twenty-second.\tOrdinal text",
+        "1000.\tFallback text",
+        "twenty-one.\tOld cardinal",
+        "twenty-second.\tOld ordinal",
+    ] {
+        assert!(
+            text.contains(expected),
+            "normalized text missing {expected:?}: {text:?}"
+        );
+    }
+    for forbidden in ["levelnfc", "leveltext", "levelnumbers", "pncard", "pnordt"] {
+        assert!(
+            !text.contains(forbidden),
+            "list text marker control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for expected in [
+        "twenty-one.Cardinal text",
+        "twenty-second.Ordinal text",
+        "1000.Fallback text",
+        "twenty-one.Old cardinal",
+        "twenty-second.Old ordinal",
+    ] {
+        assert!(
+            rendered_text.contains(expected),
+            "decoded PDF text missing {expected:?}: {rendered_text:?}"
+        );
+    }
+
+    for forbidden in [
+        b"levelnfc".as_slice(),
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"pncard",
+        b"pnordt",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden text-list marker content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+}
+
+#[test]
 fn zero_padded_list_markers_render_as_passive_pdf_text() {
     let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc22\levelstartat1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid16}{\list{\listlevel\levelnfc63\levelstartat1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid18}}{\*\listoverridetable{\listoverride\listid16\ls16}{\listoverride\listid18\ls18}}\pard\ls16\ilvl0 Two digits\par\pard\ls18\ilvl0 Four digits\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -5172,6 +5660,79 @@ fn carried_table_row_definitions_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn intbl_zero_consumes_table_state_without_pdf_control_leakage() {
+    let input = br"{\rtf1\trowd\cellx1800 A\cell\row\pard\intbl0 Outside table\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("A"));
+    assert!(text.contains("Outside table"));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "intbl0 should be consumed without unsupported-control noise: {:?}",
+        parsed.diagnostics
+    );
+    assert!(
+        matches!(&parsed.document.blocks[1], Block::Paragraph(paragraph) if paragraph.runs[0].text == "Outside table"),
+        "intbl0 should keep following text as body flow: {:?}",
+        parsed.document.blocks
+    );
+    for forbidden in ["intbl0", "cellx", "row"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden intbl0 table control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered_text.contains("A"));
+    assert!(rendered_text.contains("Outside table"));
+    for forbidden in [
+        b"intbl0".as_slice(),
+        b"intbl",
+        b"cellx",
+        b"/Annots",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden intbl0 table content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+}
+
+#[test]
 fn active_object_data_is_placeholdered_or_rejected_and_never_normalized() {
     let parsed = parse_rtf_bytes(&object_with_payload(false)).unwrap();
     let text = collect_text(&parsed.document);
@@ -5191,6 +5752,67 @@ fn active_object_data_is_placeholdered_or_rejected_and_never_normalized() {
         parse_rtf_bytes_with_options(&object_with_payload(false), &reject_options),
         Err(ParseError::ActiveContentRejected { .. })
     ));
+}
+
+#[test]
+fn raw_text_after_stray_ignorable_marker_does_not_hide_later_active_destination() {
+    let input = br"{\rtf1{\* raw visible \object\objdata 414243}After\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("raw visible"));
+    assert!(text.contains("[Embedded object removed]"));
+    assert!(text.contains("After"));
+    for forbidden in ["objdata", "414243"] {
+        assert!(
+            !text.contains(forbidden),
+            "object payload leaked to normalized text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("ignorable destination marker without a following destination control")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("active content removed: OLE object before safe model normalization")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("raw visible"));
+    assert!(rendered_text.contains("[Embedded object removed]"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"objdata".as_slice(),
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden stale-ignorable object content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
 }
 
 #[test]
@@ -7041,6 +7663,46 @@ fn docvariable_fields_render_metadata_without_leaking_nested_active_content() {
 }
 
 #[test]
+fn hex_docvariable_metadata_renders_without_raw_or_active_pdf_leakage() {
+    let input = br#"{\rtf1{\*\docvar {Client}{Con\'74oso {\field{\*\fldinst HYPERLINK "https://example.com/docvar-hex"}{\fldrslt Hidden link}} ta\'69l}}Client {\field{\*\fldinst DOCVARIABLE Client}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Client Contoso  tail"),
+        "hex-escaped document variable text should render passively: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"DOCVARIABLE".as_slice(),
+        b"docvar",
+        b"fldinst",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Hidden link",
+        b"\\'74",
+        b"\\'69",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "hex document variable field leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn date_fields_use_stored_results_and_never_update_or_leak_instructions() {
     let stored = parse_rtf_bytes(&rtf(&[
         "{",
@@ -8524,6 +9186,361 @@ fn resultless_listnum_fields_render_bounded_passive_numbers_without_instruction_
 }
 
 #[test]
+fn list_level_template_length_boundary_prevents_trailing_metadata_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "*",
+        "\\",
+        "listtable{",
+        "\\",
+        "list{",
+        "\\",
+        "listlevel",
+        "\\",
+        "levelnfc0",
+        "\\",
+        "levelstartat1{",
+        "\\",
+        "leveltext",
+        "\\",
+        "'02",
+        "\\",
+        "'00.;HIDDEN-LIST-PAYLOAD{",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243};}{",
+        "\\",
+        "levelnumbers",
+        "\\",
+        "'01;}",
+        "\\",
+        "levelnumbers HIDDEN-NUMBERS-PAYLOAD}",
+        "\\",
+        "listid5}}{",
+        "\\",
+        "*",
+        "\\",
+        "listoverridetable{",
+        "\\",
+        "listoverride",
+        "\\",
+        "listid5",
+        "\\",
+        "ls1}}",
+        "\\",
+        "pard",
+        "\\",
+        "ls1",
+        "\\",
+        "ilvl0 Safe item",
+        "\\",
+        "par",
+        "\\",
+        "pard Typed HIDDEN-LIST-PAYLOAD outside",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("1.\tSafe item"),
+        "decoded text did not contain bounded synthesized list marker: {text:?}"
+    );
+    for forbidden in [
+        "HIDDEN-NUMBERS-PAYLOAD",
+        "[Embedded object removed]",
+        "objdata",
+        "414243",
+        "leveltext",
+        "levelnumbers",
+        "listtable",
+        "listoverridetable",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden trailing list template metadata leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        text.contains("Typed HIDDEN-LIST-PAYLOAD outside"),
+        "literal visible text matching the hidden payload should remain renderable"
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<String>();
+    assert!(
+        rendered_text.contains("1.Safe item"),
+        "decoded PDF text did not contain bounded synthesized list marker: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Typed HIDDEN-LIST-PAYLOAD outside"),
+        "visible literal payload text should still render: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"HIDDEN-NUMBERS-PAYLOAD".as_slice(),
+        b"[Embedded object removed]",
+        b"objdata",
+        b"414243",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverridetable",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden trailing list template metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn structural_metadata_fields_do_not_emit_visible_placeholders_or_payloads() {
+    let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\field{\*\fldinst HYPERLINK "https://hidden.example/font"}}}{\stylesheet{\s1 Visible Style;}{\field{\*\fldinst HYPERLINK "https://hidden.example/style"}}}{\colortbl;\red0\green0\blue0;{\field{\*\fldinst HYPERLINK "https://hidden.example/color"}}}\f0 Visible body\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Visible body"),
+        "decoded text did not contain visible body text: {text:?}"
+    );
+    for forbidden in [
+        "[Field removed",
+        "HYPERLINK",
+        "hidden.example",
+        "fldinst",
+        "fonttbl",
+        "stylesheet",
+        "colortbl",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "structural metadata field leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<String>();
+
+    assert!(
+        rendered_text.contains("Visible body"),
+        "decoded PDF text did not contain visible body text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"[Field removed".as_slice(),
+        b"HYPERLINK",
+        b"hidden.example",
+        b"fldinst",
+        b"fonttbl",
+        b"stylesheet",
+        b"colortbl",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "structural metadata field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn structural_metadata_bookmarks_do_not_feed_fields_or_pdf_anchors() {
+    let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\*\bkmkstart HiddenFontMark}Hidden font payload{\*\bkmkend HiddenFontMark}}{\stylesheet{\s1 Visible Style;}{\*\bkmkstart HiddenStyleMark}Hidden style payload{\*\bkmkend HiddenStyleMark}}\f0 Body {\*\bkmkstart VisibleMark}Marked text{\*\bkmkend VisibleMark} visible {\field{\*\fldinst REF VisibleMark}} hidden {\field{\*\fldinst REF HiddenFontMark}} style {\field{\*\fldinst REF HiddenStyleMark}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = strip_bookmark_page_markers(&collect_text(&parsed.document));
+
+    assert!(
+        text.contains("Body Marked text visible Marked text hidden [Field removed: no passive result] style [Field removed: no passive result]"),
+        "decoded text did not preserve visible bookmark or placeholder hidden metadata refs: {text:?}"
+    );
+    for forbidden in [
+        "Hidden font payload",
+        "Hidden style payload",
+        "HiddenFontMark",
+        "HiddenStyleMark",
+        "bkmkstart",
+        "bkmkend",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "structural metadata bookmark leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<String>();
+
+    assert!(
+        rendered_text.contains("Body Marked text visible Marked text hidden [Field removed: no passive result] style [Field removed: no passive result]"),
+        "decoded PDF text did not preserve visible bookmark or placeholder hidden metadata refs: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"Hidden font payload".as_slice(),
+        b"Hidden style payload",
+        b"HiddenFontMark",
+        b"HiddenStyleMark",
+        b"bkmkstart",
+        b"bkmkend",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "structural metadata bookmark leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn structural_metadata_shape_pictures_do_not_emit_pdf_placeholders_or_images() {
+    let input = br"{\rtf1{\info{\title Hidden title {\*\shppict{\pict\pngblip 00}}{\*\nonshppict{\pict\wmetafile8 2f4a617661536372697074}}}}Visible body\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(text, "Visible body");
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_)))
+    );
+    for forbidden in [
+        "Hidden title",
+        "Image skipped",
+        "unsupported picture",
+        "shppict",
+        "nonshppict",
+        "pict",
+        "pngblip",
+        "wmetafile",
+        "JavaScript",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "metadata shape-picture fallback leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible body"));
+    for forbidden in [
+        b"Hidden title".as_slice(),
+        b"Image skipped",
+        b"unsupported picture",
+        b"shppict",
+        b"nonshppict",
+        b"pict",
+        b"pngblip",
+        b"wmetafile",
+        b"JavaScript",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/EmbeddedFile",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "metadata shape-picture fallback leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+}
+
+#[test]
 fn resultless_ref_fields_render_closed_bookmark_text_without_instruction_leakage() {
     let input = rtf(&[
         "{",
@@ -8604,6 +9621,95 @@ fn resultless_ref_fields_render_closed_bookmark_text_without_instruction_leakage
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden REF/bookmark content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn resultless_ref_fields_resolve_unicode_bookmark_names_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "*",
+        "\\",
+        "bkmkstart Code",
+        "\\",
+        "u65?Bookmark}Visible referenced text{",
+        "\\",
+        "*",
+        "\\",
+        "bkmkend Code",
+        "\\",
+        "u65?Bookmark} copy {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst REF \"Code",
+        "\\",
+        "u65?Bookmark\"}}.",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let visible_text = strip_bookmark_page_markers(&text);
+
+    assert!(visible_text.contains("Before Visible referenced text copy Visible referenced text."));
+    for forbidden in [
+        "REF",
+        "CodeABookmark",
+        "u65",
+        "?",
+        "bkmkstart",
+        "bkmkend",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden Unicode REF/bookmark content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Before Visible referenced text copy Visible referenced text."),
+        "decoded PDF text did not contain Unicode passive REF value: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"REF".as_slice(),
+        b"CodeABookmark",
+        b"u65",
+        b"bkmkstart",
+        b"bkmkend",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Unicode REF/bookmark content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -8791,6 +9897,212 @@ fn resultless_styleref_fields_render_safe_prior_style_text_without_payload_leaka
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden STYLEREF content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn resultless_styleref_fields_resolve_unicode_style_names_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "stylesheet{",
+        "\\",
+        "s1 Code ",
+        "\\",
+        "u65? Style;}}{",
+        "\\",
+        "s1 Visible title",
+        "\\",
+        "par}{",
+        "\\",
+        "pard Ref {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst STYLEREF \"Code ",
+        "\\",
+        "u65? Style\" \\\\* Upper}}",
+        "\\",
+        "par}}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible title"));
+    assert!(text.contains("Ref VISIBLE TITLE"));
+    for forbidden in [
+        "STYLEREF",
+        "Code A Style",
+        "u65",
+        "?",
+        "fldinst",
+        "stylesheet",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Unicode STYLEREF leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Ref VISIBLE TITLE"),
+        "decoded PDF text did not contain Unicode passive STYLEREF value: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"STYLEREF".as_slice(),
+        b"Code A Style",
+        b"u65",
+        b"fldinst",
+        b"stylesheet",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Unicode STYLEREF content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn unicode_stylesheet_name_terminator_ignores_trailing_text_without_pdf_leakage() {
+    let input = br#"{\rtf1{\stylesheet{\s1 Code\u65? Style\u59?Ignored;}}\s1 Visible title\par\pard Ref {\field{\*\fldinst STYLEREF "Code\u65? Style" \\* Upper}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible title"));
+    assert!(text.contains("Ref VISIBLE TITLE"));
+    for forbidden in [
+        "STYLEREF",
+        "CodeA Style",
+        "Ignored",
+        "u65",
+        "u59",
+        "?",
+        "fldinst",
+        "stylesheet",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Unicode stylesheet terminator leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Ref VISIBLE TITLE"),
+        "decoded PDF text did not contain Unicode-terminated passive STYLEREF value: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"STYLEREF".as_slice(),
+        b"CodeA Style",
+        b"Ignored",
+        b"u65",
+        b"u59",
+        b"fldinst",
+        b"stylesheet",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Unicode stylesheet terminator content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn resultless_styleref_fields_resolve_hex_style_names_without_control_leakage() {
+    let input = br#"{\rtf1{\stylesheet{\s1 Cod\'65 Style;}}\s1 Visible title\par\pard Ref {\field{\*\fldinst STYLEREF "Cod\'65 Style" \\* Upper}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible title"));
+    assert!(text.contains("Ref VISIBLE TITLE"));
+    for forbidden in ["STYLEREF", "Code Style", "\\'65", "fldinst", "stylesheet"] {
+        assert!(
+            !text.contains(forbidden),
+            "hex STYLEREF leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Ref VISIBLE TITLE"),
+        "decoded PDF text did not contain hex-style-name passive STYLEREF value: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"STYLEREF".as_slice(),
+        b"Code Style",
+        b"Cod\\'65",
+        b"fldinst",
+        b"stylesheet",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden hex STYLEREF content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -9885,6 +11197,72 @@ fn resultless_quote_fields_render_without_executing_field_instruction() {
 }
 
 #[test]
+fn resultless_quote_field_instruction_unicode_renders_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst QUOTE \"Code ",
+        "\\",
+        "u65? value\"}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before Code A value After"));
+    for forbidden in ["QUOTE", "fldinst", "u65", "? value"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden Unicode quote-field content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Before Code A value After"),
+        "decoded PDF text did not contain Unicode passive QUOTE result: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"QUOTE".as_slice(),
+        b"fldinst",
+        b"u65",
+        b"? value",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Unicode quote-field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_macrobutton_fields_render_without_executing_macro() {
     let input = rtf(&[
         "{",
@@ -10693,8 +12071,8 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
         "expected page number x at 18pt, got {page_number_position:?}"
     );
     assert!(
-        (page_number_position.1 - 708.75).abs() < 0.01,
-        "expected page number baseline near 708.75pt, got {page_number_position:?}"
+        (page_number_position.1 - 709.5).abs() < 0.01,
+        "expected page number baseline near 709.5pt, got {page_number_position:?}"
     );
     for forbidden in [
         b"pgnx".as_slice(),
@@ -14119,11 +15497,12 @@ fn symbol_pntext_bullets_render_as_passive_winansi_without_font_payload_leakage(
 
 #[test]
 fn wingdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
-    let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\f1 \'a3 \'fe \'fc \'fb\par {\field{\*\fldinst SYMBOL 254 \\f "Wingdings"}}\par}"#.to_vec();
+    let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\f1 \'a3 \'fe \'fc \'fb \'fd \u61693?\par {\field{\*\fldinst SYMBOL 254 \\f "Wingdings"}} {\field{\*\fldinst SYMBOL 253 \\f "Wingdings"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("\u{2610} \u{2611} \u{2713} \u{2717}"));
+    assert!(text.contains("\u{2610} \u{2611} \u{2713} \u{2717} \u{2612} \u{2612}"));
     assert!(text.contains("\u{2611}"));
+    assert!(text.contains("\u{2612}"));
     for forbidden in ["fonttbl", "Wingdings", "fldinst", "SYMBOL"] {
         assert!(
             !text.contains(forbidden),
@@ -28995,6 +30374,94 @@ fn explicit_section_columns_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn landscape_zero_controls_keep_portrait_pdf_geometry_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "landscape0",
+        "\\",
+        "paperw12240",
+        "\\",
+        "paperh15840 Portrait body",
+        "\\",
+        "page portrait page two",
+        "\\",
+        "sect",
+        "\\",
+        "sectd",
+        "\\",
+        "lndscpsxn0",
+        "\\",
+        "pgwsxn12240",
+        "\\",
+        "pghsxn15840 Later section",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Portrait body"));
+    assert!(text.contains("Later section"));
+    assert!(!parsed.document.page.landscape);
+    assert_eq!(parsed.document.page.width_twips, 12_240);
+    assert_eq!(parsed.document.page.height_twips, 15_840);
+    for forbidden in [
+        "landscape",
+        "lndscpsxn",
+        "paperw",
+        "paperh",
+        "pgwsxn",
+        "pghsxn",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "orientation/page geometry control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 3);
+    for page_id in parsed_pdf.get_pages().values() {
+        let (width, height) = pdf_page_media_box_size(&parsed_pdf, *page_id);
+        assert_eq!((width.round() as i32, height.round() as i32), (612, 792));
+    }
+    for forbidden in [
+        b"landscape".as_slice(),
+        b"lndscpsxn",
+        b"paperw",
+        b"paperh",
+        b"pgwsxn",
+        b"pghsxn",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "orientation/page geometry control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+}
+
+#[test]
 fn later_section_title_page_header_footer_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
@@ -38076,7 +39543,7 @@ fn decoded_pdf_text(content: &lopdf::content::Content) -> String {
         if operation.operator == "Tj" {
             for operand in &operation.operands {
                 if let Ok(bytes) = operand.as_str() {
-                    text.push_str(&String::from_utf8_lossy(bytes));
+                    text.push_str(&decode_pdf_text_bytes(bytes));
                 }
             }
         } else if operation.operator == "TJ" {
@@ -38084,7 +39551,7 @@ fn decoded_pdf_text(content: &lopdf::content::Content) -> String {
                 if let Ok(items) = operand.as_array() {
                     for item in items {
                         if let Ok(bytes) = item.as_str() {
-                            text.push_str(&String::from_utf8_lossy(bytes));
+                            text.push_str(&decode_pdf_text_bytes(bytes));
                         }
                     }
                 }
@@ -38092,6 +39559,28 @@ fn decoded_pdf_text(content: &lopdf::content::Content) -> String {
         }
     }
     text
+}
+
+fn decode_pdf_text_bytes(bytes: &[u8]) -> String {
+    if bytes_look_like_utf16be_cids(bytes) {
+        let utf16 = bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        if let Ok(decoded) = String::from_utf16(&utf16) {
+            return decoded;
+        }
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn bytes_look_like_utf16be_cids(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+        return false;
+    }
+    let chunks = bytes.len() / 2;
+    let zero_high_bytes = bytes.chunks_exact(2).filter(|chunk| chunk[0] == 0).count();
+    zero_high_bytes * 2 >= chunks
 }
 
 fn pdf_first_text_position_for_text(
@@ -38108,7 +39597,7 @@ fn pdf_first_text_position_for_text(
             if operation.operands.iter().any(|operand| {
                 operand
                     .as_str()
-                    .is_ok_and(|bytes| String::from_utf8_lossy(bytes).contains(needle))
+                    .is_ok_and(|bytes| decode_pdf_text_bytes(bytes).contains(needle))
             }) {
                 return position;
             }
@@ -38117,7 +39606,7 @@ fn pdf_first_text_position_for_text(
                 operand.as_array().is_ok_and(|items| {
                     items.iter().any(|item| {
                         item.as_str()
-                            .is_ok_and(|bytes| String::from_utf8_lossy(bytes).contains(needle))
+                            .is_ok_and(|bytes| decode_pdf_text_bytes(bytes).contains(needle))
                     })
                 })
             })
@@ -38186,6 +39675,36 @@ fn pdf_operand_number(object: &lopdf::Object) -> Option<f32> {
         lopdf::Object::Real(value) => Some(*value),
         _ => None,
     }
+}
+
+fn pdf_page_media_box_size(pdf: &PdfDocument, page_id: lopdf::ObjectId) -> (f32, f32) {
+    let page = pdf
+        .get_object(page_id)
+        .expect("page object")
+        .as_dict()
+        .expect("page dictionary");
+    let media_box = page
+        .get(b"MediaBox")
+        .expect("page media box")
+        .as_array()
+        .expect("media box array");
+    let left = media_box
+        .first()
+        .and_then(pdf_operand_number)
+        .expect("media box left");
+    let bottom = media_box
+        .get(1)
+        .and_then(pdf_operand_number)
+        .expect("media box bottom");
+    let right = media_box
+        .get(2)
+        .and_then(pdf_operand_number)
+        .expect("media box right");
+    let top = media_box
+        .get(3)
+        .and_then(pdf_operand_number)
+        .expect("media box top");
+    (right - left, top - bottom)
 }
 
 fn has_wmf_preview_warning(diagnostics: &[Diagnostic]) -> bool {

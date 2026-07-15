@@ -322,6 +322,7 @@ struct SuppliedPdfFont {
     cid_ref: Ref,
     descriptor_ref: Ref,
     font_file_ref: Ref,
+    cid_to_gid_map_ref: Ref,
     to_unicode_ref: Ref,
     used_glyphs: Vec<SuppliedGlyph>,
 }
@@ -329,6 +330,7 @@ struct SuppliedPdfFont {
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct SuppliedGlyph {
     cid: u16,
+    gid: u16,
     unicode: char,
     width: f32,
 }
@@ -535,7 +537,7 @@ pub fn estimate_passive_pdf_object_count(
         .saturating_add(
             collect_used_supplied_font_asset_indexes(layout, font_provider)
                 .len()
-                .saturating_mul(5),
+                .saturating_mul(6),
         )
         .saturating_add(count_image_xobjects(layout))
 }
@@ -1200,6 +1202,7 @@ fn collect_supplied_pdf_fonts(
                     cid_ref: next_ref(next_object_id),
                     descriptor_ref: next_ref(next_object_id),
                     font_file_ref: next_ref(next_object_id),
+                    cid_to_gid_map_ref: next_ref(next_object_id),
                     to_unicode_ref: next_ref(next_object_id),
                     used_glyphs: Vec::new(),
                 });
@@ -1440,15 +1443,24 @@ fn encode_text_with_font_asset(
             return None;
         }
         let advance = face.glyph_hor_advance(glyph_id)?;
-        let cid = glyph_id.0;
+        let cid = supplied_pdf_cid_for_char(ch)?;
         encoded.extend_from_slice(&cid.to_be_bytes());
         glyphs.push(SuppliedGlyph {
             cid,
+            gid: glyph_id.0,
             unicode: ch,
             width: f32::from(advance) * 1000.0 / units_per_em,
         });
     }
     Some((glyphs, encoded))
+}
+
+fn supplied_pdf_cid_for_char(ch: char) -> Option<u16> {
+    let codepoint = u32::from(ch);
+    if codepoint == 0 || codepoint > u32::from(u16::MAX) {
+        return None;
+    }
+    Some(codepoint as u16)
 }
 
 fn add_supplied_glyph(glyphs: &mut Vec<SuppliedGlyph>, glyph: SuppliedGlyph) {
@@ -3065,7 +3077,7 @@ fn write_supplied_pdf_fonts(
                 .base_font(Name(&supplied.base_name))
                 .system_info(system_info)
                 .font_descriptor(supplied.descriptor_ref)
-                .cid_to_gid_map_predefined(Name(b"Identity"));
+                .cid_to_gid_map_stream(supplied.cid_to_gid_map_ref);
             if let Some(default_width) = supplied.used_glyphs.first().map(|glyph| glyph.width) {
                 cid_font.default_width(default_width);
             }
@@ -3108,6 +3120,11 @@ fn write_supplied_pdf_fonts(
             font_file.pair(Name(b"Length1"), asset.bytes.len() as i32);
         }
 
+        pdf.stream(
+            supplied.cid_to_gid_map_ref,
+            &supplied_cid_to_gid_map(&supplied.used_glyphs),
+        );
+
         let mut cmap =
             UnicodeCmap::<u16>::new(Name(&supplied.base_name), supplied_cid_system_info());
         for glyph in &supplied.used_glyphs {
@@ -3115,6 +3132,20 @@ fn write_supplied_pdf_fonts(
         }
         pdf.stream(supplied.to_unicode_ref, &cmap.finish());
     }
+}
+
+fn supplied_cid_to_gid_map(glyphs: &[SuppliedGlyph]) -> Vec<u8> {
+    let max_cid = glyphs
+        .iter()
+        .map(|glyph| usize::from(glyph.cid))
+        .max()
+        .unwrap_or(0);
+    let mut map = vec![0; (max_cid + 1) * 2];
+    for glyph in glyphs {
+        let offset = usize::from(glyph.cid) * 2;
+        map[offset..offset + 2].copy_from_slice(&glyph.gid.to_be_bytes());
+    }
+    map
 }
 
 fn supplied_cid_system_info() -> SystemInfo<'static> {
@@ -4229,6 +4260,10 @@ fn encode_win_ansi_char(ch: char) -> u8 {
     }
 }
 
+pub(crate) fn passive_base14_covers_latin_extended_char(ch: char) -> bool {
+    extended_latin_entry_for_char(ch).is_some()
+}
+
 fn extended_latin_entry_for_char(ch: char) -> Option<ExtendedLatinEntry> {
     let (byte, glyph_name) = match ch {
         '\u{0100}' => (0xc2, b"Amacron".as_slice()),
@@ -4589,7 +4624,7 @@ mod tests {
         let parsed = lopdf::Document::load_mem(&pdf).unwrap();
 
         assert_eq!(estimated, parsed.objects.len());
-        assert_eq!(estimated, 10);
+        assert_eq!(estimated, 11);
         assert!(
             pdf.windows(b"/FontFile2".len())
                 .any(|window| window == b"/FontFile2")
@@ -4640,7 +4675,7 @@ mod tests {
         let page_fonts = page_font_resource_names(&pdf, 0);
 
         assert_eq!(estimated, parsed.objects.len());
-        assert_eq!(estimated, 9);
+        assert_eq!(estimated, 10);
         assert!(page_fonts.iter().any(|name| name == b"TF1"));
         assert!(!page_fonts.iter().any(|name| name == b"F1"));
         assert!(
@@ -7682,7 +7717,7 @@ endstream
             if operation.operator == "Tj" {
                 for operand in &operation.operands {
                     if let Ok(bytes) = operand.as_str() {
-                        text.push_str(&String::from_utf8_lossy(bytes));
+                        text.push_str(&decode_pdf_text_bytes(bytes));
                     }
                 }
             } else if operation.operator == "TJ" {
@@ -7690,7 +7725,7 @@ endstream
                     if let Ok(items) = operand.as_array() {
                         for item in items {
                             if let Ok(bytes) = item.as_str() {
-                                text.push_str(&String::from_utf8_lossy(bytes));
+                                text.push_str(&decode_pdf_text_bytes(bytes));
                             }
                         }
                     }
@@ -7698,6 +7733,28 @@ endstream
             }
         }
         text
+    }
+
+    fn decode_pdf_text_bytes(bytes: &[u8]) -> String {
+        if bytes_look_like_utf16be_cids(bytes) {
+            let utf16 = bytes
+                .chunks_exact(2)
+                .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+                .collect::<Vec<_>>();
+            if let Ok(decoded) = String::from_utf16(&utf16) {
+                return decoded;
+            }
+        }
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+
+    fn bytes_look_like_utf16be_cids(bytes: &[u8]) -> bool {
+        if bytes.len() < 2 || bytes.len() % 2 != 0 {
+            return false;
+        }
+        let chunks = bytes.len() / 2;
+        let zero_high_bytes = bytes.chunks_exact(2).filter(|chunk| chunk[0] == 0).count();
+        zero_high_bytes * 2 >= chunks
     }
 
     fn content_bytes(content: &lopdf::content::Content) -> Vec<u8> {

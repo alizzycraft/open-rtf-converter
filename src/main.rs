@@ -319,7 +319,7 @@ fn load_cli_font_provider(
     browser_safe: bool,
 ) -> Result<FontProvider, CliFontError> {
     let mut provider = if browser_safe {
-        FontProvider::browser_safe_with_bundled_fallback()
+        FontProvider::browser_safe_defaults()
     } else {
         FontProvider::default()
     };
@@ -1580,11 +1580,27 @@ mod tests {
     fn browser_safe_cli_uses_stricter_font_provider_limits() {
         let provider = load_cli_font_provider(&[], &[], &[], &[], true).unwrap();
 
-        assert_eq!(provider.assets.len(), 1);
-        assert!(provider.has_asset_for_family("Unknown Word Font"));
         assert_eq!(
-            provider.coverage_for_char("Times New Roman CE", 'ő'),
+            provider.assets.len(),
+            FontProvider::browser_safe_defaults().assets.len()
+        );
+        assert!(provider.has_asset_for_family("Arial"));
+        assert_eq!(
+            provider.coverage_for_char("Arial", 'A'),
             open_rtf_converter::FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Times New Roman CE", '\u{0151}'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Courier New", 'A'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+        assert!(!provider.has_asset_for_family("Unknown Word Font"));
+        assert_eq!(
+            provider.coverage_for_char("Unknown Word Font", 'A'),
+            open_rtf_converter::FontCoverage::NoAsset
         );
         assert_eq!(
             provider.limits.max_assets,
@@ -1611,6 +1627,22 @@ mod tests {
         assert!(
             load_cli_font_provider(&specs, &[], &[], &[], false).is_ok(),
             "normal CLI mode should keep the wider default font alias limit"
+        );
+    }
+
+    #[test]
+    fn browser_safe_cli_uses_explicit_wildcard_font_fallback_when_requested() {
+        let specs = vec!["*=fixtures/fonts/Tuffy.ttf".to_string()];
+        let provider = load_cli_font_provider(&specs, &[], &[], &[], true).unwrap();
+
+        assert_eq!(
+            provider.assets.len(),
+            FontProvider::browser_safe_defaults().assets.len() + 1
+        );
+        assert!(provider.has_asset_for_family("Unknown Word Font"));
+        assert_eq!(
+            provider.coverage_for_char("Times New Roman CE", '\u{0151}'),
+            open_rtf_converter::FontCoverage::Covered
         );
     }
 

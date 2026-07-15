@@ -6534,11 +6534,12 @@ fn flow_run_line_height(
     font_provider: Option<&FontProvider>,
 ) -> f32 {
     let fallback = fallback_flow_run_line_height(run);
+    let passive_base14_fallback = || passive_base14_fallback_flow_run_line_height(run, document);
     let Some(provider) = font_provider else {
         return fallback;
     };
     let Some(font) = font_for_style(document, &run.style) else {
-        return fallback;
+        return passive_base14_fallback();
     };
     let metric_char = run
         .text
@@ -6549,7 +6550,7 @@ fn flow_run_line_height(
         .or_else(|| supplied_font_glyph_metrics(provider, font, &run.style, 'A'))
         .and_then(|metrics| metrics.line_height_points(run.line_height_points))
     else {
-        return fallback;
+        return passive_base14_fallback();
     };
     let bounded_line_height = line_height.clamp(
         run.line_height_points.max(1.0),
@@ -6560,6 +6561,21 @@ fn flow_run_line_height(
 
 fn fallback_flow_run_line_height(run: &FlowRun) -> f32 {
     (run.line_height_points * 1.25) + run.style.baseline_shift_points().abs()
+}
+
+fn passive_base14_fallback_flow_run_line_height(run: &FlowRun, document: &Document) -> f32 {
+    let style = passive_pdf_style_for_run(document, &run.style);
+    let family = font_family_for_run_text(document, &style, &run.text);
+    let multiplier = base14_line_height_multiplier(family);
+    (run.line_height_points * multiplier) + run.style.baseline_shift_points().abs()
+}
+
+fn base14_line_height_multiplier(family: PdfFontFamily) -> f32 {
+    match family {
+        PdfFontFamily::Courier => 1.12,
+        PdfFontFamily::Helvetica | PdfFontFamily::Times => 1.15,
+        PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats => 1.15,
+    }
 }
 
 fn measure_flow_run(
@@ -14865,14 +14881,18 @@ mod tests {
             alternate_name: None,
             charset: None,
             code_page: None,
-            family: FontFamilyHint::Swiss,
-            pitch: FontPitch::Default,
+            family: FontFamilyHint::Modern,
+            pitch: FontPitch::Fixed,
         }];
+        let style = CharacterStyle {
+            font_size_half_points: 40,
+            ..Default::default()
+        };
         let paragraph = Paragraph {
             style: Default::default(),
             runs: vec![Run {
                 text: "A".to_string(),
-                style: Default::default(),
+                style: style.clone(),
             }],
         };
         let provider = FontProvider {
@@ -14906,13 +14926,11 @@ mod tests {
         .expect("supplied line");
         let expected_height = provider
             .glyph_metrics_for_char("Tuffy", 'A')
-            .and_then(|metrics| {
-                metrics.line_height_points(CharacterStyle::default().font_size_points())
-            })
+            .and_then(|metrics| metrics.line_height_points(style.font_size_points()))
             .expect("line metrics")
             .clamp(
-                CharacterStyle::default().font_size_points().max(1.0),
-                CharacterStyle::default().font_size_points().max(1.0) * 2.0,
+                style.font_size_points().max(1.0),
+                style.font_size_points().max(1.0) * 2.0,
             )
             .max(empty_line().height);
 
@@ -14921,6 +14939,60 @@ mod tests {
             (supplied_line.height - fallback_line.height).abs() > 0.1,
             "provided metrics should visibly differ from fallback line height"
         );
+    }
+
+    #[test]
+    fn base14_fallback_line_height_is_tighter_than_legacy_uniform_spacing() {
+        let mut document = Document::default();
+        document.fonts = vec![
+            FontDef {
+                index: 0,
+                name: "Times New Roman".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Roman,
+                pitch: FontPitch::Default,
+            },
+            FontDef {
+                index: 1,
+                name: "Courier New".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Modern,
+                pitch: FontPitch::Fixed,
+            },
+        ];
+        let markers = test_markers("1", "1");
+        let provider = FontProvider::default();
+        let line_height_for_font = |font_index| {
+            let paragraph = Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Line".to_string(),
+                    style: CharacterStyle {
+                        font_index,
+                        font_size_half_points: 40,
+                        ..Default::default()
+                    },
+                }],
+            };
+            wrap_paragraph_with_font_provider(
+                &paragraph,
+                500.0,
+                &markers,
+                &document,
+                Some(&provider),
+            )
+            .into_iter()
+            .next()
+            .expect("line")
+            .height
+        };
+
+        assert!((line_height_for_font(0) - 23.0).abs() < 0.01);
+        assert!((line_height_for_font(1) - 22.4).abs() < 0.01);
     }
 
     #[test]

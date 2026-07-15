@@ -13,7 +13,7 @@ use crate::layout::{
 use crate::model::{Document, FontDef, ImageFormat, StaticImageVectorCommand};
 use crate::pdf::{
     PassivePdfError, audit_passive_pdf_bytes, estimate_passive_pdf_object_count,
-    render_pdf_with_font_provider,
+    passive_base14_covers_latin_extended_char, render_pdf_with_font_provider,
 };
 use crate::rtf::{ParseError, parse_rtf_bytes_with_options};
 
@@ -288,6 +288,15 @@ fn collect_unsupported_glyph_diagnostic_from_fragment(
     };
     let font_name = font.name.as_str();
     let message = match font_provider_coverage_for_font_char(font_provider, font, sample_char) {
+        FontCoverage::NoAsset
+            if script == "Latin Extended"
+                && fragment_latin_extended_is_covered_by_passive_base14(fragment) =>
+        {
+            format!(
+                "{} characters for font '{}' render through bounded passive PDF base-font encoding; provide a passive font asset for closer Word-compatible font metrics",
+                script, font_name
+            )
+        }
         FontCoverage::NoAsset => format!(
             "{} characters for font '{}' need passive font asset support; current PDF base-font fallback may render replacement glyphs",
             script, font_name
@@ -302,6 +311,27 @@ fn collect_unsupported_glyph_diagnostic_from_fragment(
         ),
     };
     diagnostics.push(Diagnostic::warning(message, None));
+}
+
+fn fragment_latin_extended_is_covered_by_passive_base14(fragment: &TextFragment) -> bool {
+    if matches!(
+        fragment.font_family,
+        PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats
+    ) {
+        return false;
+    }
+    let mut saw_latin_extended = false;
+    for ch in fragment
+        .text
+        .chars()
+        .filter(|ch| is_latin_extended_char(*ch))
+    {
+        saw_latin_extended = true;
+        if !passive_base14_covers_latin_extended_char(ch) {
+            return false;
+        }
+    }
+    saw_latin_extended
 }
 
 fn collect_unsupported_glyph_diagnostics_from_vector_images(

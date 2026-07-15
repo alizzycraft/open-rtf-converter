@@ -941,6 +941,77 @@ fn browser_safe_defaults_embed_bundled_passive_fallback_font() {
 }
 
 #[test]
+fn browser_safe_defaults_embed_bundled_metric_fonts_for_common_word_families() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial;}{\f1 Times New Roman;}{\f2 Courier New;}{\f3 MS Serif;}}\f0 Arial AB\par\f1 Serif \u337?D\par\f2 Mono EF\par\f3 Legacy serif GH\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected bundled sans passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for family in ["Arial", "Times New Roman", "Courier New", "MS Serif"] {
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| !diagnostic
+                .message
+                .contains(&format!("font '{family}' approximated"))
+                && !diagnostic
+                    .message
+                    .contains(&format!("font '{family}' substituted"))),
+            "bundled metric asset should suppress {family} base-font diagnostics: {:?}",
+            output.diagnostics
+        );
+    }
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("Latin Extended characters for font 'Times New Roman' have a caller-provided passive font asset")),
+        "serif asset should cover Latin Extended glyphs through embedded passive Type0 fonts: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/OpenAction",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/Launch",
+        b"/EmbeddedFile",
+        b"/Filespec",
+        b"/RichMedia",
+        b"/XFA",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active PDF marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn caller_font_asset_matches_rtf_alternate_font_name_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Mystery Sans{\*\falt Tuffy;};}}\f0 Alternate AB\par}";
     let provider = FontProvider {
@@ -1009,6 +1080,435 @@ fn caller_font_asset_matches_rtf_alternate_font_name_without_system_fonts() {
             .all(|diagnostic| !diagnostic.message.contains("Mystery Sans")
                 || !diagnostic.message.contains("substituted")),
         "alternate caller font should suppress substitution diagnostics: {:?}",
+        output.diagnostics
+    );
+}
+
+#[test]
+fn browser_safe_defaults_embed_bundled_sans_metric_font_for_narrow_aliases() {
+    let input =
+        br"{\rtf1\ansi{\fonttbl{\f0 Arial Narrow;}{\f1 Helvetica Narrow;}}\f0 Narrow AB\par\f1 Condensed CD\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected bundled narrow sans passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for family in ["Arial Narrow", "Helvetica Narrow"] {
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| !diagnostic
+                .message
+                .contains(&format!("font '{family}' approximated"))
+                && !diagnostic
+                    .message
+                    .contains(&format!("font '{family}' substituted"))),
+            "bundled narrow sans asset should suppress {family} base-font diagnostics: {:?}",
+            output.diagnostics
+        );
+        assert!(
+            !output
+                .pdf
+                .windows(family.as_bytes().len())
+                .any(|window| window == family.as_bytes()),
+            "source narrow font family leaked to PDF bytes: {family}"
+        );
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/OpenAction",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/Launch",
+        b"/EmbeddedFile",
+        b"/Filespec",
+        b"/RichMedia",
+        b"/XFA",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active PDF marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn browser_safe_defaults_embed_bundled_symbol_metric_font_for_math_text() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}\f0 Math: \f1 \u945?\u946?\u8730?\u8721?\u8800?\u8776?\u8594?\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected bundled Symbol passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for forbidden in [
+        b"/BaseFont /Symbol".as_slice(),
+        b"/F13",
+        b"OpenRtfConverter-Symbol",
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/Launch",
+        b"/EmbeddedFile",
+        b"/Filespec",
+        b"/RichMedia",
+        b"/XFA",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Symbol fallback or active PDF marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("font 'Symbol' approximated")
+            && !diagnostic.message.contains("font 'Symbol' substituted")),
+        "bundled Symbol asset should suppress Symbol base-font diagnostics: {:?}",
+        output.diagnostics
+    );
+}
+
+#[test]
+fn caller_font_asset_matches_terminated_rtf_alternate_font_name_without_system_fonts() {
+    let input =
+        br"{\rtf1\ansi{\fonttbl{\f0 Mystery Sans{\*\falt Tuffy;Ignored Asset;};}}\f0 Alternate terminated AB\par}";
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected terminated alternate-name supplied passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"falt",
+        b"Mystery Sans",
+        b"Ignored Asset",
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "terminated alternate font metadata or active marker leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("Mystery Sans")
+                || !diagnostic.message.contains("substituted")),
+        "terminated alternate caller font should suppress substitution diagnostics: {:?}",
+        output.diagnostics
+    );
+}
+
+#[test]
+fn caller_font_asset_matches_unicode_rtf_font_name_without_system_fonts() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Tuff\u121?;}}\f0 Unicode font AB\par}";
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected Unicode font-name supplied passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"u121",
+        b"Tuff?",
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Unicode font metadata or active marker leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("font 'Tuffy' substituted")),
+        "Unicode font name should match caller font asset without substitution: {:?}",
+        output.diagnostics
+    );
+}
+
+#[test]
+fn caller_font_asset_matches_unicode_terminated_rtf_font_name_without_system_fonts() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Tuff\u121?\u59?}}\f0 Unicode terminated font AB\par}";
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected Unicode-terminated font-name supplied passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"u121",
+        b"u59",
+        b"Tuff?",
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Unicode-terminated font metadata or active marker leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("font 'Tuffy' substituted")),
+        "Unicode-terminated font name should match caller font asset without substitution: {:?}",
+        output.diagnostics
+    );
+}
+
+#[test]
+fn caller_font_asset_matches_primary_font_name_before_trailing_metadata_without_system_fonts() {
+    let input =
+        br"{\rtf1\ansi{\fonttbl{\f0 Tuffy;Ignored Asset;}}\f0 Primary terminated font AB\par}";
+    let provider = FontProvider {
+        assets: vec![FontAsset {
+            family_names: vec!["Tuffy".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        }],
+        limits: FontProviderLimits {
+            max_asset_bytes: 256 * 1024,
+            max_total_bytes: 256 * 1024,
+            ..FontProviderLimits::default()
+        },
+    };
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            font_provider: provider,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+        b"/TF1".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected primary terminated font-name supplied passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"Ignored Asset",
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "primary terminated font metadata or active marker leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("font 'Tuffy' substituted")),
+        "primary terminated font name should match caller font asset without substitution: {:?}",
         output.diagnostics
     );
 }
@@ -1089,7 +1589,7 @@ fn caller_font_asset_embeds_for_z_ordered_shape_text_without_system_fonts() {
 }
 
 #[test]
-fn rtf_embedded_font_payload_does_not_become_pdf_font_file() {
+fn rtf_embedded_font_payload_does_not_become_pdf_embedded_file_or_source_font() {
     let input =
         br"{\rtf1\ansi{\fonttbl{\f0 Arial{\fontemb{\fontfile HOSTILE-FONT-PAYLOAD}};}}Visible\par}";
     let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults()).unwrap();
@@ -1097,9 +1597,6 @@ fn rtf_embedded_font_payload_does_not_become_pdf_font_file() {
     assert_eq!(output.pages, 1);
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
     for forbidden in [
-        b"/FontFile".as_slice(),
-        b"/FontFile2".as_slice(),
-        b"/FontFile3".as_slice(),
         b"HOSTILE-FONT-PAYLOAD".as_slice(),
         b"fontemb".as_slice(),
         b"fontfile".as_slice(),
@@ -1112,7 +1609,7 @@ fn rtf_embedded_font_payload_does_not_become_pdf_font_file() {
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "RTF embedded font payload leaked to PDF: {:?}",
+            "RTF embedded font payload or active marker leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
