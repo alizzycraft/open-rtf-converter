@@ -15028,11 +15028,15 @@ enum FieldTextFormatSwitch {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum FieldNumberFormatSwitch {
     Arabic,
+    ArabicDash,
+    CardText,
+    DollarText,
     UpperAlphabetic,
     LowerAlphabetic,
     UpperRoman,
     LowerRoman,
     Ordinal,
+    OrdinalText,
     Hex,
 }
 
@@ -15040,6 +15044,7 @@ enum FieldNumberFormatSwitch {
 enum FieldFormatSwitch {
     Text(FieldTextFormatSwitch),
     Number(FieldNumberFormatSwitch),
+    NoOp,
 }
 
 impl PassiveFieldResult {
@@ -15057,8 +15062,18 @@ fn apply_field_format_switches(
     instruction: &str,
     mut result: PassiveFieldResult,
 ) -> Option<PassiveFieldResult> {
-    if result.font_name.is_some() || contains_internal_marker(&result.text) {
+    if result.font_name.is_some() {
+        if !passive_field_result_text_is_safe(&result.text) {
+            return None;
+        }
         return Some(result);
+    }
+    if contains_internal_marker(&result.text) {
+        return if field_result_allows_internal_marker(instruction, &result.text) {
+            Some(result)
+        } else {
+            None
+        };
     }
 
     if let Some(picture) = field_numeric_picture_switch(instruction)? {
@@ -15066,6 +15081,10 @@ fn apply_field_format_switches(
         if result.text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS {
             return None;
         }
+    }
+
+    if !passive_field_result_text_is_safe(&result.text) {
+        return None;
     }
 
     let switches = field_format_switches(instruction)?;
@@ -15082,6 +15101,7 @@ fn apply_field_format_switches(
             FieldFormatSwitch::Number(switch) => {
                 apply_field_number_format_switch(&result.text, switch)?
             }
+            FieldFormatSwitch::NoOp => result.text.clone(),
         };
         if result.text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS {
             return None;
@@ -15093,6 +15113,26 @@ fn apply_field_format_switches(
     }
 
     Some(result)
+}
+
+fn passive_field_result_text_is_safe(text: &str) -> bool {
+    text.chars().count() <= MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
+        && !text.chars().any(|ch| ch.is_control())
+        && !contains_internal_marker(text)
+}
+
+fn field_result_allows_internal_marker(instruction: &str, text: &str) -> bool {
+    match field_instruction_name(instruction) {
+        Some("PAGE") => text == PAGE_NUMBER_MARKER,
+        Some("NUMPAGES") => text == TOTAL_PAGES_MARKER,
+        Some("NUMWORDS") => text == DOCUMENT_WORDS_MARKER,
+        Some("NUMCHARS") => text == DOCUMENT_CHARS_MARKER,
+        Some("NUMCHARSWS") => text == DOCUMENT_CHARS_WITH_SPACES_MARKER,
+        Some("SECTION") => text == SECTION_NUMBER_MARKER,
+        Some("SECTIONPAGES") => text == SECTION_PAGES_MARKER,
+        Some("PAGEREF") => is_bookmark_page_marker(text),
+        _ => false,
+    }
 }
 
 fn passive_field_result(
@@ -15840,7 +15880,9 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
         mapped.to_string()
     } else {
         let ch = char::from_u32(value)?;
-        if ch.is_control() {
+        let mut buffer = [0; 4];
+        let text = ch.encode_utf8(&mut buffer);
+        if ch.is_control() || contains_internal_marker(text) {
             return None;
         }
         ch.to_string()
@@ -16179,7 +16221,25 @@ fn apply_field_date_picture(timestamp: &DocumentTimestamp, picture: &str) -> Opt
     let mut index = 0;
     while index < picture.len() {
         let rest = &picture[index..];
-        if let Some(value) = rest.strip_prefix("AM/PM") {
+        if rest.starts_with('\'') {
+            let literal = single_quoted_date_picture_literal(rest)?;
+            output.push_str(literal.text);
+            index += literal.bytes;
+        } else if let Some(value) = rest.strip_prefix("A/P") {
+            output.push(if timestamp.hour.unwrap_or(0) < 12 {
+                'A'
+            } else {
+                'P'
+            });
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("a/p") {
+            output.push(if timestamp.hour.unwrap_or(0) < 12 {
+                'a'
+            } else {
+                'p'
+            });
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("AM/PM") {
             output.push_str(if timestamp.hour.unwrap_or(0) < 12 {
                 "AM"
             } else {
@@ -16210,6 +16270,12 @@ fn apply_field_date_picture(timestamp: &DocumentTimestamp, picture: &str) -> Opt
             index = picture.len() - value.len();
         } else if let Some(value) = rest.strip_prefix('M') {
             output.push_str(&timestamp.month.unwrap_or(1).to_string());
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("dddd") {
+            output.push_str(weekday_name(timestamp)?);
+            index = picture.len() - value.len();
+        } else if let Some(value) = rest.strip_prefix("ddd") {
+            output.push_str(weekday_abbreviation(timestamp)?);
             index = picture.len() - value.len();
         } else if let Some(value) = rest.strip_prefix("dd") {
             output.push_str(&format!("{:02}", timestamp.day.unwrap_or(1)));
@@ -16256,6 +16322,20 @@ fn apply_field_date_picture(timestamp: &DocumentTimestamp, picture: &str) -> Opt
     Some(output)
 }
 
+struct DatePictureLiteral<'a> {
+    text: &'a str,
+    bytes: usize,
+}
+
+fn single_quoted_date_picture_literal(input: &str) -> Option<DatePictureLiteral<'_>> {
+    let body = input.strip_prefix('\'')?;
+    let end = body.find('\'')?;
+    Some(DatePictureLiteral {
+        text: &body[..end],
+        bytes: '\''.len_utf8() + end + '\''.len_utf8(),
+    })
+}
+
 fn twelve_hour(hour: i32) -> i32 {
     let hour = hour % 12;
     if hour == 0 { 12 } else { hour }
@@ -16295,6 +16375,52 @@ fn month_abbreviation(month: i32) -> Option<&'static str> {
         12 => "Dec",
         _ => return None,
     })
+}
+
+fn weekday_name(timestamp: &DocumentTimestamp) -> Option<&'static str> {
+    Some(match weekday_index(timestamp)? {
+        0 => "Sunday",
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        _ => return None,
+    })
+}
+
+fn weekday_abbreviation(timestamp: &DocumentTimestamp) -> Option<&'static str> {
+    Some(match weekday_index(timestamp)? {
+        0 => "Sun",
+        1 => "Mon",
+        2 => "Tue",
+        3 => "Wed",
+        4 => "Thu",
+        5 => "Fri",
+        6 => "Sat",
+        _ => return None,
+    })
+}
+
+fn weekday_index(timestamp: &DocumentTimestamp) -> Option<usize> {
+    let year = timestamp.year.unwrap_or(1);
+    let month = timestamp.month.unwrap_or(1);
+    let day = timestamp.day.unwrap_or(1);
+    if year < 1 || !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month)? {
+        return None;
+    }
+
+    let month_offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let mut adjusted_year = year;
+    if month < 3 {
+        adjusted_year -= 1;
+    }
+    let weekday = adjusted_year + adjusted_year / 4 - adjusted_year / 100
+        + adjusted_year / 400
+        + month_offsets[(month - 1) as usize]
+        + day;
+    Some(weekday.rem_euclid(7) as usize)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16469,10 +16595,19 @@ fn field_format_switch_after_star(input: &str) -> Option<(FieldFormatSwitch, &st
         FieldFormatSwitch::Text(switch)
     } else if let Some(switch) = field_number_format_switch(name) {
         FieldFormatSwitch::Number(switch)
+    } else if is_noop_field_format_switch(name) {
+        FieldFormatSwitch::NoOp
     } else {
         return None;
     };
     Some((switch, rest))
+}
+
+fn is_noop_field_format_switch(name: &str) -> bool {
+    matches!(
+        name.to_ascii_uppercase().as_str(),
+        "MERGEFORMAT" | "CHARFORMAT"
+    )
 }
 
 fn field_text_format_switch(name: &str) -> Option<FieldTextFormatSwitch> {
@@ -16489,6 +16624,9 @@ fn field_number_format_switch(name: &str) -> Option<FieldNumberFormatSwitch> {
     let upper = name.to_ascii_uppercase();
     match upper.as_str() {
         "ARABIC" => Some(FieldNumberFormatSwitch::Arabic),
+        "ARABICDASH" => Some(FieldNumberFormatSwitch::ArabicDash),
+        "CARDTEXT" => Some(FieldNumberFormatSwitch::CardText),
+        "DOLLARTEXT" => Some(FieldNumberFormatSwitch::DollarText),
         "ALPHABETIC" if name.chars().all(|ch| !ch.is_ascii_lowercase()) => {
             Some(FieldNumberFormatSwitch::UpperAlphabetic)
         }
@@ -16498,6 +16636,7 @@ fn field_number_format_switch(name: &str) -> Option<FieldNumberFormatSwitch> {
         }
         "ROMAN" => Some(FieldNumberFormatSwitch::LowerRoman),
         "ORDINAL" => Some(FieldNumberFormatSwitch::Ordinal),
+        "ORDTEXT" | "ORDINALTEXT" => Some(FieldNumberFormatSwitch::OrdinalText),
         "HEX" => Some(FieldNumberFormatSwitch::Hex),
         _ => None,
     }
@@ -16516,11 +16655,15 @@ fn apply_field_number_format_switch(text: &str, switch: FieldNumberFormatSwitch)
     let value = text.trim().parse::<i32>().ok()?;
     match switch {
         FieldNumberFormatSwitch::Arabic => Some(value.to_string()),
+        FieldNumberFormatSwitch::ArabicDash => Some(format!("- {value} -")),
+        FieldNumberFormatSwitch::CardText => format_cardinal_text_counter(value),
+        FieldNumberFormatSwitch::DollarText => format_dollar_text_counter(value),
         FieldNumberFormatSwitch::UpperAlphabetic => Some(format_alpha_counter(value, false)),
         FieldNumberFormatSwitch::LowerAlphabetic => Some(format_alpha_counter(value, true)),
         FieldNumberFormatSwitch::UpperRoman => Some(format_roman_counter(value, false)),
         FieldNumberFormatSwitch::LowerRoman => Some(format_roman_counter(value, true)),
         FieldNumberFormatSwitch::Ordinal => Some(format_ordinal_counter(value)),
+        FieldNumberFormatSwitch::OrdinalText => format_ordinal_text_counter(value),
         FieldNumberFormatSwitch::Hex if value >= 0 => Some(format!("{value:X}")),
         FieldNumberFormatSwitch::Hex => None,
     }
@@ -16961,23 +17104,37 @@ fn field_switch_i32(input: &str) -> (Option<i32>, &str) {
 
 fn field_switch_i32_value(instruction: &str, target_switch: char) -> Option<i32> {
     let target_switch = target_switch.to_ascii_lowercase();
-    let mut index = 0;
-    while index < instruction.len() {
-        let rest = &instruction[index..];
-        let Some(relative) = rest.find('\\') else {
-            break;
-        };
-        let switch_start = index + relative;
-        let after_slash = switch_start + '\\'.len_utf8();
-        let Some(switch) = instruction[after_slash..].chars().next() else {
-            break;
-        };
-        let switch_end = after_slash + switch.len_utf8();
-        if switch.to_ascii_lowercase() == target_switch {
-            let (value, _) = field_switch_i32(&instruction[switch_end..]);
-            return value;
+    let mut in_quote = false;
+    let mut escaped = false;
+
+    for (index, ch) in instruction.char_indices() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quote = false;
+            }
+            continue;
         }
-        index = switch_end;
+
+        if ch == '"' {
+            in_quote = true;
+            continue;
+        }
+
+        if ch == '\\' {
+            let after_slash = index + ch.len_utf8();
+            let Some(switch) = instruction[after_slash..].chars().next() else {
+                break;
+            };
+            let switch_end = after_slash + switch.len_utf8();
+            if switch.to_ascii_lowercase() == target_switch {
+                let (value, _) = field_switch_i32(&instruction[switch_end..]);
+                return value;
+            }
+        }
     }
     None
 }
@@ -16985,15 +17142,40 @@ fn field_switch_i32_value(instruction: &str, target_switch: char) -> Option<i32>
 fn field_switch_string_value(instruction: &str, switch: u8) -> Option<String> {
     let bytes = instruction.as_bytes();
     let switch = switch.to_ascii_lowercase();
-    let mut index = 0;
-    while index + 1 < bytes.len() {
-        if bytes[index] == b'\\' && bytes[index + 1].to_ascii_lowercase() == switch {
-            let mut value_start = index + 2;
+    let mut in_quote = false;
+    let mut escaped = false;
+
+    for (index, ch) in instruction.char_indices() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quote = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_quote = true;
+            continue;
+        }
+
+        if ch == '\\' {
+            let after_slash = index + ch.len_utf8();
+            let Some(candidate) = instruction[after_slash..].chars().next() else {
+                break;
+            };
+            if !candidate.is_ascii() || candidate.to_ascii_lowercase() as u8 != switch {
+                continue;
+            }
+
+            let mut value_start = after_slash + candidate.len_utf8();
             if value_start < bytes.len()
                 && !bytes[value_start].is_ascii_whitespace()
                 && bytes[value_start] != b'"'
             {
-                index += 1;
                 continue;
             }
             while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
@@ -17003,7 +17185,6 @@ fn field_switch_string_value(instruction: &str, switch: u8) -> Option<String> {
                 return Some(value);
             }
         }
-        index += 1;
     }
     None
 }
@@ -17224,6 +17405,172 @@ fn format_ordinal_counter(value: i32) -> String {
         },
     };
     format!("{value}{suffix}")
+}
+
+fn format_cardinal_text_counter(value: i32) -> Option<String> {
+    if !(0..=999).contains(&value) {
+        return None;
+    }
+    Some(cardinal_text_under_1000(value as usize))
+}
+
+fn format_ordinal_text_counter(value: i32) -> Option<String> {
+    if !(0..=999).contains(&value) {
+        return None;
+    }
+    Some(ordinal_text_under_1000(value as usize))
+}
+
+fn format_dollar_text_counter(value: i32) -> Option<String> {
+    if !(0..=999).contains(&value) {
+        return None;
+    }
+    Some(format!(
+        "{} and 00/100",
+        cardinal_text_under_1000(value as usize)
+    ))
+}
+
+fn cardinal_text_under_1000(value: usize) -> String {
+    if value < 20 {
+        return cardinal_text_under_20(value).to_string();
+    }
+    if value < 100 {
+        return cardinal_tens_text(value);
+    }
+
+    let hundreds = value / 100;
+    let remainder = value % 100;
+    let mut output = format!("{} hundred", cardinal_text_under_20(hundreds));
+    if remainder > 0 {
+        output.push(' ');
+        output.push_str(&cardinal_text_under_1000(remainder));
+    }
+    output
+}
+
+fn ordinal_text_under_1000(value: usize) -> String {
+    if value < 20 {
+        return ordinal_text_under_20(value).to_string();
+    }
+    if value < 100 {
+        return ordinal_tens_text(value);
+    }
+
+    let hundreds = value / 100;
+    let remainder = value % 100;
+    if remainder == 0 {
+        return format!("{} hundredth", cardinal_text_under_20(hundreds));
+    }
+    format!(
+        "{} hundred {}",
+        cardinal_text_under_20(hundreds),
+        ordinal_text_under_1000(remainder)
+    )
+}
+
+fn cardinal_tens_text(value: usize) -> String {
+    let tens = value / 10;
+    let remainder = value % 10;
+    let prefix = cardinal_tens_word(tens);
+    if remainder == 0 {
+        prefix.to_string()
+    } else {
+        format!("{prefix}-{}", cardinal_text_under_20(remainder))
+    }
+}
+
+fn ordinal_tens_text(value: usize) -> String {
+    let tens = value / 10;
+    let remainder = value % 10;
+    if remainder == 0 {
+        return ordinal_tens_word(tens).to_string();
+    }
+    format!(
+        "{}-{}",
+        cardinal_tens_word(tens),
+        ordinal_text_under_20(remainder)
+    )
+}
+
+fn cardinal_text_under_20(value: usize) -> &'static str {
+    match value {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        3 => "three",
+        4 => "four",
+        5 => "five",
+        6 => "six",
+        7 => "seven",
+        8 => "eight",
+        9 => "nine",
+        10 => "ten",
+        11 => "eleven",
+        12 => "twelve",
+        13 => "thirteen",
+        14 => "fourteen",
+        15 => "fifteen",
+        16 => "sixteen",
+        17 => "seventeen",
+        18 => "eighteen",
+        19 => "nineteen",
+        _ => "",
+    }
+}
+
+fn ordinal_text_under_20(value: usize) -> &'static str {
+    match value {
+        0 => "zeroth",
+        1 => "first",
+        2 => "second",
+        3 => "third",
+        4 => "fourth",
+        5 => "fifth",
+        6 => "sixth",
+        7 => "seventh",
+        8 => "eighth",
+        9 => "ninth",
+        10 => "tenth",
+        11 => "eleventh",
+        12 => "twelfth",
+        13 => "thirteenth",
+        14 => "fourteenth",
+        15 => "fifteenth",
+        16 => "sixteenth",
+        17 => "seventeenth",
+        18 => "eighteenth",
+        19 => "nineteenth",
+        _ => "",
+    }
+}
+
+fn cardinal_tens_word(tens: usize) -> &'static str {
+    match tens {
+        2 => "twenty",
+        3 => "thirty",
+        4 => "forty",
+        5 => "fifty",
+        6 => "sixty",
+        7 => "seventy",
+        8 => "eighty",
+        9 => "ninety",
+        _ => "",
+    }
+}
+
+fn ordinal_tens_word(tens: usize) -> &'static str {
+    match tens {
+        2 => "twentieth",
+        3 => "thirtieth",
+        4 => "fortieth",
+        5 => "fiftieth",
+        6 => "sixtieth",
+        7 => "seventieth",
+        8 => "eightieth",
+        9 => "ninetieth",
+        _ => "",
+    }
 }
 
 fn format_zero_padded_decimal_counter(value: i32, width: usize) -> String {
@@ -23351,6 +23698,103 @@ After\par}"#;
     }
 
     #[test]
+    fn passive_field_marker_bypass_is_limited_to_marker_fields() {
+        assert!(
+            apply_field_format_switches("PAGE", PassiveFieldResult::text(PAGE_NUMBER_MARKER))
+                .is_some()
+        );
+        assert!(
+            apply_field_format_switches("NUMPAGES", PassiveFieldResult::text(TOTAL_PAGES_MARKER))
+                .is_some()
+        );
+        assert!(
+            apply_field_format_switches(
+                "PAGEREF Target",
+                PassiveFieldResult {
+                    text: bookmark_page_ref_marker(7),
+                    font_name: None,
+                    font_size_half_points: None,
+                    form_field: false,
+                },
+            )
+            .is_some()
+        );
+
+        assert!(
+            apply_field_format_switches(
+                r#"QUOTE "hostile""#,
+                PassiveFieldResult::text(PAGE_NUMBER_MARKER)
+            )
+            .is_none()
+        );
+        assert!(
+            apply_field_format_switches(
+                "MACROBUTTON Launch Visible",
+                PassiveFieldResult {
+                    text: bookmark_page_ref_marker(7),
+                    font_name: None,
+                    font_size_half_points: None,
+                    form_field: false,
+                },
+            )
+            .is_none()
+        );
+        assert!(
+            apply_field_format_switches(
+                "SYMBOL 65",
+                PassiveFieldResult {
+                    text: PAGE_NUMBER_MARKER.to_string(),
+                    font_name: Some("ZapfDingbats".to_string()),
+                    font_size_half_points: None,
+                    form_field: false,
+                },
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn passive_field_results_without_switches_obey_central_text_bounds() {
+        let oversized = "x".repeat(MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS + 1);
+        assert!(
+            apply_field_format_switches(
+                r#"QUOTE "hostile""#,
+                PassiveFieldResult {
+                    text: oversized.clone(),
+                    font_name: None,
+                    font_size_half_points: None,
+                    form_field: false,
+                },
+            )
+            .is_none()
+        );
+        assert!(
+            apply_field_format_switches(
+                r#"QUOTE "hostile""#,
+                PassiveFieldResult {
+                    text: "safe\nunsafe".to_string(),
+                    font_name: None,
+                    font_size_half_points: None,
+                    form_field: false,
+                },
+            )
+            .is_none()
+        );
+        assert!(
+            apply_field_format_switches(
+                "SYMBOL 65",
+                PassiveFieldResult {
+                    text: oversized,
+                    font_name: Some("ZapfDingbats".to_string()),
+                    font_size_half_points: None,
+                    form_field: false,
+                },
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn resultless_quote_fields_render_bounded_passive_literal() {
         let output =
             parse_rtf(r#"{\rtf1 Before {\field{\*\fldinst QUOTE "Visible literal"}} After\par}"#)
@@ -23474,13 +23918,15 @@ After\par}"#;
     #[test]
     fn resultless_fields_apply_passive_number_format_switches() {
         let output = parse_rtf(
-            r#"{\rtf1 Values {\field{\*\fldinst SEQ Figure \\r 4 \\* ROMAN}} {\field{\*\fldinst SEQ Figure \\* roman}} {\field{\*\fldinst = 27 \\* alphabetic}} {\field{\*\fldinst = 27 \\* ALPHABETIC}} {\field{\*\fldinst = 255 \\* Hex}} {\field{\*\fldinst IF 1 = 1 "7" "0" \\* Ordinal}}\par}"#,
+            r#"{\rtf1 Values {\field{\*\fldinst SEQ Figure \\r 4 \\* ROMAN}} {\field{\*\fldinst SEQ Figure \\* roman}} {\field{\*\fldinst = 27 \\* alphabetic}} {\field{\*\fldinst = 27 \\* ALPHABETIC}} {\field{\*\fldinst = 255 \\* Hex}} {\field{\*\fldinst IF 1 = 1 "7" "0" \\* Ordinal}} {\field{\*\fldinst = 42 \\* CardText \\* MERGEFORMAT}} {\field{\*\fldinst = 513 \\* OrdText \\* CHARFORMAT}} {\field{\*\fldinst = 42 \\* DollarText}} {\field{\*\fldinst = 9 \\* ArabicDash}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
         assert!(
-            text.contains("Values IV v aa AA FF 7th"),
+            text.contains(
+                "Values IV v aa AA FF 7th forty-two five hundred thirteenth forty-two and 00/100 - 9 -"
+            ),
             "normalized field number-switch text was {text:?}"
         );
         for forbidden in [
@@ -23493,6 +23939,12 @@ After\par}"#;
             "ALPHABETIC",
             "Ordinal",
             "Hex",
+            "CardText",
+            "OrdText",
+            "DollarText",
+            "ArabicDash",
+            "MERGEFORMAT",
+            "CHARFORMAT",
             "[Field removed",
         ] {
             assert!(
@@ -23587,6 +24039,26 @@ After\par}"#;
     }
 
     #[test]
+    fn field_switch_scanners_ignore_quoted_payload_text() {
+        assert_eq!(
+            field_switch_string_value(r#"SYMBOL 65 "literal \f Symbol""#, b'f'),
+            None
+        );
+        assert_eq!(
+            field_switch_string_value(r#"SYMBOL 65 "literal \f Symbol" \f Wingdings"#, b'f'),
+            Some("Wingdings".to_string())
+        );
+        assert_eq!(
+            field_switch_i32_value(r#"SYMBOL 65 "literal \s 72" \s 12"#, 's'),
+            Some(12)
+        );
+        assert_eq!(
+            field_switch_i32_value(r#"SYMBOL 65 "literal \s 72""#, 's'),
+            None
+        );
+    }
+
+    #[test]
     fn date_fields_render_stored_result_without_updating() {
         let output = parse_rtf(
             r#"{\rtf1 Created {\field{\*\fldinst DATE \\@ "MMMM d, yyyy"}{\fldrslt Stored visible date}}\par}"#,
@@ -23632,13 +24104,13 @@ After\par}"#;
     #[test]
     fn resultless_document_timestamp_fields_render_from_metadata_only() {
         let output = parse_rtf(
-            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30\sec9}{\revtim\yr2025\mo1\dy2\hr9\min4\sec5}{\printim\yr2026\mo12\dy31}}Created {\field{\*\fldinst CREATEDATE \\@ "MMMM d, yyyy"}} saved {\field{\*\fldinst SAVEDATE \\@ "yyyy-MM-dd HH:mm:ss"}} printed {\field{\*\fldinst PRINTDATE \\@ "M/d/yy"}} missing {\field{\*\fldinst SAVEDATE \\@ "unknown-token"}} dynamic {\field{\*\fldinst DATE \\@ "yyyy"}}\par}"#,
+            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30\sec9}{\revtim\yr2025\mo1\dy2\hr9\min4\sec5}{\printim\yr2026\mo12\dy31}}Created {\field{\*\fldinst CREATEDATE \\@ "dddd, MMMM d, yyyy 'at' h:mm A/P"}} saved {\field{\*\fldinst SAVEDATE \\@ "ddd yyyy-MM-dd h:mm a/p"}} printed {\field{\*\fldinst PRINTDATE \\@ "M/d/yy"}} missing {\field{\*\fldinst SAVEDATE \\@ "unknown-token"}} dynamic {\field{\*\fldinst DATE \\@ "yyyy"}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Created July 5, 2024"));
-        assert!(text.contains("saved 2025-01-02 09:04:05"));
+        assert!(text.contains("Created Friday, July 5, 2024 at 2:30 P"));
+        assert!(text.contains("saved Thu 2025-01-02 9:04 a"));
         assert!(text.contains("printed 12/31/26"));
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),

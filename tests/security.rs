@@ -7119,13 +7119,13 @@ fn metadata_timestamp_fields_render_passively_without_instruction_or_metadata_le
         "\\",
         "*",
         "\\",
-        "fldinst CREATEDATE \\\\@ \"MMMM d, yyyy\"}} saved {",
+        "fldinst CREATEDATE \\\\@ \"dddd, MMMM d, yyyy 'at' h:mm A/P\"}} saved {",
         "\\",
         "field{",
         "\\",
         "*",
         "\\",
-        "fldinst SAVEDATE \\\\@ \"yyyy-MM-dd HH:mm:ss\"}} dynamic {",
+        "fldinst SAVEDATE \\\\@ \"ddd yyyy-MM-dd h:mm a/p\"}} dynamic {",
         "\\",
         "field{",
         "\\",
@@ -7141,8 +7141,8 @@ fn metadata_timestamp_fields_render_passively_without_instruction_or_metadata_le
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(rendered_text.contains("Created July 5, 2024"));
-    assert!(rendered_text.contains("saved 2025-01-02 09:04:05"));
+    assert!(rendered_text.contains("Created Friday, July 5, 2024 at 2:30 P"));
+    assert!(rendered_text.contains("saved Thu 2025-01-02 9:04 a"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
     for forbidden in [
         b"fldinst".as_slice(),
@@ -9544,6 +9544,33 @@ fn resultless_field_number_switches_render_passively_without_instruction_leakage
         "*",
         "\\",
         "fldinst IF 1 = 1 \"7\" \"0\" \\\\* Ordinal}}.",
+        " {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 42 \\\\* CardText \\\\* MERGEFORMAT}} {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 513 \\\\* OrdText \\\\* CHARFORMAT}}.",
+        " {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 42 \\\\* DollarText}}.",
+        " {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = 9 \\\\* ArabicDash}}.",
         "\\",
         "par}",
     ]);
@@ -9551,7 +9578,9 @@ fn resultless_field_number_switches_render_passively_without_instruction_leakage
     let text = collect_text(&parsed.document);
 
     assert!(
-        text.contains("Values IV v aa AA FF 7th."),
+        text.contains(
+            "Values IV v aa AA FF 7th. forty-two five hundred thirteenth. forty-two and 00/100. - 9 -."
+        ),
         "normalized field number-switch text was {text:?}"
     );
     for forbidden in [
@@ -9566,6 +9595,12 @@ fn resultless_field_number_switches_render_passively_without_instruction_leakage
         "ALPHABETIC",
         "Ordinal",
         "Hex",
+        "CardText",
+        "OrdText",
+        "DollarText",
+        "ArabicDash",
+        "MERGEFORMAT",
+        "CHARFORMAT",
         "[Field removed",
     ] {
         assert!(
@@ -9602,7 +9637,9 @@ fn resultless_field_number_switches_render_passively_without_instruction_leakage
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     assert!(
-        rendered_text.contains("Values IV v aa AA FF 7th."),
+        rendered_text.contains(
+            "Values IV v aa AA FF 7th. forty-two five hundred thirteenth. forty-two and 00/100. - 9 -."
+        ),
         "decoded PDF text did not contain passive field number-switch values: {rendered_text:?}"
     );
     for forbidden in [
@@ -9617,6 +9654,12 @@ fn resultless_field_number_switches_render_passively_without_instruction_leakage
         b"ALPHABETIC",
         b"Ordinal",
         b"Hex",
+        b"CardText",
+        b"OrdText",
+        b"DollarText",
+        b"ArabicDash",
+        b"MERGEFORMAT",
+        b"CHARFORMAT",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -9915,6 +9958,112 @@ fn resultless_symbol_fields_render_without_executing_field_instruction() {
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden symbol-field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn resultless_symbol_field_cannot_inject_internal_marker() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst SYMBOL 983040}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before [Field removed: no passive result] After"));
+    assert!(!text.contains(PAGE_NUMBER_MARKER));
+    assert!(!text.contains("SYMBOL"));
+    assert!(!text.contains("983040"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before [Field removed: no passive result] After"));
+    assert!(!rendered_text.contains("Before 1 After"));
+    for forbidden in [
+        b"SYMBOL".as_slice(),
+        b"983040",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden hostile symbol-field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn quoted_symbol_payload_does_not_act_as_font_switch() {
+    let input =
+        br#"{\rtf1 Before {\field{\*\fldinst SYMBOL 65 "literal \\f Symbol"}} After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Before A After"),
+        "quoted fake SYMBOL switch should not affect passive output, got {text:?}"
+    );
+    assert!(!text.contains("literal"));
+    assert!(!text.contains("SYMBOL"));
+    assert!(!text.contains("fldinst"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before A After"));
+    assert!(!rendered_text.contains("literal"));
+    for forbidden in [
+        b"SYMBOL".as_slice(),
+        b"literal",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden quoted-symbol content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
