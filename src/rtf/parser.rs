@@ -19935,6 +19935,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_MOVETOEX: u32 = 27;
     const EMR_POLYGON: u32 = 3;
     const EMR_POLYLINE: u32 = 4;
+    const EMR_POLYLINETO: u32 = 6;
     const EMR_POLYPOLYLINE: u32 = 7;
     const EMR_POLYPOLYGON: u32 = 8;
     const EMR_SETPIXELV: u32 = 15;
@@ -19956,6 +19957,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_EXTTEXTOUTW: u32 = 84;
     const EMR_POLYGON16: u32 = 86;
     const EMR_POLYLINE16: u32 = 87;
+    const EMR_POLYLINETO16: u32 = 89;
     const EMR_POLYPOLYLINE16: u32 = 90;
     const EMR_POLYPOLYGON16: u32 = 91;
 
@@ -20257,6 +20259,34 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     });
                 }
             }
+            EMR_POLYLINETO => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let raw_points = parse_emf_raw_poly_points(data)?;
+                let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
+                points.push(normalized_emf_point(
+                    current_position.0,
+                    current_position.1,
+                    &header,
+                    &coordinates,
+                ));
+                for (x, y) in &raw_points {
+                    points.push(normalized_emf_point(*x, *y, &header, &coordinates));
+                }
+                if points
+                    .windows(2)
+                    .any(|pair| segment_is_visible(pair[0], pair[1]))
+                {
+                    commands.push(StaticImageVectorCommand::Polyline {
+                        points,
+                        stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
+                    });
+                }
+                current_position = *raw_points.last()?;
+            }
             EMR_POLYGON16 | EMR_POLYLINE16 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -20284,6 +20314,34 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         stroke_style: state.stroke_style,
                     });
                 }
+            }
+            EMR_POLYLINETO16 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let raw_points = parse_emf_raw_poly16_points(data)?;
+                let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
+                points.push(normalized_emf_point(
+                    current_position.0,
+                    current_position.1,
+                    &header,
+                    &coordinates,
+                ));
+                for (x, y) in &raw_points {
+                    points.push(normalized_emf_point(*x, *y, &header, &coordinates));
+                }
+                if points
+                    .windows(2)
+                    .any(|pair| segment_is_visible(pair[0], pair[1]))
+                {
+                    commands.push(StaticImageVectorCommand::Polyline {
+                        points,
+                        stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
+                    });
+                }
+                current_position = *raw_points.last()?;
             }
             EMR_POLYPOLYGON | EMR_POLYPOLYLINE => {
                 let polygons = parse_emf_poly_poly_points(data, &header, &coordinates)?;
@@ -20646,6 +20704,15 @@ fn parse_emf_poly_points(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
 ) -> Option<Vec<(f32, f32)>> {
+    parse_emf_raw_poly_points(data).map(|points| {
+        points
+            .into_iter()
+            .map(|(x, y)| normalized_emf_point(x, y, header, coordinates))
+            .collect()
+    })
+}
+
+fn parse_emf_raw_poly_points(data: &[u8]) -> Option<Vec<(i32, i32)>> {
     if data.len() < 20 {
         return None;
     }
@@ -20665,7 +20732,7 @@ fn parse_emf_poly_points(
         let offset = points_start + (idx * 8);
         let x = read_le_i32(data, offset)?;
         let y = read_le_i32(data, offset + 4)?;
-        points.push(normalized_emf_point(x, y, header, coordinates));
+        points.push((x, y));
     }
     Some(points)
 }
@@ -20675,6 +20742,15 @@ fn parse_emf_poly16_points(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
 ) -> Option<Vec<(f32, f32)>> {
+    parse_emf_raw_poly16_points(data).map(|points| {
+        points
+            .into_iter()
+            .map(|(x, y)| normalized_emf_point(x, y, header, coordinates))
+            .collect()
+    })
+}
+
+fn parse_emf_raw_poly16_points(data: &[u8]) -> Option<Vec<(i32, i32)>> {
     if data.len() < 20 {
         return None;
     }
@@ -20694,7 +20770,7 @@ fn parse_emf_poly16_points(
         let offset = points_start + (idx * 4);
         let x = i32::from(read_le_i16(data, offset)?);
         let y = i32::from(read_le_i16(data, offset + 2)?);
-        points.push(normalized_emf_point(x, y, header, coordinates));
+        points.push((x, y));
     }
     Some(points)
 }
@@ -35555,6 +35631,55 @@ After\par}"#;
                     y1: 40.0,
                     x2: 160.0,
                     y2: 80.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn emf_polylineto_records_extend_from_current_position() {
+        let records = [
+            emf_point_record(27, 10, 10),
+            emf_poly_record(6, &[(20, 20), (200, 100)]),
+            emf_point_record(54, 20, 10),
+            emf_point_record(27, 30, 30),
+            emf_poly16_record(89, &[(40, 40), (200, 120)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![
+                StaticImageVectorCommand::Polyline {
+                    points: vec![(10.0, 10.0), (20.0, 20.0), (160.0, 80.0)],
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                },
+                StaticImageVectorCommand::Line {
+                    x1: 160.0,
+                    y1: 80.0,
+                    x2: 20.0,
+                    y2: 10.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                },
+                StaticImageVectorCommand::Polyline {
+                    points: vec![(30.0, 30.0), (40.0, 40.0), (160.0, 80.0)],
                     stroke_color: Some(Color::default()),
                     stroke_width: 1.0,
                     stroke_style: BorderStyle::Single,

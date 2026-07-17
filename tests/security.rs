@@ -31301,6 +31301,115 @@ fn emf_move_to_and_line_to_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_polylineto_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_point_record(27, 10, 10),
+        emf_poly_record(6, &[(20, 20), (200, 100)]),
+        emf_point_record(54, 20, 10),
+        emf_point_record(27, 30, 30),
+        emf_poly16_record(89, &[(40, 40), (200, 120)]),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF POLYLINETO vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 3);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Polyline { ref points, .. }
+            if points == &vec![(10.0, 10.0), (20.0, 20.0), (160.0, 80.0)]
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Line {
+            x1: 160.0,
+            y1: 80.0,
+            x2: 20.0,
+            y2: 10.0,
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[2],
+        StaticImageVectorCommand::Polyline { ref points, .. }
+            if points == &vec![(30.0, 30.0), (40.0, 40.0), (160.0, 80.0)]
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF POLYLINETO payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "l")
+            .count()
+            >= 3,
+        "EMF POLYLINETO should render passive PDF line operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s")),
+        "EMF POLYLINETO should render passive stroked paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF POLYLINETO payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_coordinate_mapping_records_render_passively_without_payload_leakage() {
     let records = [
         emf_size_record(9, 320, 160),
