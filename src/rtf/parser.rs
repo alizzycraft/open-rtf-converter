@@ -19716,6 +19716,7 @@ struct EmfDrawingState {
     text_background_mode: WmfTextBackgroundMode,
     text_horizontal_align: StaticImageTextHorizontalAlign,
     text_vertical_align: StaticImageTextVerticalAlign,
+    text_word_extra: f32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -19800,6 +19801,7 @@ impl Default for EmfDrawingState {
             text_background_mode: WmfTextBackgroundMode::Transparent,
             text_horizontal_align: StaticImageTextHorizontalAlign::Left,
             text_vertical_align: StaticImageTextVerticalAlign::Top,
+            text_word_extra: 0.0,
         }
     }
 }
@@ -19946,6 +19948,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETTEXTALIGN: u32 = 22;
     const EMR_SETTEXTCOLOR: u32 = 24;
     const EMR_SETBKCOLOR: u32 = 25;
+    const EMR_SETTEXTJUSTIFICATION: u32 = 120;
     const EMR_SAVEDC: u32 = 33;
     const EMR_RESTOREDC: u32 = 34;
     const EMR_SELECTOBJECT: u32 = 37;
@@ -20058,6 +20061,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if let Some(color) = color_from_colorref(data, 0) {
                     state.background_color = Some(color);
                 }
+            }
+            EMR_SETTEXTJUSTIFICATION => {
+                state.text_word_extra = parse_emf_text_justification(data, &header, &coordinates)?;
             }
             EMR_SAVEDC => {
                 if saved_states.len() >= MAX_PASSIVE_WMF_OBJECTS {
@@ -20173,6 +20179,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             }
                         }),
                         character_extra: 0.0,
+                        word_extra: state.text_word_extra,
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
@@ -20657,6 +20664,29 @@ fn normalized_emf_text_height(header: &ParsedEmfHeader) -> f32 {
     (header.height_px.max(1) as f32 / 12.0).clamp(4.0, 48.0)
 }
 
+fn parse_emf_text_justification(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<f32> {
+    if data.len() < 8 {
+        return None;
+    }
+    let break_extra = read_le_i32(data, 0)?;
+    let break_count = read_le_i32(data, 4)?;
+    if break_count <= 0 || break_extra == 0 {
+        return Some(0.0);
+    }
+    let extra_per_break = break_extra.checked_div(break_count)?;
+    let extra = map_emf_length_axis(
+        extra_per_break,
+        coordinates.window_extent_x,
+        coordinates.viewport_extent_x,
+        header.width_px,
+    );
+    Some(extra)
+}
+
 fn parse_emf_setpixelv_rect(
     data: &[u8],
     header: &ParsedEmfHeader,
@@ -21107,6 +21137,15 @@ fn map_emf_axis(
     let scaled = (relative * i128::from(viewport_extent)) / i128::from(window_extent);
     let device = i128::from(viewport_origin) + scaled;
     device.clamp(0, max) as f32
+}
+
+fn map_emf_length_axis(value: i32, window_extent: i32, viewport_extent: i32, max: u32) -> f32 {
+    if window_extent == 0 || viewport_extent == 0 || value == 0 {
+        return 0.0;
+    }
+    let scaled = (i128::from(value) * i128::from(viewport_extent)) / i128::from(window_extent);
+    let limit = i128::from(max.max(1));
+    scaled.clamp(-limit, limit) as f32
 }
 
 fn signed_rect_extent(start: i32, end: i32) -> Option<u32> {
@@ -22299,6 +22338,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         },
                         clip_bounds: None,
                         character_extra: state.text_character_extra,
+                        word_extra: 0.0,
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
@@ -22364,6 +22404,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             }
                         }),
                         character_extra: state.text_character_extra,
+                        word_extra: 0.0,
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
@@ -35357,6 +35398,7 @@ After\par}"#;
                 background_color: None,
                 clip_bounds: None,
                 character_extra: 0.0,
+                word_extra: 0.0,
                 horizontal_align: StaticImageTextHorizontalAlign::Center,
                 vertical_align: StaticImageTextVerticalAlign::Top,
             }]
@@ -35408,11 +35450,43 @@ After\par}"#;
                     background_color: None,
                     clip_bounds: None,
                     character_extra: 0.0,
+                    word_extra: 0.0,
                     horizontal_align: StaticImageTextHorizontalAlign::Left,
                     vertical_align: StaticImageTextVerticalAlign::Top,
                 },
             ]
         );
+    }
+
+    #[test]
+    fn emf_settextjustification_adds_passive_word_spacing() {
+        let records = [
+            emf_size_record(9, 320, 160),
+            emf_size_record(11, 160, 80),
+            emf_i32_pair_record(120, 40, 2),
+            emf_exttextoutw_record(40, 20, "A B C", 0, None, false),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Text {
+                ref text,
+                word_extra,
+                character_extra: 0.0,
+                ..
+            } if text == "A B C" && (word_extra - 10.0).abs() < 0.01
+        ));
     }
 
     #[test]
@@ -36470,6 +36544,16 @@ fn emf_i32_record(record_type: u32, value: i32) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, record_type);
     write_test_le_u32(&mut record, 4, 12);
     write_test_le_i32(&mut record, 8, value);
+    record
+}
+
+#[cfg(test)]
+fn emf_i32_pair_record(record_type: u32, first: i32, second: i32) -> Vec<u8> {
+    let mut record = vec![0; 16];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 16);
+    write_test_le_i32(&mut record, 8, first);
+    write_test_le_i32(&mut record, 12, second);
     record
 }
 

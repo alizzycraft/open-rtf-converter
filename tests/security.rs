@@ -30790,6 +30790,97 @@ fn emf_exttextoutw_opaque_bounds_render_passive_background_without_payload_leaka
 }
 
 #[test]
+fn emf_settextjustification_renders_passive_word_spacing_without_payload_leakage() {
+    let records = [
+        emf_size_record(9, 320, 160),
+        emf_size_record(11, 160, 80),
+        emf_i32_pair_record(120, 40, 2),
+        emf_exttextoutw_record(40, 20, "A B C", 0, None, false),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF text justification vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Text {
+            ref text,
+            word_extra,
+            character_extra: 0.0,
+            ..
+        } if text == "A B C" && (word_extra - 10.0).abs() < 0.01
+    ));
+    for forbidden in ["emfblip", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF text justification payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(rendered_text.contains("A B C"));
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "Tw"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_f32().ok())
+                    .is_some_and(|value| value.abs() > 0.01)
+        }),
+        "EMF SETTEXTJUSTIFICATION should emit nonzero passive PDF word spacing"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF text justification payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_polyline_and_polygon_records_render_passively_without_payload_leakage() {
     let records = [
         emf_poly_record(4, &[(0, 0), (40, 20), (200, 100)]),
@@ -42988,6 +43079,15 @@ fn emf_i32_record(record_type: u32, value: i32) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, record_type);
     write_test_le_u32(&mut record, 4, 12);
     write_test_le_i32(&mut record, 8, value);
+    record
+}
+
+fn emf_i32_pair_record(record_type: u32, first: i32, second: i32) -> Vec<u8> {
+    let mut record = vec![0; 16];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 16);
+    write_test_le_i32(&mut record, 8, first);
+    write_test_le_i32(&mut record, 12, second);
     record
 }
 

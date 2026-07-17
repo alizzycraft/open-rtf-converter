@@ -533,6 +533,7 @@ pub enum StaticImageVectorCommand {
         background_color: Option<Color>,
         clip_bounds: Option<StaticImageVectorTextBounds>,
         character_extra: f32,
+        word_extra: f32,
         horizontal_align: StaticImageTextHorizontalAlign,
         vertical_align: StaticImageTextVerticalAlign,
     },
