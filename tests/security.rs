@@ -32027,6 +32027,114 @@ fn emf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_polydraw_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_polydraw_record(
+            56,
+            &[
+                (10, 10),
+                (50, 10),
+                (50, 40),
+                (60, 10),
+                (70, 5),
+                (80, 40),
+                (90, 30),
+            ],
+            &[0x06, 0x02, 0x03, 0x06, 0x04, 0x04, 0x05],
+        ),
+        emf_point_record(54, 100, 10),
+        emf_polydraw16_record(92, &[(20, 50), (60, 50), (60, 70)], &[0x06, 0x02, 0x02]),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF POLYDRAW vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Polyline { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Bezier { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[4],
+        StaticImageVectorCommand::Polyline { .. }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF POLYDRAW payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "l"),
+        "EMF POLYDRAW lines should render passive PDF line operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "EMF POLYDRAW Bezier segments should render passive PDF cubic operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF POLYDRAW payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_savedc_and_restoredc_records_render_passively_without_payload_leakage() {
     let records = [
         emf_create_pen_record(
@@ -43526,6 +43634,50 @@ fn emf_arc_record(
     write_test_le_i32(&mut record, 28, start_y);
     write_test_le_i32(&mut record, 32, end_x);
     write_test_le_i32(&mut record, 36, end_y);
+    record
+}
+
+fn emf_polydraw_record(record_type: u32, points: &[(i32, i32)], types: &[u8]) -> Vec<u8> {
+    assert_eq!(points.len(), types.len());
+    let size = (28 + (points.len() * 8) + types.len()).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, points.len() as u32);
+    let points_start = 28;
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = points_start + (idx * 8);
+        write_test_le_i32(&mut record, offset, *x);
+        write_test_le_i32(&mut record, offset + 4, *y);
+    }
+    let types_start = points_start + (points.len() * 8);
+    record[types_start..types_start + types.len()].copy_from_slice(types);
+    record
+}
+
+fn emf_polydraw16_record(record_type: u32, points: &[(i16, i16)], types: &[u8]) -> Vec<u8> {
+    assert_eq!(points.len(), types.len());
+    let size = (28 + (points.len() * 4) + types.len()).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, points.len() as u32);
+    let points_start = 28;
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = points_start + (idx * 4);
+        write_test_le_i16(&mut record, offset, *x);
+        write_test_le_i16(&mut record, offset + 2, *y);
+    }
+    let types_start = points_start + (points.len() * 4);
+    record[types_start..types_start + types.len()].copy_from_slice(types);
     record
 }
 

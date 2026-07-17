@@ -19696,6 +19696,12 @@ struct ParsedEmfArc {
     end_position: (i32, i32),
 }
 
+#[derive(Debug)]
+struct ParsedEmfPolyDraw {
+    commands: Vec<StaticImageVectorCommand>,
+    end_position: (i32, i32),
+}
+
 #[derive(Debug, Copy, Clone)]
 enum EmfObject {
     Pen {
@@ -19998,6 +20004,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_ROUNDRECT: u32 = 44;
     const EMR_LINETO: u32 = 54;
     const EMR_ARCTO: u32 = 55;
+    const EMR_POLYDRAW: u32 = 56;
     const EMR_EXTTEXTOUTW: u32 = 84;
     const EMR_POLYBEZIER16: u32 = 85;
     const EMR_POLYGON16: u32 = 86;
@@ -20006,6 +20013,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYLINETO16: u32 = 89;
     const EMR_POLYPOLYLINE16: u32 = 90;
     const EMR_POLYPOLYGON16: u32 = 91;
+    const EMR_POLYDRAW16: u32 = 92;
 
     let header = parse_emf_header_dimensions(bytes)?;
     if header
@@ -20576,6 +20584,37 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     });
                 }
                 current_position = *raw_points.last()?;
+            }
+            EMR_POLYDRAW | EMR_POLYDRAW16 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let parsed = if record_type == EMR_POLYDRAW {
+                    parse_emf_polydraw(
+                        data,
+                        &header,
+                        &coordinates,
+                        current_position,
+                        state.stroke_color,
+                        state.stroke_width,
+                        state.stroke_style,
+                    )?
+                } else {
+                    parse_emf_polydraw16(
+                        data,
+                        &header,
+                        &coordinates,
+                        current_position,
+                        state.stroke_color,
+                        state.stroke_width,
+                        state.stroke_style,
+                    )?
+                };
+                if commands.len().checked_add(parsed.commands.len())? > MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                commands.extend(parsed.commands);
+                current_position = parsed.end_position;
             }
             EMR_POLYPOLYGON | EMR_POLYPOLYLINE => {
                 let polygons = parse_emf_poly_poly_points(data, &header, &coordinates)?;
@@ -21162,6 +21201,256 @@ fn parse_emf_raw_poly16_points(data: &[u8]) -> Option<Vec<(i32, i32)>> {
         points.push((x, y));
     }
     Some(points)
+}
+
+fn parse_emf_polydraw(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+    current_position: (i32, i32),
+    stroke_color: Option<Color>,
+    stroke_width: f32,
+    stroke_style: BorderStyle,
+) -> Option<ParsedEmfPolyDraw> {
+    let (points, types) = parse_emf_raw_polydraw(data, false)?;
+    build_emf_polydraw_commands(
+        &points,
+        &types,
+        header,
+        coordinates,
+        current_position,
+        stroke_color,
+        stroke_width,
+        stroke_style,
+    )
+}
+
+fn parse_emf_polydraw16(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+    current_position: (i32, i32),
+    stroke_color: Option<Color>,
+    stroke_width: f32,
+    stroke_style: BorderStyle,
+) -> Option<ParsedEmfPolyDraw> {
+    let (points, types) = parse_emf_raw_polydraw(data, true)?;
+    build_emf_polydraw_commands(
+        &points,
+        &types,
+        header,
+        coordinates,
+        current_position,
+        stroke_color,
+        stroke_width,
+        stroke_style,
+    )
+}
+
+fn parse_emf_raw_polydraw(data: &[u8], compact_points: bool) -> Option<(Vec<(i32, i32)>, Vec<u8>)> {
+    if data.len() < 20 {
+        return None;
+    }
+    let count = usize::try_from(read_le_u32(data, 16)?).ok()?;
+    if count == 0 || count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+        return None;
+    }
+    let point_size = if compact_points { 4usize } else { 8usize };
+    let points_start = 20usize;
+    let points_bytes = count.checked_mul(point_size)?;
+    let types_start = points_start.checked_add(points_bytes)?;
+    let types_end = types_start.checked_add(count)?;
+    if types_end > data.len() {
+        return None;
+    }
+
+    let mut points = Vec::with_capacity(count);
+    for idx in 0..count {
+        let offset = points_start + (idx * point_size);
+        let point = if compact_points {
+            (
+                i32::from(read_le_i16(data, offset)?),
+                i32::from(read_le_i16(data, offset + 2)?),
+            )
+        } else {
+            (read_le_i32(data, offset)?, read_le_i32(data, offset + 4)?)
+        };
+        points.push(point);
+    }
+    Some((points, data[types_start..types_end].to_vec()))
+}
+
+fn build_emf_polydraw_commands(
+    points: &[(i32, i32)],
+    types: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+    initial_position: (i32, i32),
+    stroke_color: Option<Color>,
+    stroke_width: f32,
+    stroke_style: BorderStyle,
+) -> Option<ParsedEmfPolyDraw> {
+    const PT_CLOSEFIGURE: u8 = 0x01;
+    const PT_LINETO: u8 = 0x02;
+    const PT_BEZIERTO: u8 = 0x04;
+    const PT_MOVETO: u8 = 0x06;
+
+    if points.len() != types.len() {
+        return None;
+    }
+    let mut commands = Vec::new();
+    let mut current_position = initial_position;
+    let mut current =
+        normalized_emf_point(initial_position.0, initial_position.1, header, coordinates);
+    let mut figure_start = current;
+    let mut figure_start_position = initial_position;
+    let mut line_points: Vec<(f32, f32)> = Vec::new();
+    let mut idx = 0usize;
+    while idx < points.len() {
+        let point_type = types[idx];
+        let close = point_type & PT_CLOSEFIGURE != 0;
+        let base = point_type & !PT_CLOSEFIGURE;
+        match base {
+            PT_MOVETO => {
+                if close {
+                    return None;
+                }
+                flush_emf_polydraw_line(
+                    &mut commands,
+                    &mut line_points,
+                    stroke_color,
+                    stroke_width,
+                    stroke_style,
+                )?;
+                current_position = points[idx];
+                current = normalized_emf_point(
+                    current_position.0,
+                    current_position.1,
+                    header,
+                    coordinates,
+                );
+                figure_start = current;
+                figure_start_position = current_position;
+                idx += 1;
+            }
+            PT_LINETO => {
+                if line_points.is_empty() {
+                    line_points.push(current);
+                }
+                current_position = points[idx];
+                current = normalized_emf_point(
+                    current_position.0,
+                    current_position.1,
+                    header,
+                    coordinates,
+                );
+                line_points.push(current);
+                if close {
+                    line_points.push(figure_start);
+                    current = figure_start;
+                    current_position = figure_start_position;
+                }
+                idx += 1;
+            }
+            PT_BEZIERTO => {
+                flush_emf_polydraw_line(
+                    &mut commands,
+                    &mut line_points,
+                    stroke_color,
+                    stroke_width,
+                    stroke_style,
+                )?;
+                if idx.checked_add(2)? >= points.len() {
+                    return None;
+                }
+                let first_type = types[idx];
+                let second_type = types[idx + 1];
+                let third_type = types[idx + 2];
+                if first_type & PT_CLOSEFIGURE != 0 || second_type & PT_CLOSEFIGURE != 0 {
+                    return None;
+                }
+                if (first_type & !PT_CLOSEFIGURE) != PT_BEZIERTO
+                    || (second_type & !PT_CLOSEFIGURE) != PT_BEZIERTO
+                    || (third_type & !PT_CLOSEFIGURE) != PT_BEZIERTO
+                {
+                    return None;
+                }
+                let mut bezier_points = Vec::with_capacity(4);
+                bezier_points.push(current);
+                for point in &points[idx..idx + 3] {
+                    bezier_points.push(normalized_emf_point(point.0, point.1, header, coordinates));
+                }
+                if point_bounds_are_visible(&bezier_points) {
+                    commands.push(StaticImageVectorCommand::Bezier {
+                        points: bezier_points,
+                        stroke_color,
+                        stroke_width,
+                        stroke_style,
+                    });
+                }
+                current_position = points[idx + 2];
+                current = normalized_emf_point(
+                    current_position.0,
+                    current_position.1,
+                    header,
+                    coordinates,
+                );
+                if third_type & PT_CLOSEFIGURE != 0 {
+                    let close_points = vec![current, figure_start];
+                    if segment_is_visible(close_points[0], close_points[1]) {
+                        commands.push(StaticImageVectorCommand::Polyline {
+                            points: close_points,
+                            stroke_color,
+                            stroke_width,
+                            stroke_style,
+                        });
+                    }
+                    current = figure_start;
+                    current_position = figure_start_position;
+                }
+                idx += 3;
+            }
+            _ => return None,
+        }
+    }
+    flush_emf_polydraw_line(
+        &mut commands,
+        &mut line_points,
+        stroke_color,
+        stroke_width,
+        stroke_style,
+    )?;
+    Some(ParsedEmfPolyDraw {
+        commands,
+        end_position: current_position,
+    })
+}
+
+fn flush_emf_polydraw_line(
+    commands: &mut Vec<StaticImageVectorCommand>,
+    line_points: &mut Vec<(f32, f32)>,
+    stroke_color: Option<Color>,
+    stroke_width: f32,
+    stroke_style: BorderStyle,
+) -> Option<()> {
+    if line_points.len() >= 2
+        && line_points
+            .windows(2)
+            .any(|pair| segment_is_visible(pair[0], pair[1]))
+    {
+        commands.push(StaticImageVectorCommand::Polyline {
+            points: std::mem::take(line_points),
+            stroke_color,
+            stroke_width,
+            stroke_style,
+        });
+    } else {
+        line_points.clear();
+    }
+    if commands.len() > MAX_PASSIVE_WMF_COMMANDS {
+        return None;
+    }
+    Some(())
 }
 
 fn polybezier_point_count_is_valid(count: usize) -> bool {
@@ -36497,6 +36786,92 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_polydraw_records_become_passive_vector_commands() {
+        let records = [
+            emf_polydraw_record(
+                56,
+                &[
+                    (10, 10),
+                    (50, 10),
+                    (50, 40),
+                    (60, 10),
+                    (70, 5),
+                    (80, 40),
+                    (90, 30),
+                ],
+                &[0x06, 0x02, 0x03, 0x06, 0x04, 0x04, 0x05],
+            ),
+            emf_point_record(54, 100, 10),
+            emf_polydraw16_record(92, &[(20, 50), (60, 50), (60, 70)], &[0x06, 0x02, 0x02]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 5);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Polyline { points, .. }
+                if points == &vec![(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 10.0)]
+        ));
+        assert!(matches!(
+            &image.vector_commands[1],
+            StaticImageVectorCommand::Bezier { points, .. }
+                if points == &vec![(60.0, 10.0), (70.0, 5.0), (80.0, 40.0), (90.0, 30.0)]
+        ));
+        assert!(matches!(
+            &image.vector_commands[2],
+            StaticImageVectorCommand::Polyline { points, .. }
+                if points == &vec![(90.0, 30.0), (60.0, 10.0)]
+        ));
+        assert!(matches!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::Line {
+                x1: 60.0,
+                y1: 10.0,
+                x2: 100.0,
+                y2: 10.0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &image.vector_commands[4],
+            StaticImageVectorCommand::Polyline { points, .. }
+                if points == &vec![(20.0, 50.0), (60.0, 50.0), (60.0, 70.0)]
+        ));
+    }
+
+    #[test]
+    fn emf_polydraw_records_with_partial_bezier_become_passive_placeholders() {
+        let records = [emf_polydraw_record(
+            56,
+            &[(10, 10), (30, 20), (40, 30)],
+            &[0x06, 0x04, 0x04],
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_coordinate_records_with_zero_extent_become_passive_placeholders() {
         let records = [
             emf_size_record(9, 0, 160),
@@ -37212,6 +37587,52 @@ fn emf_arc_record(
     write_test_le_i32(&mut record, 28, start_y);
     write_test_le_i32(&mut record, 32, end_x);
     write_test_le_i32(&mut record, 36, end_y);
+    record
+}
+
+#[cfg(test)]
+fn emf_polydraw_record(record_type: u32, points: &[(i32, i32)], types: &[u8]) -> Vec<u8> {
+    assert_eq!(points.len(), types.len());
+    let size = (28 + (points.len() * 8) + types.len()).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, points.len() as u32);
+    let points_start = 28;
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = points_start + (idx * 8);
+        write_test_le_i32(&mut record, offset, *x);
+        write_test_le_i32(&mut record, offset + 4, *y);
+    }
+    let types_start = points_start + (points.len() * 8);
+    record[types_start..types_start + types.len()].copy_from_slice(types);
+    record
+}
+
+#[cfg(test)]
+fn emf_polydraw16_record(record_type: u32, points: &[(i16, i16)], types: &[u8]) -> Vec<u8> {
+    assert_eq!(points.len(), types.len());
+    let size = (28 + (points.len() * 4) + types.len()).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, points.len() as u32);
+    let points_start = 28;
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = points_start + (idx * 4);
+        write_test_le_i16(&mut record, offset, *x);
+        write_test_le_i16(&mut record, offset + 2, *y);
+    }
+    let types_start = points_start + (points.len() * 4);
+    record[types_start..types_start + types.len()].copy_from_slice(types);
     record
 }
 
