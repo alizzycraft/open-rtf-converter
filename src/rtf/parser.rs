@@ -21167,69 +21167,73 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_POLYPOLYGON | EMR_POLYPOLYLINE => {
                 let polygons = parse_emf_poly_poly_points(data, &header, &coordinates)?;
-                for points in polygons {
-                    if record_type == EMR_POLYPOLYGON {
-                        if points.len() >= 3 && point_bounds_are_visible(&points) {
+                if record_type == EMR_POLYPOLYGON {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
+                    if let Some(command) = emf_polypolygon_path_command(
+                        polygons,
+                        state.stroke_color,
+                        state.stroke_width,
+                        state.stroke_style,
+                        state.fill_rule,
+                        state.fill_pattern,
+                        state.fill_color,
+                    )? {
+                        commands.push(command);
+                    }
+                } else {
+                    for points in polygons {
+                        if points
+                            .windows(2)
+                            .any(|pair| segment_is_visible(pair[0], pair[1]))
+                        {
                             if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                                 return None;
                             }
-                            commands.push(StaticImageVectorCommand::Polygon {
+                            commands.push(StaticImageVectorCommand::Polyline {
                                 points,
                                 stroke_color: state.stroke_color,
                                 stroke_width: state.stroke_width,
                                 stroke_style: state.stroke_style,
-                                fill_rule: state.fill_rule,
-                                fill_pattern: state.fill_pattern,
-                                fill_color: state.fill_color,
                             });
                         }
-                    } else if points
-                        .windows(2)
-                        .any(|pair| segment_is_visible(pair[0], pair[1]))
-                    {
-                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                            return None;
-                        }
-                        commands.push(StaticImageVectorCommand::Polyline {
-                            points,
-                            stroke_color: state.stroke_color,
-                            stroke_width: state.stroke_width,
-                            stroke_style: state.stroke_style,
-                        });
                     }
                 }
             }
             EMR_POLYPOLYGON16 | EMR_POLYPOLYLINE16 => {
                 let polygons = parse_emf_poly_poly16_points(data, &header, &coordinates)?;
-                for points in polygons {
-                    if record_type == EMR_POLYPOLYGON16 {
-                        if points.len() >= 3 && point_bounds_are_visible(&points) {
+                if record_type == EMR_POLYPOLYGON16 {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
+                    if let Some(command) = emf_polypolygon_path_command(
+                        polygons,
+                        state.stroke_color,
+                        state.stroke_width,
+                        state.stroke_style,
+                        state.fill_rule,
+                        state.fill_pattern,
+                        state.fill_color,
+                    )? {
+                        commands.push(command);
+                    }
+                } else {
+                    for points in polygons {
+                        if points
+                            .windows(2)
+                            .any(|pair| segment_is_visible(pair[0], pair[1]))
+                        {
                             if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                                 return None;
                             }
-                            commands.push(StaticImageVectorCommand::Polygon {
+                            commands.push(StaticImageVectorCommand::Polyline {
                                 points,
                                 stroke_color: state.stroke_color,
                                 stroke_width: state.stroke_width,
                                 stroke_style: state.stroke_style,
-                                fill_rule: state.fill_rule,
-                                fill_pattern: state.fill_pattern,
-                                fill_color: state.fill_color,
                             });
                         }
-                    } else if points
-                        .windows(2)
-                        .any(|pair| segment_is_visible(pair[0], pair[1]))
-                    {
-                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                            return None;
-                        }
-                        commands.push(StaticImageVectorCommand::Polyline {
-                            points,
-                            stroke_color: state.stroke_color,
-                            stroke_width: state.stroke_width,
-                            stroke_style: state.stroke_style,
-                        });
                     }
                 }
             }
@@ -22144,6 +22148,75 @@ fn polybezier_point_count_is_valid(count: usize) -> bool {
 
 fn polybezierto_point_count_is_valid(count: usize) -> bool {
     count >= 3 && count % 3 == 0
+}
+
+fn emf_polypolygon_path_command(
+    polygons: Vec<Vec<(f32, f32)>>,
+    stroke_color: Option<Color>,
+    stroke_width: f32,
+    stroke_style: BorderStyle,
+    fill_rule: StaticImageVectorFillRule,
+    fill_pattern: ShadingPattern,
+    fill_color: Option<Color>,
+) -> Option<Option<StaticImageVectorCommand>> {
+    if fill_color.is_none() && stroke_color.is_none() {
+        return Some(None);
+    }
+
+    let mut visible_polygons = polygons
+        .into_iter()
+        .filter(|points| points.len() >= 3 && point_bounds_are_visible(points));
+    let Some(first_polygon) = visible_polygons.next() else {
+        return Some(None);
+    };
+    let start = *first_polygon.first()?;
+    let mut segments = Vec::new();
+    append_emf_polypolygon_path_segments(&mut segments, &first_polygon, false)?;
+    for polygon in visible_polygons {
+        append_emf_polypolygon_path_segments(&mut segments, &polygon, true)?;
+    }
+    if segments.is_empty() {
+        return Some(None);
+    }
+
+    Some(Some(StaticImageVectorCommand::Path {
+        start,
+        segments,
+        closed: false,
+        stroke_color,
+        stroke_width,
+        stroke_style,
+        fill_rule,
+        fill_pattern,
+        fill_color,
+    }))
+}
+
+fn append_emf_polypolygon_path_segments(
+    segments: &mut Vec<StaticImageVectorPathSegment>,
+    points: &[(f32, f32)],
+    include_move_to: bool,
+) -> Option<()> {
+    let first = *points.first()?;
+    if include_move_to {
+        if segments.len() >= MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+            return None;
+        }
+        segments.push(StaticImageVectorPathSegment::MoveTo(first.0, first.1));
+    }
+    for point in points.iter().skip(1) {
+        if segments.len() >= MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+            return None;
+        }
+        segments.push(StaticImageVectorPathSegment::LineTo(point.0, point.1));
+    }
+    if points.last().is_some_and(|last| *last != first) {
+        if segments.len() >= MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+            return None;
+        }
+        segments.push(StaticImageVectorPathSegment::LineTo(first.0, first.1));
+    }
+    Some(())
 }
 
 fn parse_emf_poly_poly_points(
@@ -37424,7 +37497,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 4);
+        assert_eq!(image.vector_commands.len(), 3);
         assert!(matches!(
             image.vector_commands[0],
             StaticImageVectorCommand::Polyline { ref points, .. }
@@ -37437,19 +37510,23 @@ After\par}"#;
         ));
         assert!(matches!(
             image.vector_commands[2],
-            StaticImageVectorCommand::Polygon {
-                ref points,
+            StaticImageVectorCommand::Path {
+                start: (20.0, 10.0),
+                ref segments,
                 fill_rule: StaticImageVectorFillRule::Alternate,
                 ..
-            } if points == &vec![(20.0, 10.0), (60.0, 70.0), (100.0, 10.0)]
-        ));
-        assert!(matches!(
-            image.vector_commands[3],
-            StaticImageVectorCommand::Polygon {
-                ref points,
-                fill_rule: StaticImageVectorFillRule::Alternate,
-                ..
-            } if points == &vec![(100.0, 20.0), (140.0, 70.0), (160.0, 20.0)]
+            } if matches!(
+                &segments[..],
+                [
+                    StaticImageVectorPathSegment::LineTo(60.0, 70.0),
+                    StaticImageVectorPathSegment::LineTo(100.0, 10.0),
+                    StaticImageVectorPathSegment::LineTo(20.0, 10.0),
+                    StaticImageVectorPathSegment::MoveTo(100.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(140.0, 70.0),
+                    StaticImageVectorPathSegment::LineTo(160.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(100.0, 20.0),
+                ]
+            )
         ));
     }
 
@@ -37530,7 +37607,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 4);
+        assert_eq!(image.vector_commands.len(), 3);
         assert!(matches!(
             image.vector_commands[0],
             StaticImageVectorCommand::Polyline { ref points, .. }
@@ -37543,13 +37620,74 @@ After\par}"#;
         ));
         assert!(matches!(
             image.vector_commands[2],
-            StaticImageVectorCommand::Polygon { ref points, .. }
-                if points == &vec![(20.0, 10.0), (60.0, 70.0), (100.0, 10.0)]
+            StaticImageVectorCommand::Path {
+                start: (20.0, 10.0),
+                ref segments,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                ..
+            } if matches!(
+                &segments[..],
+                [
+                    StaticImageVectorPathSegment::LineTo(60.0, 70.0),
+                    StaticImageVectorPathSegment::LineTo(100.0, 10.0),
+                    StaticImageVectorPathSegment::LineTo(20.0, 10.0),
+                    StaticImageVectorPathSegment::MoveTo(100.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(140.0, 70.0),
+                    StaticImageVectorPathSegment::LineTo(160.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(100.0, 20.0),
+                ]
+            )
         ));
+    }
+
+    #[test]
+    fn emf_polypolygon_records_preserve_fill_rule_as_single_passive_path() {
+        let records = [
+            emf_u32_record(19, 2),
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 40,
+                    green: 180,
+                    blue: 90,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_poly_poly_record(
+                8,
+                &[
+                    vec![(10, 10), (140, 10), (140, 70), (10, 70)],
+                    vec![(50, 25), (100, 25), (100, 55), (50, 55)],
+                ],
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
         assert!(matches!(
-            image.vector_commands[3],
-            StaticImageVectorCommand::Polygon { ref points, .. }
-                if points == &vec![(100.0, 20.0), (140.0, 70.0), (160.0, 20.0)]
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Path {
+                start: (10.0, 10.0),
+                segments,
+                fill_rule: StaticImageVectorFillRule::Winding,
+                fill_color: Some(Color { red: 40, green: 180, blue: 90 }),
+                ..
+            } if segments.iter().any(|segment| matches!(
+                segment,
+                StaticImageVectorPathSegment::MoveTo(50.0, 25.0)
+            ))
         ));
     }
 

@@ -31917,14 +31917,18 @@ fn emf_polypolyline_and_polypolygon_records_render_passively_without_payload_lea
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 4);
+    assert_eq!(image.vector_commands.len(), 3);
     assert!(matches!(
         image.vector_commands[0],
         StaticImageVectorCommand::Polyline { ref points, .. } if points.len() == 2
     ));
     assert!(matches!(
-        image.vector_commands[2],
-        StaticImageVectorCommand::Polygon { ref points, .. } if points.len() == 3
+        &image.vector_commands[2],
+        StaticImageVectorCommand::Path { segments, .. }
+            if segments.iter().any(|segment| matches!(
+                segment,
+                StaticImageVectorPathSegment::MoveTo(100.0, 20.0)
+            ))
     ));
     for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
         assert!(
@@ -32010,7 +32014,7 @@ fn emf_poly16_records_render_passively_without_payload_leakage() {
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 6);
+    assert_eq!(image.vector_commands.len(), 5);
     assert!(matches!(
         image.vector_commands[0],
         StaticImageVectorCommand::Polyline { ref points, .. }
@@ -32021,9 +32025,12 @@ fn emf_poly16_records_render_passively_without_payload_leakage() {
         StaticImageVectorCommand::Polygon { ref points, .. } if points.len() == 3
     ));
     assert!(matches!(
-        image.vector_commands[5],
-        StaticImageVectorCommand::Polygon { ref points, .. }
-            if points == &vec![(100.0, 20.0), (140.0, 70.0), (160.0, 20.0)]
+        &image.vector_commands[4],
+        StaticImageVectorCommand::Path { segments, .. }
+            if segments.iter().any(|segment| matches!(
+                segment,
+                StaticImageVectorPathSegment::MoveTo(100.0, 20.0)
+            ))
     ));
     for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
         assert!(
@@ -32822,6 +32829,125 @@ fn emf_scaled_extent_records_render_passively_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "EMF scaled-extent payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emf_polypolygon_records_render_single_passive_fill_path_without_payload_leakage() {
+    let records = [
+        emf_u32_record(19, 2),
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 40,
+                green: 180,
+                blue: 90,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_poly_poly_record(
+            8,
+            &[
+                vec![(10, 10), (140, 10), (140, 70), (10, 70)],
+                vec![(50, 25), (100, 25), (100, 55), (50, 55)],
+            ],
+        ),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF POLYPOLYGON vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::Path {
+            fill_rule: StaticImageVectorFillRule::Winding,
+            fill_color: Some(Color {
+                red: 40,
+                green: 180,
+                blue: 90
+            }),
+            segments,
+            ..
+        } if segments.iter().any(|segment| matches!(
+            segment,
+            StaticImageVectorPathSegment::MoveTo(50.0, 25.0)
+        ))
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF POLYPOLYGON payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "m")
+            .count()
+            >= 2,
+        "EMF POLYPOLYGON should render separate passive PDF subpath moves"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "B")),
+        "EMF POLYPOLYGON winding fill should render a passive nonzero fill operation"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF POLYPOLYGON payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
