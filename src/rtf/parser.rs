@@ -13,8 +13,8 @@ use crate::model::{
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImageAlphaMask, StaticImagePlacement, StaticImageTextHorizontalAlign,
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapePoint, StaticShapeVerticalAnchor,
+    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
     TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
@@ -19681,6 +19681,15 @@ struct ParsedEmfVector {
     commands: Vec<StaticImageVectorCommand>,
 }
 
+#[derive(Debug)]
+struct ParsedEmfExtTextOut {
+    x: f32,
+    y: f32,
+    text: String,
+    opaque_bounds: Option<(f32, f32, f32, f32)>,
+    clip_bounds: Option<(f32, f32, f32, f32)>,
+}
+
 #[derive(Debug, Copy, Clone)]
 enum EmfObject {
     Pen {
@@ -19702,6 +19711,11 @@ struct EmfDrawingState {
     fill_color: Option<Color>,
     fill_pattern: ShadingPattern,
     fill_rule: StaticImageVectorFillRule,
+    text_color: Option<Color>,
+    background_color: Option<Color>,
+    text_background_mode: WmfTextBackgroundMode,
+    text_horizontal_align: StaticImageTextHorizontalAlign,
+    text_vertical_align: StaticImageTextVerticalAlign,
 }
 
 impl Default for EmfDrawingState {
@@ -19713,6 +19727,15 @@ impl Default for EmfDrawingState {
             fill_color: None,
             fill_pattern: ShadingPattern::None,
             fill_rule: StaticImageVectorFillRule::Alternate,
+            text_color: Some(Color::default()),
+            background_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255,
+            }),
+            text_background_mode: WmfTextBackgroundMode::Transparent,
+            text_horizontal_align: StaticImageTextHorizontalAlign::Left,
+            text_vertical_align: StaticImageTextVerticalAlign::Top,
         }
     }
 }
@@ -19844,6 +19867,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_MOVETOEX: u32 = 27;
     const EMR_POLYGON: u32 = 3;
     const EMR_POLYLINE: u32 = 4;
+    const EMR_SETBKMODE: u32 = 18;
+    const EMR_SETTEXTALIGN: u32 = 22;
+    const EMR_SETTEXTCOLOR: u32 = 24;
+    const EMR_SETBKCOLOR: u32 = 25;
     const EMR_SELECTOBJECT: u32 = 37;
     const EMR_CREATEPEN: u32 = 38;
     const EMR_CREATEBRUSHINDIRECT: u32 = 39;
@@ -19852,6 +19879,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_ELLIPSE: u32 = 42;
     const EMR_ROUNDRECT: u32 = 44;
     const EMR_LINETO: u32 = 54;
+    const EMR_EXTTEXTOUTW: u32 = 84;
 
     let header = parse_emf_header_dimensions(bytes)?;
     if header
@@ -19899,6 +19927,29 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_MOVETOEX => {
                 current_position = parse_emf_point_record(data, &header)?;
             }
+            EMR_SETBKMODE => {
+                state.text_background_mode =
+                    if read_le_u32(data, 0)? == u32::from(WMF_BKMODE_OPAQUE) {
+                        WmfTextBackgroundMode::Opaque
+                    } else {
+                        WmfTextBackgroundMode::Transparent
+                    };
+            }
+            EMR_SETTEXTALIGN => {
+                let mode = (read_le_u32(data, 0)? & 0xffff) as u16;
+                state.text_horizontal_align = wmf_text_horizontal_align(mode);
+                state.text_vertical_align = wmf_text_vertical_align(mode);
+            }
+            EMR_SETTEXTCOLOR => {
+                if let Some(color) = color_from_colorref(data, 0) {
+                    state.text_color = Some(color);
+                }
+            }
+            EMR_SETBKCOLOR => {
+                if let Some(color) = color_from_colorref(data, 0) {
+                    state.background_color = Some(color);
+                }
+            }
             EMR_CREATEPEN => {
                 let (handle, object) = parse_emf_pen_object(data)?;
                 store_emf_object(&mut objects, handle, object)?;
@@ -19942,6 +19993,39 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     });
                 }
                 current_position = endpoint;
+            }
+            EMR_EXTTEXTOUTW => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some(text) = parse_emf_exttextoutw(data, &header) {
+                    commands.push(StaticImageVectorCommand::Text {
+                        x: text.x,
+                        y: text.y,
+                        height: normalized_emf_text_height(&header),
+                        text: text.text,
+                        color: state.text_color,
+                        background_color: if text.opaque_bounds.is_none() {
+                            match state.text_background_mode {
+                                WmfTextBackgroundMode::Opaque => state.background_color,
+                                WmfTextBackgroundMode::Transparent => None,
+                            }
+                        } else {
+                            None
+                        },
+                        clip_bounds: text.clip_bounds.map(|(left, top, right, bottom)| {
+                            StaticImageVectorTextBounds {
+                                left,
+                                top,
+                                right,
+                                bottom,
+                            }
+                        }),
+                        character_extra: 0.0,
+                        horizontal_align: state.text_horizontal_align,
+                        vertical_align: state.text_vertical_align,
+                    });
+                }
             }
             EMR_RECTANGLE | EMR_ELLIPSE | EMR_ROUNDRECT => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -20058,6 +20142,85 @@ fn parse_emf_record_rect(data: &[u8], header: &ParsedEmfHeader) -> Option<(f32, 
     let right = read_le_i32(data, 8)?;
     let bottom = read_le_i32(data, 12)?;
     normalized_emf_rect(left, top, right, bottom, header)
+}
+
+fn parse_emf_exttextoutw(data: &[u8], header: &ParsedEmfHeader) -> Option<ParsedEmfExtTextOut> {
+    const EMF_ETO_OPAQUE: u32 = 0x0002;
+    const EMF_ETO_CLIPPED: u32 = 0x0004;
+    const EMF_ETO_GLYPH_INDEX: u32 = 0x0010;
+
+    if data.len() < 68 {
+        return None;
+    }
+    let x = read_le_i32(data, 28)?;
+    let y = read_le_i32(data, 32)?;
+    let char_count = usize::try_from(read_le_u32(data, 36)?).ok()?;
+    if char_count == 0 || char_count > (MAX_PASSIVE_WMF_TEXT_BYTES / 2) {
+        return None;
+    }
+    let record_string_offset = usize::try_from(read_le_u32(data, 40)?).ok()?;
+    let options = read_le_u32(data, 44)?;
+    if options & EMF_ETO_GLYPH_INDEX != 0 {
+        return None;
+    }
+    let bounds = if options & (EMF_ETO_OPAQUE | EMF_ETO_CLIPPED) != 0 {
+        normalized_emf_rect(
+            read_le_i32(data, 48)?,
+            read_le_i32(data, 52)?,
+            read_le_i32(data, 56)?,
+            read_le_i32(data, 60)?,
+            header,
+        )
+    } else {
+        None
+    };
+    let byte_count = char_count.checked_mul(2)?;
+    let string_offset = record_string_offset.checked_sub(8)?;
+    let string_end = string_offset.checked_add(byte_count)?;
+    if string_offset < 68 || string_end > data.len() {
+        return None;
+    }
+    let text = sanitize_emf_utf16le_text(data.get(string_offset..string_end)?)?;
+    let (x, y) = normalized_emf_point(x, y, header);
+    Some(ParsedEmfExtTextOut {
+        x,
+        y,
+        text,
+        opaque_bounds: if options & EMF_ETO_OPAQUE != 0 {
+            bounds
+        } else {
+            None
+        },
+        clip_bounds: if options & EMF_ETO_CLIPPED != 0 {
+            bounds
+        } else {
+            None
+        },
+    })
+}
+
+fn sanitize_emf_utf16le_text(bytes: &[u8]) -> Option<String> {
+    if bytes.len() % 2 != 0 || bytes.len() > MAX_PASSIVE_WMF_TEXT_BYTES {
+        return None;
+    }
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    let mut text = String::new();
+    for item in char::decode_utf16(units) {
+        match item.ok()? {
+            '\0' => {}
+            '\t' | '\n' | '\r' => text.push(' '),
+            ch if ch.is_control() => {}
+            ch => text.push(ch),
+        }
+    }
+    if text.is_empty() { None } else { Some(text) }
+}
+
+fn normalized_emf_text_height(header: &ParsedEmfHeader) -> f32 {
+    (header.height_px.max(1) as f32 / 12.0).clamp(4.0, 48.0)
 }
 
 fn parse_emf_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
@@ -34467,6 +34630,83 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_exttextoutw_records_become_passive_text_commands() {
+        let records = [
+            emf_u32_record(24, 0x0033_2211),
+            emf_u32_record(22, 0x0000_0006),
+            emf_exttextoutw_record(40, 20, "Hi\u{2019}", 0, None, false),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![StaticImageVectorCommand::Text {
+                x: 40.0,
+                y: 20.0,
+                height: 6.6666665,
+                text: "Hi\u{2019}".to_string(),
+                color: Some(Color {
+                    red: 17,
+                    green: 34,
+                    blue: 51,
+                }),
+                background_color: None,
+                clip_bounds: None,
+                character_extra: 0.0,
+                horizontal_align: StaticImageTextHorizontalAlign::Center,
+                vertical_align: StaticImageTextVerticalAlign::Top,
+            }]
+        );
+    }
+
+    #[test]
+    fn emf_exttextoutw_with_excessive_text_becomes_passive_placeholder() {
+        let text = "A".repeat((MAX_PASSIVE_WMF_TEXT_BYTES / 2) + 1);
+        let records = [emf_exttextoutw_record(40, 20, &text, 0, None, false)];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_exttextoutw_glyph_index_text_becomes_passive_placeholder() {
+        let records = [emf_exttextoutw_record(40, 20, "Hi", 0, None, true)];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_polyline_and_polygon_records_become_passive_vector_commands() {
         let records = [
             emf_poly_record(4, &[(0, 0), (40, 20), (200, 100)]),
@@ -34883,6 +35123,64 @@ fn emf_select_object_record(handle: u32) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, 37);
     write_test_le_u32(&mut record, 4, 12);
     write_test_le_u32(&mut record, 8, handle);
+    record
+}
+
+#[cfg(test)]
+fn emf_u32_record(record_type: u32, value: u32) -> Vec<u8> {
+    let mut record = vec![0; 12];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 12);
+    write_test_le_u32(&mut record, 8, value);
+    record
+}
+
+#[cfg(test)]
+fn emf_exttextoutw_record(
+    x: i32,
+    y: i32,
+    text: &str,
+    options: u32,
+    bounds: Option<(i32, i32, i32, i32)>,
+    glyph_index: bool,
+) -> Vec<u8> {
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let text_bytes = units.len() * 2;
+    let string_offset_from_record = 76u32;
+    let size = (76usize + text_bytes).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 84);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, 1);
+    write_test_le_u32(&mut record, 28, 0x3f80_0000);
+    write_test_le_u32(&mut record, 32, 0x3f80_0000);
+    write_test_le_i32(&mut record, 36, x);
+    write_test_le_i32(&mut record, 40, y);
+    write_test_le_u32(&mut record, 44, units.len() as u32);
+    write_test_le_u32(&mut record, 48, string_offset_from_record);
+    write_test_le_u32(
+        &mut record,
+        52,
+        if glyph_index {
+            options | 0x0010
+        } else {
+            options
+        },
+    );
+    let (left, top, right, bottom) = bounds.unwrap_or((0, 0, 0, 0));
+    write_test_le_i32(&mut record, 56, left);
+    write_test_le_i32(&mut record, 60, top);
+    write_test_le_i32(&mut record, 64, right);
+    write_test_le_i32(&mut record, 68, bottom);
+    write_test_le_u32(&mut record, 72, 0);
+    for (idx, unit) in units.iter().enumerate() {
+        let offset = 76 + (idx * 2);
+        record[offset..offset + 2].copy_from_slice(&unit.to_le_bytes());
+    }
     record
 }
 
