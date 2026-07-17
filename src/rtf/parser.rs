@@ -19869,6 +19869,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYLINE: u32 = 4;
     const EMR_POLYPOLYLINE: u32 = 7;
     const EMR_POLYPOLYGON: u32 = 8;
+    const EMR_SETPIXELV: u32 = 15;
     const EMR_SETBKMODE: u32 = 18;
     const EMR_SETTEXTALIGN: u32 = 22;
     const EMR_SETTEXTCOLOR: u32 = 24;
@@ -20026,6 +20027,26 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         character_extra: 0.0,
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
+                    });
+                }
+            }
+            EMR_SETPIXELV => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some((left, top, right, bottom, color)) =
+                    parse_emf_setpixelv_rect(data, &header)
+                {
+                    commands.push(StaticImageVectorCommand::Rectangle {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        stroke_color: None,
+                        stroke_width: 0.0,
+                        stroke_style: BorderStyle::Single,
+                        fill_pattern: ShadingPattern::None,
+                        fill_color: Some(color),
                     });
                 }
             }
@@ -20257,6 +20278,28 @@ fn sanitize_emf_utf16le_text(bytes: &[u8]) -> Option<String> {
 
 fn normalized_emf_text_height(header: &ParsedEmfHeader) -> f32 {
     (header.height_px.max(1) as f32 / 12.0).clamp(4.0, 48.0)
+}
+
+fn parse_emf_setpixelv_rect(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+) -> Option<(f32, f32, f32, f32, Color)> {
+    if data.len() < 12 {
+        return None;
+    }
+    let x = read_le_i32(data, 0)?;
+    let y = read_le_i32(data, 4)?;
+    let color = color_from_colorref(data, 8)?;
+    let (x, y) = normalized_emf_point(x, y, header);
+    let max_x = header.width_px.max(1) as f32;
+    let max_y = header.height_px.max(1) as f32;
+    Some((
+        pixel_rect_start(x, max_x),
+        pixel_rect_start(y, max_y),
+        pixel_rect_end(x, max_x),
+        pixel_rect_end(y, max_y),
+        color,
+    ))
 }
 
 fn parse_emf_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
@@ -34918,6 +34961,77 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_setpixelv_records_become_passive_filled_rectangles() {
+        let records = [
+            emf_setpixelv_record(
+                10,
+                20,
+                Color {
+                    red: 20,
+                    green: 40,
+                    blue: 60,
+                },
+            ),
+            emf_setpixelv_record(
+                200,
+                100,
+                Color {
+                    red: 220,
+                    green: 180,
+                    blue: 120,
+                },
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![
+                StaticImageVectorCommand::Rectangle {
+                    left: 10.0,
+                    top: 20.0,
+                    right: 11.0,
+                    bottom: 21.0,
+                    stroke_color: None,
+                    stroke_width: 0.0,
+                    stroke_style: BorderStyle::Single,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: Some(Color {
+                        red: 20,
+                        green: 40,
+                        blue: 60
+                    }),
+                },
+                StaticImageVectorCommand::Rectangle {
+                    left: 159.0,
+                    top: 79.0,
+                    right: 160.0,
+                    bottom: 80.0,
+                    stroke_color: None,
+                    stroke_width: 0.0,
+                    stroke_style: BorderStyle::Single,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: Some(Color {
+                        red: 220,
+                        green: 180,
+                        blue: 120
+                    }),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn emf_move_to_and_line_to_records_become_passive_line_commands() {
         let records = [
             emf_point_record(27, 10, 10),
@@ -35408,6 +35522,19 @@ fn emf_poly_poly_record_with_counts(
         write_test_le_i32(&mut record, offset, *x);
         write_test_le_i32(&mut record, offset + 4, *y);
     }
+    record
+}
+
+#[cfg(test)]
+fn emf_setpixelv_record(x: i32, y: i32, color: Color) -> Vec<u8> {
+    let mut record = vec![0; 20];
+    write_test_le_u32(&mut record, 0, 15);
+    write_test_le_u32(&mut record, 4, 20);
+    write_test_le_i32(&mut record, 8, x);
+    write_test_le_i32(&mut record, 12, y);
+    record[16] = color.red;
+    record[17] = color.green;
+    record[18] = color.blue;
     record
 }
 
