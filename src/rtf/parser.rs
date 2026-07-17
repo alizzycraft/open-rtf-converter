@@ -20132,6 +20132,24 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 if let Some(text) = parse_emf_exttextoutw(data, &header, &coordinates) {
+                    if let (Some((left, top, right, bottom)), Some(fill_color)) =
+                        (text.opaque_bounds, state.background_color)
+                    {
+                        if commands.len().checked_add(2)? > MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
+                        commands.push(StaticImageVectorCommand::Rectangle {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color: None,
+                            stroke_width: 0.0,
+                            stroke_style: BorderStyle::Single,
+                            fill_pattern: ShadingPattern::None,
+                            fill_color: Some(fill_color),
+                        });
+                    }
                     commands.push(StaticImageVectorCommand::Text {
                         x: text.x,
                         y: text.y,
@@ -35342,6 +35360,58 @@ After\par}"#;
                 horizontal_align: StaticImageTextHorizontalAlign::Center,
                 vertical_align: StaticImageTextVerticalAlign::Top,
             }]
+        );
+    }
+
+    #[test]
+    fn emf_exttextoutw_opaque_bounds_become_passive_background_rectangle() {
+        let records = [
+            emf_u32_record(25, 0x0078_b4dc),
+            emf_exttextoutw_record(40, 20, "Hi", 0x0002, Some((30, 10, 90, 35)), false),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![
+                StaticImageVectorCommand::Rectangle {
+                    left: 30.0,
+                    top: 10.0,
+                    right: 90.0,
+                    bottom: 35.0,
+                    stroke_color: None,
+                    stroke_width: 0.0,
+                    stroke_style: BorderStyle::Single,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: Some(Color {
+                        red: 220,
+                        green: 180,
+                        blue: 120,
+                    }),
+                },
+                StaticImageVectorCommand::Text {
+                    x: 40.0,
+                    y: 20.0,
+                    height: 6.6666665,
+                    text: "Hi".to_string(),
+                    color: Some(Color::default()),
+                    background_color: None,
+                    clip_bounds: None,
+                    character_extra: 0.0,
+                    horizontal_align: StaticImageTextHorizontalAlign::Left,
+                    vertical_align: StaticImageTextVerticalAlign::Top,
+                },
+            ]
         );
     }
 
