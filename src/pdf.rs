@@ -15,7 +15,7 @@ use crate::layout::{
 use crate::model::{
     BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ShadingPattern,
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, TextRelief, UnderlineStyle,
+    StaticImageVectorFillRule, StaticImageVectorPathSegment, TextRelief, UnderlineStyle,
 };
 
 const HELVETICA_REGULAR: &[u8] = b"F1";
@@ -1797,6 +1797,37 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     *fill_color,
                 );
             }
+            StaticImageVectorCommand::Path {
+                start,
+                segments,
+                closed,
+                stroke_color,
+                stroke_width,
+                stroke_style,
+                fill_rule,
+                fill_pattern,
+                fill_color,
+            } => {
+                let start =
+                    vector_command_point(draw, source_width, source_height, start.0, start.1);
+                let segments =
+                    vector_command_path_segments(draw, source_width, source_height, segments);
+                let stroke_width =
+                    vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
+                draw_passive_vector_path(
+                    content,
+                    start,
+                    &segments,
+                    *closed,
+                    *stroke_color,
+                    stroke_width,
+                    stroke_style,
+                    *fill_rule,
+                    *fill_pattern,
+                    *fill_color,
+                );
+            }
             StaticImageVectorCommand::Rectangle {
                 left,
                 top,
@@ -1974,6 +2005,39 @@ fn vector_command_point(
         x: draw.x + (x / source_width) * draw.width,
         y: draw.y + draw.height - (y / source_height) * draw.height,
     }
+}
+
+fn vector_command_path_segments(
+    draw: ImageDrawRect,
+    source_width: f32,
+    source_height: f32,
+    segments: &[StaticImageVectorPathSegment],
+) -> Vec<StaticImageVectorPathSegment> {
+    segments
+        .iter()
+        .map(|segment| match segment {
+            StaticImageVectorPathSegment::LineTo(x, y) => {
+                let point = vector_command_point(draw, source_width, source_height, *x, *y);
+                StaticImageVectorPathSegment::LineTo(point.x, point.y)
+            }
+            StaticImageVectorPathSegment::CubicTo {
+                control1,
+                control2,
+                end,
+            } => {
+                let control1 =
+                    vector_command_point(draw, source_width, source_height, control1.0, control1.1);
+                let control2 =
+                    vector_command_point(draw, source_width, source_height, control2.0, control2.1);
+                let end = vector_command_point(draw, source_width, source_height, end.0, end.1);
+                StaticImageVectorPathSegment::CubicTo {
+                    control1: (control1.x, control1.y),
+                    control2: (control2.x, control2.y),
+                    end: (end.x, end.y),
+                }
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -2155,6 +2219,84 @@ fn draw_passive_vector_polygon(
         fill_rule,
         fill_color.map(pdf_color_from_model),
     );
+}
+
+fn draw_passive_vector_path(
+    content: &mut Content,
+    start: crate::layout::LayoutPoint,
+    segments: &[StaticImageVectorPathSegment],
+    closed: bool,
+    stroke_color: Option<crate::model::Color>,
+    stroke_width: f32,
+    stroke_style: LineStyle,
+    fill_rule: StaticImageVectorFillRule,
+    fill_pattern: ShadingPattern,
+    fill_color: Option<crate::model::Color>,
+) {
+    if segments.is_empty() {
+        return;
+    }
+    if fill_pattern != ShadingPattern::None {
+        return;
+    }
+    if fill_color.is_none() && stroke_color.is_none() {
+        return;
+    }
+
+    let has_stroke = stroke_color.is_some() && stroke_width > 0.0;
+    content.save_state();
+    if let Some(color) = stroke_color {
+        if has_stroke {
+            set_stroke_color(content, pdf_color_from_model(color));
+            content.set_line_width(stroke_width.max(0.25));
+            set_passive_path_stroke_style(content, stroke_width, stroke_style);
+        }
+    }
+    if let Some(color) = fill_color {
+        set_fill_color(content, pdf_color_from_model(color));
+    }
+    content.move_to(start.x, start.y);
+    for segment in segments {
+        match segment {
+            StaticImageVectorPathSegment::LineTo(x, y) => {
+                content.line_to(*x, *y);
+            }
+            StaticImageVectorPathSegment::CubicTo {
+                control1,
+                control2,
+                end,
+            } => {
+                content.cubic_to(control1.0, control1.1, control2.0, control2.1, end.0, end.1);
+            }
+        }
+    }
+    if closed {
+        content.close_path();
+    }
+    if fill_color.is_some() && has_stroke {
+        match fill_rule {
+            StaticImageVectorFillRule::Alternate => {
+                content.fill_even_odd_and_stroke();
+            }
+            StaticImageVectorFillRule::Winding => {
+                content.fill_nonzero_and_stroke();
+            }
+        }
+    } else if fill_color.is_some() {
+        match fill_rule {
+            StaticImageVectorFillRule::Alternate => {
+                content.fill_even_odd();
+            }
+            StaticImageVectorFillRule::Winding => {
+                content.fill_nonzero();
+            }
+        }
+    } else if has_stroke {
+        content.stroke();
+    } else {
+        content.end_path();
+    }
+    content.restore_state();
 }
 
 fn draw_passive_vector_rectangle(

@@ -489,6 +489,17 @@ pub enum StaticImageVectorCommand {
         fill_pattern: ShadingPattern,
         fill_color: Option<Color>,
     },
+    Path {
+        start: (f32, f32),
+        segments: Vec<StaticImageVectorPathSegment>,
+        closed: bool,
+        stroke_color: Option<Color>,
+        stroke_width: f32,
+        stroke_style: BorderStyle,
+        fill_rule: StaticImageVectorFillRule,
+        fill_pattern: ShadingPattern,
+        fill_color: Option<Color>,
+    },
     Rectangle {
         left: f32,
         top: f32,
@@ -536,6 +547,16 @@ pub enum StaticImageVectorCommand {
         word_extra: f32,
         horizontal_align: StaticImageTextHorizontalAlign,
         vertical_align: StaticImageTextVerticalAlign,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StaticImageVectorPathSegment {
+    LineTo(f32, f32),
+    CubicTo {
+        control1: (f32, f32),
+        control2: (f32, f32),
+        end: (f32, f32),
     },
 }
 

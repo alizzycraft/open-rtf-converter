@@ -13,13 +13,14 @@ use crate::model::{
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImageAlphaMask, StaticImagePlacement, StaticImageTextHorizontalAlign,
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint, StaticShapeVerticalAnchor,
-    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
-    TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
-    TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
-    TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
+    StaticImageVectorPathSegment, StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape,
+    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint,
+    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
+    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
+    TableCellPadding, TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief,
+    UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -20027,12 +20028,30 @@ impl EmfPathBuilder {
         if self.collecting {
             return None;
         }
-        let points = self.line_only_points()?;
-        if points.len() < 3 || !point_bounds_are_visible(&points) {
+        if let Some(points) = self.line_only_points() {
+            if points.len() < 3 || !point_bounds_are_visible(&points) {
+                return None;
+            }
+            return Some(StaticImageVectorCommand::Polygon {
+                points,
+                stroke_color,
+                stroke_width,
+                stroke_style,
+                fill_rule,
+                fill_pattern,
+                fill_color,
+            });
+        }
+
+        if fill_pattern != ShadingPattern::None || (fill_color.is_none() && stroke_color.is_none())
+        {
             return None;
         }
-        Some(StaticImageVectorCommand::Polygon {
-            points,
+        let (start, segments, closed) = self.path_segments()?;
+        Some(StaticImageVectorCommand::Path {
+            start,
+            segments,
+            closed,
             stroke_color,
             stroke_width,
             stroke_style,
@@ -20064,6 +20083,66 @@ impl EmfPathBuilder {
             }
         }
         Some(points)
+    }
+
+    fn path_segments(&self) -> Option<((f32, f32), Vec<StaticImageVectorPathSegment>, bool)> {
+        let mut iter = self.segments.iter();
+        let first_segment = iter.next()?;
+        let start = match first_segment {
+            EmfPathSegment::Polyline(points) => *points.first()?,
+            EmfPathSegment::Bezier(points) => *points.first()?,
+        };
+        let mut current = start;
+        let mut path_segments = Vec::new();
+        let mut saw_visible_segment = false;
+        for segment in std::iter::once(first_segment).chain(iter) {
+            match segment {
+                EmfPathSegment::Polyline(points) => {
+                    if points.len() < 2 {
+                        return None;
+                    }
+                    if points.first().is_some_and(|point| *point != current) {
+                        return None;
+                    }
+                    for point in points.iter().skip(1) {
+                        if path_segments.len() >= MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+                            return None;
+                        }
+                        if *point != current {
+                            saw_visible_segment |= segment_is_visible(current, *point);
+                            path_segments
+                                .push(StaticImageVectorPathSegment::LineTo(point.0, point.1));
+                            current = *point;
+                        }
+                    }
+                }
+                EmfPathSegment::Bezier(points) => {
+                    if points.len() < 4 || (points.len() - 1) % 3 != 0 {
+                        return None;
+                    }
+                    if points.first().is_some_and(|point| *point != current) {
+                        return None;
+                    }
+                    for chunk in points[1..].chunks_exact(3) {
+                        if path_segments.len() >= MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+                            return None;
+                        }
+                        saw_visible_segment |=
+                            point_bounds_are_visible(&[current, chunk[0], chunk[1], chunk[2]]);
+                        path_segments.push(StaticImageVectorPathSegment::CubicTo {
+                            control1: chunk[0],
+                            control2: chunk[1],
+                            end: chunk[2],
+                        });
+                        current = chunk[2];
+                    }
+                }
+            }
+        }
+        if !saw_visible_segment {
+            return None;
+        }
+        Some((start, path_segments, current == start))
     }
 }
 
@@ -36592,8 +36671,19 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_filled_bezier_path_becomes_passive_placeholder() {
+    fn emf_filled_bezier_path_becomes_passive_path_command() {
         let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 80,
+                    green: 140,
+                    blue: 210,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
             emf_unknown_record(59),
             emf_point_record(27, 20, 20),
             emf_poly_record(5, &[(30, 5), (60, 55), (80, 20)]),
@@ -36606,12 +36696,31 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Path {
+                start: (20.0, 20.0),
+                segments,
+                closed: false,
+                stroke_color: None,
+                stroke_width: 0.0,
+                fill_color: Some(Color { red: 80, green: 140, blue: 210 }),
+                ..
+            } if matches!(
+                &segments[..],
+                [StaticImageVectorPathSegment::CubicTo {
+                    control1: (30.0, 5.0),
+                    control2: (60.0, 55.0),
+                    end: (80.0, 20.0),
+                }]
+            )
         ));
     }
 
