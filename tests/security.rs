@@ -1255,6 +1255,10 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "\\",
         "tposyb",
         "\\",
+        "tposyin",
+        "\\",
+        "tposyout",
+        "\\",
         "clftsWidth3",
         "\\",
         "clwWidth1800 Positioned left",
@@ -1266,6 +1270,32 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "clftsWidth3",
         "\\",
         "clwWidth1800 Positioned right",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "\\",
+        "trowd",
+        "\\",
+        "trrh360",
+        "\\",
+        "phmrg",
+        "\\",
+        "posx720",
+        "\\",
+        "pvmrg",
+        "\\",
+        "posy120",
+        "\\",
+        "posyin",
+        "\\",
+        "posyout",
+        "\\",
+        "cellx1800 Alias anchored",
+        "\\",
+        "cell",
+        "\\",
+        "cellx3600 Alias right",
         "\\",
         "cell",
         "\\",
@@ -1297,6 +1327,8 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
     assert_eq!(table.rows[0].wrap_margins.top_twips, 120);
     assert_eq!(table.rows[0].wrap_margins.bottom_twips, 120);
     assert_eq!(table.rows[0].alignment, TableRowAlignment::Outside);
+    assert_eq!(table.rows[1].left_offset_twips, 720);
+    assert_eq!(table.rows[1].vertical_offset_twips, 120);
     assert!(!table.rows[0].cells[0].fit_text);
     assert!(table.rows[0].cells[1].fit_text);
     for forbidden in [
@@ -1306,13 +1338,19 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "tdfrmtxtTop",
         "tdfrmtxtBottom",
         "tphmrg",
+        "phmrg",
         "tposx",
         "tposxr",
         "tposxo",
         "tpvmrg",
         "tpvpara",
+        "pvmrg",
         "tposy",
         "tposyb",
+        "tposyin",
+        "tposyout",
+        "posyin",
+        "posyout",
         "clFitText",
     ] {
         assert!(
@@ -1368,6 +1406,13 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
             .message
             .contains("floating table vertical alignment \\tposyb")
     }));
+    for control_name in ["tposyin", "tposyout", "posyin", "posyout"] {
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(&format!(
+                "floating table vertical flow control \\{control_name}"
+            ))
+        }));
+    }
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains(
             "floating table vertical center/bottom alignment interpreted as bounded passive row offset",
@@ -1402,6 +1447,8 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
 
     assert!(rendered_text.contains("Positioned left"));
     assert!(rendered_text.contains("Positioned right"));
+    assert!(rendered_text.contains("Alias anchored"));
+    assert!(rendered_text.contains("Alias right"));
     assert!(rendered_text.contains("After table"));
     for forbidden in [
         b"tabsnoovrlp".as_slice(),
@@ -1410,13 +1457,19 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         b"tdfrmtxtTop",
         b"tdfrmtxtBottom",
         b"tphmrg",
+        b"phmrg",
         b"tposx",
         b"tposxr",
         b"tposxo",
         b"tpvmrg",
         b"tpvpara",
+        b"pvmrg",
         b"tposy",
         b"tposyb",
+        b"tposyin",
+        b"tposyout",
+        b"posyin",
+        b"posyout",
         b"clFitText",
         b"/JavaScript",
         b"/EmbeddedFile",
@@ -2120,6 +2173,38 @@ fn nested_table_content_flattens_passively_without_control_leakage() {
         "\\",
         "nesttableprops",
         "\\",
+        "rtlrow",
+        "\\",
+        "ltrrow",
+        "\\",
+        "trpaddfl3",
+        "\\",
+        "trpaddl120",
+        "\\",
+        "trspdfl3",
+        "\\",
+        "trspdl60",
+        "\\",
+        "clpadfl3",
+        "\\",
+        "clpadl80",
+        "\\",
+        "clspdfl3",
+        "\\",
+        "clspdl30",
+        "\\",
+        "tphmrg",
+        "\\",
+        "tposx120",
+        "\\",
+        "tpvpg",
+        "\\",
+        "tposyin",
+        "\\",
+        "tdfrmtxtLeft120",
+        "\\",
+        "tabsnoovrlp",
+        "\\",
         "cellx1000 Inner A",
         "\\",
         "nestcell",
@@ -2156,6 +2241,37 @@ fn nested_table_content_flattens_passively_without_control_leakage() {
             "forbidden nested table control leaked to text: {forbidden}"
         );
     }
+    for forbidden in [
+        "rtlrow",
+        "ltrrow",
+        "trpaddfl",
+        "trpaddl",
+        "trspdfl",
+        "trspdl",
+        "clpadfl",
+        "clpadl",
+        "clspdfl",
+        "clspdl",
+        "tphmrg",
+        "tposx",
+        "tpvpg",
+        "tposyin",
+        "tdfrmtxtLeft",
+        "tabsnoovrlp",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden nested table layout control leaked to text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "nested table layout controls should be consumed without unsupported-control noise: {:?}",
+        parsed.diagnostics
+    );
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("nested-table-passive.rtf");
@@ -2185,6 +2301,22 @@ fn nested_table_content_flattens_passively_without_control_leakage() {
         b"nesttableprops",
         b"nestcell",
         b"nestrow",
+        b"rtlrow",
+        b"ltrrow",
+        b"trpaddfl",
+        b"trpaddl",
+        b"trspdfl",
+        b"trspdl",
+        b"clpadfl",
+        b"clpadl",
+        b"clspdfl",
+        b"clspdl",
+        b"tphmrg",
+        b"tposx",
+        b"tpvpg",
+        b"tposyin",
+        b"tdfrmtxtLeft",
+        b"tabsnoovrlp",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -3203,6 +3335,22 @@ fn rtl_table_rows_render_passively_without_control_leakage() {
         "\\",
         "trowd",
         "\\",
+        "rtlrow",
+        "\\",
+        "ltrrow",
+        "\\",
+        "cellx1440 Reset left",
+        "\\",
+        "cell",
+        "\\",
+        "cellx4320 Reset right",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "\\",
+        "trowd",
+        "\\",
         "rtlrow0",
         "\\",
         "cellx1440 Normal left",
@@ -3238,15 +3386,25 @@ fn rtl_table_rows_render_passively_without_control_leakage() {
     );
     assert_eq!(
         table.rows[1].cells[0].paragraphs[0].runs[0].text,
-        "Normal left"
+        "Reset left"
     );
     assert_eq!(
         table.rows[1].cells[1].paragraphs[0].runs[0].text,
+        "Reset right"
+    );
+    assert_eq!(
+        table.rows[2].cells[0].paragraphs[0].runs[0].text,
+        "Normal left"
+    );
+    assert_eq!(
+        table.rows[2].cells[1].paragraphs[0].runs[0].text,
         "Normal right"
     );
     assert!(text.find("Left wide cell") < text.find("Right cell"));
+    assert!(text.find("Reset left") < text.find("Reset right"));
     assert!(!text.contains("taprtl"));
     assert!(!text.contains("rtlrow"));
+    assert!(!text.contains("ltrrow"));
 
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
@@ -3264,9 +3422,14 @@ fn rtl_table_rows_render_passively_without_control_leakage() {
             "visible RTL table text {expected:?} missing from PDF text {rendered_text:?}"
         );
     }
+    assert!(
+        rendered_text.find("Reset left") < rendered_text.find("Reset right"),
+        "LTR row reset should preserve normal visual order: {rendered_text:?}"
+    );
     for forbidden in [
         b"taprtl".as_slice(),
         b"rtlrow",
+        b"ltrrow",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -26825,7 +26988,7 @@ fn shape_picture_result_uses_passive_author_wrap_distances_without_payload_leaka
         "\\",
         "shpbottom1080",
         "\\",
-        "shpwr1{",
+        "shpwr2{",
         "\\",
         "sp{",
         "\\",
@@ -29981,6 +30144,295 @@ fn emf_and_other_metafile_picture_formats_are_passive_placeholders_without_paylo
                 String::from_utf8_lossy(forbidden)
             );
         }
+    }
+}
+
+#[test]
+fn emf_header_geometry_renders_passive_placeholder_without_payload_leakage() {
+    let emf = minimal_emf_with_bounds_and_frame(160, 80, 2540, 1270);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF placeholder image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.width_px, 160);
+    assert_eq!(image.height_px, 80);
+    assert_eq!(image.natural_width_px_hint, Some(160));
+    assert_eq!(image.natural_height_px_hint, Some(80));
+    assert_eq!(image.display_width_twips, Some(1440));
+    assert_eq!(image.display_height_twips, Some(720));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("EMF picture records stripped; header dimensions used")
+    }));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "EMF placeholder should render a passive stroked frame"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emf_simple_vector_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_rect_record(43, 10, 10, 70, 40),
+        emf_rect_record(42, 80, 20, 150, 70),
+        emf_unknown_record(999),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.width_px, 160);
+    assert_eq!(image.height_px, 80);
+    assert_eq!(image.display_width_twips, Some(1440));
+    assert_eq!(image.display_height_twips, Some(720));
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 10.0,
+            right: 70.0,
+            bottom: 40.0,
+            stroke_color: Some(_),
+            stroke_width: 1.0,
+            stroke_style: BorderStyle::Single,
+            fill_pattern: ShadingPattern::None,
+            fill_color: None,
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Ellipse {
+            left: 80.0,
+            top: 20.0,
+            right: 150.0,
+            bottom: 70.0,
+            stroke_color: Some(_),
+            stroke_width: 1.0,
+            stroke_style: BorderStyle::Single,
+            fill_pattern: ShadingPattern::None,
+            fill_color: None,
+        }
+    ));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("EMF picture rendered as bounded passive vector preview with 1 unsupported record(s) skipped")
+    }));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s")),
+        "EMF vector preview should render passive stroked paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emf_polyline_and_polygon_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_poly_record(4, &[(0, 0), (40, 20), (200, 100)]),
+        emf_poly_record(3, &[(20, 10), (60, 70), (100, 10)]),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Polyline { ref points, .. }
+            if points == &vec![(0.0, 0.0), (40.0, 20.0), (160.0, 80.0)]
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Polygon {
+            ref points,
+            fill_rule: StaticImageVectorFillRule::Alternate,
+            fill_pattern: ShadingPattern::None,
+            ..
+        } if points == &vec![(20.0, 10.0), (60.0, 70.0), (100.0, 10.0)]
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF poly payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s")),
+        "EMF poly vector preview should render passive stroked paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF poly payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
     }
 }
 
@@ -40979,6 +41431,105 @@ fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<
     }
     jpeg.extend_from_slice(&[0xff, 0xd9]);
     jpeg
+}
+
+fn minimal_emf_with_bounds_and_frame(
+    width_px: i32,
+    height_px: i32,
+    frame_width_hundredth_mm: i32,
+    frame_height_hundredth_mm: i32,
+) -> Vec<u8> {
+    minimal_emf_with_records(
+        width_px,
+        height_px,
+        frame_width_hundredth_mm,
+        frame_height_hundredth_mm,
+        &[],
+    )
+}
+
+fn minimal_emf_with_records(
+    width_px: i32,
+    height_px: i32,
+    frame_width_hundredth_mm: i32,
+    frame_height_hundredth_mm: i32,
+    records: &[Vec<u8>],
+) -> Vec<u8> {
+    let mut emf = vec![0; 88];
+    write_test_le_u32(&mut emf, 0, 1);
+    write_test_le_u32(&mut emf, 4, 88);
+    write_test_le_i32(&mut emf, 8, 0);
+    write_test_le_i32(&mut emf, 12, 0);
+    write_test_le_i32(&mut emf, 16, width_px);
+    write_test_le_i32(&mut emf, 20, height_px);
+    write_test_le_i32(&mut emf, 24, 0);
+    write_test_le_i32(&mut emf, 28, 0);
+    write_test_le_i32(&mut emf, 32, frame_width_hundredth_mm);
+    write_test_le_i32(&mut emf, 36, frame_height_hundredth_mm);
+    write_test_le_u32(&mut emf, 40, 0x464d_4520);
+    write_test_le_u32(&mut emf, 44, 0x0001_0000);
+    for record in records {
+        emf.extend_from_slice(record);
+    }
+    if !records.is_empty() {
+        emf.extend_from_slice(&emf_eof_record());
+    }
+    let byte_count = emf.len() as u32;
+    let eof_record_count = if records.is_empty() { 0 } else { 1 };
+    write_test_le_u32(&mut emf, 52, 1 + records.len() as u32 + eof_record_count);
+    write_test_le_u32(&mut emf, 48, byte_count);
+    emf
+}
+
+fn emf_rect_record(record_type: u32, left: i32, top: i32, right: i32, bottom: i32) -> Vec<u8> {
+    let mut record = vec![0; 24];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 24);
+    write_test_le_i32(&mut record, 8, left);
+    write_test_le_i32(&mut record, 12, top);
+    write_test_le_i32(&mut record, 16, right);
+    write_test_le_i32(&mut record, 20, bottom);
+    record
+}
+
+fn emf_poly_record(record_type: u32, points: &[(i32, i32)]) -> Vec<u8> {
+    let size = 28 + (points.len() * 8);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, points.len() as u32);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = 28 + (idx * 8);
+        write_test_le_i32(&mut record, offset, *x);
+        write_test_le_i32(&mut record, offset + 4, *y);
+    }
+    record
+}
+
+fn emf_unknown_record(record_type: u32) -> Vec<u8> {
+    let mut record = vec![0; 8];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 8);
+    record
+}
+
+fn emf_eof_record() -> Vec<u8> {
+    let mut record = vec![0; 20];
+    write_test_le_u32(&mut record, 0, 14);
+    write_test_le_u32(&mut record, 4, 20);
+    record
+}
+
+fn write_test_le_u32(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+fn write_test_le_i32(bytes: &mut [u8], offset: usize, value: i32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
 fn minimal_grayscale_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {

@@ -4205,11 +4205,11 @@ impl Parser {
             "trowd" => self.start_table_row(offset)?,
             "trrh" => self.set_current_table_row_height(control.parameter, offset),
             "trleft" => self.set_current_table_row_left_offset(control.parameter, offset),
-            "tposx" => self.add_current_table_row_horizontal_position_offset(
+            "posx" | "tposx" => self.add_current_table_row_horizontal_position_offset(
                 control.parameter.unwrap_or(0),
                 offset,
             ),
-            "tposnegx" => self.add_current_table_row_horizontal_position_offset(
+            "posnegx" | "tposnegx" => self.add_current_table_row_horizontal_position_offset(
                 control
                     .parameter
                     .unwrap_or(0)
@@ -4218,51 +4218,51 @@ impl Parser {
                     .unwrap_or(i32::MIN),
                 offset,
             ),
-            "tposxl" => self.set_current_table_row_floating_alignment(
+            "posxl" | "tposxl" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Left,
                 control.name.as_str(),
                 offset,
             ),
-            "tposxi" => self.set_current_table_row_floating_alignment(
+            "posxi" | "tposxi" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Inside,
                 control.name.as_str(),
                 offset,
             ),
-            "tposxc" => self.set_current_table_row_floating_alignment(
+            "posxc" | "tposxc" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Center,
                 control.name.as_str(),
                 offset,
             ),
-            "tposxr" => self.set_current_table_row_floating_alignment(
+            "posxr" | "tposxr" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Right,
                 control.name.as_str(),
                 offset,
             ),
-            "tposxo" => self.set_current_table_row_floating_alignment(
+            "posxo" | "tposxo" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Outside,
                 control.name.as_str(),
                 offset,
             ),
-            "tphcol" => self.set_current_table_row_horizontal_anchor(
+            "phcol" | "tphcol" => self.set_current_table_row_horizontal_anchor(
                 TableRowHorizontalAnchor::Column,
                 control.name.as_str(),
                 offset,
             ),
-            "tphmrg" => self.set_current_table_row_horizontal_anchor(
+            "phmrg" | "tphmrg" => self.set_current_table_row_horizontal_anchor(
                 TableRowHorizontalAnchor::Margin,
                 control.name.as_str(),
                 offset,
             ),
-            "tphpg" => self.set_current_table_row_horizontal_anchor(
+            "phpg" | "tphpg" => self.set_current_table_row_horizontal_anchor(
                 TableRowHorizontalAnchor::Page,
                 control.name.as_str(),
                 offset,
             ),
-            "tposy" => self.add_current_table_row_vertical_position_offset(
+            "posy" | "tposy" => self.add_current_table_row_vertical_position_offset(
                 control.parameter.unwrap_or(0),
                 offset,
             ),
-            "tposnegy" => self.add_current_table_row_vertical_position_offset(
+            "posnegy" | "tposnegy" => self.add_current_table_row_vertical_position_offset(
                 control
                     .parameter
                     .unwrap_or(0)
@@ -4271,32 +4271,33 @@ impl Parser {
                     .unwrap_or(i32::MIN),
                 offset,
             ),
-            "tpvpara" => self.set_current_table_row_vertical_anchor(
+            "pvpara" | "tpvpara" => self.set_current_table_row_vertical_anchor(
                 TableRowVerticalAnchor::Paragraph,
                 control.name.as_str(),
                 offset,
             ),
-            "tpvmrg" => self.set_current_table_row_vertical_anchor(
+            "pvmrg" | "tpvmrg" => self.set_current_table_row_vertical_anchor(
                 TableRowVerticalAnchor::Margin,
                 control.name.as_str(),
                 offset,
             ),
-            "tpvpg" => self.set_current_table_row_vertical_anchor(
+            "pvpg" | "tpvpg" => self.set_current_table_row_vertical_anchor(
                 TableRowVerticalAnchor::Page,
                 control.name.as_str(),
                 offset,
             ),
-            "tposyb" => self.set_current_table_row_vertical_position_alignment(
+            "posyb" | "tposyb" => self.set_current_table_row_vertical_position_alignment(
                 FloatingTableVerticalPositionAlignment::Bottom,
                 control.name.as_str(),
                 offset,
             ),
-            "tposyc" => self.set_current_table_row_vertical_position_alignment(
+            "posyc" | "tposyc" => self.set_current_table_row_vertical_position_alignment(
                 FloatingTableVerticalPositionAlignment::Center,
                 control.name.as_str(),
                 offset,
             ),
-            "tposyt" | "tposyil" => self.handle_current_table_row_passive_vertical_flow_control(
+            "posyt" | "tposyt" | "posyil" | "tposyil" | "posyin" | "tposyin" | "posyout"
+            | "tposyout" => self.handle_current_table_row_passive_vertical_flow_control(
                 control.name.as_str(),
                 offset,
             ),
@@ -4330,6 +4331,7 @@ impl Parser {
             "taprtl" | "rtlrow" => {
                 self.set_current_table_row_right_to_left(control.parameter.unwrap_or(1) != 0)
             }
+            "ltrrow" => self.set_current_table_row_right_to_left(false),
             "trhdr" => {
                 self.set_current_table_row_repeat_header(control.parameter.unwrap_or(1) != 0)
             }
@@ -11618,7 +11620,67 @@ impl Parser {
                     self.mark_shape_visual_result_rendered();
                 }
             }
-            PictureKind::Emf | PictureKind::Unsupported | PictureKind::Unknown => {
+            PictureKind::Emf => {
+                if let Some(emf) = parse_emf_vector_image_data(&picture.bytes) {
+                    self.ensure_image_pixels(emf.width_px, emf.height_px, offset)?;
+                    if emf.skipped_record_count > 0 {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "EMF picture rendered as bounded passive vector preview with {} unsupported record(s) skipped",
+                                emf.skipped_record_count
+                            ),
+                            Some(offset),
+                        ));
+                    }
+                    self.push_static_image(
+                        picture.owner_destination,
+                        StaticImage {
+                            format: ImageFormat::WmfVector,
+                            bytes: Vec::new(),
+                            palette: Vec::new(),
+                            alpha_mask: None,
+                            vector_commands: emf.commands,
+                            width_px: emf.width_px,
+                            height_px: emf.height_px,
+                            natural_width_px_hint: Some(emf.width_px),
+                            natural_height_px_hint: Some(emf.height_px),
+                            display_width_twips: picture
+                                .display_width_twips
+                                .or(emf.frame_width_twips),
+                            display_height_twips: picture
+                                .display_height_twips
+                                .or(emf.frame_height_twips),
+                            scale_x_percent: picture.scale_x_percent,
+                            scale_y_percent: picture.scale_y_percent,
+                            crop: picture.crop,
+                            placement: None,
+                        },
+                        offset,
+                    )?;
+                    self.mark_shape_visual_result_rendered();
+                } else if let Some(emf) = parse_emf_header_dimensions(&picture.bytes) {
+                    let image = passive_emf_placeholder_image(&picture, &emf);
+                    self.ensure_image_pixels(image.width_px, image.height_px, offset)?;
+                    self.diagnostics.push(Diagnostic::warning(
+                        "EMF picture records stripped; header dimensions used for bounded passive geometry placeholder",
+                        Some(offset),
+                    ));
+                    self.push_static_image(picture.owner_destination, image, offset)?;
+                    self.mark_shape_visual_result_rendered();
+                } else {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "unsupported picture format replaced with a passive geometry placeholder",
+                        Some(offset),
+                    ));
+                    self.push_static_image(
+                        picture.owner_destination,
+                        passive_picture_placeholder_image(&picture),
+                        offset,
+                    )?;
+                    self.mark_shape_visual_result_rendered();
+                }
+            }
+            PictureKind::Unsupported | PictureKind::Unknown => {
                 self.diagnostics.push(Diagnostic::warning(
                     "unsupported picture format replaced with a passive geometry placeholder",
                     Some(offset),
@@ -14996,10 +15058,22 @@ fn is_nested_table_structural_control(name: &str) -> bool {
                 | "clshdng"
                 | "clbghoriz"
                 | "clbgvert"
+                | "clpadfl"
+                | "clpadfr"
+                | "clpadft"
+                | "clpadfb"
                 | "clpadl"
                 | "clpadr"
                 | "clpadt"
                 | "clpadb"
+                | "clspdfl"
+                | "clspdfr"
+                | "clspdft"
+                | "clspdfb"
+                | "clspdl"
+                | "clspdr"
+                | "clspdt"
+                | "clspdb"
                 | "clftsWidth"
                 | "clwWidth"
                 | "clNoWrap"
@@ -15029,17 +15103,77 @@ fn is_nested_table_structural_control(name: &str) -> bool {
                 | "trqr"
                 | "taprtl"
                 | "rtlrow"
+                | "ltrrow"
                 | "trhdr"
                 | "trkeep"
+                | "trpaddfl"
+                | "trpaddfr"
+                | "trpaddft"
+                | "trpaddfb"
                 | "trpaddl"
                 | "trpaddr"
                 | "trpaddt"
                 | "trpaddb"
+                | "trspdfl"
+                | "trspdfr"
+                | "trspdft"
+                | "trspdfb"
+                | "trspdl"
+                | "trspdr"
+                | "trspdt"
+                | "trspdb"
                 | "trcbpat"
                 | "trcfpat"
                 | "trshdng"
                 | "trbghoriz"
                 | "trbgvert"
+                | "posx"
+                | "posnegx"
+                | "posxl"
+                | "posxi"
+                | "posxc"
+                | "posxr"
+                | "posxo"
+                | "tposx"
+                | "tposnegx"
+                | "tposxl"
+                | "tposxi"
+                | "tposxc"
+                | "tposxr"
+                | "tposxo"
+                | "phcol"
+                | "phmrg"
+                | "phpg"
+                | "tphcol"
+                | "tphmrg"
+                | "tphpg"
+                | "posy"
+                | "posnegy"
+                | "posyb"
+                | "posyc"
+                | "posyt"
+                | "posyil"
+                | "posyin"
+                | "posyout"
+                | "tposy"
+                | "tposnegy"
+                | "tposyb"
+                | "tposyc"
+                | "tposyt"
+                | "tposyil"
+                | "tposyin"
+                | "tposyout"
+                | "pvpara"
+                | "pvmrg"
+                | "pvpg"
+                | "tpvpara"
+                | "tpvmrg"
+                | "tpvpg"
+                | "tdfrmtxtLeft"
+                | "tdfrmtxtRight"
+                | "tdfrmtxtTop"
+                | "tdfrmtxtBottom"
+                | "tabsnoovrlp"
                 | "trbrdrl"
                 | "trbrdrr"
                 | "trbrdrt"
@@ -19524,6 +19658,29 @@ struct ParsedJpeg {
     format: ImageFormat,
 }
 
+#[derive(Debug)]
+struct ParsedEmfHeader {
+    width_px: u32,
+    height_px: u32,
+    bounds_left: i32,
+    bounds_top: i32,
+    header_size: usize,
+    declared_size: usize,
+    declared_record_count: Option<usize>,
+    frame_width_twips: Option<i32>,
+    frame_height_twips: Option<i32>,
+}
+
+#[derive(Debug)]
+struct ParsedEmfVector {
+    width_px: u32,
+    height_px: u32,
+    frame_width_twips: Option<i32>,
+    frame_height_twips: Option<i32>,
+    skipped_record_count: usize,
+    commands: Vec<StaticImageVectorCommand>,
+}
+
 fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
     if bytes.len() < 4 || bytes[0] != 0xff || bytes[1] != 0xd8 {
         return None;
@@ -19592,6 +19749,280 @@ fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
     None
 }
 
+fn parse_emf_header_dimensions(bytes: &[u8]) -> Option<ParsedEmfHeader> {
+    const EMR_HEADER_RECORD_TYPE: u32 = 1;
+    const EMF_SIGNATURE: u32 = 0x464d_4520;
+    const MIN_EMF_HEADER_BYTES: usize = 88;
+
+    if bytes.len() < MIN_EMF_HEADER_BYTES {
+        return None;
+    }
+    if read_le_u32(bytes, 0)? != EMR_HEADER_RECORD_TYPE {
+        return None;
+    }
+    let header_size = read_le_u32(bytes, 4)? as usize;
+    if header_size < MIN_EMF_HEADER_BYTES || header_size > bytes.len() {
+        return None;
+    }
+    if read_le_u32(bytes, 40)? != EMF_SIGNATURE {
+        return None;
+    }
+    let declared_size = read_le_u32(bytes, 48)? as usize;
+    if declared_size < header_size || declared_size > bytes.len() {
+        return None;
+    }
+    let declared_record_count = usize::try_from(read_le_u32(bytes, 52)?).ok();
+
+    let bounds_left_raw = read_le_i32(bytes, 8)?;
+    let bounds_top_raw = read_le_i32(bytes, 12)?;
+    let bounds_right_raw = read_le_i32(bytes, 16)?;
+    let bounds_bottom_raw = read_le_i32(bytes, 20)?;
+    let bounds_width = signed_rect_extent(bounds_left_raw, bounds_right_raw);
+    let bounds_height = signed_rect_extent(bounds_top_raw, bounds_bottom_raw);
+    let frame_width_hundredth_mm =
+        signed_rect_extent(read_le_i32(bytes, 24)?, read_le_i32(bytes, 32)?);
+    let frame_height_hundredth_mm =
+        signed_rect_extent(read_le_i32(bytes, 28)?, read_le_i32(bytes, 36)?);
+
+    let frame_width_twips = hundredth_mm_to_twips(frame_width_hundredth_mm);
+    let frame_height_twips = hundredth_mm_to_twips(frame_height_hundredth_mm);
+    let width_px = bounds_width.or_else(|| hundredth_mm_to_96dpi_px(frame_width_hundredth_mm))?;
+    let height_px =
+        bounds_height.or_else(|| hundredth_mm_to_96dpi_px(frame_height_hundredth_mm))?;
+
+    Some(ParsedEmfHeader {
+        width_px,
+        height_px,
+        bounds_left: bounds_left_raw.min(bounds_right_raw),
+        bounds_top: bounds_top_raw.min(bounds_bottom_raw),
+        header_size,
+        declared_size,
+        declared_record_count,
+        frame_width_twips,
+        frame_height_twips,
+    })
+}
+
+fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
+    const EMR_EOF: u32 = 14;
+    const EMR_POLYGON: u32 = 3;
+    const EMR_POLYLINE: u32 = 4;
+    const EMR_RECTANGLE: u32 = 43;
+    const EMR_ELLIPSE: u32 = 42;
+
+    let header = parse_emf_header_dimensions(bytes)?;
+    if header
+        .declared_record_count
+        .is_some_and(|count| count == 0 || count > MAX_PASSIVE_WMF_RECORDS)
+    {
+        return None;
+    }
+    let mut pos = header.header_size;
+    let mut record_count = 1usize;
+    let mut commands = Vec::new();
+    let mut skipped_record_count = 0usize;
+    let mut reached_eof = false;
+
+    while pos + 8 <= header.declared_size {
+        if header
+            .declared_record_count
+            .is_some_and(|limit| record_count >= limit)
+        {
+            break;
+        }
+        record_count = record_count.checked_add(1)?;
+        if record_count > MAX_PASSIVE_WMF_RECORDS {
+            return None;
+        }
+        let record_type = read_le_u32(bytes, pos)?;
+        let record_size = read_le_u32(bytes, pos + 4)? as usize;
+        if record_size < 8 || record_size % 4 != 0 {
+            return None;
+        }
+        let record_end = pos.checked_add(record_size)?;
+        if record_end > header.declared_size {
+            return None;
+        }
+        let data = &bytes[pos + 8..record_end];
+
+        match record_type {
+            EMR_EOF => {
+                reached_eof = true;
+                break;
+            }
+            EMR_RECTANGLE | EMR_ELLIPSE => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let Some((left, top, right, bottom)) = parse_emf_record_rect(data, &header) else {
+                    return None;
+                };
+                if bounds_is_visible((left, top, right, bottom)) {
+                    let stroke_color = Some(Color::default());
+                    let fill_color = None;
+                    let command = if record_type == EMR_RECTANGLE {
+                        StaticImageVectorCommand::Rectangle {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color,
+                            stroke_width: 1.0,
+                            stroke_style: BorderStyle::Single,
+                            fill_pattern: ShadingPattern::None,
+                            fill_color,
+                        }
+                    } else {
+                        StaticImageVectorCommand::Ellipse {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color,
+                            stroke_width: 1.0,
+                            stroke_style: BorderStyle::Single,
+                            fill_pattern: ShadingPattern::None,
+                            fill_color,
+                        }
+                    };
+                    commands.push(command);
+                }
+            }
+            EMR_POLYGON | EMR_POLYLINE => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let Some(points) = parse_emf_poly_points(data, &header) else {
+                    return None;
+                };
+                if record_type == EMR_POLYGON {
+                    if points.len() >= 3 {
+                        commands.push(StaticImageVectorCommand::Polygon {
+                            points,
+                            stroke_color: Some(Color::default()),
+                            stroke_width: 1.0,
+                            stroke_style: BorderStyle::Single,
+                            fill_rule: StaticImageVectorFillRule::Alternate,
+                            fill_pattern: ShadingPattern::None,
+                            fill_color: None,
+                        });
+                    }
+                } else if points.len() >= 2 {
+                    commands.push(StaticImageVectorCommand::Polyline {
+                        points,
+                        stroke_color: Some(Color::default()),
+                        stroke_width: 1.0,
+                        stroke_style: BorderStyle::Single,
+                    });
+                }
+            }
+            _ => {
+                skipped_record_count = skipped_record_count.checked_add(1)?;
+            }
+        }
+
+        pos = record_end;
+    }
+
+    if !reached_eof {
+        return None;
+    }
+    if commands.is_empty() {
+        return None;
+    }
+
+    Some(ParsedEmfVector {
+        width_px: header.width_px,
+        height_px: header.height_px,
+        frame_width_twips: header.frame_width_twips,
+        frame_height_twips: header.frame_height_twips,
+        skipped_record_count,
+        commands,
+    })
+}
+
+fn parse_emf_record_rect(data: &[u8], header: &ParsedEmfHeader) -> Option<(f32, f32, f32, f32)> {
+    if data.len() < 16 {
+        return None;
+    }
+    let left = read_le_i32(data, 0)?;
+    let top = read_le_i32(data, 4)?;
+    let right = read_le_i32(data, 8)?;
+    let bottom = read_le_i32(data, 12)?;
+    normalized_emf_rect(left, top, right, bottom, header)
+}
+
+fn parse_emf_poly_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f32, f32)>> {
+    if data.len() < 20 {
+        return None;
+    }
+    let count = usize::try_from(read_le_u32(data, 16)?).ok()?;
+    if count == 0 || count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+        return None;
+    }
+    let points_start = 20usize;
+    let points_bytes = count.checked_mul(8)?;
+    let points_end = points_start.checked_add(points_bytes)?;
+    if points_end > data.len() {
+        return None;
+    }
+
+    let mut points = Vec::with_capacity(count);
+    for idx in 0..count {
+        let offset = points_start + (idx * 8);
+        let x = read_le_i32(data, offset)?;
+        let y = read_le_i32(data, offset + 4)?;
+        points.push(normalized_emf_point(x, y, header));
+    }
+    Some(points)
+}
+
+fn normalized_emf_rect(
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    header: &ParsedEmfHeader,
+) -> Option<(f32, f32, f32, f32)> {
+    let width = i64::from(header.width_px);
+    let height = i64::from(header.height_px);
+    let x1 = (i64::from(left.min(right)) - i64::from(header.bounds_left)).clamp(0, width) as f32;
+    let x2 = (i64::from(left.max(right)) - i64::from(header.bounds_left)).clamp(0, width) as f32;
+    let y1 = (i64::from(top.min(bottom)) - i64::from(header.bounds_top)).clamp(0, height) as f32;
+    let y2 = (i64::from(top.max(bottom)) - i64::from(header.bounds_top)).clamp(0, height) as f32;
+    if x2 <= x1 || y2 <= y1 {
+        return None;
+    }
+    Some((x1, y1, x2, y2))
+}
+
+fn normalized_emf_point(x: i32, y: i32, header: &ParsedEmfHeader) -> (f32, f32) {
+    let width = i64::from(header.width_px);
+    let height = i64::from(header.height_px);
+    let x = (i64::from(x) - i64::from(header.bounds_left)).clamp(0, width) as f32;
+    let y = (i64::from(y) - i64::from(header.bounds_top)).clamp(0, height) as f32;
+    (x, y)
+}
+
+fn signed_rect_extent(start: i32, end: i32) -> Option<u32> {
+    let extent = i64::from(end) - i64::from(start);
+    u32::try_from(extent.unsigned_abs())
+        .ok()
+        .filter(|value| *value > 0)
+}
+
+fn hundredth_mm_to_twips(value: Option<u32>) -> Option<i32> {
+    let hundredth_mm = u128::from(value?);
+    let twips = ((hundredth_mm * 72) + 63) / 127;
+    i32::try_from(twips.max(1)).ok()
+}
+
+fn hundredth_mm_to_96dpi_px(value: Option<u32>) -> Option<u32> {
+    let hundredth_mm = u128::from(value?);
+    let px = ((hundredth_mm * 96) + 1270) / 2540;
+    u32::try_from(px.max(1)).ok()
+}
+
 fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
     StaticImage {
         format: ImageFormat::Placeholder,
@@ -19610,6 +20041,25 @@ fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
         crop: picture.crop,
         placement: None,
     }
+}
+
+fn passive_emf_placeholder_image(picture: &PictureBuilder, emf: &ParsedEmfHeader) -> StaticImage {
+    let mut image = passive_picture_placeholder_image(picture);
+    if picture.width_px_hint.is_none() {
+        image.width_px = emf.width_px.max(1);
+        image.natural_width_px_hint = Some(emf.width_px.max(1));
+    }
+    if picture.height_px_hint.is_none() {
+        image.height_px = emf.height_px.max(1);
+        image.natural_height_px_hint = Some(emf.height_px.max(1));
+    }
+    if image.display_width_twips.is_none() {
+        image.display_width_twips = emf.frame_width_twips;
+    }
+    if image.display_height_twips.is_none() {
+        image.display_height_twips = emf.frame_height_twips;
+    }
+    image
 }
 
 fn passive_empty_picture_placeholder_image(
@@ -24153,7 +24603,7 @@ mod tests {
     #[test]
     fn normalizes_floating_table_horizontal_anchor_controls() {
         let output = parse_rtf(
-            r"{\rtf1\margl720\trowd\tphpg\tposx1440\cellx2000 Page anchored\cell\row\trowd\tphmrg\tposx1440\cellx2000 Margin anchored\cell\row\trowd\tphcol\tposx1440\cellx2000 Column anchored\cell\row}",
+            r"{\rtf1\margl720\trowd\phpg\posx1440\cellx2000 Page anchored\cell\row\trowd\phmrg\posx1440\cellx2000 Margin anchored\cell\row\trowd\phcol\posx1440\cellx2000 Column anchored\cell\row\trowd\tphpg\posx1440\cellx2000 T page anchored\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -24164,6 +24614,12 @@ mod tests {
         assert_eq!(table.rows[0].left_offset_twips, 720);
         assert_eq!(table.rows[1].left_offset_twips, 1440);
         assert_eq!(table.rows[2].left_offset_twips, 1440);
+        assert_eq!(table.rows[3].left_offset_twips, 720);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table horizontal anchor \\phpg")
+        }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -24215,7 +24671,7 @@ mod tests {
     #[test]
     fn interprets_flow_relative_floating_table_vertical_controls() {
         let output = parse_rtf(
-            r"{\rtf1\margt720\trowd\tpvpg\tposy1440\cellx2000 Page top\cell\row\trowd\tpvmrg\tposy1440\cellx2000 Margin top\cell\row\trowd\tpvpara\tposyt\cellx2000 Paragraph top\cell\row\trowd\tposyil\cellx2000 Inline top\cell\row}",
+            r"{\rtf1\margt720\trowd\pvpg\posy1440\cellx2000 Page top\cell\row\trowd\pvmrg\posy1440\cellx2000 Margin top\cell\row\trowd\pvpara\posyt\cellx2000 Paragraph top\cell\row\trowd\tpvpg\posy1440\cellx2000 T page top\cell\row\trowd\tposyil\cellx2000 Inline top\cell\row\trowd\tposyin\cellx2000 Inside page\cell\row\trowd\posyout\cellx2000 Outside page\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -24231,16 +24687,29 @@ mod tests {
         );
         assert_eq!(
             table.rows[3].cells[0].paragraphs[0].runs[0].text,
+            "T page top"
+        );
+        assert_eq!(table.rows[3].vertical_offset_twips, 720);
+        assert_eq!(
+            table.rows[4].cells[0].paragraphs[0].runs[0].text,
             "Inline top"
         );
-        for control_name in ["tpvpg", "tpvmrg", "tpvpara"] {
+        assert_eq!(
+            table.rows[5].cells[0].paragraphs[0].runs[0].text,
+            "Inside page"
+        );
+        assert_eq!(
+            table.rows[6].cells[0].paragraphs[0].runs[0].text,
+            "Outside page"
+        );
+        for control_name in ["pvpg", "pvmrg", "pvpara", "tpvpg"] {
             assert!(output.diagnostics.iter().any(|diagnostic| {
                 diagnostic
                     .message
                     .contains(&format!("floating table vertical anchor \\{control_name}"))
             }));
         }
-        for control_name in ["tposyt", "tposyil"] {
+        for control_name in ["posyt", "tposyil", "tposyin", "posyout"] {
             assert!(output.diagnostics.iter().any(|diagnostic| {
                 diagnostic.message.contains(&format!(
                     "floating table vertical flow control \\{control_name}"
@@ -33516,6 +33985,202 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_header_dimensions_become_passive_placeholder_geometry() {
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_bounds_and_frame(160, 80, 2540, 1270))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF placeholder"),
+        };
+        assert_eq!(image.format, ImageFormat::Placeholder);
+        assert!(image.bytes.is_empty());
+        assert!(image.palette.is_empty());
+        assert_eq!(image.width_px, 160);
+        assert_eq!(image.height_px, 80);
+        assert_eq!(image.natural_width_px_hint, Some(160));
+        assert_eq!(image.natural_height_px_hint, Some(80));
+        assert_eq!(image.display_width_twips, Some(1440));
+        assert_eq!(image.display_height_twips, Some(720));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("EMF picture records stripped; header dimensions used")
+        }));
+    }
+
+    #[test]
+    fn emf_rectangle_and_ellipse_records_become_passive_vector_commands() {
+        let records = [
+            emf_rect_record(43, 10, 10, 70, 40),
+            emf_rect_record(42, 80, 20, 150, 70),
+            emf_unknown_record(999),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert!(image.palette.is_empty());
+        assert_eq!(image.width_px, 160);
+        assert_eq!(image.height_px, 80);
+        assert_eq!(image.natural_width_px_hint, Some(160));
+        assert_eq!(image.natural_height_px_hint, Some(80));
+        assert_eq!(image.display_width_twips, Some(1440));
+        assert_eq!(image.display_height_twips, Some(720));
+        assert_eq!(
+            image.vector_commands,
+            vec![
+                StaticImageVectorCommand::Rectangle {
+                    left: 10.0,
+                    top: 10.0,
+                    right: 70.0,
+                    bottom: 40.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: None,
+                },
+                StaticImageVectorCommand::Ellipse {
+                    left: 80.0,
+                    top: 20.0,
+                    right: 150.0,
+                    bottom: 70.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: None,
+                },
+            ]
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("EMF picture rendered as bounded passive vector preview with 1 unsupported record(s) skipped")
+        }));
+    }
+
+    #[test]
+    fn emf_polyline_and_polygon_records_become_passive_vector_commands() {
+        let records = [
+            emf_poly_record(4, &[(0, 0), (40, 20), (200, 100)]),
+            emf_poly_record(3, &[(20, 10), (60, 70), (100, 10)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Polyline {
+                points: vec![(0.0, 0.0), (40.0, 20.0), (160.0, 80.0)],
+                stroke_color: Some(Color::default()),
+                stroke_width: 1.0,
+                stroke_style: BorderStyle::Single,
+            }
+        );
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Polygon {
+                points: vec![(20.0, 10.0), (60.0, 70.0), (100.0, 10.0)],
+                stroke_color: Some(Color::default()),
+                stroke_width: 1.0,
+                stroke_style: BorderStyle::Single,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                fill_pattern: ShadingPattern::None,
+                fill_color: None,
+            }
+        );
+    }
+
+    #[test]
+    fn emf_poly_records_with_excessive_points_become_passive_placeholders() {
+        let points = vec![(1, 1); MAX_PASSIVE_WMF_POINTS_PER_RECORD + 1];
+        let records = [emf_poly_record(4, &points)];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF placeholder"),
+        };
+        assert_eq!(image.format, ImageFormat::Placeholder);
+        assert!(image.bytes.is_empty());
+        assert!(image.vector_commands.is_empty());
+        assert_eq!(image.width_px, 160);
+        assert_eq!(image.height_px, 80);
+    }
+
+    #[test]
+    fn emf_vector_parser_ignores_records_after_declared_byte_range() {
+        let records = [
+            emf_rect_record(43, 10, 10, 70, 40),
+            emf_rect_record(42, 80, 20, 150, 70),
+        ];
+        let mut emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        write_test_le_u32(&mut emf, 48, 112);
+        write_test_le_u32(&mut emf, 52, 2);
+        let input = format!(r"{{\rtf1{{\pict\emfblip {}}}}}", bytes_to_hex(&emf));
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF placeholder"),
+        };
+        assert_eq!(image.format, ImageFormat::Placeholder);
+        assert!(image.bytes.is_empty());
+        assert!(image.vector_commands.is_empty());
+        assert_eq!(image.width_px, 160);
+        assert_eq!(image.height_px, 80);
+    }
+
+    #[test]
+    fn emf_vector_parser_ignores_records_after_declared_record_count() {
+        let records = [
+            emf_rect_record(43, 10, 10, 70, 40),
+            emf_rect_record(42, 80, 20, 150, 70),
+        ];
+        let mut emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        write_test_le_u32(&mut emf, 52, 2);
+        let input = format!(r"{{\rtf1{{\pict\emfblip {}}}}}", bytes_to_hex(&emf));
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF placeholder"),
+        };
+        assert_eq!(image.format, ImageFormat::Placeholder);
+        assert!(image.bytes.is_empty());
+        assert!(image.vector_commands.is_empty());
+        assert_eq!(image.width_px, 160);
+        assert_eq!(image.height_px, 80);
+    }
+
+    #[test]
     fn unsupported_dib_picture_becomes_placeholder() {
         let mut dib = minimal_24bit_dib_with_dimensions(1, 1);
         dib[16..20].copy_from_slice(&1u32.to_le_bytes());
@@ -33659,6 +34324,113 @@ fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<
     }
     jpeg.extend_from_slice(&[0xff, 0xd9]);
     jpeg
+}
+
+#[cfg(test)]
+fn minimal_emf_with_bounds_and_frame(
+    width_px: i32,
+    height_px: i32,
+    frame_width_hundredth_mm: i32,
+    frame_height_hundredth_mm: i32,
+) -> Vec<u8> {
+    minimal_emf_with_records(
+        width_px,
+        height_px,
+        frame_width_hundredth_mm,
+        frame_height_hundredth_mm,
+        &[],
+    )
+}
+
+#[cfg(test)]
+fn minimal_emf_with_records(
+    width_px: i32,
+    height_px: i32,
+    frame_width_hundredth_mm: i32,
+    frame_height_hundredth_mm: i32,
+    records: &[Vec<u8>],
+) -> Vec<u8> {
+    let mut emf = vec![0; 88];
+    write_test_le_u32(&mut emf, 0, 1);
+    write_test_le_u32(&mut emf, 4, 88);
+    write_test_le_i32(&mut emf, 8, 0);
+    write_test_le_i32(&mut emf, 12, 0);
+    write_test_le_i32(&mut emf, 16, width_px);
+    write_test_le_i32(&mut emf, 20, height_px);
+    write_test_le_i32(&mut emf, 24, 0);
+    write_test_le_i32(&mut emf, 28, 0);
+    write_test_le_i32(&mut emf, 32, frame_width_hundredth_mm);
+    write_test_le_i32(&mut emf, 36, frame_height_hundredth_mm);
+    write_test_le_u32(&mut emf, 40, 0x464d_4520);
+    write_test_le_u32(&mut emf, 44, 0x0001_0000);
+    for record in records {
+        emf.extend_from_slice(record);
+    }
+    if !records.is_empty() {
+        emf.extend_from_slice(&emf_eof_record());
+    }
+    let byte_count = emf.len() as u32;
+    let eof_record_count = if records.is_empty() { 0 } else { 1 };
+    write_test_le_u32(&mut emf, 52, 1 + records.len() as u32 + eof_record_count);
+    write_test_le_u32(&mut emf, 48, byte_count);
+    emf
+}
+
+#[cfg(test)]
+fn emf_rect_record(record_type: u32, left: i32, top: i32, right: i32, bottom: i32) -> Vec<u8> {
+    let mut record = vec![0; 24];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 24);
+    write_test_le_i32(&mut record, 8, left);
+    write_test_le_i32(&mut record, 12, top);
+    write_test_le_i32(&mut record, 16, right);
+    write_test_le_i32(&mut record, 20, bottom);
+    record
+}
+
+#[cfg(test)]
+fn emf_poly_record(record_type: u32, points: &[(i32, i32)]) -> Vec<u8> {
+    let size = 28 + (points.len() * 8);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, points.len() as u32);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = 28 + (idx * 8);
+        write_test_le_i32(&mut record, offset, *x);
+        write_test_le_i32(&mut record, offset + 4, *y);
+    }
+    record
+}
+
+#[cfg(test)]
+fn emf_unknown_record(record_type: u32) -> Vec<u8> {
+    let mut record = vec![0; 8];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 8);
+    record
+}
+
+#[cfg(test)]
+fn emf_eof_record() -> Vec<u8> {
+    let mut record = vec![0; 20];
+    write_test_le_u32(&mut record, 0, 14);
+    write_test_le_u32(&mut record, 4, 20);
+    record
+}
+
+#[cfg(test)]
+fn write_test_le_u32(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+#[cfg(test)]
+fn write_test_le_i32(bytes: &mut [u8], offset: usize, value: i32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
 #[cfg(test)]

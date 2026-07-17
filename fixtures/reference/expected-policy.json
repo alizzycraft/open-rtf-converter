@@ -16,6 +16,14 @@
         "Second page text"
       ],
       "intentional_security_differences": [],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "fonttbl",
+        "colortbl",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
         "Word-exported PDF and page PNG references still need to be captured for visual diffing."
       ]
@@ -36,6 +44,14 @@
         "After table text"
       ],
       "intentional_security_differences": [],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
         "Table geometry should be compared against a Word-exported reference once available."
       ]
@@ -57,6 +73,14 @@
         "Unknown ignorable destinations are skipped and never copied into the PDF layer.",
         "Unsupported controls are warned about without allowing parser metadata to become visible output."
       ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "unknownDestination",
+        "madeup123",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
         "Word-exported reference should document whether Word surfaces any recoverable unknown-control text differently."
       ]
@@ -78,6 +102,19 @@
         "Embedded OLE payload bytes are stripped and never copied into the normalized model or PDF.",
         "Only the safe static object result is rendered; the object itself is not activated, embedded, attached, or preserved."
       ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "objemb",
+        "objdata",
+        "414243",
+        "JavaScript",
+        "EmbeddedFile",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
         "Word-exported reference should confirm the fallback result's exact visual position once available."
       ]
@@ -95,6 +132,18 @@
         "After alpha image."
       ],
       "intentional_security_differences": [],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "pngblip",
+        "IHDR",
+        "IDAT",
+        "IEND",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [
+        "/SMask"
+      ],
       "known_gaps": [
         "Word-exported reference should confirm exact alpha compositing against non-white page content once available."
       ]
@@ -112,8 +161,67 @@
         "After indexed transparency image."
       ],
       "intentional_security_differences": [],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "pngblip",
+        "IHDR",
+        "PLTE",
+        "tRNS",
+        "IDAT",
+        "IEND",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [
+        "/SMask"
+      ],
       "known_gaps": [
         "Word-exported reference should confirm exact indexed transparency compositing against non-white page content once available."
+      ]
+    },
+    {
+      "id": "sample-complex-passive-rendering",
+      "input": "docs/sample.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "It is an example test rtf-file to RTF2XML bean for testing",
+        "Simple table",
+        "Here are some special characters",
+        "At last you can see an image"
+      ],
+      "intentional_security_differences": [
+        "Embedded Word.Picture/OLE object payload bytes are stripped and never copied into the normalized model or PDF.",
+        "Only safe passive picture/shape result content is rendered; duplicate object and shape alternates are ignored.",
+        "WMF/EMF-like object result data must be converted to safe passive drawing commands or passive placeholders, never raw metafile bytes."
+      ],
+      "expected_diagnostics": [
+        "rendering shape picture result with bounded passive shape frame",
+        "ignoring duplicate embedded object alternate after passive shape result",
+        "active content removed: object metadata in skipped destination",
+        "ignoring duplicate shape result fallback after passive primary shape result",
+        "Latin Extended characters for font 'Times New Roman CE'"
+      ],
+      "forbidden_pdf_markers": [
+        "objdata",
+        "Word.Picture.8",
+        "METAFILEPICT",
+        "shppict",
+        "shprslt",
+        "wmetafile8",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported PDF and page PNG references still need to be captured for visual diffing.",
+        "Exact Word visual parity for the embedded object/shape result area remains a comparison target.",
+        "JPEG pictureBiLevel exact thresholding remains a fidelity gap for JPEG streams; current behavior is a WASM-safe passive approximation."
       ]
     }
   ]

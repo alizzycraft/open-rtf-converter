@@ -22,6 +22,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/object-result.rtf",
         "fixtures/png-alpha.rtf",
         "fixtures/png-trns.rtf",
+        "docs/sample.rtf",
     ] {
         assert!(
             Path::new(fixture).is_file(),
@@ -59,6 +60,21 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
     assert!(
         MANIFEST.contains("\"known_gaps\""),
         "visual fixtures must track missing comparison evidence"
+    );
+    assert_eq!(
+        MANIFEST.matches("\"expected_diagnostics\"").count(),
+        reference_fixtures().len(),
+        "each manifest fixture should explicitly document expected diagnostics"
+    );
+    assert_eq!(
+        MANIFEST.matches("\"forbidden_pdf_markers\"").count(),
+        reference_fixtures().len(),
+        "each manifest fixture should explicitly document source/control/PDF markers that must not reach PDF bytes"
+    );
+    assert_eq!(
+        MANIFEST.matches("\"expected_pdf_markers\"").count(),
+        reference_fixtures().len(),
+        "each manifest fixture should explicitly document passive PDF markers required by the executable fixture gate"
     );
 }
 
@@ -129,6 +145,18 @@ fn reference_policy_fixtures_match_current_passive_converter_output() {
                 String::from_utf8_lossy(expected)
             );
         }
+        for expected in fixture.must_emit_diagnostics {
+            assert!(
+                output
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.contains(expected)),
+                "{} did not emit expected diagnostic {:?}; diagnostics were {:?}",
+                fixture.input,
+                expected,
+                output.diagnostics
+            );
+        }
     }
 }
 
@@ -138,6 +166,7 @@ struct ReferenceFixture {
     must_preserve_text: &'static [&'static str],
     must_not_leak: &'static [&'static [u8]],
     must_contain_pdf: &'static [&'static [u8]],
+    must_emit_diagnostics: &'static [&'static str],
 }
 
 fn reference_fixtures() -> &'static [ReferenceFixture] {
@@ -152,6 +181,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_not_leak: &[b"fonttbl", b"colortbl", b"/JavaScript", b"/EmbeddedFile"],
             must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "fixtures/table-ish.rtf",
@@ -159,6 +189,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_preserve_text: &["Name", "Value", "Alpha", "Beta", "After table text"],
             must_not_leak: &[b"trowd", b"cellx", b"/JavaScript", b"/EmbeddedFile"],
             must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "fixtures/weird.rtf",
@@ -175,6 +206,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/EmbeddedFile",
             ],
             must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "fixtures/object-result.rtf",
@@ -196,6 +228,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/OpenAction",
             ],
             must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "fixtures/png-alpha.rtf",
@@ -210,6 +243,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/EmbeddedFile",
             ],
             must_contain_pdf: &[b"/SMask"],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "fixtures/png-trns.rtf",
@@ -229,6 +263,37 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/EmbeddedFile",
             ],
             must_contain_pdf: &[b"/SMask"],
+            must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
+            input: "docs/sample.rtf",
+            expected_pages: 2,
+            must_preserve_text: &[
+                "It is an example test rtf-file to RTF2XML bean for testing",
+                "Simple table",
+                "Here are some special characters",
+                "At last you can see an image",
+            ],
+            must_not_leak: &[
+                b"objdata",
+                b"Word.Picture.8",
+                b"METAFILEPICT",
+                b"shppict",
+                b"shprslt",
+                b"wmetafile8",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "rendering shape picture result with bounded passive shape frame",
+                "ignoring duplicate embedded object alternate after passive shape result",
+                "active content removed: object metadata in skipped destination",
+                "ignoring duplicate shape result fallback after passive primary shape result",
+                "Latin Extended characters for font 'Times New Roman CE'",
+            ],
         },
     ]
 }
