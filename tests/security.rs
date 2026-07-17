@@ -30829,6 +30829,139 @@ fn emf_stroked_path_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_fillpath_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_create_pen_record(
+            2,
+            0,
+            3,
+            Color {
+                red: 180,
+                green: 30,
+                blue: 40,
+            },
+        ),
+        emf_select_object_record(2),
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 230,
+                green: 210,
+                blue: 80,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_unknown_record(59),
+        emf_point_record(27, 20, 20),
+        emf_poly_record(6, &[(70, 20), (45, 60)]),
+        emf_unknown_record(61),
+        emf_unknown_record(60),
+        emf_unknown_record(63),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF fill path vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Polygon {
+            stroke_color: Some(Color {
+                red: 180,
+                green: 30,
+                blue: 40
+            }),
+            stroke_width: 3.0,
+            fill_color: Some(Color {
+                red: 230,
+                green: 210,
+                blue: 80
+            }),
+            ..
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF fill path payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "rg"),
+        "EMF fill paths should render passive PDF fill color"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "RG"),
+        "EMF stroke-and-fill paths should render passive PDF stroke color"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "B" | "B*")),
+        "EMF stroke-and-fill paths should render passive PDF fill/stroke operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF fill path payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_exttextoutw_records_render_passively_without_payload_leakage() {
     let records = [
         emf_u32_record(24, 0x0033_2211),

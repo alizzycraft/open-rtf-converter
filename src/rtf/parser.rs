@@ -20014,6 +20014,57 @@ impl EmfPathBuilder {
         }
         Some(commands)
     }
+
+    fn fill_command(
+        self,
+        stroke_color: Option<Color>,
+        stroke_width: f32,
+        stroke_style: BorderStyle,
+        fill_rule: StaticImageVectorFillRule,
+        fill_pattern: ShadingPattern,
+        fill_color: Option<Color>,
+    ) -> Option<StaticImageVectorCommand> {
+        if self.collecting {
+            return None;
+        }
+        let points = self.line_only_points()?;
+        if points.len() < 3 || !point_bounds_are_visible(&points) {
+            return None;
+        }
+        Some(StaticImageVectorCommand::Polygon {
+            points,
+            stroke_color,
+            stroke_width,
+            stroke_style,
+            fill_rule,
+            fill_pattern,
+            fill_color,
+        })
+    }
+
+    fn line_only_points(&self) -> Option<Vec<(f32, f32)>> {
+        let mut points = Vec::new();
+        for segment in &self.segments {
+            match segment {
+                EmfPathSegment::Polyline(segment_points) => {
+                    if segment_points.len() < 2 {
+                        return None;
+                    }
+                    for point in segment_points {
+                        if points.last().is_some_and(|last| last == point) {
+                            continue;
+                        }
+                        if points.len() >= MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+                            return None;
+                        }
+                        points.push(*point);
+                    }
+                }
+                EmfPathSegment::Bezier(_) => return None,
+            }
+        }
+        Some(points)
+    }
 }
 
 fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
@@ -20181,6 +20232,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_BEGINPATH: u32 = 59;
     const EMR_ENDPATH: u32 = 60;
     const EMR_CLOSEFIGURE: u32 = 61;
+    const EMR_FILLPATH: u32 = 62;
+    const EMR_STROKEANDFILLPATH: u32 = 63;
     const EMR_STROKEPATH: u32 = 64;
     const EMR_EXTTEXTOUTW: u32 = 84;
     const EMR_POLYBEZIER16: u32 = 85;
@@ -20406,6 +20459,26 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 commands.extend(path_commands);
+            }
+            EMR_FILLPATH | EMR_STROKEANDFILLPATH => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let path = active_path.take()?;
+                let (stroke_color, stroke_width) = if record_type == EMR_STROKEANDFILLPATH {
+                    (state.stroke_color, state.stroke_width)
+                } else {
+                    (None, 0.0)
+                };
+                let command = path.fill_command(
+                    stroke_color,
+                    stroke_width,
+                    state.stroke_style,
+                    state.fill_rule,
+                    state.fill_pattern,
+                    state.fill_color,
+                )?;
+                commands.push(command);
             }
             EMR_EXTTEXTOUTW => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -36400,6 +36473,132 @@ After\par}"#;
             emf_unknown_record(59),
             emf_point_record(27, 10, 10),
             emf_point_record(54, 50, 10),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_fillpath_records_become_passive_polygon_commands() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 20,
+                    green: 160,
+                    blue: 90,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_unknown_record(59),
+            emf_point_record(27, 10, 10),
+            emf_poly_record(6, &[(80, 10), (80, 50), (10, 50)]),
+            emf_unknown_record(61),
+            emf_unknown_record(60),
+            emf_unknown_record(62),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Polygon {
+                points,
+                stroke_color: None,
+                stroke_width: 0.0,
+                fill_color: Some(Color { red: 20, green: 160, blue: 90 }),
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                ..
+            } if points == &vec![(10.0, 10.0), (80.0, 10.0), (80.0, 50.0), (10.0, 50.0), (10.0, 10.0)]
+        ));
+    }
+
+    #[test]
+    fn emf_strokeandfillpath_records_become_passive_polygon_commands() {
+        let records = [
+            emf_create_pen_record(
+                2,
+                0,
+                3,
+                Color {
+                    red: 180,
+                    green: 30,
+                    blue: 40,
+                },
+            ),
+            emf_select_object_record(2),
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 230,
+                    green: 210,
+                    blue: 80,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_poly_record(6, &[(70, 20), (45, 60)]),
+            emf_unknown_record(61),
+            emf_unknown_record(60),
+            emf_unknown_record(63),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Polygon {
+                points,
+                stroke_color: Some(Color { red: 180, green: 30, blue: 40 }),
+                stroke_width: 3.0,
+                fill_color: Some(Color { red: 230, green: 210, blue: 80 }),
+                ..
+            } if points == &vec![(20.0, 20.0), (70.0, 20.0), (45.0, 60.0), (20.0, 20.0)]
+        ));
+    }
+
+    #[test]
+    fn emf_filled_bezier_path_becomes_passive_placeholder() {
+        let records = [
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_poly_record(5, &[(30, 5), (60, 55), (80, 20)]),
+            emf_unknown_record(60),
+            emf_unknown_record(62),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
