@@ -19835,6 +19835,12 @@ struct EmfSavedState {
     current_position: (i32, i32),
 }
 
+#[derive(Debug, Copy, Clone)]
+struct RestoredEmfSavedState {
+    state: EmfSavedState,
+    restore_count: usize,
+}
+
 impl Default for EmfDrawingState {
     fn default() -> Self {
         Self {
@@ -20478,17 +20484,27 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if saved_states.len() >= MAX_PASSIVE_WMF_OBJECTS {
                     return None;
                 }
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
                 saved_states.push(EmfSavedState {
                     drawing: state,
                     coordinates,
                     current_position,
                 });
+                commands.push(StaticImageVectorCommand::SaveState);
             }
             EMR_RESTOREDC => {
                 let restored = restore_emf_saved_state(data, &mut saved_states)?;
-                state = restored.drawing;
-                coordinates = restored.coordinates;
-                current_position = restored.current_position;
+                if commands.len().checked_add(restored.restore_count)? > MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                state = restored.state.drawing;
+                coordinates = restored.state.coordinates;
+                current_position = restored.state.current_position;
+                for _ in 0..restored.restore_count {
+                    commands.push(StaticImageVectorCommand::RestoreState);
+                }
             }
             EMR_CREATEPEN => {
                 let (handle, object) = parse_emf_pen_object(data)?;
@@ -21150,6 +21166,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     if active_path.is_some() {
         return None;
     }
+    if !saved_states.is_empty() {
+        if commands.len().checked_add(saved_states.len())? > MAX_PASSIVE_WMF_COMMANDS {
+            return None;
+        }
+        for _ in 0..saved_states.len() {
+            commands.push(StaticImageVectorCommand::RestoreState);
+        }
+    }
     if commands.is_empty() {
         return None;
     }
@@ -21644,7 +21668,7 @@ fn apply_emf_object(state: &mut EmfDrawingState, object: EmfObject, header: &Par
 fn restore_emf_saved_state(
     data: &[u8],
     saved_states: &mut Vec<EmfSavedState>,
-) -> Option<EmfSavedState> {
+) -> Option<RestoredEmfSavedState> {
     if data.len() < 4 {
         return None;
     }
@@ -21660,7 +21684,10 @@ fn restore_emf_saved_state(
     for _ in 0..restore_count {
         restored = saved_states.pop();
     }
-    restored
+    Some(RestoredEmfSavedState {
+        state: restored?,
+        restore_count,
+    })
 }
 
 fn emf_stock_object(handle: u32) -> Option<EmfObject> {
@@ -38021,9 +38048,23 @@ After\par}"#;
             Block::Image(image) => image,
             _ => panic!("expected passive EMF vector image"),
         };
-        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(image.vector_commands.len(), 4);
         assert!(matches!(
             image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::RestoreState
+        ));
+        let line_commands: Vec<_> = image
+            .vector_commands
+            .iter()
+            .filter(|command| matches!(command, StaticImageVectorCommand::Line { .. }))
+            .collect();
+        assert_eq!(line_commands.len(), 2);
+        assert!(matches!(
+            line_commands[0],
             StaticImageVectorCommand::Line {
                 x1: 20.0,
                 y1: 10.0,
@@ -38039,7 +38080,7 @@ After\par}"#;
             }
         ));
         assert!(matches!(
-            image.vector_commands[1],
+            line_commands[1],
             StaticImageVectorCommand::Line {
                 x1: 5.0,
                 y1: 20.0,
@@ -38052,6 +38093,50 @@ After\par}"#;
                 }),
                 stroke_width: 2.0,
                 stroke_style: BorderStyle::Single,
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_restoredc_restores_passive_clip_state() {
+        let records = [
+            emf_unknown_record(33),
+            emf_rect_record(30, 20, 20, 60, 60),
+            emf_rect_record(43, 0, 0, 160, 80),
+            emf_i32_record(34, -1),
+            emf_rect_record(43, 80, 0, 150, 70),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.vector_commands.len(), 5);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect { .. }
+        ));
+        assert!(matches!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::Rectangle {
+                left: 80.0,
+                top: 0.0,
+                right: 150.0,
+                bottom: 70.0,
+                ..
             }
         ));
     }

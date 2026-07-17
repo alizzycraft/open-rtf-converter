@@ -1714,8 +1714,19 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
     content.rect(fragment.x, fragment.y, fragment.width, fragment.height);
     content.clip_nonzero();
     content.end_path();
+    let mut vector_state_depth = 0usize;
     for command in &fragment.image.vector_commands {
         match command {
+            StaticImageVectorCommand::SaveState => {
+                content.save_state();
+                vector_state_depth = vector_state_depth.saturating_add(1);
+            }
+            StaticImageVectorCommand::RestoreState => {
+                if vector_state_depth > 0 {
+                    content.restore_state();
+                    vector_state_depth -= 1;
+                }
+            }
             StaticImageVectorCommand::ClipRect {
                 left,
                 top,
@@ -2018,6 +2029,9 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 );
             }
         }
+    }
+    for _ in 0..vector_state_depth {
+        content.restore_state();
     }
     content.restore_state();
 }

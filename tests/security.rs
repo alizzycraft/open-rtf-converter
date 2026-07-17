@@ -32952,6 +32952,20 @@ fn emf_savedc_and_restoredc_records_render_passively_without_payload_leakage() {
     assert!(image.bytes.is_empty());
     assert!(matches!(
         image.vector_commands[0],
+        StaticImageVectorCommand::SaveState
+    ));
+    assert!(matches!(
+        image.vector_commands[2],
+        StaticImageVectorCommand::RestoreState
+    ));
+    let line_commands: Vec<_> = image
+        .vector_commands
+        .iter()
+        .filter(|command| matches!(command, StaticImageVectorCommand::Line { .. }))
+        .collect();
+    assert_eq!(line_commands.len(), 2);
+    assert!(matches!(
+        line_commands[0],
         StaticImageVectorCommand::Line {
             x1: 20.0,
             y1: 10.0,
@@ -32967,7 +32981,7 @@ fn emf_savedc_and_restoredc_records_render_passively_without_payload_leakage() {
         }
     ));
     assert!(matches!(
-        image.vector_commands[1],
+        line_commands[1],
         StaticImageVectorCommand::Line {
             x1: 5.0,
             y1: 20.0,
@@ -33035,6 +33049,110 @@ fn emf_savedc_and_restoredc_records_render_passively_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "EMF saved-state payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emf_restoredc_restores_passive_clip_scope_without_payload_leakage() {
+    let records = [
+        emf_unknown_record(33),
+        emf_rect_record(30, 20, 20, 60, 60),
+        emf_rect_record(43, 0, 0, 160, 80),
+        emf_i32_record(34, -1),
+        emf_rect_record(43, 80, 0, 150, 70),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF restored clip image");
+
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::SaveState
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::ClipRect { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[3],
+        StaticImageVectorCommand::RestoreState
+    ));
+    assert!(matches!(
+        image.vector_commands[4],
+        StaticImageVectorCommand::Rectangle {
+            left: 80.0,
+            top: 0.0,
+            right: 150.0,
+            bottom: 70.0,
+            ..
+        }
+    ));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "q")
+            .count()
+            >= 2,
+        "EMF saved clip state should render passive PDF save-state operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "Q")
+            .count()
+            >= 2,
+        "EMF restored clip state should render passive PDF restore-state operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "EMF saved clip scope should render a passive PDF clipping path"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF restored clip payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
