@@ -19775,6 +19775,13 @@ impl EmfCoordinateState {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+struct EmfSavedState {
+    drawing: EmfDrawingState,
+    coordinates: EmfCoordinateState,
+    current_position: (i32, i32),
+}
+
 impl Default for EmfDrawingState {
     fn default() -> Self {
         Self {
@@ -19936,6 +19943,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETTEXTALIGN: u32 = 22;
     const EMR_SETTEXTCOLOR: u32 = 24;
     const EMR_SETBKCOLOR: u32 = 25;
+    const EMR_SAVEDC: u32 = 33;
+    const EMR_RESTOREDC: u32 = 34;
     const EMR_SELECTOBJECT: u32 = 37;
     const EMR_CREATEPEN: u32 = 38;
     const EMR_CREATEBRUSHINDIRECT: u32 = 39;
@@ -19966,6 +19975,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     let mut current_position = (0i32, 0i32);
     let mut objects: Vec<Option<EmfObject>> = Vec::new();
     let mut state = EmfDrawingState::default();
+    let mut saved_states: Vec<EmfSavedState> = Vec::new();
 
     while pos + 8 <= header.declared_size {
         if header
@@ -20042,6 +20052,22 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if let Some(color) = color_from_colorref(data, 0) {
                     state.background_color = Some(color);
                 }
+            }
+            EMR_SAVEDC => {
+                if saved_states.len() >= MAX_PASSIVE_WMF_OBJECTS {
+                    return None;
+                }
+                saved_states.push(EmfSavedState {
+                    drawing: state,
+                    coordinates,
+                    current_position,
+                });
+            }
+            EMR_RESTOREDC => {
+                let restored = restore_emf_saved_state(data, &mut saved_states)?;
+                state = restored.drawing;
+                coordinates = restored.coordinates;
+                current_position = restored.current_position;
             }
             EMR_CREATEPEN => {
                 let (handle, object) = parse_emf_pen_object(data)?;
@@ -20550,6 +20576,28 @@ fn apply_emf_object(state: &mut EmfDrawingState, object: EmfObject, header: &Par
             state.fill_pattern = pattern;
         }
     }
+}
+
+fn restore_emf_saved_state(
+    data: &[u8],
+    saved_states: &mut Vec<EmfSavedState>,
+) -> Option<EmfSavedState> {
+    if data.len() < 4 {
+        return None;
+    }
+    let relative = read_le_i32(data, 0)?;
+    if relative >= 0 {
+        return None;
+    }
+    let restore_count = usize::try_from(relative.unsigned_abs()).ok()?;
+    if restore_count == 0 || restore_count > saved_states.len() {
+        return None;
+    }
+    let mut restored = None;
+    for _ in 0..restore_count {
+        restored = saved_states.pop();
+    }
+    restored
 }
 
 fn emf_stock_object(handle: u32) -> Option<EmfObject> {
@@ -35594,6 +35642,106 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_savedc_and_restoredc_restore_passive_state() {
+        let records = [
+            emf_create_pen_record(
+                2,
+                0,
+                2,
+                Color {
+                    red: 200,
+                    green: 20,
+                    blue: 20,
+                },
+            ),
+            emf_select_object_record(2),
+            emf_point_record(12, 5, 0),
+            emf_unknown_record(33),
+            emf_create_pen_record(
+                3,
+                1,
+                4,
+                Color {
+                    red: 20,
+                    green: 40,
+                    blue: 200,
+                },
+            ),
+            emf_select_object_record(3),
+            emf_point_record(12, 20, 0),
+            emf_point_record(27, 0, 10),
+            emf_point_record(54, 40, 10),
+            emf_i32_record(34, -1),
+            emf_point_record(27, 0, 20),
+            emf_point_record(54, 40, 20),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Line {
+                x1: 20.0,
+                y1: 10.0,
+                x2: 60.0,
+                y2: 10.0,
+                stroke_color: Some(Color {
+                    red: 20,
+                    green: 40,
+                    blue: 200
+                }),
+                stroke_width: 4.0,
+                stroke_style: BorderStyle::Dashed,
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Line {
+                x1: 5.0,
+                y1: 20.0,
+                x2: 45.0,
+                y2: 20.0,
+                stroke_color: Some(Color {
+                    red: 200,
+                    green: 20,
+                    blue: 20
+                }),
+                stroke_width: 2.0,
+                stroke_style: BorderStyle::Single,
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_restoredc_without_saved_state_becomes_passive_placeholder() {
+        let records = [
+            emf_i32_record(34, -1),
+            emf_rect_record(43, 10, 20, 170, 100),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_poly_records_with_excessive_points_become_passive_placeholders() {
         let points = vec![(1, 1); MAX_PASSIVE_WMF_POINTS_PER_RECORD + 1];
         let records = [emf_poly_record(4, &points)];
@@ -35932,6 +36080,15 @@ fn emf_u32_record(record_type: u32, value: u32) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, record_type);
     write_test_le_u32(&mut record, 4, 12);
     write_test_le_u32(&mut record, 8, value);
+    record
+}
+
+#[cfg(test)]
+fn emf_i32_record(record_type: u32, value: i32) -> Vec<u8> {
+    let mut record = vec![0; 12];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 12);
+    write_test_le_i32(&mut record, 8, value);
     record
 }
 

@@ -31409,6 +31409,149 @@ fn emf_coordinate_mapping_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_savedc_and_restoredc_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_create_pen_record(
+            2,
+            0,
+            2,
+            Color {
+                red: 200,
+                green: 20,
+                blue: 20,
+            },
+        ),
+        emf_select_object_record(2),
+        emf_point_record(12, 5, 0),
+        emf_unknown_record(33),
+        emf_create_pen_record(
+            3,
+            1,
+            4,
+            Color {
+                red: 20,
+                green: 40,
+                blue: 200,
+            },
+        ),
+        emf_select_object_record(3),
+        emf_point_record(12, 20, 0),
+        emf_point_record(27, 0, 10),
+        emf_point_record(54, 40, 10),
+        emf_i32_record(34, -1),
+        emf_point_record(27, 0, 20),
+        emf_point_record(54, 40, 20),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF saved-state vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Line {
+            x1: 20.0,
+            y1: 10.0,
+            x2: 60.0,
+            y2: 10.0,
+            stroke_color: Some(Color {
+                red: 20,
+                green: 40,
+                blue: 200
+            }),
+            stroke_width: 4.0,
+            stroke_style: BorderStyle::Dashed,
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Line {
+            x1: 5.0,
+            y1: 20.0,
+            x2: 45.0,
+            y2: 20.0,
+            stroke_color: Some(Color {
+                red: 200,
+                green: 20,
+                blue: 20
+            }),
+            stroke_width: 2.0,
+            stroke_style: BorderStyle::Single,
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF saved-state payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "l"),
+        "EMF saved-state lines should render passive PDF line operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "RG" | "rg")),
+        "EMF saved-state colors should render passive PDF color operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF saved-state payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn extreme_character_spacing_is_bounded_before_pdf_rendering() {
     let input = rtf(&[
         "{",
@@ -42524,6 +42667,14 @@ fn emf_u32_record(record_type: u32, value: u32) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, record_type);
     write_test_le_u32(&mut record, 4, 12);
     write_test_le_u32(&mut record, 8, value);
+    record
+}
+
+fn emf_i32_record(record_type: u32, value: i32) -> Vec<u8> {
+    let mut record = vec![0; 12];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 12);
+    write_test_le_i32(&mut record, 8, value);
     record
 }
 
