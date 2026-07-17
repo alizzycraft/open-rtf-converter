@@ -20290,6 +20290,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETBKCOLOR: u32 = 25;
     const EMR_SCALEVIEWPORTEXTEX: u32 = 31;
     const EMR_SCALEWINDOWEXTEX: u32 = 32;
+    const EMR_INTERSECTCLIPRECT: u32 = 30;
     const EMR_SETARCDIRECTION: u32 = 57;
     const EMR_SETTEXTJUSTIFICATION: u32 = 120;
     const EMR_SAVEDC: u32 = 33;
@@ -20394,6 +20395,25 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_SCALEWINDOWEXTEX => {
                 let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
                 coordinates.scale_window_extent(x_num, x_denom, y_num, y_denom)?;
+            }
+            EMR_INTERSECTCLIPRECT => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let Some((left, top, right, bottom)) =
+                    parse_emf_record_rect(data, &header, &coordinates)
+                else {
+                    return None;
+                };
+                if !bounds_is_visible((left, top, right, bottom)) {
+                    return None;
+                }
+                commands.push(StaticImageVectorCommand::ClipRect {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                });
             }
             EMR_MOVETOEX => {
                 current_position = parse_emf_raw_point_record(data)?;
@@ -36667,6 +36687,67 @@ After\par}"#;
                 fill_color: Some(Color { red: 230, green: 210, blue: 80 }),
                 ..
             } if points == &vec![(20.0, 20.0), (70.0, 20.0), (45.0, 60.0), (20.0, 20.0)]
+        ));
+    }
+
+    #[test]
+    fn emf_intersectcliprect_records_become_passive_clip_commands() {
+        let records = [
+            emf_rect_record(30, 20, 20, 100, 60),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 0.0,
+                top: 0.0,
+                right: 160.0,
+                bottom: 80.0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_empty_intersectcliprect_becomes_passive_placeholder() {
+        let records = [
+            emf_rect_record(30, 20, 20, 20, 60),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
         ));
     }
 

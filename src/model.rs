@@ -459,6 +459,12 @@ pub enum ImageFormat {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StaticImageVectorCommand {
+    ClipRect {
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+    },
     Line {
         x1: f32,
         y1: f32,

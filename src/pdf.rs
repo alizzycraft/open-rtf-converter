@@ -1716,6 +1716,25 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
     content.end_path();
     for command in &fragment.image.vector_commands {
         match command {
+            StaticImageVectorCommand::ClipRect {
+                left,
+                top,
+                right,
+                bottom,
+            } => {
+                let rect = vector_command_rect(
+                    draw,
+                    source_width,
+                    source_height,
+                    *left,
+                    *top,
+                    *right,
+                    *bottom,
+                );
+                content.rect(rect.x, rect.y, rect.width, rect.height);
+                content.clip_nonzero();
+                content.end_path();
+            }
             StaticImageVectorCommand::Line {
                 x1,
                 y1,
