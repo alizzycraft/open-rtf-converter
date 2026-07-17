@@ -465,6 +465,12 @@ pub enum StaticImageVectorCommand {
         right: f32,
         bottom: f32,
     },
+    ClipPath {
+        start: (f32, f32),
+        segments: Vec<StaticImageVectorPathSegment>,
+        closed: bool,
+        fill_rule: StaticImageVectorFillRule,
+    },
     Line {
         x1: f32,
         y1: f32,

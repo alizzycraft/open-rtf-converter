@@ -1735,6 +1735,27 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                 content.clip_nonzero();
                 content.end_path();
             }
+            StaticImageVectorCommand::ClipPath {
+                start,
+                segments,
+                closed,
+                fill_rule,
+            } => {
+                let start =
+                    vector_command_point(draw, source_width, source_height, start.0, start.1);
+                let segments =
+                    vector_command_path_segments(draw, source_width, source_height, segments);
+                append_passive_vector_path(content, start, &segments, *closed);
+                match fill_rule {
+                    StaticImageVectorFillRule::Alternate => {
+                        content.clip_even_odd();
+                    }
+                    StaticImageVectorFillRule::Winding => {
+                        content.clip_nonzero();
+                    }
+                }
+                content.end_path();
+            }
             StaticImageVectorCommand::Line {
                 x1,
                 y1,
@@ -2274,24 +2295,7 @@ fn draw_passive_vector_path(
     if let Some(color) = fill_color {
         set_fill_color(content, pdf_color_from_model(color));
     }
-    content.move_to(start.x, start.y);
-    for segment in segments {
-        match segment {
-            StaticImageVectorPathSegment::LineTo(x, y) => {
-                content.line_to(*x, *y);
-            }
-            StaticImageVectorPathSegment::CubicTo {
-                control1,
-                control2,
-                end,
-            } => {
-                content.cubic_to(control1.0, control1.1, control2.0, control2.1, end.0, end.1);
-            }
-        }
-    }
-    if closed {
-        content.close_path();
-    }
+    append_passive_vector_path(content, start, segments, closed);
     if fill_color.is_some() && has_stroke {
         match fill_rule {
             StaticImageVectorFillRule::Alternate => {
@@ -2316,6 +2320,32 @@ fn draw_passive_vector_path(
         content.end_path();
     }
     content.restore_state();
+}
+
+fn append_passive_vector_path(
+    content: &mut Content,
+    start: crate::layout::LayoutPoint,
+    segments: &[StaticImageVectorPathSegment],
+    closed: bool,
+) {
+    content.move_to(start.x, start.y);
+    for segment in segments {
+        match segment {
+            StaticImageVectorPathSegment::LineTo(x, y) => {
+                content.line_to(*x, *y);
+            }
+            StaticImageVectorPathSegment::CubicTo {
+                control1,
+                control2,
+                end,
+            } => {
+                content.cubic_to(control1.0, control1.1, control2.0, control2.1, end.0, end.1);
+            }
+        }
+    }
+    if closed {
+        content.close_path();
+    }
 }
 
 fn draw_passive_vector_rectangle(
