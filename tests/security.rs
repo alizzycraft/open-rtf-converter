@@ -30346,6 +30346,103 @@ fn emf_simple_vector_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_roundrect_records_render_passively_without_payload_leakage() {
+    let records = [emf_roundrect_record(10, 10, 70, 40, 90, 80)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF roundrect vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::RoundedRectangle {
+            left: 10.0,
+            top: 10.0,
+            right: 70.0,
+            bottom: 40.0,
+            corner_width: 60.0,
+            corner_height: 30.0,
+            stroke_color: Some(_),
+            stroke_width: 1.0,
+            stroke_style: BorderStyle::Single,
+            fill_pattern: ShadingPattern::None,
+            fill_color: None,
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF roundrect payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "EMF roundrect vector preview should render passive Bezier curve operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s")),
+        "EMF roundrect vector preview should render passive stroked paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF roundrect payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_polyline_and_polygon_records_render_passively_without_payload_leakage() {
     let records = [
         emf_poly_record(4, &[(0, 0), (40, 20), (200, 100)]),
@@ -41606,6 +41703,26 @@ fn emf_rect_record(record_type: u32, left: i32, top: i32, right: i32, bottom: i3
     write_test_le_i32(&mut record, 12, top);
     write_test_le_i32(&mut record, 16, right);
     write_test_le_i32(&mut record, 20, bottom);
+    record
+}
+
+fn emf_roundrect_record(
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    corner_width: i32,
+    corner_height: i32,
+) -> Vec<u8> {
+    let mut record = vec![0; 32];
+    write_test_le_u32(&mut record, 0, 44);
+    write_test_le_u32(&mut record, 4, 32);
+    write_test_le_i32(&mut record, 8, left);
+    write_test_le_i32(&mut record, 12, top);
+    write_test_le_i32(&mut record, 16, right);
+    write_test_le_i32(&mut record, 20, bottom);
+    write_test_le_i32(&mut record, 24, corner_width);
+    write_test_le_i32(&mut record, 28, corner_height);
     record
 }
 

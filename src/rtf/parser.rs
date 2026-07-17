@@ -19810,6 +19810,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYLINE: u32 = 4;
     const EMR_RECTANGLE: u32 = 43;
     const EMR_ELLIPSE: u32 = 42;
+    const EMR_ROUNDRECT: u32 = 44;
     const EMR_LINETO: u32 = 54;
 
     let header = parse_emf_header_dimensions(bytes)?;
@@ -19874,7 +19875,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 current_position = endpoint;
             }
-            EMR_RECTANGLE | EMR_ELLIPSE => {
+            EMR_RECTANGLE | EMR_ELLIPSE | EMR_ROUNDRECT => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
@@ -19884,8 +19885,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if bounds_is_visible((left, top, right, bottom)) {
                     let stroke_color = Some(Color::default());
                     let fill_color = None;
-                    let command = if record_type == EMR_RECTANGLE {
-                        StaticImageVectorCommand::Rectangle {
+                    let command = match record_type {
+                        EMR_RECTANGLE => StaticImageVectorCommand::Rectangle {
                             left,
                             top,
                             right,
@@ -19895,9 +19896,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             stroke_style: BorderStyle::Single,
                             fill_pattern: ShadingPattern::None,
                             fill_color,
-                        }
-                    } else {
-                        StaticImageVectorCommand::Ellipse {
+                        },
+                        EMR_ELLIPSE => StaticImageVectorCommand::Ellipse {
                             left,
                             top,
                             right,
@@ -19907,7 +19907,25 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             stroke_style: BorderStyle::Single,
                             fill_pattern: ShadingPattern::None,
                             fill_color,
+                        },
+                        EMR_ROUNDRECT => {
+                            let (corner_width, corner_height) =
+                                parse_emf_roundrect_corners(data, right - left, bottom - top)?;
+                            StaticImageVectorCommand::RoundedRectangle {
+                                left,
+                                top,
+                                right,
+                                bottom,
+                                corner_width,
+                                corner_height,
+                                stroke_color,
+                                stroke_width: 1.0,
+                                stroke_style: BorderStyle::Single,
+                                fill_pattern: ShadingPattern::None,
+                                fill_color,
+                            }
                         }
+                        _ => return None,
                     };
                     commands.push(command);
                 }
@@ -19999,6 +20017,18 @@ fn parse_emf_poly_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f
         points.push(normalized_emf_point(x, y, header));
     }
     Some(points)
+}
+
+fn parse_emf_roundrect_corners(data: &[u8], width: f32, height: f32) -> Option<(f32, f32)> {
+    if data.len() < 24 {
+        return None;
+    }
+    let corner_width = read_le_i32(data, 16)?.unsigned_abs() as f32;
+    let corner_height = read_le_i32(data, 20)?.unsigned_abs() as f32;
+    Some((
+        corner_width.clamp(0.0, width.max(0.0)),
+        corner_height.clamp(0.0, height.max(0.0)),
+    ))
 }
 
 fn parse_emf_point_record(data: &[u8], header: &ParsedEmfHeader) -> Option<(f32, f32)> {
@@ -34106,6 +34136,39 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_roundrect_records_become_passive_vector_commands() {
+        let records = [emf_roundrect_record(10, 10, 70, 40, 90, 80)];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![StaticImageVectorCommand::RoundedRectangle {
+                left: 10.0,
+                top: 10.0,
+                right: 70.0,
+                bottom: 40.0,
+                corner_width: 60.0,
+                corner_height: 30.0,
+                stroke_color: Some(Color::default()),
+                stroke_width: 1.0,
+                stroke_style: BorderStyle::Single,
+                fill_pattern: ShadingPattern::None,
+                fill_color: None,
+            }]
+        );
+    }
+
+    #[test]
     fn emf_polyline_and_polygon_records_become_passive_vector_commands() {
         let records = [
             emf_poly_record(4, &[(0, 0), (40, 20), (200, 100)]),
@@ -34463,6 +34526,27 @@ fn emf_rect_record(record_type: u32, left: i32, top: i32, right: i32, bottom: i3
     write_test_le_i32(&mut record, 12, top);
     write_test_le_i32(&mut record, 16, right);
     write_test_le_i32(&mut record, 20, bottom);
+    record
+}
+
+#[cfg(test)]
+fn emf_roundrect_record(
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    corner_width: i32,
+    corner_height: i32,
+) -> Vec<u8> {
+    let mut record = vec![0; 32];
+    write_test_le_u32(&mut record, 0, 44);
+    write_test_le_u32(&mut record, 4, 32);
+    write_test_le_i32(&mut record, 8, left);
+    write_test_le_i32(&mut record, 12, top);
+    write_test_le_i32(&mut record, 16, right);
+    write_test_le_i32(&mut record, 20, bottom);
+    write_test_le_i32(&mut record, 24, corner_width);
+    write_test_le_i32(&mut record, 28, corner_height);
     record
 }
 
