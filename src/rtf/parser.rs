@@ -19681,6 +19681,42 @@ struct ParsedEmfVector {
     commands: Vec<StaticImageVectorCommand>,
 }
 
+#[derive(Debug, Copy, Clone)]
+enum EmfObject {
+    Pen {
+        color: Option<Color>,
+        width: i32,
+        style: BorderStyle,
+    },
+    Brush {
+        color: Option<Color>,
+        pattern: ShadingPattern,
+    },
+}
+
+#[derive(Debug, Copy, Clone)]
+struct EmfDrawingState {
+    stroke_color: Option<Color>,
+    stroke_width: f32,
+    stroke_style: BorderStyle,
+    fill_color: Option<Color>,
+    fill_pattern: ShadingPattern,
+    fill_rule: StaticImageVectorFillRule,
+}
+
+impl Default for EmfDrawingState {
+    fn default() -> Self {
+        Self {
+            stroke_color: Some(Color::default()),
+            stroke_width: 1.0,
+            stroke_style: BorderStyle::Single,
+            fill_color: None,
+            fill_pattern: ShadingPattern::None,
+            fill_rule: StaticImageVectorFillRule::Alternate,
+        }
+    }
+}
+
 fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
     if bytes.len() < 4 || bytes[0] != 0xff || bytes[1] != 0xd8 {
         return None;
@@ -19808,6 +19844,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_MOVETOEX: u32 = 27;
     const EMR_POLYGON: u32 = 3;
     const EMR_POLYLINE: u32 = 4;
+    const EMR_SELECTOBJECT: u32 = 37;
+    const EMR_CREATEPEN: u32 = 38;
+    const EMR_CREATEBRUSHINDIRECT: u32 = 39;
+    const EMR_DELETEOBJECT: u32 = 40;
     const EMR_RECTANGLE: u32 = 43;
     const EMR_ELLIPSE: u32 = 42;
     const EMR_ROUNDRECT: u32 = 44;
@@ -19826,6 +19866,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     let mut skipped_record_count = 0usize;
     let mut reached_eof = false;
     let mut current_position = normalized_emf_point(0, 0, &header);
+    let mut objects: Vec<Option<EmfObject>> = Vec::new();
+    let mut state = EmfDrawingState::default();
 
     while pos + 8 <= header.declared_size {
         if header
@@ -19857,6 +19899,32 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_MOVETOEX => {
                 current_position = parse_emf_point_record(data, &header)?;
             }
+            EMR_CREATEPEN => {
+                let (handle, object) = parse_emf_pen_object(data)?;
+                store_emf_object(&mut objects, handle, object)?;
+            }
+            EMR_CREATEBRUSHINDIRECT => {
+                let (handle, object) = parse_emf_brush_object(data)?;
+                store_emf_object(&mut objects, handle, object)?;
+            }
+            EMR_DELETEOBJECT => {
+                let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
+                if let Some(slot) = objects.get_mut(handle) {
+                    *slot = None;
+                }
+            }
+            EMR_SELECTOBJECT => {
+                let handle = read_le_u32(data, 0)?;
+                if let Some(object) = emf_stock_object(handle).or_else(|| {
+                    usize::try_from(handle)
+                        .ok()
+                        .and_then(|idx| objects.get(idx).copied().flatten())
+                }) {
+                    apply_emf_object(&mut state, object, &header);
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
             EMR_LINETO => {
                 let endpoint = parse_emf_point_record(data, &header)?;
                 if segment_is_visible(current_position, endpoint) {
@@ -19868,9 +19936,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         y1: current_position.1,
                         x2: endpoint.0,
                         y2: endpoint.1,
-                        stroke_color: Some(Color::default()),
-                        stroke_width: 1.0,
-                        stroke_style: BorderStyle::Single,
+                        stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
                     });
                 }
                 current_position = endpoint;
@@ -19883,30 +19951,28 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 };
                 if bounds_is_visible((left, top, right, bottom)) {
-                    let stroke_color = Some(Color::default());
-                    let fill_color = None;
                     let command = match record_type {
                         EMR_RECTANGLE => StaticImageVectorCommand::Rectangle {
                             left,
                             top,
                             right,
                             bottom,
-                            stroke_color,
-                            stroke_width: 1.0,
-                            stroke_style: BorderStyle::Single,
-                            fill_pattern: ShadingPattern::None,
-                            fill_color,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                            fill_pattern: state.fill_pattern,
+                            fill_color: state.fill_color,
                         },
                         EMR_ELLIPSE => StaticImageVectorCommand::Ellipse {
                             left,
                             top,
                             right,
                             bottom,
-                            stroke_color,
-                            stroke_width: 1.0,
-                            stroke_style: BorderStyle::Single,
-                            fill_pattern: ShadingPattern::None,
-                            fill_color,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                            fill_pattern: state.fill_pattern,
+                            fill_color: state.fill_color,
                         },
                         EMR_ROUNDRECT => {
                             let (corner_width, corner_height) =
@@ -19918,11 +19984,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                                 bottom,
                                 corner_width,
                                 corner_height,
-                                stroke_color,
-                                stroke_width: 1.0,
-                                stroke_style: BorderStyle::Single,
-                                fill_pattern: ShadingPattern::None,
-                                fill_color,
+                                stroke_color: state.stroke_color,
+                                stroke_width: state.stroke_width,
+                                stroke_style: state.stroke_style,
+                                fill_pattern: state.fill_pattern,
+                                fill_color: state.fill_color,
                             }
                         }
                         _ => return None,
@@ -19941,20 +20007,20 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     if points.len() >= 3 {
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
-                            stroke_color: Some(Color::default()),
-                            stroke_width: 1.0,
-                            stroke_style: BorderStyle::Single,
-                            fill_rule: StaticImageVectorFillRule::Alternate,
-                            fill_pattern: ShadingPattern::None,
-                            fill_color: None,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                            fill_rule: state.fill_rule,
+                            fill_pattern: state.fill_pattern,
+                            fill_color: state.fill_color,
                         });
                     }
                 } else if points.len() >= 2 {
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
-                        stroke_color: Some(Color::default()),
-                        stroke_width: 1.0,
-                        stroke_style: BorderStyle::Single,
+                        stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
                     });
                 }
             }
@@ -19992,6 +20058,125 @@ fn parse_emf_record_rect(data: &[u8], header: &ParsedEmfHeader) -> Option<(f32, 
     let right = read_le_i32(data, 8)?;
     let bottom = read_le_i32(data, 12)?;
     normalized_emf_rect(left, top, right, bottom, header)
+}
+
+fn parse_emf_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
+    if data.len() < 20 {
+        return None;
+    }
+    let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
+    let style = read_le_u32(data, 4)?;
+    let width = i32::try_from(read_le_i32(data, 8)?.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let color = color_from_colorref(data, 16)?;
+    Some((
+        handle,
+        EmfObject::Pen {
+            color: if (style & 0x000f) == 5 {
+                None
+            } else {
+                Some(color)
+            },
+            width,
+            style: wmf_pen_border_style((style & 0xffff) as u16),
+        },
+    ))
+}
+
+fn parse_emf_brush_object(data: &[u8]) -> Option<(usize, EmfObject)> {
+    if data.len() < 16 {
+        return None;
+    }
+    let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
+    let style = read_le_u32(data, 4)?;
+    let color = color_from_colorref(data, 8)?;
+    let pattern = if style == 2 {
+        wmf_hatch_shading_pattern((read_le_u32(data, 12)? & 0xffff) as u16)
+    } else {
+        ShadingPattern::None
+    };
+    Some((
+        handle,
+        EmfObject::Brush {
+            color: if style == 1 { None } else { Some(color) },
+            pattern,
+        },
+    ))
+}
+
+fn store_emf_object(
+    objects: &mut Vec<Option<EmfObject>>,
+    handle: usize,
+    object: EmfObject,
+) -> Option<()> {
+    if handle >= MAX_PASSIVE_WMF_OBJECTS {
+        return None;
+    }
+    let required_len = handle.checked_add(1)?;
+    if objects.len() < required_len {
+        objects.resize(required_len, None);
+    }
+    objects[handle] = Some(object);
+    Some(())
+}
+
+fn apply_emf_object(state: &mut EmfDrawingState, object: EmfObject, header: &ParsedEmfHeader) {
+    match object {
+        EmfObject::Pen {
+            color,
+            width,
+            style,
+        } => {
+            state.stroke_color = color;
+            state.stroke_width =
+                width.clamp(1, i32::try_from(header.width_px.max(1)).unwrap_or(i32::MAX)) as f32;
+            state.stroke_style = style;
+        }
+        EmfObject::Brush { color, pattern } => {
+            state.fill_color = color;
+            state.fill_pattern = pattern;
+        }
+    }
+}
+
+fn emf_stock_object(handle: u32) -> Option<EmfObject> {
+    match handle {
+        0x8000_0000 => Some(EmfObject::Brush {
+            color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255,
+            }),
+            pattern: ShadingPattern::None,
+        }),
+        0x8000_0004 => Some(EmfObject::Brush {
+            color: Some(Color::default()),
+            pattern: ShadingPattern::None,
+        }),
+        0x8000_0005 => Some(EmfObject::Brush {
+            color: None,
+            pattern: ShadingPattern::None,
+        }),
+        0x8000_0006 => Some(EmfObject::Pen {
+            color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255,
+            }),
+            width: 1,
+            style: BorderStyle::Single,
+        }),
+        0x8000_0007 => Some(EmfObject::Pen {
+            color: Some(Color::default()),
+            width: 1,
+            style: BorderStyle::Single,
+        }),
+        0x8000_0008 => Some(EmfObject::Pen {
+            color: None,
+            width: 1,
+            style: BorderStyle::Single,
+        }),
+        _ => None,
+    }
 }
 
 fn parse_emf_poly_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f32, f32)>> {
@@ -34169,6 +34354,119 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_pen_and_brush_objects_style_passive_vector_commands() {
+        let records = [
+            emf_create_pen_record(
+                2,
+                1,
+                3,
+                Color {
+                    red: 20,
+                    green: 40,
+                    blue: 60,
+                },
+            ),
+            emf_select_object_record(2),
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 220,
+                    green: 180,
+                    blue: 120,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_rect_record(43, 10, 10, 70, 40),
+            emf_point_record(27, 10, 50),
+            emf_point_record(54, 70, 70),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![
+                StaticImageVectorCommand::Rectangle {
+                    left: 10.0,
+                    top: 10.0,
+                    right: 70.0,
+                    bottom: 40.0,
+                    stroke_color: Some(Color {
+                        red: 20,
+                        green: 40,
+                        blue: 60
+                    }),
+                    stroke_width: 3.0,
+                    stroke_style: BorderStyle::Dashed,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: Some(Color {
+                        red: 220,
+                        green: 180,
+                        blue: 120
+                    }),
+                },
+                StaticImageVectorCommand::Line {
+                    x1: 10.0,
+                    y1: 50.0,
+                    x2: 70.0,
+                    y2: 70.0,
+                    stroke_color: Some(Color {
+                        red: 20,
+                        green: 40,
+                        blue: 60
+                    }),
+                    stroke_width: 3.0,
+                    stroke_style: BorderStyle::Dashed,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn emf_stock_null_objects_suppress_passive_stroke_and_fill() {
+        let records = [
+            emf_select_object_record(0x8000_0005),
+            emf_select_object_record(0x8000_0008),
+            emf_rect_record(43, 10, 10, 70, 40),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(
+            image.vector_commands,
+            vec![StaticImageVectorCommand::Rectangle {
+                left: 10.0,
+                top: 10.0,
+                right: 70.0,
+                bottom: 40.0,
+                stroke_color: None,
+                stroke_width: 1.0,
+                stroke_style: BorderStyle::Single,
+                fill_pattern: ShadingPattern::None,
+                fill_color: None,
+            }]
+        );
+    }
+
+    #[test]
     fn emf_polyline_and_polygon_records_become_passive_vector_commands() {
         let records = [
             emf_poly_record(4, &[(0, 0), (40, 20), (200, 100)]),
@@ -34547,6 +34845,44 @@ fn emf_roundrect_record(
     write_test_le_i32(&mut record, 20, bottom);
     write_test_le_i32(&mut record, 24, corner_width);
     write_test_le_i32(&mut record, 28, corner_height);
+    record
+}
+
+#[cfg(test)]
+fn emf_create_pen_record(handle: u32, style: u32, width: i32, color: Color) -> Vec<u8> {
+    let mut record = vec![0; 28];
+    write_test_le_u32(&mut record, 0, 38);
+    write_test_le_u32(&mut record, 4, 28);
+    write_test_le_u32(&mut record, 8, handle);
+    write_test_le_u32(&mut record, 12, style);
+    write_test_le_i32(&mut record, 16, width);
+    write_test_le_i32(&mut record, 20, 0);
+    record[24] = color.red;
+    record[25] = color.green;
+    record[26] = color.blue;
+    record
+}
+
+#[cfg(test)]
+fn emf_create_brush_record(handle: u32, style: u32, color: Color, hatch: u32) -> Vec<u8> {
+    let mut record = vec![0; 24];
+    write_test_le_u32(&mut record, 0, 39);
+    write_test_le_u32(&mut record, 4, 24);
+    write_test_le_u32(&mut record, 8, handle);
+    write_test_le_u32(&mut record, 12, style);
+    record[16] = color.red;
+    record[17] = color.green;
+    record[18] = color.blue;
+    write_test_le_u32(&mut record, 20, hatch);
+    record
+}
+
+#[cfg(test)]
+fn emf_select_object_record(handle: u32) -> Vec<u8> {
+    let mut record = vec![0; 12];
+    write_test_le_u32(&mut record, 0, 37);
+    write_test_le_u32(&mut record, 4, 12);
+    write_test_le_u32(&mut record, 8, handle);
     record
 }
 

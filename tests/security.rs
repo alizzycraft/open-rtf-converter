@@ -7,7 +7,7 @@ use lopdf::Document as PdfDocument;
 use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, DOCUMENT_CHARS_MARKER,
+    Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, ENDNOTE_REFERENCE_MARKER,
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
     FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, PAGE_NUMBER_MARKER,
@@ -30443,6 +30443,152 @@ fn emf_roundrect_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_pen_and_brush_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_create_pen_record(
+            2,
+            1,
+            3,
+            Color {
+                red: 20,
+                green: 40,
+                blue: 60,
+            },
+        ),
+        emf_select_object_record(2),
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 220,
+                green: 180,
+                blue: 120,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_rect_record(43, 10, 10, 70, 40),
+        emf_point_record(27, 10, 50),
+        emf_point_record(54, 70, 70),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive styled EMF vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            stroke_color: Some(Color {
+                red: 20,
+                green: 40,
+                blue: 60
+            }),
+            stroke_width: 3.0,
+            stroke_style: BorderStyle::Dashed,
+            fill_pattern: ShadingPattern::None,
+            fill_color: Some(Color {
+                red: 220,
+                green: 180,
+                blue: 120
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Line {
+            stroke_color: Some(Color {
+                red: 20,
+                green: 40,
+                blue: 60
+            }),
+            stroke_width: 3.0,
+            stroke_style: BorderStyle::Dashed,
+            ..
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF styled object payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "RG"),
+        "EMF pen color should render as passive PDF stroke color"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "rg"),
+        "EMF brush color should render as passive PDF fill color"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s" | "B" | "B*")),
+        "styled EMF vector preview should render passive painted paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF styled object payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_polyline_and_polygon_records_render_passively_without_payload_leakage() {
     let records = [
         emf_poly_record(4, &[(0, 0), (40, 20), (200, 100)]),
@@ -41723,6 +41869,41 @@ fn emf_roundrect_record(
     write_test_le_i32(&mut record, 20, bottom);
     write_test_le_i32(&mut record, 24, corner_width);
     write_test_le_i32(&mut record, 28, corner_height);
+    record
+}
+
+fn emf_create_pen_record(handle: u32, style: u32, width: i32, color: Color) -> Vec<u8> {
+    let mut record = vec![0; 28];
+    write_test_le_u32(&mut record, 0, 38);
+    write_test_le_u32(&mut record, 4, 28);
+    write_test_le_u32(&mut record, 8, handle);
+    write_test_le_u32(&mut record, 12, style);
+    write_test_le_i32(&mut record, 16, width);
+    write_test_le_i32(&mut record, 20, 0);
+    record[24] = color.red;
+    record[25] = color.green;
+    record[26] = color.blue;
+    record
+}
+
+fn emf_create_brush_record(handle: u32, style: u32, color: Color, hatch: u32) -> Vec<u8> {
+    let mut record = vec![0; 24];
+    write_test_le_u32(&mut record, 0, 39);
+    write_test_le_u32(&mut record, 4, 24);
+    write_test_le_u32(&mut record, 8, handle);
+    write_test_le_u32(&mut record, 12, style);
+    record[16] = color.red;
+    record[17] = color.green;
+    record[18] = color.blue;
+    write_test_le_u32(&mut record, 20, hatch);
+    record
+}
+
+fn emf_select_object_record(handle: u32) -> Vec<u8> {
+    let mut record = vec![0; 12];
+    write_test_le_u32(&mut record, 0, 37);
+    write_test_le_u32(&mut record, 4, 12);
+    write_test_le_u32(&mut record, 8, handle);
     record
 }
 
