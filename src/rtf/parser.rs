@@ -19996,6 +19996,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_CREATEPEN: u32 = 38;
     const EMR_CREATEBRUSHINDIRECT: u32 = 39;
     const EMR_DELETEOBJECT: u32 = 40;
+    const EMR_ANGLEARC: u32 = 41;
     const EMR_ARC: u32 = 45;
     const EMR_CHORD: u32 = 46;
     const EMR_PIE: u32 = 47;
@@ -20317,6 +20318,25 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     };
                     commands.push(command);
                 }
+            }
+            EMR_ANGLEARC => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let (points, end_position) =
+                    parse_emf_anglearc_record(data, &header, &coordinates, current_position)?;
+                if points
+                    .windows(2)
+                    .any(|pair| segment_is_visible(pair[0], pair[1]))
+                {
+                    commands.push(StaticImageVectorCommand::Polyline {
+                        points,
+                        stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
+                    });
+                }
+                current_position = end_position;
             }
             EMR_ARC | EMR_ARCTO | EMR_CHORD | EMR_PIE => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -20722,6 +20742,68 @@ fn parse_emf_record_rect(
     let right = read_le_i32(data, 8)?;
     let bottom = read_le_i32(data, 12)?;
     normalized_emf_rect(left, top, right, bottom, header, coordinates)
+}
+
+fn parse_emf_anglearc_record(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+    current_position: (i32, i32),
+) -> Option<(Vec<(f32, f32)>, (i32, i32))> {
+    if data.len() < 20 {
+        return None;
+    }
+    let center = (read_le_i32(data, 0)?, read_le_i32(data, 4)?);
+    let radius = read_le_u32(data, 8)?;
+    let start_angle = read_le_f32(data, 12)?;
+    let sweep_angle = read_le_f32(data, 16)?;
+    let raw_arc_points = sample_emf_anglearc_points(center, radius, start_angle, sweep_angle)?;
+    let end_position = *raw_arc_points.last()?;
+    let mut points = Vec::with_capacity(raw_arc_points.len().checked_add(1)?);
+    points.push(normalized_emf_point(
+        current_position.0,
+        current_position.1,
+        header,
+        coordinates,
+    ));
+    points.extend(
+        raw_arc_points
+            .into_iter()
+            .map(|(x, y)| normalized_emf_point(x, y, header, coordinates)),
+    );
+    Some((points, end_position))
+}
+
+fn sample_emf_anglearc_points(
+    center: (i32, i32),
+    radius: u32,
+    start_angle: f32,
+    sweep_angle: f32,
+) -> Option<Vec<(i32, i32)>> {
+    if radius == 0 || !start_angle.is_finite() || !sweep_angle.is_finite() {
+        return None;
+    }
+    let sweep_angle = sweep_angle.clamp(-360.0, 360.0);
+    if sweep_angle.abs() < f32::EPSILON {
+        return None;
+    }
+    let segments = ((f64::from(sweep_angle.abs()) / 360.0) * MAX_PASSIVE_WMF_ARC_SEGMENTS as f64)
+        .ceil()
+        .clamp(4.0, MAX_PASSIVE_WMF_ARC_SEGMENTS as f64) as usize;
+    let mut points = Vec::with_capacity(segments.checked_add(1)?);
+    let center_x = f64::from(center.0);
+    let center_y = f64::from(center.1);
+    let radius = f64::from(radius);
+    let start = f64::from(start_angle).to_radians();
+    let sweep = f64::from(sweep_angle).to_radians();
+    for idx in 0..=segments {
+        let ratio = idx as f64 / segments as f64;
+        let angle = start + (sweep * ratio);
+        let x = center_x + (radius * angle.cos());
+        let y = center_y - (radius * angle.sin());
+        points.push((f64_to_i32_rounded(x)?, f64_to_i32_rounded(y)?));
+    }
+    Some(points)
 }
 
 fn normalized_emf_rect_center(
@@ -22546,6 +22628,11 @@ fn read_le_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 fn read_le_i32(bytes: &[u8], offset: usize) -> Option<i32> {
     let end = offset.checked_add(4)?;
     Some(i32::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
+}
+
+fn read_le_f32(bytes: &[u8], offset: usize) -> Option<f32> {
+    let end = offset.checked_add(4)?;
+    Some(f32::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
 }
 
 fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
@@ -36872,6 +36959,64 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_anglearc_records_become_passive_polyline_commands() {
+        let records = [
+            emf_point_record(27, 10, 40),
+            emf_anglearc_record(60, 40, 40, 0.0, 90.0),
+            emf_point_record(54, 60, 70),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Polyline { points, .. }
+                if points.first() == Some(&(10.0, 40.0))
+                    && points.get(1) == Some(&(100.0, 40.0))
+                    && points.last() == Some(&(60.0, 0.0))
+                    && points.len() <= MAX_PASSIVE_WMF_POINTS_PER_RECORD
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Line {
+                x1: 60.0,
+                y1: 0.0,
+                x2: 60.0,
+                y2: 70.0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_anglearc_records_with_zero_radius_become_passive_placeholders() {
+        let records = [emf_anglearc_record(60, 40, 0, 0.0, 90.0)];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_coordinate_records_with_zero_extent_become_passive_placeholders() {
         let records = [
             emf_size_record(9, 0, 160),
@@ -37637,6 +37782,25 @@ fn emf_polydraw16_record(record_type: u32, points: &[(i16, i16)], types: &[u8]) 
 }
 
 #[cfg(test)]
+fn emf_anglearc_record(
+    center_x: i32,
+    center_y: i32,
+    radius: u32,
+    start_angle: f32,
+    sweep_angle: f32,
+) -> Vec<u8> {
+    let mut record = vec![0; 28];
+    write_test_le_u32(&mut record, 0, 41);
+    write_test_le_u32(&mut record, 4, 28);
+    write_test_le_i32(&mut record, 8, center_x);
+    write_test_le_i32(&mut record, 12, center_y);
+    write_test_le_u32(&mut record, 16, radius);
+    write_test_le_f32(&mut record, 20, start_angle);
+    write_test_le_f32(&mut record, 24, sweep_angle);
+    record
+}
+
+#[cfg(test)]
 fn emf_unknown_record(record_type: u32) -> Vec<u8> {
     let mut record = vec![0; 8];
     write_test_le_u32(&mut record, 0, record_type);
@@ -37665,6 +37829,11 @@ fn write_test_le_i32(bytes: &mut [u8], offset: usize, value: i32) {
 #[cfg(test)]
 fn write_test_le_i16(bytes: &mut [u8], offset: usize, value: i16) {
     bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+}
+
+#[cfg(test)]
+fn write_test_le_f32(bytes: &mut [u8], offset: usize, value: f32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
 #[cfg(test)]
