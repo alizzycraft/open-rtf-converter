@@ -81,6 +81,40 @@
       "known_gaps": [
         "Word-exported reference should confirm the fallback result's exact visual position once available."
       ]
+    },
+    {
+      "id": "png-alpha-passive-smask",
+      "input": "fixtures/png-alpha.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before alpha image.",
+        "After alpha image."
+      ],
+      "intentional_security_differences": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact alpha compositing against non-white page content once available."
+      ]
+    },
+    {
+      "id": "png-trns-passive-smask",
+      "input": "fixtures/png-trns.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before indexed transparency image.",
+        "After indexed transparency image."
+      ],
+      "intentional_security_differences": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact indexed transparency compositing against non-white page content once available."
+      ]
     }
   ]
 }

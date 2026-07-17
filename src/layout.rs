@@ -5,13 +5,16 @@ use crate::model::StaticImageWrapSide;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
-    DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontDef, FontFamilyHint, FontPitch,
-    FootnotePlacement, ImageFormat, LineNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
-    PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
-    ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
-    StaticImageVectorCommand, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table,
-    TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
+    DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END,
+    EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
+    FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
+    NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
+    PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand, StaticShape,
+    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
+    Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
     TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
     TableRowWrapMargins, UnderlineStyle,
 };
@@ -39,9 +42,19 @@ pub struct LayoutPage {
     pub width: f32,
     pub height: f32,
     pub items: Vec<LayoutItem>,
+    flow_exclusions: Vec<FlowExclusion>,
     display_page_number: String,
     section_number: usize,
     geometry: PageGeometry,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct FlowExclusion {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    wrap_side: StaticImageWrapSide,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +233,7 @@ struct PageGeometry {
     section_number: usize,
     title_page: bool,
     header_footer_index: usize,
+    physical_page_number: usize,
 }
 
 impl PageGeometry {
@@ -289,6 +303,7 @@ impl PageGeometry {
             section_number: 1,
             title_page: settings.title_page,
             header_footer_index,
+            physical_page_number,
         }
     }
 
@@ -346,6 +361,7 @@ impl PageGeometry {
             column_lefts: columns.lefts,
             column_widths: columns.widths,
             column_gaps: columns.gaps,
+            physical_page_number,
             ..self
         }
     }
@@ -528,6 +544,7 @@ fn new_layout_page(geometry: PageGeometry, physical_page_number: usize) -> Layou
         width: geometry.width,
         height: geometry.height,
         items: Vec::new(),
+        flow_exclusions: Vec::new(),
         display_page_number: geometry.numbering.display_page_number(physical_page_number),
         section_number: geometry.section_number,
         geometry,
@@ -725,11 +742,25 @@ impl LayoutEngine {
         let mut current_column = 0usize;
         let mut section_number = 1usize;
         let mut line_number_state = LineNumberState::new(&document.page);
-        let mut rendered_endnotes = vec![false; document.endnotes.len()];
+        let mut rendered_footnote_pages = vec![None; document.footnotes.len()];
+        let mut rendered_endnote_pages = vec![None; document.endnotes.len()];
 
         for (block_idx, block) in document.blocks.iter().enumerate() {
             match block {
                 Block::PageBreak => {
+                    layout_footnotes_until_block(
+                        &mut pages,
+                        &mut cursor_y,
+                        document,
+                        &mut rendered_footnote_pages,
+                        block_idx,
+                        geometry.content_width,
+                        geometry.margin_left,
+                        geometry.margin_bottom,
+                        &mut geometry,
+                        document_stats,
+                        font_provider,
+                    );
                     let previous_page_count = pages.len();
                     start_new_page(
                         &mut pages,
@@ -745,11 +776,24 @@ impl LayoutEngine {
                     );
                 }
                 Block::ContinuousSectionBreak => {
+                    layout_footnotes_for_section(
+                        &mut pages,
+                        &mut cursor_y,
+                        document,
+                        &mut rendered_footnote_pages,
+                        section_number,
+                        geometry.content_width,
+                        geometry.margin_left,
+                        geometry.margin_bottom,
+                        &mut geometry,
+                        document_stats,
+                        font_provider,
+                    );
                     layout_endnotes_for_section(
                         &mut pages,
                         &mut cursor_y,
                         document,
-                        &mut rendered_endnotes,
+                        &mut rendered_endnote_pages,
                         section_number,
                         geometry.content_width,
                         geometry.margin_left,
@@ -772,11 +816,24 @@ impl LayoutEngine {
                     }
                 }
                 Block::SectionBreak => {
+                    layout_footnotes_for_section(
+                        &mut pages,
+                        &mut cursor_y,
+                        document,
+                        &mut rendered_footnote_pages,
+                        section_number,
+                        geometry.content_width,
+                        geometry.margin_left,
+                        geometry.margin_bottom,
+                        &mut geometry,
+                        document_stats,
+                        font_provider,
+                    );
                     layout_endnotes_for_section(
                         &mut pages,
                         &mut cursor_y,
                         document,
-                        &mut rendered_endnotes,
+                        &mut rendered_endnote_pages,
                         section_number,
                         geometry.content_width,
                         geometry.margin_left,
@@ -801,11 +858,24 @@ impl LayoutEngine {
                     );
                 }
                 Block::EvenPageSectionBreak => {
+                    layout_footnotes_for_section(
+                        &mut pages,
+                        &mut cursor_y,
+                        document,
+                        &mut rendered_footnote_pages,
+                        section_number,
+                        geometry.content_width,
+                        geometry.margin_left,
+                        geometry.margin_bottom,
+                        &mut geometry,
+                        document_stats,
+                        font_provider,
+                    );
                     layout_endnotes_for_section(
                         &mut pages,
                         &mut cursor_y,
                         document,
-                        &mut rendered_endnotes,
+                        &mut rendered_endnote_pages,
                         section_number,
                         geometry.content_width,
                         geometry.margin_left,
@@ -831,11 +901,24 @@ impl LayoutEngine {
                     );
                 }
                 Block::OddPageSectionBreak => {
+                    layout_footnotes_for_section(
+                        &mut pages,
+                        &mut cursor_y,
+                        document,
+                        &mut rendered_footnote_pages,
+                        section_number,
+                        geometry.content_width,
+                        geometry.margin_left,
+                        geometry.margin_bottom,
+                        &mut geometry,
+                        document_stats,
+                        font_provider,
+                    );
                     layout_endnotes_for_section(
                         &mut pages,
                         &mut cursor_y,
                         document,
-                        &mut rendered_endnotes,
+                        &mut rendered_endnote_pages,
                         section_number,
                         geometry.content_width,
                         geometry.margin_left,
@@ -1010,7 +1093,7 @@ impl LayoutEngine {
                             pages.len(),
                         );
                     }
-                    layout_paragraph(
+                    layout_paragraph_with_auto_footnotes(
                         &mut pages,
                         &mut cursor_y,
                         paragraph,
@@ -1026,24 +1109,40 @@ impl LayoutEngine {
                         Some(&mut line_number_state),
                         &markers,
                         font_provider,
+                        Some(AutoFootnoteFlush {
+                            rendered_footnote_pages: &mut rendered_footnote_pages,
+                            block_index: block_idx,
+                            rendered_footnote_index_on_page: None,
+                            reserved_footnote_margin_bottom_on_page: None,
+                        }),
+                        None,
+                    );
+                    layout_footnotes_until_block(
+                        &mut pages,
+                        &mut cursor_y,
+                        document,
+                        &mut rendered_footnote_pages,
+                        block_idx,
+                        geometry.content_width,
+                        geometry.margin_left,
+                        geometry.margin_bottom,
+                        &mut geometry,
+                        document_stats,
+                        font_provider,
                     );
                 }
             }
         }
 
-        layout_footnotes(
+        layout_remaining_footnotes(
             &mut pages,
             &mut cursor_y,
-            &document.footnotes,
-            document.footnote_number_start,
-            document.footnote_number_format,
-            0,
-            document.footnote_placement,
+            document,
+            &mut rendered_footnote_pages,
             geometry.content_width,
             geometry.margin_left,
             geometry.margin_bottom,
             &mut geometry,
-            document,
             document_stats,
             font_provider,
         );
@@ -1051,7 +1150,7 @@ impl LayoutEngine {
             &mut pages,
             &mut cursor_y,
             document,
-            &mut rendered_endnotes,
+            &mut rendered_endnote_pages,
             geometry.content_width,
             geometry.margin_left,
             geometry.margin_bottom,
@@ -1063,7 +1162,7 @@ impl LayoutEngine {
             &mut pages,
             &mut cursor_y,
             document,
-            &mut rendered_endnotes,
+            &mut rendered_endnote_pages,
             EndnotePlacement::AfterBody,
             false,
             geometry.content_width,
@@ -1077,7 +1176,7 @@ impl LayoutEngine {
             &mut pages,
             &mut cursor_y,
             document,
-            &mut rendered_endnotes,
+            &mut rendered_endnote_pages,
             EndnotePlacement::EndOfDocument,
             true,
             geometry.content_width,
@@ -1114,6 +1213,13 @@ impl LayoutEngine {
             document_stats,
             font_provider,
         );
+        resolve_footnote_reference_markers(&mut pages, document, font_provider);
+        resolve_endnote_reference_markers(
+            &mut pages,
+            document,
+            &rendered_endnote_pages,
+            font_provider,
+        );
         resolve_bookmark_page_ref_markers(&mut pages, document, font_provider);
         resolve_section_page_markers(&mut pages);
         resolve_total_page_markers(&mut pages);
@@ -1138,38 +1244,251 @@ impl LayoutEngine {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn layout_footnotes(
+fn layout_remaining_footnotes(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
-    footnotes: &[Paragraph],
-    number_start: i32,
-    number_format: PageNumberFormat,
-    number_offset: usize,
-    placement: FootnotePlacement,
+    document: &Document,
+    rendered_footnote_pages: &mut [Option<usize>],
+    content_width: f32,
+    margin_left: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) {
+    let entries = document
+        .footnotes
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| {
+            rendered_footnote_pages
+                .get(*idx)
+                .is_none_or(Option::is_none)
+        })
+        .map(|(idx, note)| (idx, note.clone()))
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return;
+    }
+
+    layout_footnote_entries(
+        pages,
+        cursor_y,
+        &entries,
+        document,
+        content_width,
+        margin_left,
+        margin_bottom,
+        geometry,
+        document_stats,
+        font_provider,
+        rendered_footnote_pages,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_footnotes_for_section(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    document: &Document,
+    rendered_footnote_pages: &mut [Option<usize>],
+    section_number: usize,
+    content_width: f32,
+    margin_left: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) {
+    let entries = document
+        .footnotes
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| {
+            rendered_footnote_pages
+                .get(*idx)
+                .is_none_or(Option::is_none)
+        })
+        .filter(|(idx, _)| {
+            document
+                .footnote_section_indices
+                .get(*idx)
+                .copied()
+                .unwrap_or(1)
+                == section_number
+        })
+        .map(|(idx, note)| (idx, note.clone()))
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return;
+    }
+
+    layout_footnote_entries(
+        pages,
+        cursor_y,
+        &entries,
+        document,
+        content_width,
+        margin_left,
+        margin_bottom,
+        geometry,
+        document_stats,
+        font_provider,
+        rendered_footnote_pages,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_footnotes_until_block(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    document: &Document,
+    rendered_footnote_pages: &mut [Option<usize>],
+    block_index: usize,
+    content_width: f32,
+    margin_left: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) {
+    let entries = footnote_entries_until_block(document, rendered_footnote_pages, block_index);
+    if entries.is_empty() {
+        return;
+    }
+
+    layout_footnote_entries(
+        pages,
+        cursor_y,
+        &entries,
+        document,
+        content_width,
+        margin_left,
+        margin_bottom,
+        geometry,
+        document_stats,
+        font_provider,
+        rendered_footnote_pages,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_footnotes_until_index(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    document: &Document,
+    rendered_footnote_pages: &mut [Option<usize>],
+    max_note_index: usize,
+    content_width: f32,
+    margin_left: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) {
+    let entries = document
+        .footnotes
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| *idx <= max_note_index)
+        .filter(|(idx, _)| {
+            rendered_footnote_pages
+                .get(*idx)
+                .is_none_or(Option::is_none)
+        })
+        .map(|(idx, note)| (idx, note.clone()))
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return;
+    }
+
+    layout_footnote_entries(
+        pages,
+        cursor_y,
+        &entries,
+        document,
+        content_width,
+        margin_left,
+        margin_bottom,
+        geometry,
+        document_stats,
+        font_provider,
+        rendered_footnote_pages,
+    );
+}
+
+fn footnote_entries_until_block(
+    document: &Document,
+    rendered_footnote_pages: &[Option<usize>],
+    block_index: usize,
+) -> Vec<(usize, Paragraph)> {
+    document
+        .footnotes
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| {
+            rendered_footnote_pages
+                .get(*idx)
+                .is_none_or(Option::is_none)
+        })
+        .filter(|(idx, _)| {
+            document
+                .footnote_block_indices
+                .get(*idx)
+                .copied()
+                .unwrap_or(usize::MAX)
+                <= block_index
+        })
+        .map(|(idx, note)| (idx, note.clone()))
+        .collect()
+}
+
+fn footnote_entries_until_index(
+    document: &Document,
+    rendered_footnote_pages: &[Option<usize>],
+    max_note_index: usize,
+) -> Vec<(usize, Paragraph)> {
+    document
+        .footnotes
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| *idx <= max_note_index)
+        .filter(|(idx, _)| {
+            rendered_footnote_pages
+                .get(*idx)
+                .is_none_or(Option::is_none)
+        })
+        .map(|(idx, note)| (idx, note.clone()))
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_footnote_entries(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    entries: &[(usize, Paragraph)],
+    document: &Document,
     content_width: f32,
     mut margin_left: f32,
     margin_bottom: f32,
     geometry: &mut PageGeometry,
-    document: &Document,
     document_stats: DocumentStats,
     font_provider: Option<&FontProvider>,
+    rendered_footnote_pages: &mut [Option<usize>],
 ) {
-    if footnotes.is_empty() {
+    if entries.is_empty() {
         return;
     }
 
-    if placement == FootnotePlacement::BottomOfPage {
-        position_cursor_for_bottom_notes(
+    if document.footnote_placement == FootnotePlacement::BottomOfPage {
+        position_cursor_for_bottom_note_entries(
             pages,
             cursor_y,
-            footnotes,
-            number_start,
-            number_format,
-            number_offset,
+            entries,
+            document,
             content_width,
             margin_bottom,
             geometry,
-            document,
             document_stats,
             font_provider,
         );
@@ -1181,6 +1500,145 @@ fn layout_footnotes(
         start_new_page(pages, cursor_y, geometry, &mut column);
         margin_left = geometry.body_left(0);
     }
+
+    push_note_separator(
+        pages,
+        cursor_y,
+        document.footnote_separator.as_ref(),
+        margin_left,
+        content_width,
+        margin_bottom,
+        geometry,
+        document,
+        document_stats,
+        font_provider,
+    );
+
+    for (idx, footnote) in entries {
+        let note_page = pages.len().max(1);
+        let sequence =
+            footnote_sequence_for_rendered_page(document, *idx, rendered_footnote_pages, note_page);
+        let paragraph = note_display_paragraph(
+            footnote,
+            document.footnote_number_start,
+            sequence,
+            document.footnote_number_format,
+        );
+        let markers = current_marker_context(pages, document_stats);
+        layout_footnote_paragraph(
+            pages,
+            cursor_y,
+            &paragraph,
+            content_width,
+            margin_bottom,
+            geometry,
+            document,
+            document_stats,
+            &markers,
+            font_provider,
+        );
+        if let Some(rendered_page) = rendered_footnote_pages.get_mut(*idx) {
+            *rendered_page = Some(note_page);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_footnote_paragraph(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    paragraph: &Paragraph,
+    content_width: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document: &Document,
+    document_stats: DocumentStats,
+    markers: &MarkerContext,
+    font_provider: Option<&FontProvider>,
+) {
+    let mut footnote_column = 0;
+    let mut continuation_hook =
+        |pages: &mut Vec<LayoutPage>, cursor_y: &mut f32, geometry: &PageGeometry| {
+            let mut separator_geometry = geometry.clone();
+            push_note_separator(
+                pages,
+                cursor_y,
+                document.footnote_continuation_separator.as_ref(),
+                geometry.body_left(0),
+                content_width,
+                margin_bottom,
+                &mut separator_geometry,
+                document,
+                document_stats,
+                font_provider,
+            );
+        };
+    layout_paragraph_with_auto_footnotes(
+        pages,
+        cursor_y,
+        paragraph,
+        false,
+        false,
+        false,
+        content_width,
+        margin_bottom,
+        geometry,
+        &mut footnote_column,
+        document,
+        document_stats,
+        None,
+        markers,
+        font_provider,
+        None,
+        Some(&mut continuation_hook),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_note_separator(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    separator: Option<&Paragraph>,
+    margin_left: f32,
+    content_width: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document: &Document,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) {
+    if let Some(separator) = separator.filter(|paragraph| !paragraph.runs.is_empty()) {
+        let mut separator_column = 0;
+        let markers = current_marker_context(pages, document_stats);
+        layout_paragraph(
+            pages,
+            cursor_y,
+            separator,
+            false,
+            false,
+            false,
+            content_width,
+            margin_bottom,
+            geometry,
+            &mut separator_column,
+            document,
+            document_stats,
+            None,
+            &markers,
+            font_provider,
+        );
+        return;
+    }
+
+    push_default_note_separator(pages, cursor_y, margin_left, content_width);
+}
+
+fn push_default_note_separator(
+    pages: &mut [LayoutPage],
+    cursor_y: &mut f32,
+    margin_left: f32,
+    content_width: f32,
+) {
     let Some(page) = pages.last_mut() else {
         return;
     };
@@ -1198,56 +1656,22 @@ fn layout_footnotes(
         style: LineStyle::Solid,
     });
     *cursor_y -= 9.0;
-
-    for (idx, footnote) in footnotes.iter().enumerate() {
-        let paragraph = note_display_paragraph(
-            footnote,
-            number_start,
-            number_offset + idx + 1,
-            number_format,
-        );
-        let markers = current_marker_context(pages, document_stats);
-        let mut footnote_column = 0;
-        layout_paragraph(
-            pages,
-            cursor_y,
-            &paragraph,
-            false,
-            false,
-            false,
-            content_width,
-            margin_bottom,
-            geometry,
-            &mut footnote_column,
-            document,
-            document_stats,
-            None,
-            &markers,
-            font_provider,
-        );
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn position_cursor_for_bottom_notes(
+fn position_cursor_for_bottom_note_entries(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
-    footnotes: &[Paragraph],
-    number_start: i32,
-    number_format: PageNumberFormat,
-    number_offset: usize,
+    entries: &[(usize, Paragraph)],
+    document: &Document,
     content_width: f32,
     margin_bottom: f32,
     geometry: &mut PageGeometry,
-    document: &Document,
     document_stats: DocumentStats,
     font_provider: Option<&FontProvider>,
 ) {
-    let note_height = note_block_height(
-        footnotes,
-        number_start,
-        number_format,
-        number_offset,
+    let note_height = footnote_entries_block_height(
+        entries,
         content_width,
         document,
         document_stats,
@@ -1262,11 +1686,8 @@ fn position_cursor_for_bottom_notes(
     *cursor_y = target_cursor_y;
 }
 
-fn note_block_height(
-    footnotes: &[Paragraph],
-    number_start: i32,
-    number_format: PageNumberFormat,
-    number_offset: usize,
+fn footnote_entries_block_height(
+    entries: &[(usize, Paragraph)],
     content_width: f32,
     document: &Document,
     document_stats: DocumentStats,
@@ -1274,12 +1695,13 @@ fn note_block_height(
 ) -> f32 {
     let mut height = 9.0;
     let markers = marker_context("1".to_string(), "1".to_string(), document_stats);
-    for (idx, footnote) in footnotes.iter().enumerate() {
+    for (idx, footnote) in entries {
+        let sequence = footnote_sequence_for_index(document, *idx);
         let paragraph = note_display_paragraph(
             footnote,
-            number_start,
-            number_offset + idx + 1,
-            number_format,
+            document.footnote_number_start,
+            sequence,
+            document.footnote_number_format,
         );
         height += twips_to_points(effective_space_before_twips(&paragraph.style));
         height += wrap_paragraph_with_font_provider(
@@ -1295,6 +1717,146 @@ fn note_block_height(
         height += twips_to_points(effective_space_after_twips(&paragraph.style));
     }
     height
+}
+
+fn footnote_reservation_margin_bottom(
+    document: &Document,
+    rendered_footnote_pages: &[Option<usize>],
+    max_note_index: usize,
+    content_width: f32,
+    geometry: PageGeometry,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
+    let entries = footnote_entries_until_index(document, rendered_footnote_pages, max_note_index);
+    if entries.is_empty() {
+        return geometry.margin_bottom;
+    }
+    let reserve_height = footnote_entries_block_height(
+        &entries,
+        content_width,
+        document,
+        document_stats,
+        font_provider,
+    );
+    let body_top = geometry.height - geometry.margin_top;
+    let max_reserved_margin = (body_top - 18.0).max(geometry.margin_bottom);
+    (geometry.margin_bottom + reserve_height).min(max_reserved_margin)
+}
+
+fn footnote_sequence_for_index(document: &Document, index: usize) -> usize {
+    match document.footnote_number_restart {
+        NoteNumberRestart::Continuous => index.saturating_add(1),
+        NoteNumberRestart::EachSection => note_sequence_for_index(
+            NoteNumberRestart::EachSection,
+            &document.footnote_section_indices,
+            index,
+        ),
+        NoteNumberRestart::EachPage => {
+            let page_group = explicit_page_group_for_footnote(document, index);
+            document
+                .footnote_block_indices
+                .iter()
+                .enumerate()
+                .take(index.saturating_add(1))
+                .filter(|(candidate_idx, _)| {
+                    explicit_page_group_for_footnote(document, *candidate_idx) == page_group
+                })
+                .count()
+                .max(1)
+        }
+    }
+}
+
+fn footnote_sequence_for_rendered_page(
+    document: &Document,
+    index: usize,
+    rendered_footnote_pages: &[Option<usize>],
+    current_page: usize,
+) -> usize {
+    match document.footnote_number_restart {
+        NoteNumberRestart::Continuous => index.saturating_add(1),
+        NoteNumberRestart::EachSection => note_sequence_for_index(
+            NoteNumberRestart::EachSection,
+            &document.footnote_section_indices,
+            index,
+        ),
+        NoteNumberRestart::EachPage => rendered_footnote_pages
+            .iter()
+            .enumerate()
+            .take(index.saturating_add(1))
+            .filter(|(candidate_idx, rendered_page)| {
+                if *candidate_idx == index {
+                    true
+                } else {
+                    rendered_page.is_some_and(|page| page == current_page)
+                }
+            })
+            .count()
+            .max(1),
+    }
+}
+
+fn endnote_sequence_for_rendered_page(
+    restart: NoteNumberRestart,
+    section_indices: &[usize],
+    index: usize,
+    rendered_endnote_pages: &[Option<usize>],
+    current_page: usize,
+) -> usize {
+    match restart {
+        NoteNumberRestart::Continuous => index.saturating_add(1),
+        NoteNumberRestart::EachSection => {
+            note_sequence_for_index(NoteNumberRestart::EachSection, section_indices, index)
+        }
+        NoteNumberRestart::EachPage => rendered_endnote_pages
+            .iter()
+            .enumerate()
+            .take(index.saturating_add(1))
+            .filter(|(candidate_idx, rendered_page)| {
+                if *candidate_idx == index {
+                    true
+                } else {
+                    rendered_page.is_some_and(|page| page == current_page)
+                }
+            })
+            .count()
+            .max(1),
+    }
+}
+
+fn explicit_page_group_for_footnote(document: &Document, index: usize) -> usize {
+    let block_index = document
+        .footnote_block_indices
+        .get(index)
+        .copied()
+        .unwrap_or(usize::MAX);
+    document
+        .blocks
+        .iter()
+        .take(block_index)
+        .filter(|block| matches!(block, Block::PageBreak))
+        .count()
+        .saturating_add(1)
+}
+
+fn note_sequence_for_index(
+    restart: NoteNumberRestart,
+    section_indices: &[usize],
+    index: usize,
+) -> usize {
+    match restart {
+        NoteNumberRestart::Continuous | NoteNumberRestart::EachPage => index.saturating_add(1),
+        NoteNumberRestart::EachSection => {
+            let section = section_indices.get(index).copied().unwrap_or(1);
+            section_indices
+                .iter()
+                .take(index.saturating_add(1))
+                .filter(|candidate| **candidate == section)
+                .count()
+                .max(1)
+        }
+    }
 }
 
 fn note_display_paragraph(
@@ -1331,8 +1893,10 @@ fn layout_endnote_entries(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
     endnotes: &[(usize, Paragraph)],
+    section_indices: &[usize],
     number_start: i32,
     number_format: PageNumberFormat,
+    number_restart: NoteNumberRestart,
     content_width: f32,
     margin_left: f32,
     margin_bottom: f32,
@@ -1340,6 +1904,7 @@ fn layout_endnote_entries(
     document: &Document,
     document_stats: DocumentStats,
     font_provider: Option<&FontProvider>,
+    rendered_endnote_pages: &mut [Option<usize>],
 ) {
     if endnotes.is_empty() {
         return;
@@ -1348,47 +1913,97 @@ fn layout_endnote_entries(
         let mut column = 0;
         start_new_page(pages, cursor_y, geometry, &mut column);
     }
-    let Some(page) = pages.last_mut() else {
-        return;
-    };
-    page.items.push(LayoutItem::Line {
-        x1: margin_left,
-        y1: *cursor_y - 3.0,
-        x2: margin_left + content_width.min(144.0),
-        y2: *cursor_y - 3.0,
-        width: 0.5,
-        color: PdfColor {
-            red: 0.35,
-            green: 0.35,
-            blue: 0.35,
-        },
-        style: LineStyle::Solid,
-    });
-    *cursor_y -= 9.0;
+    push_note_separator(
+        pages,
+        cursor_y,
+        document.endnote_separator.as_ref(),
+        margin_left,
+        content_width,
+        margin_bottom,
+        geometry,
+        document,
+        document_stats,
+        font_provider,
+    );
 
     for (idx, endnote) in endnotes {
-        let paragraph =
-            note_display_paragraph(endnote, number_start, idx.saturating_add(1), number_format);
+        let note_page = pages.len().max(1);
+        let sequence = endnote_sequence_for_rendered_page(
+            number_restart,
+            section_indices,
+            *idx,
+            rendered_endnote_pages,
+            note_page,
+        );
+        let paragraph = note_display_paragraph(endnote, number_start, sequence, number_format);
         let markers = current_marker_context(pages, document_stats);
-        let mut endnote_column = 0;
-        layout_paragraph(
+        layout_endnote_paragraph(
             pages,
             cursor_y,
             &paragraph,
-            false,
-            false,
-            false,
             content_width,
             margin_bottom,
             geometry,
-            &mut endnote_column,
             document,
             document_stats,
-            None,
             &markers,
             font_provider,
         );
+        if let Some(rendered_page) = rendered_endnote_pages.get_mut(*idx) {
+            *rendered_page = Some(note_page);
+        }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_endnote_paragraph(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    paragraph: &Paragraph,
+    content_width: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document: &Document,
+    document_stats: DocumentStats,
+    markers: &MarkerContext,
+    font_provider: Option<&FontProvider>,
+) {
+    let mut endnote_column = 0;
+    let mut continuation_hook =
+        |pages: &mut Vec<LayoutPage>, cursor_y: &mut f32, geometry: &PageGeometry| {
+            let mut separator_geometry = geometry.clone();
+            push_note_separator(
+                pages,
+                cursor_y,
+                document.endnote_continuation_separator.as_ref(),
+                geometry.body_left(0),
+                content_width,
+                margin_bottom,
+                &mut separator_geometry,
+                document,
+                document_stats,
+                font_provider,
+            );
+        };
+    layout_paragraph_with_auto_footnotes(
+        pages,
+        cursor_y,
+        paragraph,
+        false,
+        false,
+        false,
+        content_width,
+        margin_bottom,
+        geometry,
+        &mut endnote_column,
+        document,
+        document_stats,
+        None,
+        markers,
+        font_provider,
+        None,
+        Some(&mut continuation_hook),
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1396,7 +2011,7 @@ fn layout_endnotes_for_placement(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
     document: &Document,
-    rendered_endnotes: &mut [bool],
+    rendered_endnote_pages: &mut [Option<usize>],
     placement: EndnotePlacement,
     force_new_page: bool,
     content_width: f32,
@@ -1410,7 +2025,7 @@ fn layout_endnotes_for_placement(
         .endnotes
         .iter()
         .enumerate()
-        .filter(|(idx, _)| !rendered_endnotes.get(*idx).copied().unwrap_or(false))
+        .filter(|(idx, _)| rendered_endnote_pages.get(*idx).is_none_or(Option::is_none))
         .filter(|(idx, _)| endnote_placement_for(document, *idx) == placement)
         .map(|(idx, note)| (idx, note.clone()))
         .collect::<Vec<_>>();
@@ -1425,8 +2040,10 @@ fn layout_endnotes_for_placement(
         pages,
         cursor_y,
         &entries,
+        &document.endnote_section_indices,
         document.endnote_number_start,
         document.endnote_number_format,
+        document.endnote_number_restart,
         content_width,
         margin_left,
         margin_bottom,
@@ -1434,12 +2051,8 @@ fn layout_endnotes_for_placement(
         document,
         document_stats,
         font_provider,
+        rendered_endnote_pages,
     );
-    for (idx, _) in entries {
-        if let Some(rendered) = rendered_endnotes.get_mut(idx) {
-            *rendered = true;
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1447,7 +2060,7 @@ fn layout_endnotes_for_section(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
     document: &Document,
-    rendered_endnotes: &mut [bool],
+    rendered_endnote_pages: &mut [Option<usize>],
     section_number: usize,
     content_width: f32,
     margin_left: f32,
@@ -1458,7 +2071,7 @@ fn layout_endnotes_for_section(
 ) {
     let mut section_notes = Vec::new();
     for (idx, endnote) in document.endnotes.iter().enumerate() {
-        if rendered_endnotes.get(idx).copied().unwrap_or(false) {
+        if rendered_endnote_pages.get(idx).is_some_and(Option::is_some) {
             continue;
         }
         if endnote_placement_for(document, idx) != EndnotePlacement::EndOfSection {
@@ -1481,8 +2094,10 @@ fn layout_endnotes_for_section(
         pages,
         cursor_y,
         &section_notes,
+        &document.endnote_section_indices,
         document.endnote_number_start,
         document.endnote_number_format,
+        document.endnote_number_restart,
         content_width,
         margin_left,
         margin_bottom,
@@ -1490,13 +2105,8 @@ fn layout_endnotes_for_section(
         document,
         document_stats,
         font_provider,
+        rendered_endnote_pages,
     );
-
-    for (idx, _) in section_notes {
-        if let Some(rendered) = rendered_endnotes.get_mut(idx) {
-            *rendered = true;
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1504,7 +2114,7 @@ fn layout_remaining_section_endnotes(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
     document: &Document,
-    rendered_endnotes: &mut [bool],
+    rendered_endnote_pages: &mut [Option<usize>],
     content_width: f32,
     margin_left: f32,
     margin_bottom: f32,
@@ -1516,7 +2126,7 @@ fn layout_remaining_section_endnotes(
         .endnotes
         .iter()
         .enumerate()
-        .filter(|(idx, _)| !rendered_endnotes.get(*idx).copied().unwrap_or(false))
+        .filter(|(idx, _)| rendered_endnote_pages.get(*idx).is_none_or(Option::is_none))
         .filter(|(idx, _)| endnote_placement_for(document, *idx) == EndnotePlacement::EndOfSection)
         .map(|(idx, _)| {
             document
@@ -1534,7 +2144,7 @@ fn layout_remaining_section_endnotes(
             pages,
             cursor_y,
             document,
-            rendered_endnotes,
+            rendered_endnote_pages,
             section_number,
             content_width,
             margin_left,
@@ -2384,6 +2994,52 @@ fn start_new_page_for_kept_paragraphs(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn kept_paragraphs_would_advance_to_page(
+    pages: &[LayoutPage],
+    cursor_y: &f32,
+    paragraph: &Paragraph,
+    next_paragraph: Option<&Paragraph>,
+    content_width: f32,
+    margin_bottom: f32,
+    geometry: &PageGeometry,
+    current_column: &usize,
+    document: &Document,
+    markers: &MarkerContext,
+    font_provider: Option<&FontProvider>,
+) -> bool {
+    if !paragraph.style.keep_together && next_paragraph.is_none() {
+        return false;
+    }
+    if pages.last().is_none_or(|page| page.items.is_empty()) {
+        return false;
+    }
+
+    let kept_height = paragraph_block_height(
+        paragraph,
+        content_width,
+        markers,
+        document,
+        *geometry,
+        font_provider,
+    ) + next_paragraph
+        .map(|paragraph| {
+            paragraph_block_height(
+                paragraph,
+                content_width,
+                markers,
+                document,
+                *geometry,
+                font_provider,
+            )
+        })
+        .unwrap_or(0.0);
+    let usable_height = (geometry.height - geometry.margin_top - margin_bottom).max(0.0);
+    kept_height <= usable_height
+        && *cursor_y - kept_height < margin_bottom
+        && *current_column + 1 >= geometry.column_count
+}
+
 fn paragraph_block_height(
     paragraph: &Paragraph,
     content_width: f32,
@@ -2462,6 +3118,9 @@ fn apply_page_vertical_alignment(pages: &mut [LayoutPage]) {
         if shift_down > 0.01 {
             for item in &mut page.items {
                 translate_layout_item_y(item, -shift_down);
+            }
+            for exclusion in &mut page.flow_exclusions {
+                exclusion.y -= shift_down;
             }
         }
     }
@@ -3192,6 +3851,8 @@ fn layout_table(
         .iter()
         .take_while(|row| row.repeat_header)
         .collect::<Vec<_>>();
+    let table_flow_cursor_y = *cursor_y;
+    let mut has_flow_exclusion = false;
 
     for (row_idx, row) in table.rows.iter().enumerate() {
         let next_row = table.rows.get(row_idx + 1);
@@ -3203,7 +3864,7 @@ fn layout_table(
             document,
             font_provider,
         );
-        let top_offset = table_row_vertical_offset_points(row);
+        let top_offset = table_row_vertical_offset_points(row, prepared.row_height);
         let row_wrap_margins = table_row_wrap_margin_points(row);
         let top_margin = row_wrap_margins.top.max(0.0);
         let bottom_margin = row_wrap_margins.bottom.max(0.0);
@@ -3296,6 +3957,7 @@ fn layout_table(
             (*cursor_y - top_offset - top_margin - geometry.margin_bottom).max(prepared.row_height),
         );
         let mut row_cursor_y = *cursor_y - top_offset - top_margin;
+        let row_top = row_cursor_y;
         push_table_row(
             pages,
             &mut row_cursor_y,
@@ -3309,10 +3971,24 @@ fn layout_table(
             table.borders_visible,
             next_row,
         );
+        push_table_row_flow_exclusion(
+            pages,
+            row,
+            row_top,
+            row_cursor_y,
+            content_width,
+            margin_left,
+            table_width,
+        );
+        has_flow_exclusion |= table_row_has_wrap_margins(row);
         *cursor_y = row_cursor_y - bottom_margin;
     }
 
-    *cursor_y -= 6.0;
+    if has_flow_exclusion {
+        *cursor_y = table_flow_cursor_y;
+    } else {
+        *cursor_y -= 6.0;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3565,8 +4241,29 @@ fn table_cell_text_rotation(direction: TableCellTextDirection) -> TextRotation {
     }
 }
 
-fn table_row_vertical_offset_points(row: &TableRow) -> f32 {
+fn table_row_vertical_offset_points(row: &TableRow, row_height: f32) -> f32 {
+    if let Some(base_offset) = dynamic_table_row_vertical_offset_twips(
+        row.vertical_offset_twips,
+        TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    ) {
+        return twips_to_points(base_offset) - (row_height / 2.0);
+    }
+    if let Some(base_offset) = dynamic_table_row_vertical_offset_twips(
+        row.vertical_offset_twips,
+        TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    ) {
+        return twips_to_points(base_offset) - row_height;
+    }
     twips_to_points(row.vertical_offset_twips)
+}
+
+fn dynamic_table_row_vertical_offset_twips(value: i32, base: i32) -> Option<i32> {
+    let offset = value.checked_sub(base)?;
+    if offset.abs() <= TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS {
+        Some(offset)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -3594,6 +4291,53 @@ fn table_row_has_wrap_margins(row: &TableRow) -> bool {
         bottom_twips,
     } = row.wrap_margins;
     left_twips > 0 || right_twips > 0 || top_twips > 0 || bottom_twips > 0
+}
+
+fn push_table_row_flow_exclusion(
+    pages: &mut [LayoutPage],
+    row: &TableRow,
+    row_top: f32,
+    row_bottom: f32,
+    content_width: f32,
+    margin_left: f32,
+    table_width: f32,
+) {
+    if !table_row_has_wrap_margins(row) {
+        return;
+    }
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
+    let wrap_margins = table_row_wrap_margin_points(row);
+    let effective_margin_left = margin_left + wrap_margins.left;
+    let effective_content_width = (content_width - wrap_margins.left - wrap_margins.right)
+        .max(table_width)
+        .max(1.0);
+    let row_left = table_row_left(
+        effective_margin_left,
+        effective_content_width,
+        table_width,
+        row.alignment,
+        page.geometry,
+    ) + twips_to_points(row.left_offset_twips);
+    let excluded_left = (row_left - wrap_margins.left).max(margin_left);
+    let excluded_right = (row_left + table_width + wrap_margins.right)
+        .min(margin_left + content_width)
+        .max(excluded_left);
+    let excluded_bottom = row_bottom - wrap_margins.bottom;
+    let excluded_top = row_top + wrap_margins.top;
+    let height = (excluded_top - excluded_bottom).max(0.0);
+    let width = (excluded_right - excluded_left).max(0.0);
+    if width < 1.0 || height < 1.0 {
+        return;
+    }
+    page.flow_exclusions.push(FlowExclusion {
+        x: excluded_left,
+        y: excluded_bottom,
+        width,
+        height,
+        wrap_side: StaticImageWrapSide::Both,
+    });
 }
 
 fn rotated_table_cell_line_origin(
@@ -3872,6 +4616,9 @@ fn push_table_row(
     borders_visible: bool,
     next_row: Option<&TableRow>,
 ) {
+    let Some(page_geometry) = pages.last().map(|page| page.geometry) else {
+        return;
+    };
     let wrap_margins = table_row_wrap_margin_points(row);
     let effective_margin_left = margin_left + wrap_margins.left;
     let effective_content_width = (content_width - wrap_margins.left - wrap_margins.right)
@@ -3882,6 +4629,7 @@ fn push_table_row(
         effective_content_width,
         table_width,
         row.alignment,
+        page_geometry,
     ) + twips_to_points(row.left_offset_twips);
     let top = *cursor_y;
     let bottom = top - prepared.row_height;
@@ -4106,11 +4854,49 @@ fn table_row_left(
     content_width: f32,
     table_width: f32,
     alignment: TableRowAlignment,
+    geometry: PageGeometry,
 ) -> f32 {
     match alignment {
         TableRowAlignment::Left => margin_left,
         TableRowAlignment::Center => margin_left + ((content_width - table_width) / 2.0).max(0.0),
         TableRowAlignment::Right => margin_left + (content_width - table_width).max(0.0),
+        TableRowAlignment::Inside => table_row_left(
+            margin_left,
+            content_width,
+            table_width,
+            inside_outside_physical_alignment(TableRowAlignment::Inside, geometry),
+            geometry,
+        ),
+        TableRowAlignment::Outside => table_row_left(
+            margin_left,
+            content_width,
+            table_width,
+            inside_outside_physical_alignment(TableRowAlignment::Outside, geometry),
+            geometry,
+        ),
+    }
+}
+
+fn inside_outside_physical_alignment(
+    alignment: TableRowAlignment,
+    geometry: PageGeometry,
+) -> TableRowAlignment {
+    if !geometry.mirror_margins {
+        return match alignment {
+            TableRowAlignment::Inside => TableRowAlignment::Left,
+            TableRowAlignment::Outside => TableRowAlignment::Right,
+            other => other,
+        };
+    }
+    let even_page = geometry.physical_page_number % 2 == 0;
+    match (alignment, even_page) {
+        (TableRowAlignment::Inside, false) | (TableRowAlignment::Outside, true) => {
+            TableRowAlignment::Left
+        }
+        (TableRowAlignment::Inside, true) | (TableRowAlignment::Outside, false) => {
+            TableRowAlignment::Right
+        }
+        (other, _) => other,
     }
 }
 
@@ -4375,8 +5161,54 @@ fn push_paragraph_borders(
     }
 }
 
+struct AutoFootnoteFlush<'a> {
+    rendered_footnote_pages: &'a mut [Option<usize>],
+    block_index: usize,
+    rendered_footnote_index_on_page: Option<usize>,
+    reserved_footnote_margin_bottom_on_page: Option<f32>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn layout_paragraph(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    paragraph: &Paragraph,
+    suppress_contextual_space_before: bool,
+    suppress_contextual_space_after: bool,
+    render_between_border_after: bool,
+    content_width: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    current_column: &mut usize,
+    document: &Document,
+    document_stats: DocumentStats,
+    line_numbers: Option<&mut LineNumberState>,
+    markers: &MarkerContext,
+    font_provider: Option<&FontProvider>,
+) {
+    layout_paragraph_with_auto_footnotes(
+        pages,
+        cursor_y,
+        paragraph,
+        suppress_contextual_space_before,
+        suppress_contextual_space_after,
+        render_between_border_after,
+        content_width,
+        margin_bottom,
+        geometry,
+        current_column,
+        document,
+        document_stats,
+        line_numbers,
+        markers,
+        font_provider,
+        None,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_paragraph_with_auto_footnotes(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
     paragraph: &Paragraph,
@@ -4392,9 +5224,23 @@ fn layout_paragraph(
     mut line_numbers: Option<&mut LineNumberState>,
     markers: &MarkerContext,
     font_provider: Option<&FontProvider>,
+    mut auto_footnotes: Option<AutoFootnoteFlush<'_>>,
+    mut page_advance_hook: Option<&mut dyn FnMut(&mut Vec<LayoutPage>, &mut f32, &PageGeometry)>,
 ) {
     let mut markers = markers.clone();
     if paragraph.style.page_break_before && !pages.last().is_none_or(|page| page.items.is_empty()) {
+        flush_auto_footnotes_before_page_advance(
+            pages,
+            cursor_y,
+            document,
+            &mut auto_footnotes,
+            false,
+            true,
+            margin_bottom,
+            geometry,
+            document_stats,
+            font_provider,
+        );
         let previous_page_count = pages.len();
         start_new_page(pages, cursor_y, geometry, current_column);
         reset_line_numbers_for_page_restart(
@@ -4403,9 +5249,42 @@ fn layout_paragraph(
             previous_page_count,
             pages.len(),
         );
+        run_page_advance_hook(
+            &mut page_advance_hook,
+            pages,
+            cursor_y,
+            geometry,
+            previous_page_count,
+        );
         markers = current_marker_context(pages, document_stats);
     }
     let previous_page_count = pages.len();
+    if kept_paragraphs_would_advance_to_page(
+        pages,
+        cursor_y,
+        paragraph,
+        None,
+        content_width,
+        margin_bottom,
+        geometry,
+        current_column,
+        document,
+        &markers,
+        font_provider,
+    ) {
+        flush_auto_footnotes_before_page_advance(
+            pages,
+            cursor_y,
+            document,
+            &mut auto_footnotes,
+            false,
+            true,
+            margin_bottom,
+            geometry,
+            document_stats,
+            font_provider,
+        );
+    }
     start_new_page_for_kept_paragraphs(
         pages,
         cursor_y,
@@ -4424,6 +5303,13 @@ fn layout_paragraph(
         *geometry,
         previous_page_count,
         pages.len(),
+    );
+    run_page_advance_hook(
+        &mut page_advance_hook,
+        pages,
+        cursor_y,
+        geometry,
+        previous_page_count,
     );
     let mut margin_left = geometry.body_left(*current_column);
     markers = current_marker_context(pages, document_stats);
@@ -4457,14 +5343,55 @@ fn layout_paragraph(
         line.height = apply_line_spacing_with_grid(line.height, &paragraph.style, *geometry);
     }
     let line_count = lines.len();
+    let mut rendered_current_block_content = false;
     for (line_idx, line) in lines.iter().enumerate() {
+        let marker_margin_bottom = auto_footnotes.as_ref().and_then(|auto_footnotes| {
+            max_footnote_reference_index_in_line(line).map(|idx| {
+                footnote_reservation_margin_bottom(
+                    document,
+                    auto_footnotes.rendered_footnote_pages,
+                    idx,
+                    geometry.content_width,
+                    *geometry,
+                    document_stats,
+                    font_provider,
+                )
+            })
+        });
+        if let Some(marker_margin_bottom) = marker_margin_bottom
+            && let Some(auto_footnotes) = auto_footnotes.as_mut()
+        {
+            auto_footnotes.reserved_footnote_margin_bottom_on_page = Some(
+                auto_footnotes
+                    .reserved_footnote_margin_bottom_on_page
+                    .map_or(marker_margin_bottom, |current| {
+                        current.max(marker_margin_bottom)
+                    }),
+            );
+        }
+        let line_margin_bottom = auto_footnotes
+            .as_ref()
+            .and_then(|auto_footnotes| auto_footnotes.reserved_footnote_margin_bottom_on_page)
+            .unwrap_or(margin_bottom);
         if should_advance_for_widow_control(
             &paragraph.style,
             &lines,
             line_idx,
             *cursor_y,
-            margin_bottom,
+            line_margin_bottom,
         ) {
+            flush_auto_footnotes_before_page_advance(
+                pages,
+                cursor_y,
+                document,
+                &mut auto_footnotes,
+                rendered_current_block_content,
+                *current_column + 1 >= geometry.column_count,
+                margin_bottom,
+                geometry,
+                document_stats,
+                font_provider,
+            );
             let previous_page_count = pages.len();
             advance_column_or_page(pages, cursor_y, geometry, current_column);
             reset_line_numbers_for_page_restart(
@@ -4473,9 +5400,28 @@ fn layout_paragraph(
                 previous_page_count,
                 pages.len(),
             );
+            run_page_advance_hook(
+                &mut page_advance_hook,
+                pages,
+                cursor_y,
+                geometry,
+                previous_page_count,
+            );
             margin_left = geometry.body_left(*current_column);
         }
-        if *cursor_y - line.height < margin_bottom {
+        if *cursor_y - line.height < line_margin_bottom {
+            flush_auto_footnotes_before_page_advance(
+                pages,
+                cursor_y,
+                document,
+                &mut auto_footnotes,
+                rendered_current_block_content,
+                *current_column + 1 >= geometry.column_count,
+                margin_bottom,
+                geometry,
+                document_stats,
+                font_provider,
+            );
             let previous_page_count = pages.len();
             advance_column_or_page(pages, cursor_y, geometry, current_column);
             reset_line_numbers_for_page_restart(
@@ -4483,6 +5429,13 @@ fn layout_paragraph(
                 *geometry,
                 previous_page_count,
                 pages.len(),
+            );
+            run_page_advance_hook(
+                &mut page_advance_hook,
+                pages,
+                cursor_y,
+                geometry,
+                previous_page_count,
             );
             margin_left = geometry.body_left(*current_column);
         }
@@ -4553,11 +5506,120 @@ fn layout_paragraph(
         }
         push_bar_tab_stops(pages, &paragraph.style, x, *cursor_y, line.height);
         push_line(pages, &line, x, *cursor_y, document, word_spacing);
+        if let Some(auto_footnotes) = auto_footnotes.as_mut()
+            && let Some(note_index) = max_footnote_reference_index_in_line(line)
+        {
+            auto_footnotes.rendered_footnote_index_on_page = Some(
+                auto_footnotes
+                    .rendered_footnote_index_on_page
+                    .map_or(note_index, |current| current.max(note_index)),
+            );
+        }
+        rendered_current_block_content = true;
         *cursor_y -= line.height;
     }
     if !suppress_contextual_space_after {
         *cursor_y -= twips_to_points(effective_space_after_twips(&paragraph.style));
     }
+}
+
+fn run_page_advance_hook(
+    page_advance_hook: &mut Option<&mut dyn FnMut(&mut Vec<LayoutPage>, &mut f32, &PageGeometry)>,
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    geometry: &PageGeometry,
+    previous_page_count: usize,
+) {
+    if pages.len() <= previous_page_count {
+        return;
+    }
+    if let Some(hook) = page_advance_hook.as_mut() {
+        hook(pages, cursor_y, geometry);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flush_auto_footnotes_before_page_advance(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    document: &Document,
+    auto_footnotes: &mut Option<AutoFootnoteFlush<'_>>,
+    include_current_block: bool,
+    will_start_new_page: bool,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) {
+    if !will_start_new_page {
+        return;
+    }
+    let Some(auto_footnotes) = auto_footnotes.as_mut() else {
+        return;
+    };
+    if include_current_block
+        && let Some(max_note_index) = auto_footnotes.rendered_footnote_index_on_page.take()
+    {
+        layout_footnotes_until_index(
+            pages,
+            cursor_y,
+            document,
+            auto_footnotes.rendered_footnote_pages,
+            max_note_index,
+            geometry.content_width,
+            geometry.margin_left,
+            margin_bottom,
+            geometry,
+            document_stats,
+            font_provider,
+        );
+        auto_footnotes.reserved_footnote_margin_bottom_on_page = None;
+        return;
+    }
+    if include_current_block {
+        auto_footnotes.reserved_footnote_margin_bottom_on_page = None;
+        return;
+    }
+    let block_index = if include_current_block {
+        auto_footnotes.block_index
+    } else if let Some(previous_block_index) = auto_footnotes.block_index.checked_sub(1) {
+        previous_block_index
+    } else {
+        return;
+    };
+    layout_footnotes_until_block(
+        pages,
+        cursor_y,
+        document,
+        auto_footnotes.rendered_footnote_pages,
+        block_index,
+        geometry.content_width,
+        geometry.margin_left,
+        margin_bottom,
+        geometry,
+        document_stats,
+        font_provider,
+    );
+    auto_footnotes.reserved_footnote_margin_bottom_on_page = None;
+}
+
+fn max_footnote_reference_index_in_line(line: &Line) -> Option<usize> {
+    line.runs
+        .iter()
+        .filter_map(|run| max_footnote_reference_index_in_text(&run.text))
+        .max()
+}
+
+fn max_footnote_reference_index_in_text(text: &str) -> Option<usize> {
+    let mut max_index = None;
+    let mut search_start = 0;
+    while let Some((start, end)) = next_footnote_reference_marker_range(text, search_start) {
+        if let Some(index) = parse_footnote_reference_marker_id(&text[start..end]) {
+            max_index = Some(max_index.map_or(index, |current: usize| current.max(index)));
+        }
+        search_start = end;
+    }
+    max_index
 }
 
 fn reset_line_numbers_for_page_restart(
@@ -4585,6 +5647,24 @@ fn wrapped_image_text_area_for_line(
     let content_right = margin_left + content_width;
     let line_bottom_y = line_top_y - line_height.max(0.0);
     let mut free_intervals = vec![(margin_left, content_right)];
+    for exclusion in &page.flow_exclusions {
+        let excluded_left = exclusion.x.max(margin_left);
+        let excluded_right = (exclusion.x + exclusion.width).min(content_right);
+        let excluded_bottom = exclusion.y;
+        let excluded_top = exclusion.y + exclusion.height;
+        free_intervals = subtract_flow_exclusion_from_intervals(
+            free_intervals,
+            margin_left,
+            content_right,
+            line_top_y,
+            line_bottom_y,
+            excluded_left,
+            excluded_right,
+            excluded_bottom,
+            excluded_top,
+            exclusion.wrap_side,
+        );
+    }
     for item in &page.items {
         let LayoutItem::Image(image) = item else {
             continue;
@@ -4611,33 +5691,18 @@ fn wrapped_image_text_area_for_line(
         let right_gap = twips_to_points(placement.wrap_margin_right_twips.max(0));
         let excluded_left = (image_left - left_gap).max(margin_left);
         let excluded_right = (image_right + right_gap).min(content_right);
-        if excluded_left >= excluded_right {
-            continue;
-        }
-        let side_left = match placement.wrap_side {
-            StaticImageWrapSide::Left => excluded_left,
-            StaticImageWrapSide::Right => margin_left,
-            StaticImageWrapSide::Both | StaticImageWrapSide::Largest => excluded_left,
-        };
-        let side_right = match placement.wrap_side {
-            StaticImageWrapSide::Left => content_right,
-            StaticImageWrapSide::Right => excluded_right,
-            StaticImageWrapSide::Both | StaticImageWrapSide::Largest => excluded_right,
-        };
-        let mut next_intervals = Vec::with_capacity(free_intervals.len() + 1);
-        for (left, right) in free_intervals {
-            if side_right <= left || side_left >= right {
-                next_intervals.push((left, right));
-                continue;
-            }
-            if left < side_left {
-                next_intervals.push((left, side_left));
-            }
-            if side_right < right {
-                next_intervals.push((side_right, right));
-            }
-        }
-        free_intervals = next_intervals;
+        free_intervals = subtract_flow_exclusion_from_intervals(
+            free_intervals,
+            margin_left,
+            content_right,
+            line_top_y,
+            line_bottom_y,
+            excluded_left,
+            excluded_right,
+            image_bottom,
+            image_top,
+            placement.wrap_side,
+        );
     }
     free_intervals
         .into_iter()
@@ -4648,6 +5713,53 @@ fn wrapped_image_text_area_for_line(
                 .total_cmp(width_b)
                 .then_with(|| left_b.total_cmp(left_a))
         })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn subtract_flow_exclusion_from_intervals(
+    free_intervals: Vec<(f32, f32)>,
+    margin_left: f32,
+    content_right: f32,
+    line_top_y: f32,
+    line_bottom_y: f32,
+    excluded_left: f32,
+    excluded_right: f32,
+    excluded_bottom: f32,
+    excluded_top: f32,
+    wrap_side: StaticImageWrapSide,
+) -> Vec<(f32, f32)> {
+    if excluded_right <= margin_left
+        || excluded_left >= content_right
+        || excluded_left >= excluded_right
+        || line_top_y <= excluded_bottom
+        || line_bottom_y >= excluded_top
+    {
+        return free_intervals;
+    }
+    let side_left = match wrap_side {
+        StaticImageWrapSide::Left => excluded_left,
+        StaticImageWrapSide::Right => margin_left,
+        StaticImageWrapSide::Both | StaticImageWrapSide::Largest => excluded_left,
+    };
+    let side_right = match wrap_side {
+        StaticImageWrapSide::Left => content_right,
+        StaticImageWrapSide::Right => excluded_right,
+        StaticImageWrapSide::Both | StaticImageWrapSide::Largest => excluded_right,
+    };
+    let mut next_intervals = Vec::with_capacity(free_intervals.len() + 1);
+    for (left, right) in free_intervals {
+        if side_right <= left || side_left >= right {
+            next_intervals.push((left, right));
+            continue;
+        }
+        if left < side_left {
+            next_intervals.push((left, side_left));
+        }
+        if side_right < right {
+            next_intervals.push((side_right, right));
+        }
+    }
+    next_intervals
 }
 
 fn reset_line_numbers_for_section_restart(
@@ -5238,6 +6350,10 @@ fn contains_inline_marker(text: &str) -> bool {
         || text.contains(DOCUMENT_WORDS_MARKER)
         || text.contains(DOCUMENT_CHARS_MARKER)
         || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
+        || text.contains(FOOTNOTE_REFERENCE_MARKER)
+        || text.contains(FOOTNOTE_REFERENCE_MARKER_END)
+        || text.contains(ENDNOTE_REFERENCE_MARKER)
+        || text.contains(ENDNOTE_REFERENCE_MARKER_END)
         || text.contains(PASSIVE_ADVANCE_MARKER)
 }
 
@@ -5819,6 +6935,12 @@ fn remove_internal_stat_markers(text: &str) -> String {
     while let Some((start, end)) = next_bookmark_page_marker_range(&cleaned, 0) {
         cleaned.replace_range(start..end, "");
     }
+    while let Some((start, end)) = next_footnote_reference_marker_range(&cleaned, 0) {
+        cleaned.replace_range(start..end, "");
+    }
+    while let Some((start, end)) = next_endnote_reference_marker_range(&cleaned, 0) {
+        cleaned.replace_range(start..end, "");
+    }
     cleaned
 }
 
@@ -5918,6 +7040,241 @@ fn resolve_section_page_markers(pages: &mut [LayoutPage]) {
             .max(1)
             .to_string();
         replace_late_page_marker(page, SECTION_PAGES_MARKER, &section_pages);
+    }
+}
+
+fn resolve_footnote_reference_markers(
+    pages: &mut [LayoutPage],
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) {
+    let reference_pages = footnote_reference_pages(pages, document.footnotes.len());
+    for (page_idx, page) in pages.iter_mut().enumerate() {
+        let current_page = page_idx.saturating_add(1);
+        let mut shifts = Vec::<(usize, f32, f32, f32)>::new();
+        for (item_idx, item) in page.items.iter_mut().enumerate() {
+            let Some(fragment) = layout_item_text_fragment_mut(item) else {
+                continue;
+            };
+            if !fragment.text.contains(FOOTNOTE_REFERENCE_MARKER) {
+                continue;
+            }
+            let old_text = fragment.text.clone();
+            let new_text = replace_footnote_reference_markers_in_text(
+                &old_text,
+                document,
+                &reference_pages,
+                current_page,
+            );
+            if new_text == old_text {
+                continue;
+            }
+            let old_width = measure_text_with_document_font(
+                &old_text,
+                &fragment.style,
+                fragment.font_family,
+                document,
+                font_provider,
+            );
+            let new_width = measure_text_with_document_font(
+                &new_text,
+                &fragment.style,
+                fragment.font_family,
+                document,
+                font_provider,
+            );
+            fragment.text = new_text;
+            let delta = new_width - old_width;
+            if delta.abs() > 0.01 {
+                shifts.push((item_idx, fragment.baseline_y, fragment.x, delta));
+            }
+        }
+        for (marker_idx, baseline_y, marker_x, delta) in shifts {
+            for item in page.items.iter_mut().skip(marker_idx.saturating_add(1)) {
+                if let Some(fragment) = layout_item_text_fragment_mut(item)
+                    && (fragment.baseline_y - baseline_y).abs() < 0.01
+                    && fragment.x >= marker_x
+                {
+                    fragment.x += delta;
+                }
+            }
+        }
+    }
+}
+
+fn resolve_endnote_reference_markers(
+    pages: &mut [LayoutPage],
+    document: &Document,
+    rendered_endnote_pages: &[Option<usize>],
+    font_provider: Option<&FontProvider>,
+) {
+    for page in pages.iter_mut() {
+        let mut shifts = Vec::<(usize, f32, f32, f32)>::new();
+        for (item_idx, item) in page.items.iter_mut().enumerate() {
+            let Some(fragment) = layout_item_text_fragment_mut(item) else {
+                continue;
+            };
+            if !fragment.text.contains(ENDNOTE_REFERENCE_MARKER) {
+                continue;
+            }
+            let old_text = fragment.text.clone();
+            let new_text = replace_endnote_reference_markers_in_text(
+                &old_text,
+                document,
+                rendered_endnote_pages,
+            );
+            if new_text == old_text {
+                continue;
+            }
+            let old_width = measure_text_with_document_font(
+                &old_text,
+                &fragment.style,
+                fragment.font_family,
+                document,
+                font_provider,
+            );
+            let new_width = measure_text_with_document_font(
+                &new_text,
+                &fragment.style,
+                fragment.font_family,
+                document,
+                font_provider,
+            );
+            fragment.text = new_text;
+            let delta = new_width - old_width;
+            if delta.abs() > 0.01 {
+                shifts.push((item_idx, fragment.baseline_y, fragment.x, delta));
+            }
+        }
+        for (marker_idx, baseline_y, marker_x, delta) in shifts {
+            for item in page.items.iter_mut().skip(marker_idx.saturating_add(1)) {
+                if let Some(fragment) = layout_item_text_fragment_mut(item)
+                    && (fragment.baseline_y - baseline_y).abs() < 0.01
+                    && fragment.x >= marker_x
+                {
+                    fragment.x += delta;
+                }
+            }
+        }
+    }
+}
+
+fn footnote_reference_pages(pages: &[LayoutPage], footnote_count: usize) -> Vec<Option<usize>> {
+    let mut reference_pages = vec![None; footnote_count];
+    for (page_idx, page) in pages.iter().enumerate() {
+        let page_number = page_idx.saturating_add(1);
+        for item in &page.items {
+            let Some(fragment) = layout_item_text_fragment(item) else {
+                continue;
+            };
+            let mut search_start = 0;
+            while let Some((start, end)) =
+                next_footnote_reference_marker_range(&fragment.text, search_start)
+            {
+                if let Some(index) = parse_footnote_reference_marker_id(&fragment.text[start..end])
+                    && let Some(reference_page) = reference_pages.get_mut(index)
+                    && reference_page.is_none()
+                {
+                    *reference_page = Some(page_number);
+                }
+                search_start = end;
+            }
+        }
+    }
+    reference_pages
+}
+
+fn replace_endnote_reference_markers_in_text(
+    text: &str,
+    document: &Document,
+    rendered_endnote_pages: &[Option<usize>],
+) -> String {
+    let mut output = String::new();
+    let mut search_start = 0;
+    while let Some((start, end)) = next_endnote_reference_marker_range(text, search_start) {
+        output.push_str(&text[search_start..start]);
+        let replacement = parse_endnote_reference_marker_id(&text[start..end])
+            .map(|index| {
+                let note_page = rendered_endnote_pages
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(1);
+                let sequence = endnote_sequence_for_rendered_page(
+                    document.endnote_number_restart,
+                    &document.endnote_section_indices,
+                    index,
+                    rendered_endnote_pages,
+                    note_page,
+                );
+                format_note_number(
+                    document.endnote_number_start,
+                    sequence,
+                    document.endnote_number_format,
+                )
+            })
+            .unwrap_or_else(|| "?".to_string());
+        output.push_str(&replacement);
+        search_start = end;
+    }
+    output.push_str(&text[search_start..]);
+    output
+}
+
+fn replace_footnote_reference_markers_in_text(
+    text: &str,
+    document: &Document,
+    reference_pages: &[Option<usize>],
+    current_page: usize,
+) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut search_start = 0;
+    while let Some((start, end)) = next_footnote_reference_marker_range(text, search_start) {
+        output.push_str(&text[search_start..start]);
+        let replacement = parse_footnote_reference_marker_id(&text[start..end])
+            .map(|index| {
+                let sequence = footnote_sequence_for_reference_page(
+                    document,
+                    index,
+                    reference_pages,
+                    current_page,
+                );
+                format_note_number(
+                    document.footnote_number_start,
+                    sequence,
+                    document.footnote_number_format,
+                )
+            })
+            .unwrap_or_else(|| "?".to_string());
+        output.push_str(&replacement);
+        search_start = end;
+    }
+    output.push_str(&text[search_start..]);
+    output
+}
+
+fn footnote_sequence_for_reference_page(
+    document: &Document,
+    index: usize,
+    reference_pages: &[Option<usize>],
+    current_page: usize,
+) -> usize {
+    match document.footnote_number_restart {
+        NoteNumberRestart::Continuous => index.saturating_add(1),
+        NoteNumberRestart::EachSection => note_sequence_for_index(
+            NoteNumberRestart::EachSection,
+            &document.footnote_section_indices,
+            index,
+        ),
+        NoteNumberRestart::EachPage => reference_pages
+            .iter()
+            .enumerate()
+            .take(index.saturating_add(1))
+            .filter(|(candidate_idx, reference_page)| {
+                *candidate_idx == index || reference_page.is_some_and(|page| page == current_page)
+            })
+            .count()
+            .max(1),
     }
 }
 
@@ -6316,9 +7673,45 @@ fn next_bookmark_page_marker_range(text: &str, start: usize) -> Option<(usize, u
     Some((marker_start, marker_end))
 }
 
+fn next_footnote_reference_marker_range(text: &str, start: usize) -> Option<(usize, usize)> {
+    let marker_start = text[start..]
+        .find(FOOTNOTE_REFERENCE_MARKER)
+        .map(|relative| start + relative)?;
+    let id_start = marker_start + FOOTNOTE_REFERENCE_MARKER.len();
+    let marker_end_relative = text[id_start..].find(FOOTNOTE_REFERENCE_MARKER_END)?;
+    let marker_end = id_start + marker_end_relative + FOOTNOTE_REFERENCE_MARKER_END.len();
+    parse_footnote_reference_marker_id(&text[marker_start..marker_end])?;
+    Some((marker_start, marker_end))
+}
+
+fn next_endnote_reference_marker_range(text: &str, start: usize) -> Option<(usize, usize)> {
+    let marker_start = text[start..]
+        .find(ENDNOTE_REFERENCE_MARKER)
+        .map(|relative| start + relative)?;
+    let id_start = marker_start + ENDNOTE_REFERENCE_MARKER.len();
+    let marker_end_relative = text[id_start..].find(ENDNOTE_REFERENCE_MARKER_END)?;
+    let marker_end = id_start + marker_end_relative + ENDNOTE_REFERENCE_MARKER_END.len();
+    parse_endnote_reference_marker_id(&text[marker_start..marker_end])?;
+    Some((marker_start, marker_end))
+}
+
 fn parse_bookmark_page_marker_id(text: &str, prefix: &str) -> Option<usize> {
     let rest = text.strip_prefix(prefix)?;
     let id = rest.strip_suffix(BOOKMARK_PAGE_MARKER_END)?;
+    (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
+        .then(|| id.parse::<usize>().ok())?
+}
+
+fn parse_footnote_reference_marker_id(text: &str) -> Option<usize> {
+    let rest = text.strip_prefix(FOOTNOTE_REFERENCE_MARKER)?;
+    let id = rest.strip_suffix(FOOTNOTE_REFERENCE_MARKER_END)?;
+    (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
+        .then(|| id.parse::<usize>().ok())?
+}
+
+fn parse_endnote_reference_marker_id(text: &str) -> Option<usize> {
+    let rest = text.strip_prefix(ENDNOTE_REFERENCE_MARKER)?;
+    let id = rest.strip_suffix(ENDNOTE_REFERENCE_MARKER_END)?;
     (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| id.parse::<usize>().ok())?
 }
@@ -6785,6 +8178,10 @@ fn passive_advance_width_points(style: &CharacterStyle) -> f32 {
     twips_to_points(style.character_spacing_twips)
 }
 
+fn passive_advance_baseline_delta_points(style: &CharacterStyle) -> f32 {
+    style.baseline_shift_points()
+}
+
 fn next_tab_position(
     current_line_width: f32,
     paragraph_style: &ParagraphStyle,
@@ -6952,11 +8349,13 @@ fn push_line_with_rotation(
 ) {
     let baseline_y = top_y - line.height + (line.height * 0.25);
     let mut cursor_x = x;
+    let mut cursor_baseline_delta = 0.0;
     let page = pages.last_mut().expect("layout always has a page");
 
     for run in &line.runs {
         if is_passive_advance_marker(&run.text) {
             cursor_x += run.width;
+            cursor_baseline_delta += passive_advance_baseline_delta_points(&run.style);
             continue;
         }
         if parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
@@ -6965,7 +8364,7 @@ fn push_line_with_rotation(
             page.items.push(LayoutItem::Text(TextFragment {
                 text: run.text.clone(),
                 x: cursor_x,
-                baseline_y,
+                baseline_y: baseline_y + cursor_baseline_delta,
                 rotation,
                 color: style_color(document, &run.style),
                 font_family: font_family_for_style(document, &run.style),
@@ -6984,7 +8383,7 @@ fn push_line_with_rotation(
         let style = passive_pdf_style_for_run(document, &run.style);
         let text = display_text(&run.text, &style);
         let font_family = font_family_for_run_text(document, &style, &text);
-        let run_baseline_y = baseline_y + style.baseline_shift_points();
+        let run_baseline_y = baseline_y + cursor_baseline_delta + style.baseline_shift_points();
         let color = style_color(document, &style);
         if let Some(highlight_index) = style.highlight_index
             && highlight_index > 0
@@ -8532,6 +9931,7 @@ mod tests {
         TableCellBorder, TableCellBorders, TableCellPadding, TableCellSpacing,
         TableCellVerticalMerge, TableRow, TableRowWrapMargins,
     };
+    use crate::rtf::parse_rtf;
 
     use super::*;
 
@@ -8744,6 +10144,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 100,
             height_px: 50,
@@ -8778,6 +10179,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -8814,6 +10216,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 100,
             height_px: 50,
@@ -8848,6 +10251,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 200,
             height_px: 100,
@@ -8877,6 +10281,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 200,
             height_px: 100,
@@ -8909,6 +10314,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 100,
             height_px: 50,
@@ -8961,6 +10367,7 @@ mod tests {
                 format: ImageFormat::Jpeg,
                 bytes: vec![0xff, 0xd8, 0xff, 0xd9],
                 palette: Vec::new(),
+                alpha_mask: None,
                 vector_commands: Vec::new(),
                 width_px: 100,
                 height_px: 50,
@@ -9033,6 +10440,7 @@ mod tests {
                 format: ImageFormat::Jpeg,
                 bytes: vec![0xff, 0xd8, 0xff, 0xd9],
                 palette: Vec::new(),
+                alpha_mask: None,
                 vector_commands: Vec::new(),
                 width_px: 100,
                 height_px: 50,
@@ -9103,6 +10511,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 100,
             height_px: 50,
@@ -9165,6 +10574,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 100,
             height_px: 50,
@@ -9266,6 +10676,7 @@ mod tests {
                 format: ImageFormat::Jpeg,
                 bytes: vec![0xff, 0xd8, 0xff, 0xd9],
                 palette: Vec::new(),
+                alpha_mask: None,
                 vector_commands: Vec::new(),
                 width_px: 100,
                 height_px: 50,
@@ -9354,6 +10765,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 100,
             height_px: 50,
@@ -9437,6 +10849,7 @@ mod tests {
                 format: ImageFormat::Placeholder,
                 bytes: Vec::new(),
                 palette: Vec::new(),
+                alpha_mask: None,
                 vector_commands: Vec::new(),
                 width_px: 1,
                 height_px: 1,
@@ -9569,6 +10982,7 @@ mod tests {
             format: ImageFormat::Placeholder,
             bytes: Vec::new(),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -11563,6 +12977,30 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_height_floating_table_bottom_alignment_uses_computed_row_height() {
+        fn baseline_for(input: &str, text: &str) -> f32 {
+            let parsed = parse_rtf(input).unwrap();
+            LayoutEngine::layout(&parsed.document).pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text == text => {
+                        Some(fragment.baseline_y)
+                    }
+                    _ => None,
+                })
+                .expect("table text")
+        }
+
+        let top_baseline = baseline_for(r"{\rtf1\trowd\cellx2000 Top\cell\row}", "Top");
+        let bottom_baseline =
+            baseline_for(r"{\rtf1\trowd\tposyb\cellx2000 Bottom\cell\row}", "Bottom");
+
+        assert!(bottom_baseline > top_baseline + 10.0);
+        assert!(bottom_baseline < top_baseline + 20.0);
+    }
+
+    #[test]
     fn lays_out_table_row_wrap_margins_as_passive_outer_spacing() {
         fn row(text: &str, wrap_margins: TableRowWrapMargins) -> TableRow {
             TableRow {
@@ -11645,6 +13083,119 @@ mod tests {
         let default_gap = default.1 - default.2;
         let wrapped_gap = wrapped.1 - wrapped.2;
         assert!((wrapped_gap - default_gap - 12.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn wrapped_table_row_excludes_following_paragraph_lines() {
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Table(Table {
+                column_widths_twips: vec![1440],
+                borders_visible: true,
+                preserve_authored_widths: false,
+                rows: vec![TableRow {
+                    height_twips: Some(720),
+                    left_offset_twips: 0,
+                    vertical_offset_twips: 0,
+                    wrap_margins: TableRowWrapMargins {
+                        left_twips: 0,
+                        right_twips: 240,
+                        top_twips: 0,
+                        bottom_twips: 0,
+                    },
+                    cell_gap_twips: 60,
+                    alignment: TableRowAlignment::Left,
+                    repeat_header: false,
+                    keep_together: false,
+                    cells: vec![TableCell {
+                        shading_color_index: None,
+                        shading_basis_points: 10_000,
+                        shading_pattern: crate::model::ShadingPattern::None,
+                        padding: TableCellPadding::default(),
+                        spacing: Default::default(),
+                        borders: TableCellBorders::default(),
+                        fit_text: false,
+                        text_direction: TableCellTextDirection::LeftToRightTopToBottom,
+                        vertical_align: TableCellVerticalAlign::Top,
+                        horizontal_merge: TableCellHorizontalMerge::None,
+                        vertical_merge: TableCellVerticalMerge::None,
+                        paragraphs: vec![Paragraph {
+                            style: Default::default(),
+                            runs: vec![Run {
+                                text: "Floating".to_string(),
+                                style: Default::default(),
+                            }],
+                        }],
+                    }],
+                }],
+            }),
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "Wrapped paragraph beside table".to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        assert_eq!(page.flow_exclusions.len(), 1);
+        let table_text = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "Floating" => Some(fragment),
+                _ => None,
+            })
+            .expect("table text");
+        let wrapped_text = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("Wrapped") => Some(fragment),
+                _ => None,
+            })
+            .expect("wrapped paragraph text");
+
+        assert!(wrapped_text.x > table_text.x + 72.0);
+        assert!((wrapped_text.baseline_y - table_text.baseline_y).abs() < 14.0);
+    }
+
+    #[test]
+    fn positioned_table_row_from_rtf_excludes_following_paragraph_lines() {
+        let parsed = parse_rtf(
+            r"{\rtf1\trowd\tposx0\trrh720\cellx1440 Floating\cell\row\pard Wrapped paragraph beside table\par}",
+        )
+        .unwrap();
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        let page = &layout.pages[0];
+        assert_eq!(page.flow_exclusions.len(), 1);
+        let table_text = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "Floating" => Some(fragment),
+                _ => None,
+            })
+            .expect("table text");
+        let wrapped_text = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("Wrapped") => Some(fragment),
+                _ => None,
+            })
+            .expect("wrapped paragraph text");
+
+        assert!(wrapped_text.x > table_text.x + 72.0);
+        assert!((wrapped_text.baseline_y - table_text.baseline_y).abs() < 14.0);
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "floating table default wrap distance interpreted as bounded passive row margin",
+            )
+        }));
     }
 
     #[test]
@@ -11732,6 +13283,83 @@ mod tests {
 
         assert!((text_x("Center") - 273.0).abs() < 0.01);
         assert!((text_x("Right") - 471.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn mirrored_pages_resolve_inside_outside_table_alignment_by_parity() {
+        fn aligned_row(text: &str, alignment: TableRowAlignment) -> TableRow {
+            TableRow {
+                height_twips: None,
+                left_offset_twips: 0,
+                vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
+                cell_gap_twips: 60,
+                alignment,
+                repeat_header: false,
+                keep_together: false,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    spacing: Default::default(),
+                    borders: TableCellBorders::default(),
+                    fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text: text.to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }
+        }
+
+        let mut document = Document::default();
+        document.page.mirror_margins = true;
+        document.blocks = vec![
+            Block::Table(Table {
+                column_widths_twips: vec![1440],
+                borders_visible: true,
+                preserve_authored_widths: false,
+                rows: vec![
+                    aligned_row("OddInside", TableRowAlignment::Inside),
+                    aligned_row("OddOutside", TableRowAlignment::Outside),
+                ],
+            }),
+            Block::PageBreak,
+            Block::Table(Table {
+                column_widths_twips: vec![1440],
+                borders_visible: true,
+                preserve_authored_widths: false,
+                rows: vec![
+                    aligned_row("EvenInside", TableRowAlignment::Inside),
+                    aligned_row("EvenOutside", TableRowAlignment::Outside),
+                ],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let page_text_x = |page_idx: usize, text: &str| {
+            layout.pages[page_idx]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.trim() == text => Some(fragment.x),
+                    _ => None,
+                })
+                .expect("aligned table text")
+        };
+
+        assert!((page_text_x(0, "OddInside") - 75.0).abs() < 0.01);
+        assert!((page_text_x(0, "OddOutside") - 471.0).abs() < 0.01);
+        assert!((page_text_x(1, "EvenInside") - 471.0).abs() < 0.01);
+        assert!((page_text_x(1, "EvenOutside") - 75.0).abs() < 0.01);
     }
 
     #[test]
@@ -13765,7 +15393,7 @@ mod tests {
 
     #[test]
     fn passive_advance_marker_offsets_following_text_without_rendering_marker() {
-        fn x_for_after(runs: Vec<Run>) -> (f32, bool) {
+        fn position_for_after(runs: Vec<Run>) -> (f32, f32, bool) {
             let mut document = Document::default();
             document.blocks = vec![Block::Paragraph(Paragraph {
                 style: Default::default(),
@@ -13774,6 +15402,7 @@ mod tests {
             let layout = LayoutEngine::layout(&document);
             let mut marker_rendered = false;
             let mut after_x = None;
+            let mut after_y = None;
             for item in &layout.pages[0].items {
                 if let LayoutItem::Text(fragment) = item {
                     if fragment.text == PASSIVE_ADVANCE_MARKER {
@@ -13781,10 +15410,15 @@ mod tests {
                     }
                     if fragment.text == "After" {
                         after_x = Some(fragment.x);
+                        after_y = Some(fragment.baseline_y);
                     }
                 }
             }
-            (after_x.expect("After text"), marker_rendered)
+            (
+                after_x.expect("After text"),
+                after_y.expect("After text baseline"),
+                marker_rendered,
+            )
         }
 
         let base_runs = vec![
@@ -13799,6 +15433,7 @@ mod tests {
         ];
         let mut advance_style = CharacterStyle::default();
         advance_style.character_spacing_twips = 240;
+        advance_style.baseline_shift_half_points = -12;
         let advanced_runs = vec![
             Run {
                 text: "Before ".to_string(),
@@ -13814,11 +15449,12 @@ mod tests {
             },
         ];
 
-        let (base_x, _) = x_for_after(base_runs);
-        let (advanced_x, marker_rendered) = x_for_after(advanced_runs);
+        let (base_x, base_y, _) = position_for_after(base_runs);
+        let (advanced_x, advanced_y, marker_rendered) = position_for_after(advanced_runs);
 
         assert!(!marker_rendered);
         assert!((advanced_x - base_x - 12.0).abs() < 0.01);
+        assert!((base_y - advanced_y - 6.0).abs() < 0.01);
     }
 
     #[test]
@@ -17089,6 +18725,7 @@ mod tests {
             format: ImageFormat::Jpeg,
             bytes: vec![0xff, 0xd8, 0xff, 0xd9],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 8,
             height_px: 4,

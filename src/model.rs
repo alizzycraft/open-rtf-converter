@@ -9,6 +9,10 @@ pub const DOCUMENT_WORDS_MARKER: &str = "\u{f0008}";
 pub const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
 pub const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
 pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
+pub const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
+pub const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
+pub const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
+pub const ENDNOTE_REFERENCE_MARKER_END: &str = "\u{f000f}";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
@@ -18,6 +22,8 @@ pub struct Document {
     pub endnote_number_start: i32,
     pub footnote_number_format: PageNumberFormat,
     pub endnote_number_format: PageNumberFormat,
+    pub footnote_number_restart: NoteNumberRestart,
+    pub endnote_number_restart: NoteNumberRestart,
     pub footnote_placement: FootnotePlacement,
     pub endnote_placement: EndnotePlacement,
     pub fonts: Vec<FontDef>,
@@ -41,7 +47,13 @@ pub struct Document {
     pub first_page_footer_shapes: Vec<StaticShape>,
     pub even_page_footer_shapes: Vec<StaticShape>,
     pub background_shapes: Vec<StaticShape>,
+    pub footnote_separator: Option<Paragraph>,
+    pub footnote_continuation_separator: Option<Paragraph>,
+    pub endnote_separator: Option<Paragraph>,
+    pub endnote_continuation_separator: Option<Paragraph>,
     pub footnotes: Vec<Paragraph>,
+    pub footnote_section_indices: Vec<usize>,
+    pub footnote_block_indices: Vec<usize>,
     pub endnotes: Vec<Paragraph>,
     pub endnote_section_indices: Vec<usize>,
     pub endnote_placements: Vec<EndnotePlacement>,
@@ -57,6 +69,8 @@ impl Default for Document {
             endnote_number_start: 1,
             footnote_number_format: PageNumberFormat::Decimal,
             endnote_number_format: PageNumberFormat::Decimal,
+            footnote_number_restart: NoteNumberRestart::Continuous,
+            endnote_number_restart: NoteNumberRestart::Continuous,
             footnote_placement: FootnotePlacement::BeneathText,
             endnote_placement: EndnotePlacement::AfterBody,
             fonts: vec![FontDef {
@@ -88,7 +102,13 @@ impl Default for Document {
             first_page_footer_shapes: Vec::new(),
             even_page_footer_shapes: Vec::new(),
             background_shapes: Vec::new(),
+            footnote_separator: None,
+            footnote_continuation_separator: None,
+            endnote_separator: None,
+            endnote_continuation_separator: None,
             footnotes: Vec::new(),
+            footnote_section_indices: Vec::new(),
+            footnote_block_indices: Vec::new(),
             endnotes: Vec::new(),
             endnote_section_indices: Vec::new(),
             endnote_placements: Vec::new(),
@@ -251,6 +271,14 @@ pub enum EndnotePlacement {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum NoteNumberRestart {
+    #[default]
+    Continuous,
+    EachSection,
+    EachPage,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum PageVerticalAlignment {
     #[default]
     Top,
@@ -345,6 +373,7 @@ pub struct StaticImage {
     pub format: ImageFormat,
     pub bytes: Vec<u8>,
     pub palette: Vec<u8>,
+    pub alpha_mask: Option<StaticImageAlphaMask>,
     pub vector_commands: Vec<StaticImageVectorCommand>,
     pub width_px: u32,
     pub height_px: u32,
@@ -356,6 +385,11 @@ pub struct StaticImage {
     pub scale_y_percent: Option<i32>,
     pub crop: ImageCrop,
     pub placement: Option<StaticImagePlacement>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticImageAlphaMask {
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -409,8 +443,12 @@ pub struct StaticImagePlacement {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ImageFormat {
     Jpeg,
+    JpegPassiveGrayscale,
+    JpegPassiveBilevel,
     JpegGrayscale,
     JpegCmyk,
+    JpegCmykPassiveGrayscale,
+    JpegCmykPassiveBilevel,
     Png,
     PngGrayscale,
     PngIndexed,
@@ -593,6 +631,10 @@ pub struct TableRow {
     pub keep_together: bool,
 }
 
+pub const TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE: i32 = -1_000_000_000;
+pub const TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE: i32 = -1_100_000_000;
+pub const TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS: i32 = 100_000;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct TableRowWrapMargins {
     pub left_twips: i32,
@@ -607,6 +649,8 @@ pub enum TableRowAlignment {
     Left,
     Center,
     Right,
+    Inside,
+    Outside,
 }
 
 #[derive(Debug, Clone, PartialEq)]

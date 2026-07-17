@@ -20,6 +20,8 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/table-ish.rtf",
         "fixtures/weird.rtf",
         "fixtures/object-result.rtf",
+        "fixtures/png-alpha.rtf",
+        "fixtures/png-trns.rtf",
     ] {
         assert!(
             Path::new(fixture).is_file(),
@@ -116,6 +118,17 @@ fn reference_policy_fixtures_match_current_passive_converter_output() {
                 String::from_utf8_lossy(forbidden)
             );
         }
+        for expected in fixture.must_contain_pdf {
+            assert!(
+                output
+                    .pdf
+                    .windows(expected.len())
+                    .any(|window| window == *expected),
+                "{} rendered PDF did not contain expected passive marker {:?}",
+                fixture.input,
+                String::from_utf8_lossy(expected)
+            );
+        }
     }
 }
 
@@ -124,6 +137,7 @@ struct ReferenceFixture {
     expected_pages: usize,
     must_preserve_text: &'static [&'static str],
     must_not_leak: &'static [&'static [u8]],
+    must_contain_pdf: &'static [&'static [u8]],
 }
 
 fn reference_fixtures() -> &'static [ReferenceFixture] {
@@ -137,12 +151,14 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "Second page text",
             ],
             must_not_leak: &[b"fonttbl", b"colortbl", b"/JavaScript", b"/EmbeddedFile"],
+            must_contain_pdf: &[],
         },
         ReferenceFixture {
             input: "fixtures/table-ish.rtf",
             expected_pages: 1,
             must_preserve_text: &["Name", "Value", "Alpha", "Beta", "After table text"],
             must_not_leak: &[b"trowd", b"cellx", b"/JavaScript", b"/EmbeddedFile"],
+            must_contain_pdf: &[],
         },
         ReferenceFixture {
             input: "fixtures/weird.rtf",
@@ -158,6 +174,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/JavaScript",
                 b"/EmbeddedFile",
             ],
+            must_contain_pdf: &[],
         },
         ReferenceFixture {
             input: "fixtures/object-result.rtf",
@@ -178,6 +195,40 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/Launch",
                 b"/OpenAction",
             ],
+            must_contain_pdf: &[],
+        },
+        ReferenceFixture {
+            input: "fixtures/png-alpha.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before alpha image.", "After alpha image."],
+            must_not_leak: &[
+                b"pngblip",
+                b"IHDR",
+                b"IDAT",
+                b"IEND",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+            ],
+            must_contain_pdf: &[b"/SMask"],
+        },
+        ReferenceFixture {
+            input: "fixtures/png-trns.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before indexed transparency image.",
+                "After indexed transparency image.",
+            ],
+            must_not_leak: &[
+                b"pngblip",
+                b"IHDR",
+                b"PLTE",
+                b"tRNS",
+                b"IDAT",
+                b"IEND",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+            ],
+            must_contain_pdf: &[b"/SMask"],
         },
     ]
 }

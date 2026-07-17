@@ -5,14 +5,17 @@ use crate::diagnostics::Diagnostic;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
-    DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document, EndnotePlacement, FontDef,
-    FontFamilyHint, FontPitch, FootnotePlacement, ImageCrop, ImageFormat, LineNumberRestart,
-    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
-    PageVerticalAlignment, Paragraph, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImagePlacement,
-    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint, StaticShapeVerticalAnchor,
+    DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER,
+    ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
+    FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnotePlacement,
+    ImageCrop, ImageFormat, LineNumberRestart, NoteNumberRestart, PAGE_NUMBER_MARKER,
+    PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
+    ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
+    StaticImageAlphaMask, StaticImagePlacement, StaticImageTextHorizontalAlign,
+    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
+    StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
+    StaticShapeKind, StaticShapePoint, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
     TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
     TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
@@ -27,6 +30,7 @@ const DEFAULT_SCRIPT_FONT_SCALE_PERCENT: i32 = 65;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 60;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
+const DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS: i32 = DEFAULT_SHAPE_WRAP_MARGIN_TWIPS;
 const MAX_PASSIVE_SHAPE_Z_ORDER: i32 = 65_535;
 const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
 
@@ -448,6 +452,10 @@ enum Destination {
     Background,
     Footnote,
     Endnote,
+    FootnoteSeparator,
+    FootnoteContinuationSeparator,
+    EndnoteSeparator,
+    EndnoteContinuationSeparator,
     ListText,
     Picture,
     Shape,
@@ -640,7 +648,10 @@ struct TableRowBuilder {
     current_cell_vertical_merge: TableCellVerticalMerge,
     height_twips: Option<i32>,
     left_offset_twips: i32,
+    horizontal_anchor_adjust_twips: i32,
     vertical_offset_twips: i32,
+    vertical_anchor_adjust_twips: i32,
+    vertical_position_alignment: FloatingTableVerticalPositionAlignment,
     wrap_margins: TableRowWrapMargins,
     cell_gap_twips: i32,
     alignment: TableRowAlignment,
@@ -692,6 +703,28 @@ enum TableRowWrapMarginSide {
     Left,
     Right,
     Top,
+    Bottom,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum TableRowHorizontalAnchor {
+    Column,
+    Margin,
+    Page,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum TableRowVerticalAnchor {
+    Paragraph,
+    Margin,
+    Page,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+enum FloatingTableVerticalPositionAlignment {
+    #[default]
+    Top,
+    Center,
     Bottom,
 }
 
@@ -1079,6 +1112,10 @@ struct Parser {
     current_even_page_footer_paragraph: Paragraph,
     current_footnote_paragraph: Paragraph,
     current_endnote_paragraph: Paragraph,
+    current_footnote_separator_paragraph: Paragraph,
+    current_footnote_continuation_separator_paragraph: Paragraph,
+    current_endnote_separator_paragraph: Paragraph,
+    current_endnote_continuation_separator_paragraph: Paragraph,
     state: ParserState,
     stack: Vec<ParserState>,
     diagnostics: Vec<Diagnostic>,
@@ -1134,6 +1171,13 @@ struct Parser {
     deferred_endnote_placement_diagnostics: Vec<(EndnotePlacement, usize)>,
     footnote_reference_count: usize,
     endnote_reference_count: usize,
+    footnote_reference_section_index: usize,
+    footnote_section_reference_count: usize,
+    current_footnote_reference_block_index: usize,
+    footnote_reference_page_break_count: usize,
+    footnote_page_reference_count: usize,
+    endnote_reference_section_index: usize,
+    endnote_section_reference_count: usize,
     options: RtfParseOptions,
     skipped_destination_bytes: usize,
     output_text_chars: usize,
@@ -1154,6 +1198,58 @@ pub fn parse_rtf_bytes_with_options(
 ) -> Result<ParseOutput, ParseError> {
     let tokens = Lexer::new(input, options.limits.clone()).tokenize()?;
     Parser::new(tokens, options.clone()).parse()
+}
+
+fn document_block_is_visible(block: &Block) -> bool {
+    match block {
+        Block::Paragraph(paragraph) => !paragraph.runs.is_empty(),
+        Block::Table(table) => !table.rows.is_empty(),
+        Block::Image(_) | Block::Shape(_) => true,
+        Block::Placeholder(_)
+        | Block::PageBreak
+        | Block::ColumnBreak
+        | Block::ContinuousSectionBreak
+        | Block::SectionBreak
+        | Block::EvenPageSectionBreak
+        | Block::OddPageSectionBreak
+        | Block::SectionSettings(_) => true,
+    }
+}
+
+fn remap_retained_document_block_index(
+    old_index: usize,
+    old_to_new: &[Option<usize>],
+    retained_len: usize,
+) -> usize {
+    if retained_len == 0 {
+        return 0;
+    }
+    if let Some(Some(new_index)) = old_to_new.get(old_index) {
+        return *new_index;
+    }
+
+    let upper_bound = old_index.min(old_to_new.len().saturating_sub(1));
+    for candidate in (0..=upper_bound).rev() {
+        if let Some(new_index) = old_to_new[candidate] {
+            return new_index;
+        }
+    }
+    old_to_new.iter().flatten().next().copied().unwrap_or(0)
+}
+
+fn footnote_reference_marker(index: usize) -> String {
+    format!("{FOOTNOTE_REFERENCE_MARKER}{index}{FOOTNOTE_REFERENCE_MARKER_END}")
+}
+
+fn endnote_reference_marker(index: usize) -> String {
+    format!("{ENDNOTE_REFERENCE_MARKER}{index}{ENDNOTE_REFERENCE_MARKER_END}")
+}
+
+fn parse_footnote_reference_marker_id(text: &str) -> Option<usize> {
+    let rest = text.strip_prefix(FOOTNOTE_REFERENCE_MARKER)?;
+    let id = rest.strip_suffix(FOOTNOTE_REFERENCE_MARKER_END)?;
+    (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
+        .then(|| id.parse::<usize>().ok())?
 }
 
 impl Parser {
@@ -1198,6 +1294,22 @@ impl Parser {
                 runs: Vec::new(),
             },
             current_endnote_paragraph: Paragraph {
+                style: state.paragraph.clone(),
+                runs: Vec::new(),
+            },
+            current_footnote_separator_paragraph: Paragraph {
+                style: state.paragraph.clone(),
+                runs: Vec::new(),
+            },
+            current_footnote_continuation_separator_paragraph: Paragraph {
+                style: state.paragraph.clone(),
+                runs: Vec::new(),
+            },
+            current_endnote_separator_paragraph: Paragraph {
+                style: state.paragraph.clone(),
+                runs: Vec::new(),
+            },
+            current_endnote_continuation_separator_paragraph: Paragraph {
                 style: state.paragraph.clone(),
                 runs: Vec::new(),
             },
@@ -1256,6 +1368,13 @@ impl Parser {
             deferred_endnote_placement_diagnostics: Vec::new(),
             footnote_reference_count: 0,
             endnote_reference_count: 0,
+            footnote_reference_section_index: 1,
+            footnote_section_reference_count: 0,
+            current_footnote_reference_block_index: 0,
+            footnote_reference_page_break_count: 0,
+            footnote_page_reference_count: 0,
+            endnote_reference_section_index: 1,
+            endnote_section_reference_count: 0,
             options,
             skipped_destination_bytes: 0,
             output_text_chars: 0,
@@ -1296,26 +1415,31 @@ impl Parser {
         self.resolve_unmatched_note_reference_markers();
         self.normalize_page_orientation();
         self.emit_deferred_note_diagnostics();
-        self.document.blocks.retain(|block| match block {
-            Block::Paragraph(paragraph) => !paragraph.runs.is_empty(),
-            Block::Table(table) => !table.rows.is_empty(),
-            Block::Image(_) => true,
-            Block::Shape(_) => true,
-            Block::Placeholder(_)
-            | Block::PageBreak
-            | Block::ColumnBreak
-            | Block::ContinuousSectionBreak
-            | Block::SectionBreak
-            | Block::EvenPageSectionBreak
-            | Block::OddPageSectionBreak => true,
-            Block::SectionSettings(_) => true,
-        });
+        self.retain_visible_document_blocks_and_remap_note_indices();
         self.enforce_retained_document_block_limit(self.last_offset)?;
 
         Ok(ParseOutput {
             document: self.document,
             diagnostics: self.diagnostics,
         })
+    }
+
+    fn retain_visible_document_blocks_and_remap_note_indices(&mut self) {
+        let old_len = self.document.blocks.len();
+        let mut old_to_new = vec![None; old_len];
+        let mut retained = Vec::with_capacity(old_len);
+        for (old_idx, block) in self.document.blocks.drain(..).enumerate() {
+            if document_block_is_visible(&block) {
+                old_to_new[old_idx] = Some(retained.len());
+                retained.push(block);
+            }
+        }
+        self.document.blocks = retained;
+        let retained_len = self.document.blocks.len();
+        for block_index in &mut self.document.footnote_block_indices {
+            *block_index =
+                remap_retained_document_block_index(*block_index, &old_to_new, retained_len);
+        }
     }
 
     fn limits(&self) -> &RtfLimits {
@@ -1374,6 +1498,14 @@ impl Parser {
             .saturating_sub(page.margin_left_twips)
             .saturating_sub(page.margin_right_twips)
             .max(1)
+    }
+
+    fn current_page_margin_left_twips(&self) -> i32 {
+        normalized_page_settings(self.current_section_page.clone()).margin_left_twips
+    }
+
+    fn current_page_margin_top_twips(&self) -> i32 {
+        normalized_page_settings(self.current_section_page.clone()).margin_top_twips
     }
 
     fn default_character_style(&self) -> CharacterStyle {
@@ -1514,6 +1646,9 @@ impl Parser {
             }
             if self.state.destination == Destination::Endnote {
                 self.finish_endnote_paragraph(offset)?;
+            }
+            if is_note_separator_destination(self.state.destination) {
+                self.finish_note_separator_paragraph(offset)?;
             }
             if self.state.destination == Destination::Picture {
                 self.finish_picture(offset)?;
@@ -2693,6 +2828,30 @@ impl Parser {
                 self.handle_active_content("embedded font payload", offset)?;
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
+            }
+            "ftnsep"
+                if destination_allows_safe_structural_content(&self.state)
+                    && self.state.destination != Destination::Ignored =>
+            {
+                self.state.destination = Destination::FootnoteSeparator;
+            }
+            "ftnsepc"
+                if destination_allows_safe_structural_content(&self.state)
+                    && self.state.destination != Destination::Ignored =>
+            {
+                self.state.destination = Destination::FootnoteContinuationSeparator;
+            }
+            "aftnsep"
+                if destination_allows_safe_structural_content(&self.state)
+                    && self.state.destination != Destination::Ignored =>
+            {
+                self.state.destination = Destination::EndnoteSeparator;
+            }
+            "aftnsepc"
+                if destination_allows_safe_structural_content(&self.state)
+                    && self.state.destination != Destination::Ignored =>
+            {
+                self.state.destination = Destination::EndnoteContinuationSeparator;
             }
             name if is_mail_merge_destination(name)
                 && destination_allows_safe_structural_content(&self.state)
@@ -4059,8 +4218,13 @@ impl Parser {
                     .unwrap_or(i32::MIN),
                 offset,
             ),
-            "tposxl" | "tposxi" => self.set_current_table_row_floating_alignment(
+            "tposxl" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Left,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposxi" => self.set_current_table_row_floating_alignment(
+                TableRowAlignment::Inside,
                 control.name.as_str(),
                 offset,
             ),
@@ -4071,6 +4235,26 @@ impl Parser {
             ),
             "tposxr" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Right,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposxo" => self.set_current_table_row_floating_alignment(
+                TableRowAlignment::Outside,
+                control.name.as_str(),
+                offset,
+            ),
+            "tphcol" => self.set_current_table_row_horizontal_anchor(
+                TableRowHorizontalAnchor::Column,
+                control.name.as_str(),
+                offset,
+            ),
+            "tphmrg" => self.set_current_table_row_horizontal_anchor(
+                TableRowHorizontalAnchor::Margin,
+                control.name.as_str(),
+                offset,
+            ),
+            "tphpg" => self.set_current_table_row_horizontal_anchor(
+                TableRowHorizontalAnchor::Page,
                 control.name.as_str(),
                 offset,
             ),
@@ -4085,6 +4269,35 @@ impl Parser {
                     .checked_abs()
                     .and_then(|value| value.checked_neg())
                     .unwrap_or(i32::MIN),
+                offset,
+            ),
+            "tpvpara" => self.set_current_table_row_vertical_anchor(
+                TableRowVerticalAnchor::Paragraph,
+                control.name.as_str(),
+                offset,
+            ),
+            "tpvmrg" => self.set_current_table_row_vertical_anchor(
+                TableRowVerticalAnchor::Margin,
+                control.name.as_str(),
+                offset,
+            ),
+            "tpvpg" => self.set_current_table_row_vertical_anchor(
+                TableRowVerticalAnchor::Page,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposyb" => self.set_current_table_row_vertical_position_alignment(
+                FloatingTableVerticalPositionAlignment::Bottom,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposyc" => self.set_current_table_row_vertical_position_alignment(
+                FloatingTableVerticalPositionAlignment::Center,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposyt" | "tposyil" => self.handle_current_table_row_passive_vertical_flow_control(
+                control.name.as_str(),
                 offset,
             ),
             "tdfrmtxtLeft" => self.set_current_table_row_wrap_margin(
@@ -4107,6 +4320,9 @@ impl Parser {
                 control.parameter,
                 offset,
             ),
+            "tabsnoovrlp" => {
+                self.handle_current_table_row_no_overlap(control.name.as_str(), offset)
+            }
             "trgaph" => self.set_current_table_cell_gap(control.parameter, offset),
             "trql" => self.set_current_table_row_alignment(TableRowAlignment::Left),
             "trqc" => self.set_current_table_row_alignment(TableRowAlignment::Center),
@@ -4685,10 +4901,16 @@ impl Parser {
             "sftnbj" => self.set_footnote_placement(FootnotePlacement::BottomOfPage, offset),
             "aenddoc" => self.set_endnote_placement(EndnotePlacement::EndOfDocument, offset),
             "endnhere" => self.set_endnote_placement(EndnotePlacement::EndOfSection, offset),
-            name if let Some(message) = note_restart_control_message(name) => {
-                self.diagnostics
-                    .push(Diagnostic::warning(message, Some(offset)));
+            "ftnrestart" => {
+                self.set_footnote_number_restart(NoteNumberRestart::EachSection, offset)
             }
+            "ftnrstcont" => self.set_footnote_number_restart(NoteNumberRestart::Continuous, offset),
+            "ftnrstpg" => self.set_footnote_number_restart(NoteNumberRestart::EachPage, offset),
+            "aftnrestart" => {
+                self.set_endnote_number_restart(NoteNumberRestart::EachSection, offset)
+            }
+            "aftnrstcont" => self.set_endnote_number_restart(NoteNumberRestart::Continuous, offset),
+            "aftnrstpg" => self.set_endnote_number_restart(NoteNumberRestart::EachPage, offset),
             "fet" => self.set_note_type_mode(control.parameter, offset),
             "linex" => self.set_line_number_distance(control.parameter, offset),
             "linemod" => self.set_line_number_step(control.parameter, offset),
@@ -5199,7 +5421,11 @@ impl Parser {
             | Destination::EvenPageFooter
             | Destination::ShapeText
             | Destination::Footnote
-            | Destination::Endnote => {
+            | Destination::Endnote
+            | Destination::FootnoteSeparator
+            | Destination::FootnoteContinuationSeparator
+            | Destination::EndnoteSeparator
+            | Destination::EndnoteContinuationSeparator => {
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(bytes.len(), offset)?;
                 } else {
@@ -5438,7 +5664,11 @@ impl Parser {
             | Destination::EvenPageFooter
             | Destination::ShapeText
             | Destination::Footnote
-            | Destination::Endnote => {
+            | Destination::Endnote
+            | Destination::FootnoteSeparator
+            | Destination::FootnoteContinuationSeparator
+            | Destination::EndnoteSeparator
+            | Destination::EndnoteContinuationSeparator => {
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(1, offset)?;
                 } else {
@@ -5758,6 +5988,14 @@ impl Parser {
         self.document.endnote_placement = placement;
         self.deferred_endnote_placement_diagnostics
             .push((placement, offset));
+    }
+
+    fn set_footnote_number_restart(&mut self, restart: NoteNumberRestart, _offset: usize) {
+        self.document.footnote_number_restart = restart;
+    }
+
+    fn set_endnote_number_restart(&mut self, restart: NoteNumberRestart, _offset: usize) {
+        self.document.endnote_number_restart = restart;
     }
 
     fn legacy_footnote_destination(&self) -> Destination {
@@ -6160,26 +6398,83 @@ impl Parser {
     ) -> Result<(), ParseError> {
         let replacement = match destination {
             Destination::Footnote => {
-                self.footnote_reference_count = self.footnote_reference_count.saturating_add(1);
-                format_note_number(
-                    self.document.footnote_number_start,
-                    self.footnote_reference_count,
-                    self.document.footnote_number_format,
-                )
+                self.next_footnote_reference_sequence();
+                self.current_footnote_reference_block_index = self.current_reference_block_index();
+                footnote_reference_marker(self.document.footnotes.len())
             }
             Destination::Endnote => {
-                self.endnote_reference_count = self.endnote_reference_count.saturating_add(1);
-                format_note_number(
-                    self.document.endnote_number_start,
-                    self.endnote_reference_count,
-                    self.document.endnote_number_format,
-                )
+                if self.document.endnote_number_restart == NoteNumberRestart::EachPage {
+                    self.next_endnote_reference_sequence();
+                    endnote_reference_marker(self.document.endnotes.len())
+                } else {
+                    let sequence = self.next_endnote_reference_sequence();
+                    format_note_number(
+                        self.document.endnote_number_start,
+                        sequence,
+                        self.document.endnote_number_format,
+                    )
+                }
             }
             _ => "1".to_string(),
         };
         self.resolve_latest_pending_note_reference(&replacement, offset)?;
         self.state.destination = destination;
         Ok(())
+    }
+
+    fn current_reference_block_index(&self) -> usize {
+        self.document.blocks.len()
+    }
+
+    fn next_footnote_reference_sequence(&mut self) -> usize {
+        self.footnote_reference_count = self.footnote_reference_count.saturating_add(1);
+        match self.document.footnote_number_restart {
+            NoteNumberRestart::EachSection => {
+                let section = self.current_section_index.max(1);
+                if self.footnote_reference_section_index != section {
+                    self.footnote_reference_section_index = section;
+                    self.footnote_section_reference_count = 0;
+                }
+                self.footnote_section_reference_count =
+                    self.footnote_section_reference_count.saturating_add(1);
+                self.footnote_section_reference_count
+            }
+            NoteNumberRestart::EachPage => {
+                let page_breaks = self
+                    .document
+                    .blocks
+                    .iter()
+                    .filter(|block| matches!(block, Block::PageBreak))
+                    .count();
+                if self.footnote_reference_page_break_count != page_breaks {
+                    self.footnote_reference_page_break_count = page_breaks;
+                    self.footnote_page_reference_count = 0;
+                }
+                self.footnote_page_reference_count =
+                    self.footnote_page_reference_count.saturating_add(1);
+                self.footnote_page_reference_count
+            }
+            NoteNumberRestart::Continuous => self.footnote_reference_count,
+        }
+    }
+
+    fn next_endnote_reference_sequence(&mut self) -> usize {
+        self.endnote_reference_count = self.endnote_reference_count.saturating_add(1);
+        match self.document.endnote_number_restart {
+            NoteNumberRestart::EachSection => {
+                let section = self.current_section_index.max(1);
+                if self.endnote_reference_section_index != section {
+                    self.endnote_reference_section_index = section;
+                    self.endnote_section_reference_count = 0;
+                }
+                self.endnote_section_reference_count =
+                    self.endnote_section_reference_count.saturating_add(1);
+                self.endnote_section_reference_count
+            }
+            NoteNumberRestart::Continuous | NoteNumberRestart::EachPage => {
+                self.endnote_reference_count
+            }
+        }
     }
 
     fn push_note_reference(&mut self, offset: usize) -> Result<(), ParseError> {
@@ -7256,6 +7551,14 @@ impl Parser {
             &mut self.current_footnote_paragraph
         } else if self.state.destination == Destination::Endnote {
             &mut self.current_endnote_paragraph
+        } else if self.state.destination == Destination::FootnoteSeparator {
+            &mut self.current_footnote_separator_paragraph
+        } else if self.state.destination == Destination::FootnoteContinuationSeparator {
+            &mut self.current_footnote_continuation_separator_paragraph
+        } else if self.state.destination == Destination::EndnoteSeparator {
+            &mut self.current_endnote_separator_paragraph
+        } else if self.state.destination == Destination::EndnoteContinuationSeparator {
+            &mut self.current_endnote_continuation_separator_paragraph
         } else if self.state.destination == Destination::ShapeText {
             if let Some(shape) = self.current_shape.as_mut() {
                 &mut shape.current_text_paragraph
@@ -7312,7 +7615,11 @@ impl Parser {
             | Destination::EvenPageFooter
             | Destination::ShapeText
             | Destination::Footnote
-            | Destination::Endnote => {
+            | Destination::Endnote
+            | Destination::FootnoteSeparator
+            | Destination::FootnoteContinuationSeparator
+            | Destination::EndnoteSeparator
+            | Destination::EndnoteContinuationSeparator => {
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(text.len(), offset)
                 } else {
@@ -7868,13 +8175,16 @@ impl Parser {
         }
     }
 
-    fn bookmark_text(&self, name: &str) -> Option<String> {
+    fn bookmark_captured_text(&self, name: &str) -> Option<String> {
         let name = clean_bookmark_name(name.to_string())?;
-        let text = self
-            .bookmark_captures
+        self.bookmark_captures
             .iter()
             .find(|bookmark| bookmark.name == name && !bookmark.active && !bookmark.text.is_empty())
-            .map(|bookmark| bookmark.text.clone())?;
+            .map(|bookmark| bookmark.text.clone())
+    }
+
+    fn bookmark_text(&self, name: &str) -> Option<String> {
+        let text = self.bookmark_captured_text(name)?;
         if contains_internal_marker(&text) || text.chars().any(|ch| ch.is_control()) {
             return None;
         }
@@ -8386,20 +8696,26 @@ impl Parser {
                 instruction,
                 self.limits().max_character_spacing_twips,
             );
+            if advance.horizontal_twips != 0 || advance.vertical_twips != 0 {
+                self.push_passive_advance_marker(
+                    advance.horizontal_twips,
+                    advance.vertical_twips,
+                    offset,
+                )?;
+            }
             if advance.horizontal_twips != 0 {
-                self.push_passive_advance_marker(advance.horizontal_twips, offset)?;
                 self.diagnostics.push(Diagnostic::warning(
                     "layout field ADVANCE interpreted as bounded passive horizontal cursor advance",
                     Some(offset),
                 ));
             }
-            if advance.ignored_vertical {
+            if advance.vertical_twips != 0 {
                 self.diagnostics.push(Diagnostic::warning(
-                    "layout field ADVANCE vertical cursor movement stripped without applying vertical positioning",
+                    "layout field ADVANCE interpreted as bounded passive vertical cursor advance",
                     Some(offset),
                 ));
             }
-            if advance.horizontal_twips == 0 && !advance.ignored_vertical {
+            if advance.horizontal_twips == 0 && advance.vertical_twips == 0 {
                 self.diagnostics.push(Diagnostic::warning(
                     "layout field ADVANCE stripped without applying cursor positioning",
                     Some(offset),
@@ -8418,12 +8734,16 @@ impl Parser {
     fn push_passive_advance_marker(
         &mut self,
         horizontal_twips: i32,
+        vertical_twips: i32,
         offset: usize,
     ) -> Result<(), ParseError> {
         let previous_spacing = self.state.character.character_spacing_twips;
+        let previous_baseline_shift = self.state.character.baseline_shift_half_points;
         self.state.character.character_spacing_twips = horizontal_twips;
+        self.state.character.baseline_shift_half_points = vertical_twips / 10;
         let result = self.push_text(PASSIVE_ADVANCE_MARKER, offset);
         self.state.character.character_spacing_twips = previous_spacing;
+        self.state.character.baseline_shift_half_points = previous_baseline_shift;
         result
     }
 
@@ -8447,7 +8767,7 @@ impl Parser {
         } else if field_instruction_name(instruction) == Some("REF") {
             self.passive_ref_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("NOTEREF") {
-            self.passive_ref_field_result(instruction)
+            self.passive_noteref_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("PAGEREF") {
             self.passive_page_ref_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("STYLEREF") {
@@ -8817,6 +9137,66 @@ impl Parser {
         })
     }
 
+    fn passive_noteref_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
+        let name = field_first_argument(instruction)?;
+        if let Some(text) = self.bookmark_captured_text(&name)
+            && let Some(text) = self.passive_footnote_marker_noteref_text(&text, instruction)
+        {
+            return Some(PassiveFieldResult {
+                text,
+                font_name: None,
+                font_size_half_points: None,
+                form_field: false,
+            });
+        }
+        self.passive_ref_field_result(instruction)
+    }
+
+    fn passive_footnote_marker_noteref_text(
+        &self,
+        text: &str,
+        instruction: &str,
+    ) -> Option<String> {
+        if text.chars().any(|ch| ch.is_control()) {
+            return None;
+        }
+        let text = strip_bookmark_page_markers(text)?;
+        let note_index = parse_footnote_reference_marker_id(&text)?;
+        if note_index > self.document.footnotes.len() {
+            return None;
+        }
+        let sequence = match self.document.footnote_number_restart {
+            NoteNumberRestart::Continuous => note_index + 1,
+            NoteNumberRestart::EachSection => {
+                let section = self
+                    .document
+                    .footnote_section_indices
+                    .get(note_index)
+                    .copied()
+                    .unwrap_or_else(|| self.current_section_index.max(1));
+                let prior_count = self
+                    .document
+                    .footnote_section_indices
+                    .iter()
+                    .take(note_index)
+                    .filter(|candidate| **candidate == section)
+                    .count();
+                prior_count + 1
+            }
+            NoteNumberRestart::EachPage => return None,
+        };
+        let value = self.document.footnote_number_start + sequence as i32 - 1;
+        if field_uses_numeric_formatting(instruction) {
+            Some(value.to_string())
+        } else {
+            Some(format_note_number(
+                self.document.footnote_number_start,
+                sequence,
+                self.document.footnote_number_format,
+            ))
+        }
+    }
+
     fn field_bookmark_value(&self, name: &str) -> Option<String> {
         let name = clean_bookmark_name(name.to_string())?;
         self.field_bookmark_values
@@ -9083,6 +9463,10 @@ impl Parser {
                 self.finish_endnote_paragraph(offset)?;
                 true
             }
+            destination if is_note_separator_destination(destination) => {
+                self.finish_note_separator_paragraph(offset)?;
+                true
+            }
             Destination::ShapeText => {
                 self.finish_shape_text_paragraph();
                 true
@@ -9211,6 +9595,12 @@ impl Parser {
                 },
             );
             self.document.footnotes.push(paragraph);
+            self.document
+                .footnote_section_indices
+                .push(self.current_section_index.max(1));
+            self.document
+                .footnote_block_indices
+                .push(self.current_footnote_reference_block_index);
         }
         Ok(())
     }
@@ -9232,6 +9622,43 @@ impl Parser {
             self.document
                 .endnote_placements
                 .push(self.document.endnote_placement);
+        }
+        Ok(())
+    }
+
+    fn finish_note_separator_paragraph(&mut self, _offset: usize) -> Result<(), ParseError> {
+        let destination = self.state.destination;
+        let current = match destination {
+            Destination::FootnoteSeparator => &mut self.current_footnote_separator_paragraph,
+            Destination::FootnoteContinuationSeparator => {
+                &mut self.current_footnote_continuation_separator_paragraph
+            }
+            Destination::EndnoteSeparator => &mut self.current_endnote_separator_paragraph,
+            Destination::EndnoteContinuationSeparator => {
+                &mut self.current_endnote_continuation_separator_paragraph
+            }
+            _ => return Ok(()),
+        };
+        if current.runs.is_empty() {
+            return Ok(());
+        }
+        let paragraph = std::mem::replace(
+            current,
+            Paragraph {
+                style: self.state.paragraph.clone(),
+                runs: Vec::new(),
+            },
+        );
+        match destination {
+            Destination::FootnoteSeparator => self.document.footnote_separator = Some(paragraph),
+            Destination::FootnoteContinuationSeparator => {
+                self.document.footnote_continuation_separator = Some(paragraph)
+            }
+            Destination::EndnoteSeparator => self.document.endnote_separator = Some(paragraph),
+            Destination::EndnoteContinuationSeparator => {
+                self.document.endnote_continuation_separator = Some(paragraph)
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -9400,7 +9827,10 @@ impl Parser {
             current_cell_vertical_merge: TableCellVerticalMerge::None,
             height_twips: None,
             left_offset_twips: 0,
+            horizontal_anchor_adjust_twips: 0,
             vertical_offset_twips: 0,
+            vertical_anchor_adjust_twips: 0,
+            vertical_position_alignment: FloatingTableVerticalPositionAlignment::Top,
             wrap_margins: TableRowWrapMargins::default(),
             cell_gap_twips: DEFAULT_TABLE_CELL_GAP_TWIPS,
             alignment: TableRowAlignment::Left,
@@ -10260,10 +10690,16 @@ impl Parser {
                 Some(offset),
             ));
         }
-        row.left_offset_twips = clamped;
+        let adjusted = i64::from(clamped) + i64::from(row.horizontal_anchor_adjust_twips);
+        let adjusted = adjusted.clamp(
+            i64::from(-max_table_row_offset_twips),
+            i64::from(max_table_row_offset_twips),
+        ) as i32;
+        row.left_offset_twips = adjusted;
     }
 
     fn add_current_table_row_horizontal_position_offset(&mut self, value: i32, offset: usize) {
+        self.ensure_current_table_row_default_floating_wrap_margins(offset);
         let max_table_row_offset_twips = self.limits().max_table_row_offset_twips;
         let Some(row) = self.current_table_row.as_mut() else {
             return;
@@ -10288,6 +10724,7 @@ impl Parser {
     }
 
     fn add_current_table_row_vertical_position_offset(&mut self, value: i32, offset: usize) {
+        self.ensure_current_table_row_default_floating_wrap_margins(offset);
         let max_table_row_offset_twips = self.limits().max_table_row_offset_twips;
         let Some(row) = self.current_table_row.as_mut() else {
             return;
@@ -10309,6 +10746,157 @@ impl Parser {
             Some(offset),
         ));
         row.vertical_offset_twips = clamped;
+    }
+
+    fn handle_current_table_row_passive_vertical_flow_control(
+        &mut self,
+        control_name: &str,
+        offset: usize,
+    ) {
+        if self.current_table_row.is_some() {
+            self.ensure_current_table_row_default_floating_wrap_margins(offset);
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "floating table vertical flow control \\{control_name} interpreted through passive table flow"
+                ),
+                Some(offset),
+            ));
+        }
+    }
+
+    fn set_current_table_row_vertical_anchor(
+        &mut self,
+        anchor: TableRowVerticalAnchor,
+        control_name: &str,
+        offset: usize,
+    ) {
+        self.ensure_current_table_row_default_floating_wrap_margins(offset);
+        let max_table_row_offset_twips = self.limits().max_table_row_offset_twips;
+        let new_adjust = match anchor {
+            TableRowVerticalAnchor::Paragraph | TableRowVerticalAnchor::Margin => 0,
+            TableRowVerticalAnchor::Page => -self.current_page_margin_top_twips(),
+        }
+        .clamp(-max_table_row_offset_twips, max_table_row_offset_twips);
+        if let Some(row) = self.current_table_row.as_mut() {
+            let requested = i64::from(row.vertical_offset_twips)
+                - i64::from(row.vertical_anchor_adjust_twips)
+                + i64::from(new_adjust);
+            let min = i64::from(-max_table_row_offset_twips);
+            let max = i64::from(max_table_row_offset_twips);
+            let clamped = requested.clamp(min, max) as i32;
+            if i64::from(clamped) != requested {
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "floating table vertical anchor adjustment clamped from {requested} to {clamped} twips"
+                    ),
+                    Some(offset),
+                ));
+            }
+            row.vertical_offset_twips = clamped;
+            row.vertical_anchor_adjust_twips = new_adjust;
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "floating table vertical anchor \\{control_name} interpreted as bounded passive row origin"
+                ),
+                Some(offset),
+            ));
+        }
+    }
+
+    fn set_current_table_row_vertical_position_alignment(
+        &mut self,
+        alignment: FloatingTableVerticalPositionAlignment,
+        control_name: &str,
+        offset: usize,
+    ) {
+        self.ensure_current_table_row_default_floating_wrap_margins(offset);
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.vertical_position_alignment = alignment;
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "floating table vertical alignment \\{control_name} captured for bounded passive row positioning"
+                ),
+                Some(offset),
+            ));
+        }
+    }
+
+    fn apply_table_row_vertical_position_alignment(
+        &mut self,
+        row: &mut TableRowBuilder,
+        offset: usize,
+    ) {
+        let alignment = row.vertical_position_alignment;
+        if alignment == FloatingTableVerticalPositionAlignment::Top {
+            return;
+        }
+        let Some(height_twips) = row
+            .height_twips
+            .map(|height| height.checked_abs().unwrap_or(i32::MAX))
+        else {
+            let base = match alignment {
+                FloatingTableVerticalPositionAlignment::Top => return,
+                FloatingTableVerticalPositionAlignment::Center => {
+                    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE
+                }
+                FloatingTableVerticalPositionAlignment::Bottom => {
+                    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE
+                }
+            };
+            row.vertical_offset_twips = base.saturating_add(row.vertical_offset_twips);
+            self.diagnostics.push(Diagnostic::warning(
+                "floating table vertical center/bottom alignment captured for computed passive row height",
+                Some(offset),
+            ));
+            return;
+        };
+        let alignment_adjust = match alignment {
+            FloatingTableVerticalPositionAlignment::Top => 0,
+            FloatingTableVerticalPositionAlignment::Center => -(height_twips / 2),
+            FloatingTableVerticalPositionAlignment::Bottom => -height_twips,
+        };
+        let max_table_row_offset_twips = self.limits().max_table_row_offset_twips;
+        let requested = i64::from(row.vertical_offset_twips) + i64::from(alignment_adjust);
+        let min = i64::from(-max_table_row_offset_twips);
+        let max = i64::from(max_table_row_offset_twips);
+        let clamped = requested.clamp(min, max) as i32;
+        if i64::from(clamped) != requested {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "floating table vertical alignment adjustment clamped from {requested} to {clamped} twips"
+                ),
+                Some(offset),
+            ));
+        }
+        row.vertical_offset_twips = clamped;
+        self.diagnostics.push(Diagnostic::warning(
+            "floating table vertical center/bottom alignment interpreted as bounded passive row offset",
+            Some(offset),
+        ));
+    }
+
+    fn ensure_current_table_row_default_floating_wrap_margins(&mut self, offset: usize) {
+        let max_table_cell_gap_twips = self.limits().max_table_cell_gap_twips;
+        let Some(row) = self.current_table_row.as_mut() else {
+            return;
+        };
+        if row.wrap_margins.left_twips > 0
+            || row.wrap_margins.right_twips > 0
+            || row.wrap_margins.top_twips > 0
+            || row.wrap_margins.bottom_twips > 0
+        {
+            return;
+        }
+        let clamped = DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS.min(max_table_cell_gap_twips.max(0));
+        if clamped <= 0 {
+            return;
+        }
+        row.wrap_margins.left_twips = clamped;
+        row.wrap_margins.right_twips = clamped;
+        self.diagnostics.push(Diagnostic::warning(
+            "floating table default wrap distance interpreted as bounded passive row margin",
+            Some(offset),
+        ));
     }
 
     fn set_current_table_row_wrap_margin(
@@ -10369,10 +10957,61 @@ impl Parser {
         control_name: &str,
         offset: usize,
     ) {
+        self.ensure_current_table_row_default_floating_wrap_margins(offset);
         if let Some(row) = self.current_table_row.as_mut() {
             row.alignment = alignment;
             self.diagnostics.push(Diagnostic::warning(
                 format!("floating table horizontal alignment \\{control_name} interpreted through passive row alignment"),
+                Some(offset),
+            ));
+        }
+    }
+
+    fn handle_current_table_row_no_overlap(&mut self, control_name: &str, offset: usize) {
+        if self.current_table_row.is_some() {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "floating table no-overlap \\{control_name} interpreted through passive table flow"
+                ),
+                Some(offset),
+            ));
+        }
+    }
+
+    fn set_current_table_row_horizontal_anchor(
+        &mut self,
+        anchor: TableRowHorizontalAnchor,
+        control_name: &str,
+        offset: usize,
+    ) {
+        self.ensure_current_table_row_default_floating_wrap_margins(offset);
+        let max_table_row_offset_twips = self.limits().max_table_row_offset_twips;
+        let new_adjust = match anchor {
+            TableRowHorizontalAnchor::Column | TableRowHorizontalAnchor::Margin => 0,
+            TableRowHorizontalAnchor::Page => -self.current_page_margin_left_twips(),
+        }
+        .clamp(-max_table_row_offset_twips, max_table_row_offset_twips);
+        if let Some(row) = self.current_table_row.as_mut() {
+            let requested = i64::from(row.left_offset_twips)
+                - i64::from(row.horizontal_anchor_adjust_twips)
+                + i64::from(new_adjust);
+            let min = i64::from(-max_table_row_offset_twips);
+            let max = i64::from(max_table_row_offset_twips);
+            let clamped = requested.clamp(min, max) as i32;
+            if i64::from(clamped) != requested {
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "floating table horizontal anchor adjustment clamped from {requested} to {clamped} twips"
+                    ),
+                    Some(offset),
+                ));
+            }
+            row.left_offset_twips = clamped;
+            row.horizontal_anchor_adjust_twips = new_adjust;
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "floating table horizontal anchor \\{control_name} interpreted as bounded passive row origin"
+                ),
                 Some(offset),
             ));
         }
@@ -10555,6 +11194,7 @@ impl Parser {
         }
 
         self.apply_table_row_preferred_width_fallback(&mut row);
+        self.apply_table_row_vertical_position_alignment(&mut row, offset);
 
         if row.right_to_left {
             Self::normalize_right_to_left_table_row(&mut row);
@@ -10810,6 +11450,7 @@ impl Parser {
                         format: jpeg.format,
                         bytes: picture.bytes,
                         palette: Vec::new(),
+                        alpha_mask: None,
                         vector_commands: Vec::new(),
                         width_px,
                         height_px,
@@ -10850,6 +11491,7 @@ impl Parser {
                         format: png.format,
                         bytes: png.idat,
                         palette: png.palette,
+                        alpha_mask: png.alpha_mask,
                         vector_commands: Vec::new(),
                         width_px: png.width_px,
                         height_px: png.height_px,
@@ -10891,6 +11533,7 @@ impl Parser {
                             format: ImageFormat::Rgb8,
                             bytes: dib.rgb,
                             palette: Vec::new(),
+                            alpha_mask: None,
                             vector_commands: Vec::new(),
                             width_px: dib.width_px,
                             height_px: dib.height_px,
@@ -10946,6 +11589,7 @@ impl Parser {
                             format: ImageFormat::WmfVector,
                             bytes: Vec::new(),
                             palette: Vec::new(),
+                            alpha_mask: None,
                             vector_commands: wmf.commands,
                             width_px: wmf.width_px,
                             height_px: wmf.height_px,
@@ -11135,6 +11779,7 @@ impl Parser {
             format: ImageFormat::Placeholder,
             bytes: Vec::new(),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -11357,8 +12002,15 @@ impl Parser {
                 }
             }
         } else if destination == Destination::Footnote {
-            self.ensure_note_capacity(paragraphs.len(), offset)?;
+            let count = paragraphs.len();
+            self.ensure_note_capacity(count, offset)?;
             self.document.footnotes.extend(paragraphs);
+            self.document
+                .footnote_section_indices
+                .extend(std::iter::repeat(self.current_section_index.max(1)).take(count));
+            self.document
+                .footnote_block_indices
+                .extend(std::iter::repeat(self.current_footnote_reference_block_index).take(count));
         } else if destination == Destination::Endnote {
             let count = paragraphs.len();
             self.ensure_note_capacity(count, offset)?;
@@ -11711,7 +12363,23 @@ impl Parser {
 
     fn set_current_shape_text_wrap(&mut self, value: Option<i32>) {
         if let Some(shape) = self.current_shape.as_mut() {
-            shape.text_wrap = value.unwrap_or(1) != 0;
+            match value.unwrap_or(1) {
+                // Word top/bottom wrapping is represented by keeping the passive
+                // shape frame in the normal block flow.
+                1 => {
+                    shape.text_wrap = false;
+                    shape.wrap_side = StaticImageWrapSide::Both;
+                }
+                3 => {
+                    shape.text_wrap = false;
+                }
+                0 => {
+                    shape.text_wrap = false;
+                }
+                _ => {
+                    shape.text_wrap = true;
+                }
+            }
         }
     }
 
@@ -11938,6 +12606,29 @@ impl Parser {
         if image.format == ImageFormat::PngIndexed
             && apply_indexed_palette_picture_color_mode(&mut image.palette, grayscale, bilevel)
         {
+            return;
+        }
+
+        if matches!(image.format, ImageFormat::Png | ImageFormat::PngGrayscale)
+            && apply_png_picture_color_mode(
+                &mut image.bytes,
+                image.width_px,
+                image.height_px,
+                image.format,
+                grayscale,
+                bilevel,
+            )
+        {
+            return;
+        }
+
+        if apply_jpeg_passive_picture_color_mode(&mut image.format, grayscale, bilevel) {
+            if bilevel {
+                self.diagnostics.push(Diagnostic::warning(
+                    "JPEG picture bilevel property approximated by passive PDF grayscale blend",
+                    Some(offset),
+                ));
+            }
             return;
         }
 
@@ -14114,7 +14805,10 @@ fn shape_layout_compatibility_control_message(
         "dobxcolumn" | "dobxmargin" | "dobxpage" | "dobypara" | "dobymargin" | "dobypage"
         | "shpbxcolumn" | "shpbxmargin" | "shpbxpage" | "shpbypara" | "shpbymargin"
         | "shpbypage" => None,
-        "shpwr" if !matches!(parameter.unwrap_or(1), 0 | 1) => {
+        "shpwr" if matches!(parameter.unwrap_or(1), 4 | 5) => {
+            Some("shape contour wrapping approximated by passive bounding-box exclusion")
+        }
+        "shpwr" if !matches!(parameter.unwrap_or(1), 0..=5) => {
             Some("shape text wrapping approximated by passive shape layout")
         }
         "shpwrk" if !matches!(parameter.unwrap_or(0), 0..=3) => {
@@ -14132,22 +14826,9 @@ fn table_layout_compatibility_control_message(name: &str) -> Option<&'static str
         | "clspdft" | "clspdfb" => {
             Some("table padding and spacing units interpreted through bounded twip layout")
         }
-        "tabsnoovrlp" | "tphcol" | "tphmrg" | "tphpg" | "tpvmrg" | "tpvpara" | "tpvpg"
-        | "tposx" | "tposnegx" | "tposxc" | "tposxi" | "tposxl" | "tposxo" | "tposxr" | "tposy"
-        | "tposnegy" | "tposyb" | "tposyc" | "tposyil" | "tposyin" | "tposyout" | "tposyt" => {
+        "tposx" | "tposnegx" | "tposxc" | "tposxi" | "tposxl" | "tposxr" | "tposy" | "tposnegy"
+        | "tposyin" | "tposyout" => {
             Some("floating table positioning approximated by passive table flow")
-        }
-        _ => None,
-    }
-}
-
-fn note_restart_control_message(name: &str) -> Option<&'static str> {
-    match name {
-        "ftnrestart" | "ftnrstpg" | "ftnrstcont" => {
-            Some("footnote restart behavior approximated by passive sequential numbering")
-        }
-        "aftnrestart" | "aftnrstpg" | "aftnrstcont" => {
-            Some("endnote restart behavior approximated by passive sequential numbering")
         }
         _ => None,
     }
@@ -15055,6 +15736,16 @@ fn is_footer_destination(destination: Destination) -> bool {
     )
 }
 
+fn is_note_separator_destination(destination: Destination) -> bool {
+    matches!(
+        destination,
+        Destination::FootnoteSeparator
+            | Destination::FootnoteContinuationSeparator
+            | Destination::EndnoteSeparator
+            | Destination::EndnoteContinuationSeparator
+    )
+}
+
 fn append_field_instruction(
     target: &mut String,
     text: &str,
@@ -15421,7 +16112,7 @@ struct PassiveFieldSegment {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 struct PassiveAdvanceFieldOffset {
     horizontal_twips: i32,
-    ignored_vertical: bool,
+    vertical_twips: i32,
 }
 
 struct FieldSequenceInstruction {
@@ -15494,12 +16185,14 @@ fn passive_advance_field_offset_twips(
 ) -> PassiveAdvanceFieldOffset {
     let right = field_switch_i32_value(instruction, 'r').unwrap_or(0);
     let left = field_switch_i32_value(instruction, 'l').unwrap_or(0);
+    let up = field_switch_i32_value(instruction, 'u').unwrap_or(0);
+    let down = field_switch_i32_value(instruction, 'd').unwrap_or(0);
     let horizontal = i64::from(right) - i64::from(left);
+    let vertical = i64::from(up) - i64::from(down);
     let limit = i64::from(max_advance_twips.max(0));
     PassiveAdvanceFieldOffset {
         horizontal_twips: horizontal.clamp(-limit, limit) as i32,
-        ignored_vertical: field_switch_i32_value(instruction, 'u').unwrap_or(0) != 0
-            || field_switch_i32_value(instruction, 'd').unwrap_or(0) != 0,
+        vertical_twips: vertical.clamp(-limit, limit) as i32,
     }
 }
 
@@ -15578,6 +16271,17 @@ fn field_result_allows_internal_marker(instruction: &str, text: &str) -> bool {
         Some("PAGEREF") => is_bookmark_page_marker(text),
         _ => false,
     }
+}
+
+fn field_uses_numeric_formatting(instruction: &str) -> bool {
+    if matches!(field_numeric_picture_switch(instruction), Some(Some(_))) {
+        return true;
+    }
+    field_format_switches(instruction).is_some_and(|switches| {
+        switches
+            .iter()
+            .any(|switch| matches!(switch, FieldFormatSwitch::Number(_)))
+    })
 }
 
 fn passive_field_result(
@@ -17672,6 +18376,10 @@ fn is_internal_marker(text: &str) -> bool {
             | DOCUMENT_CHARS_WITH_SPACES_MARKER
             | PASSIVE_ADVANCE_MARKER
             | PENDING_NOTE_REFERENCE_MARKER
+            | FOOTNOTE_REFERENCE_MARKER
+            | FOOTNOTE_REFERENCE_MARKER_END
+            | ENDNOTE_REFERENCE_MARKER
+            | ENDNOTE_REFERENCE_MARKER_END
     ) || is_bookmark_page_marker(text)
 }
 
@@ -17685,6 +18393,10 @@ fn contains_internal_marker(text: &str) -> bool {
         || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
         || text.contains(PASSIVE_ADVANCE_MARKER)
         || text.contains(PENDING_NOTE_REFERENCE_MARKER)
+        || text.contains(FOOTNOTE_REFERENCE_MARKER)
+        || text.contains(FOOTNOTE_REFERENCE_MARKER_END)
+        || text.contains(ENDNOTE_REFERENCE_MARKER)
+        || text.contains(ENDNOTE_REFERENCE_MARKER_END)
         || text.contains(BOOKMARK_PAGE_ANCHOR_MARKER)
         || text.contains(BOOKMARK_PAGE_REF_MARKER)
         || text.contains(BOOKMARK_PAGE_MARKER_END)
@@ -17700,6 +18412,10 @@ fn sanitize_internal_markers(text: &str) -> String {
         .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "\u{fffd}")
         .replace(PASSIVE_ADVANCE_MARKER, "\u{fffd}")
         .replace(PENDING_NOTE_REFERENCE_MARKER, "\u{fffd}")
+        .replace(FOOTNOTE_REFERENCE_MARKER, "\u{fffd}")
+        .replace(FOOTNOTE_REFERENCE_MARKER_END, "\u{fffd}")
+        .replace(ENDNOTE_REFERENCE_MARKER, "\u{fffd}")
+        .replace(ENDNOTE_REFERENCE_MARKER_END, "\u{fffd}")
         .replace(BOOKMARK_PAGE_ANCHOR_MARKER, "\u{fffd}")
         .replace(BOOKMARK_PAGE_REF_MARKER, "\u{fffd}")
         .replace(BOOKMARK_PAGE_MARKER_END, "\u{fffd}")
@@ -17714,6 +18430,33 @@ fn contains_bookmark_page_marker(text: &str) -> bool {
     text.contains(BOOKMARK_PAGE_ANCHOR_MARKER)
         || text.contains(BOOKMARK_PAGE_REF_MARKER)
         || text.contains(BOOKMARK_PAGE_MARKER_END)
+}
+
+fn strip_bookmark_page_markers(text: &str) -> Option<String> {
+    let mut output = String::with_capacity(text.len());
+    let mut search_start = 0;
+    loop {
+        let anchor_start = text[search_start..]
+            .find(BOOKMARK_PAGE_ANCHOR_MARKER)
+            .map(|relative| (search_start + relative, BOOKMARK_PAGE_ANCHOR_MARKER));
+        let ref_start = text[search_start..]
+            .find(BOOKMARK_PAGE_REF_MARKER)
+            .map(|relative| (search_start + relative, BOOKMARK_PAGE_REF_MARKER));
+        let Some((marker_start, prefix)) = [anchor_start, ref_start]
+            .into_iter()
+            .flatten()
+            .min_by_key(|(start, _)| *start)
+        else {
+            output.push_str(&text[search_start..]);
+            return Some(output);
+        };
+        let id_start = marker_start + prefix.len();
+        let marker_end_relative = text[id_start..].find(BOOKMARK_PAGE_MARKER_END)?;
+        let marker_end = id_start + marker_end_relative + BOOKMARK_PAGE_MARKER_END.len();
+        parse_bookmark_page_marker_id(&text[marker_start..marker_end], prefix)?;
+        output.push_str(&text[search_start..marker_start]);
+        search_start = marker_end;
+    }
 }
 
 fn parse_bookmark_page_marker_id(text: &str, prefix: &str) -> Option<usize> {
@@ -18854,6 +19597,7 @@ fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
         format: ImageFormat::Placeholder,
         bytes: Vec::new(),
         palette: Vec::new(),
+        alpha_mask: None,
         vector_commands: Vec::new(),
         width_px: picture.width_px_hint.unwrap_or(1).max(1),
         height_px: picture.height_px_hint.unwrap_or(1).max(1),
@@ -18962,6 +19706,267 @@ fn apply_indexed_palette_picture_color_mode(
     true
 }
 
+fn apply_png_picture_color_mode(
+    bytes: &mut Vec<u8>,
+    width_px: u32,
+    height_px: u32,
+    format: ImageFormat,
+    grayscale: bool,
+    bilevel: bool,
+) -> bool {
+    if !grayscale && !bilevel {
+        return true;
+    }
+    let components = match format {
+        ImageFormat::Png => 3usize,
+        ImageFormat::PngGrayscale => 1usize,
+        _ => return false,
+    };
+    let Some(width) = usize::try_from(width_px).ok() else {
+        return false;
+    };
+    let Some(height) = usize::try_from(height_px).ok() else {
+        return false;
+    };
+    let Some(row_pixels_len) = width.checked_mul(components) else {
+        return false;
+    };
+    let Some(row_len) = row_pixels_len.checked_add(1) else {
+        return false;
+    };
+    let Some(expected_len) = row_len.checked_mul(height) else {
+        return false;
+    };
+    let Some(mut scanlines) = inflate_zlib_png_scanlines(bytes, expected_len) else {
+        return false;
+    };
+    if !unfilter_png_scanlines(&mut scanlines, row_len, components) {
+        return false;
+    }
+
+    for row in scanlines.chunks_exact_mut(row_len) {
+        let pixels = &mut row[1..];
+        match format {
+            ImageFormat::Png => {
+                for pixel in pixels.chunks_exact_mut(3) {
+                    let gray = rgb_luminance(pixel[0], pixel[1], pixel[2]);
+                    let value = if bilevel {
+                        if gray >= 128 { 255 } else { 0 }
+                    } else {
+                        gray
+                    };
+                    pixel[0] = value;
+                    pixel[1] = value;
+                    pixel[2] = value;
+                }
+            }
+            ImageFormat::PngGrayscale => {
+                for sample in pixels {
+                    if bilevel {
+                        *sample = if *sample >= 128 { 255 } else { 0 };
+                    }
+                }
+            }
+            _ => return false,
+        }
+    }
+
+    *bytes = miniz_oxide::deflate::compress_to_vec_zlib(&scanlines, 6);
+    true
+}
+
+fn apply_jpeg_passive_picture_color_mode(
+    format: &mut ImageFormat,
+    grayscale: bool,
+    bilevel: bool,
+) -> bool {
+    if !grayscale && !bilevel {
+        return true;
+    }
+    *format = match (*format, bilevel) {
+        (ImageFormat::Jpeg, false) => ImageFormat::JpegPassiveGrayscale,
+        (ImageFormat::Jpeg, true) => ImageFormat::JpegPassiveBilevel,
+        (ImageFormat::JpegPassiveGrayscale | ImageFormat::JpegPassiveBilevel, true) => {
+            ImageFormat::JpegPassiveBilevel
+        }
+        (ImageFormat::JpegPassiveGrayscale | ImageFormat::JpegPassiveBilevel, false) => {
+            ImageFormat::JpegPassiveGrayscale
+        }
+        (ImageFormat::JpegCmyk, false) => ImageFormat::JpegCmykPassiveGrayscale,
+        (ImageFormat::JpegCmyk, true) => ImageFormat::JpegCmykPassiveBilevel,
+        (ImageFormat::JpegCmykPassiveGrayscale | ImageFormat::JpegCmykPassiveBilevel, true) => {
+            ImageFormat::JpegCmykPassiveBilevel
+        }
+        (ImageFormat::JpegCmykPassiveGrayscale | ImageFormat::JpegCmykPassiveBilevel, false) => {
+            ImageFormat::JpegCmykPassiveGrayscale
+        }
+        _ => return false,
+    };
+    true
+}
+
+fn inflate_zlib_png_scanlines(bytes: &[u8], expected_len: usize) -> Option<Vec<u8>> {
+    if let Some(output) = inflate_zlib_stored_blocks(bytes) {
+        return (output.len() == expected_len).then_some(output);
+    }
+    match miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(bytes, expected_len) {
+        Ok(output) if output.len() == expected_len => Some(output),
+        _ => None,
+    }
+}
+
+fn unfilter_png_scanlines(scanlines: &mut [u8], row_len: usize, bpp: usize) -> bool {
+    if row_len <= 1 || bpp == 0 || scanlines.len() % row_len != 0 {
+        return false;
+    }
+    let pixel_len = row_len - 1;
+    let mut previous = vec![0u8; pixel_len];
+    for row in scanlines.chunks_exact_mut(row_len) {
+        let filter = row[0];
+        {
+            let pixels = &mut row[1..];
+            match filter {
+                0 => {}
+                1 => {
+                    for index in 0..pixel_len {
+                        let left = if index >= bpp { pixels[index - bpp] } else { 0 };
+                        pixels[index] = pixels[index].wrapping_add(left);
+                    }
+                }
+                2 => {
+                    for index in 0..pixel_len {
+                        pixels[index] = pixels[index].wrapping_add(previous[index]);
+                    }
+                }
+                3 => {
+                    for index in 0..pixel_len {
+                        let left = if index >= bpp { pixels[index - bpp] } else { 0 };
+                        let up = previous[index];
+                        let average = ((u16::from(left) + u16::from(up)) / 2) as u8;
+                        pixels[index] = pixels[index].wrapping_add(average);
+                    }
+                }
+                4 => {
+                    for index in 0..pixel_len {
+                        let left = if index >= bpp { pixels[index - bpp] } else { 0 };
+                        let up = previous[index];
+                        let upper_left = if index >= bpp {
+                            previous[index - bpp]
+                        } else {
+                            0
+                        };
+                        pixels[index] =
+                            pixels[index].wrapping_add(paeth_predictor(left, up, upper_left));
+                    }
+                }
+                _ => return false,
+            }
+            previous.copy_from_slice(pixels);
+        }
+        row[0] = 0;
+    }
+    true
+}
+
+fn paeth_predictor(left: u8, up: u8, upper_left: u8) -> u8 {
+    let left = i32::from(left);
+    let up = i32::from(up);
+    let upper_left = i32::from(upper_left);
+    let prediction = left + up - upper_left;
+    let left_distance = (prediction - left).abs();
+    let up_distance = (prediction - up).abs();
+    let upper_left_distance = (prediction - upper_left).abs();
+    if left_distance <= up_distance && left_distance <= upper_left_distance {
+        left as u8
+    } else if up_distance <= upper_left_distance {
+        up as u8
+    } else {
+        upper_left as u8
+    }
+}
+
+fn inflate_zlib_stored_blocks(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 6 {
+        return None;
+    }
+    let cmf = bytes[0];
+    let flg = bytes[1];
+    if cmf & 0x0f != 8 || ((u16::from(cmf) << 8) | u16::from(flg)) % 31 != 0 {
+        return None;
+    }
+    if flg & 0x20 != 0 {
+        return None;
+    }
+    let expected_adler = u32::from_be_bytes(bytes[bytes.len() - 4..].try_into().ok()?);
+    let mut pos = 2usize;
+    let end = bytes.len() - 4;
+    let mut output = Vec::new();
+    loop {
+        if pos >= end {
+            return None;
+        }
+        let header = bytes[pos];
+        pos += 1;
+        let is_final = header & 0x01 != 0;
+        if header & 0x06 != 0 {
+            return None;
+        }
+        if pos.checked_add(4)? > end {
+            return None;
+        }
+        let len = u16::from_le_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+        let nlen = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
+        if nlen != !(len as u16) {
+            return None;
+        }
+        pos += 4;
+        let data_end = pos.checked_add(len)?;
+        if data_end > end {
+            return None;
+        }
+        output.extend_from_slice(&bytes[pos..data_end]);
+        pos = data_end;
+        if is_final {
+            if pos != end || adler32(&output) != expected_adler {
+                return None;
+            }
+            return Some(output);
+        }
+    }
+}
+
+#[cfg(test)]
+fn deflate_zlib_stored_blocks(data: &[u8]) -> Vec<u8> {
+    let mut output = vec![0x78, 0x01];
+    let mut remaining = data;
+    while !remaining.is_empty() {
+        let len = remaining.len().min(u16::MAX as usize);
+        let is_final = len == remaining.len();
+        output.push(if is_final { 0x01 } else { 0x00 });
+        let len_u16 = len as u16;
+        output.extend_from_slice(&len_u16.to_le_bytes());
+        output.extend_from_slice(&(!len_u16).to_le_bytes());
+        output.extend_from_slice(&remaining[..len]);
+        remaining = &remaining[len..];
+    }
+    if data.is_empty() {
+        output.extend_from_slice(&[0x01, 0x00, 0x00, 0xff, 0xff]);
+    }
+    output.extend_from_slice(&adler32(data).to_be_bytes());
+    output
+}
+
+fn adler32(data: &[u8]) -> u32 {
+    const MOD_ADLER: u32 = 65_521;
+    let mut a = 1u32;
+    let mut b = 0u32;
+    for byte in data {
+        a = (a + u32::from(*byte)) % MOD_ADLER;
+        b = (b + a) % MOD_ADLER;
+    }
+    (b << 16) | a
+}
+
 #[derive(Debug)]
 struct ParsedPng {
     width_px: u32,
@@ -18969,6 +19974,7 @@ struct ParsedPng {
     format: ImageFormat,
     idat: Vec<u8>,
     palette: Vec<u8>,
+    alpha_mask: Option<StaticImageAlphaMask>,
 }
 
 #[derive(Debug)]
@@ -20514,12 +21520,17 @@ fn parse_png_image_data(bytes: &[u8]) -> Option<ParsedPng> {
     let mut pos = PNG_SIGNATURE.len();
     let mut width_px = 0;
     let mut height_px = 0;
+    let mut bit_depth = 0;
+    let mut color_type = 0;
+    let mut interlace_method = 0;
     let mut format = None;
     let mut saw_ihdr = false;
     let mut saw_plte = false;
+    let mut saw_trns = false;
     let mut saw_iend = false;
     let mut idat = Vec::new();
     let mut palette = Vec::new();
+    let mut transparency = None;
 
     while pos.checked_add(12)? <= bytes.len() {
         let len = u32::from_be_bytes(bytes[pos..pos + 4].try_into().ok()?) as usize;
@@ -20539,18 +21550,24 @@ fn parse_png_image_data(bytes: &[u8]) -> Option<ParsedPng> {
                 }
                 width_px = u32::from_be_bytes(data[0..4].try_into().ok()?);
                 height_px = u32::from_be_bytes(data[4..8].try_into().ok()?);
-                let bit_depth = data[8];
-                let color_type = data[9];
+                bit_depth = data[8];
+                color_type = data[9];
                 let compression = data[10];
                 let filter = data[11];
                 let interlace = data[12];
+                interlace_method = interlace;
+                let supported_bit_depth = match color_type {
+                    0 => matches!(bit_depth, 1 | 2 | 4 | 8 | 16),
+                    2 | 4 | 6 => matches!(bit_depth, 8 | 16),
+                    3 => matches!(bit_depth, 1 | 2 | 4 | 8),
+                    _ => false,
+                };
                 if width_px == 0
                     || height_px == 0
-                    || bit_depth != 8
-                    || !matches!(color_type, 0 | 2 | 3)
+                    || !supported_bit_depth
                     || compression != 0
                     || filter != 0
-                    || interlace != 0
+                    || !matches!(interlace, 0 | 1)
                 {
                     return None;
                 }
@@ -20558,12 +21575,14 @@ fn parse_png_image_data(bytes: &[u8]) -> Option<ParsedPng> {
                     0 => ImageFormat::PngGrayscale,
                     2 => ImageFormat::Png,
                     3 => ImageFormat::PngIndexed,
+                    4 => ImageFormat::PngGrayscale,
+                    6 => ImageFormat::Png,
                     _ => return None,
                 });
                 saw_ihdr = true;
             }
             b"PLTE" => {
-                if !saw_ihdr || saw_plte || saw_iend || !idat.is_empty() {
+                if !saw_ihdr || saw_plte || saw_trns || saw_iend || !idat.is_empty() {
                     return None;
                 }
                 if len == 0 || len % 3 != 0 || len > 256 * 3 {
@@ -20571,6 +21590,38 @@ fn parse_png_image_data(bytes: &[u8]) -> Option<ParsedPng> {
                 }
                 palette.extend_from_slice(data);
                 saw_plte = true;
+            }
+            b"tRNS" => {
+                if !saw_ihdr || saw_trns || saw_iend || !idat.is_empty() {
+                    return None;
+                }
+                transparency = Some(match color_type {
+                    0 => {
+                        if len != 2 || bit_depth != 8 {
+                            return None;
+                        }
+                        PngTransparency::Grayscale(u16::from_be_bytes(data.try_into().ok()?))
+                    }
+                    2 => {
+                        if len != 6 || bit_depth != 8 {
+                            return None;
+                        }
+                        PngTransparency::Rgb {
+                            red: u16::from_be_bytes(data[0..2].try_into().ok()?),
+                            green: u16::from_be_bytes(data[2..4].try_into().ok()?),
+                            blue: u16::from_be_bytes(data[4..6].try_into().ok()?),
+                        }
+                    }
+                    3 => {
+                        let palette_entries = palette.len() / 3;
+                        if !saw_plte || len == 0 || len > palette_entries {
+                            return None;
+                        }
+                        PngTransparency::Indexed(data.to_vec())
+                    }
+                    _ => return None,
+                });
+                saw_trns = true;
             }
             b"IDAT" => {
                 if !saw_ihdr || saw_iend {
@@ -20600,14 +21651,644 @@ fn parse_png_image_data(bytes: &[u8]) -> Option<ParsedPng> {
     if matches!(format, Some(ImageFormat::PngIndexed)) && palette.is_empty() {
         return None;
     }
+    let format = format?;
+    let mut alpha_mask = None;
+    let idat = if interlace_method == 1 {
+        if matches!(bit_depth, 1 | 2 | 4) {
+            normalize_adam7_low_bit_depth_png_idat(
+                &idat,
+                width_px,
+                height_px,
+                bit_depth,
+                format,
+                palette.len() / 3,
+            )?
+        } else {
+            let source_pixel_bytes = png_pixel_bytes(bit_depth, color_type)?;
+            let deinterlaced =
+                normalize_adam7_png_idat(&idat, width_px, height_px, source_pixel_bytes)?;
+            match (bit_depth, color_type) {
+                (8, 4 | 6) => {
+                    let normalized =
+                        normalize_alpha_png_idat(&deinterlaced, width_px, height_px, color_type)?;
+                    alpha_mask = Some(normalized.alpha_mask);
+                    normalized.idat
+                }
+                (8, 0 | 2 | 3) => deinterlaced,
+                (16, 0 | 2 | 4 | 6) => {
+                    let normalized =
+                        normalize_16_bit_png_idat(&deinterlaced, width_px, height_px, color_type)?;
+                    alpha_mask = normalized.alpha_mask;
+                    normalized.idat
+                }
+                _ => return None,
+            }
+        }
+    } else {
+        match (bit_depth, color_type) {
+            (8, 4 | 6) => {
+                let normalized = normalize_alpha_png_idat(&idat, width_px, height_px, color_type)?;
+                alpha_mask = Some(normalized.alpha_mask);
+                normalized.idat
+            }
+            (8, _) => idat,
+            (16, 0 | 2 | 4 | 6) => {
+                let normalized = normalize_16_bit_png_idat(&idat, width_px, height_px, color_type)?;
+                alpha_mask = normalized.alpha_mask;
+                normalized.idat
+            }
+            _ => normalize_low_bit_depth_png_idat(
+                &idat,
+                width_px,
+                height_px,
+                bit_depth,
+                format,
+                palette.len() / 3,
+            )?,
+        }
+    };
+    if let Some(transparency) = transparency {
+        alpha_mask = Some(png_transparency_alpha_mask(
+            &idat,
+            width_px,
+            height_px,
+            bit_depth,
+            format,
+            transparency,
+        )?);
+    }
 
     Some(ParsedPng {
         width_px,
         height_px,
-        format: format?,
+        format,
         idat,
         palette,
+        alpha_mask,
     })
+}
+
+const PNG_ADAM7_PASSES: [(usize, usize, usize, usize); 7] = [
+    (0, 0, 8, 8),
+    (4, 0, 8, 8),
+    (0, 4, 4, 8),
+    (2, 0, 4, 4),
+    (0, 2, 2, 4),
+    (1, 0, 2, 2),
+    (0, 1, 1, 2),
+];
+
+fn normalize_adam7_png_idat(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    pixel_bytes: usize,
+) -> Option<Vec<u8>> {
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let output_row_pixels_len = width.checked_mul(pixel_bytes)?;
+    let output_row_len = output_row_pixels_len.checked_add(1)?;
+    let output_len = output_row_len.checked_mul(height)?;
+    let expected_source_len = adam7_expected_scanline_len(width, height, pixel_bytes)?;
+    let mut source = inflate_zlib_png_scanlines(idat, expected_source_len)?;
+
+    let mut output = vec![0u8; output_len];
+    for row in output.chunks_exact_mut(output_row_len) {
+        row[0] = 0;
+    }
+
+    let mut source_pos = 0usize;
+    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
+        let pass_width = adam7_pass_dimension(width, start_x, step_x);
+        let pass_height = adam7_pass_dimension(height, start_y, step_y);
+        if pass_width == 0 || pass_height == 0 {
+            continue;
+        }
+        let pass_pixels_len = pass_width.checked_mul(pixel_bytes)?;
+        let pass_row_len = pass_pixels_len.checked_add(1)?;
+        let pass_len = pass_row_len.checked_mul(pass_height)?;
+        let pass_end = source_pos.checked_add(pass_len)?;
+        let pass = source.get_mut(source_pos..pass_end)?;
+        if !unfilter_png_scanlines(pass, pass_row_len, pixel_bytes) {
+            return None;
+        }
+        for pass_y in 0..pass_height {
+            let output_y = start_y.checked_add(pass_y.checked_mul(step_y)?)?;
+            let source_row_start = pass_y.checked_mul(pass_row_len)?.checked_add(1)?;
+            let source_row = pass.get(source_row_start..source_row_start + pass_pixels_len)?;
+            for pass_x in 0..pass_width {
+                let output_x = start_x.checked_add(pass_x.checked_mul(step_x)?)?;
+                let source_pixel_start = pass_x.checked_mul(pixel_bytes)?;
+                let output_pixel_start = output_y
+                    .checked_mul(output_row_len)?
+                    .checked_add(1)?
+                    .checked_add(output_x.checked_mul(pixel_bytes)?)?;
+                output[output_pixel_start..output_pixel_start + pixel_bytes].copy_from_slice(
+                    &source_row[source_pixel_start..source_pixel_start + pixel_bytes],
+                );
+            }
+        }
+        source_pos = pass_end;
+    }
+
+    if source_pos != source.len() {
+        return None;
+    }
+    Some(miniz_oxide::deflate::compress_to_vec_zlib(&output, 6))
+}
+
+fn normalize_adam7_low_bit_depth_png_idat(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    bit_depth: u8,
+    format: ImageFormat,
+    palette_entries: usize,
+) -> Option<Vec<u8>> {
+    if !matches!(bit_depth, 1 | 2 | 4)
+        || !matches!(format, ImageFormat::PngGrayscale | ImageFormat::PngIndexed)
+    {
+        return None;
+    }
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let expected_source_len = adam7_expected_packed_scanline_len(width, height, bit_depth)?;
+    let mut source = inflate_zlib_png_scanlines(idat, expected_source_len)?;
+
+    let output_row_len = width.checked_add(1)?;
+    let output_len = output_row_len.checked_mul(height)?;
+    let mut output = vec![0u8; output_len];
+    let max_sample = (1u16 << bit_depth) - 1;
+    let mut source_pos = 0usize;
+    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
+        let pass_width = adam7_pass_dimension(width, start_x, step_x);
+        let pass_height = adam7_pass_dimension(height, start_y, step_y);
+        if pass_width == 0 || pass_height == 0 {
+            continue;
+        }
+        let pass_row_len = adam7_packed_pass_row_len(pass_width, bit_depth)?;
+        let pass_len = pass_row_len.checked_mul(pass_height)?;
+        let pass_end = source_pos.checked_add(pass_len)?;
+        let pass = source.get_mut(source_pos..pass_end)?;
+        if !unfilter_png_scanlines(pass, pass_row_len, 1) {
+            return None;
+        }
+        for pass_y in 0..pass_height {
+            let output_y = start_y.checked_add(pass_y.checked_mul(step_y)?)?;
+            let source_row_start = pass_y.checked_mul(pass_row_len)?.checked_add(1)?;
+            let source_row = pass.get(source_row_start..source_row_start + (pass_row_len - 1))?;
+            for pass_x in 0..pass_width {
+                let sample = packed_png_sample(source_row, pass_x, bit_depth)?;
+                let value = match format {
+                    ImageFormat::PngIndexed => {
+                        if usize::from(sample) >= palette_entries {
+                            return None;
+                        }
+                        sample
+                    }
+                    ImageFormat::PngGrayscale => ((u16::from(sample) * 255) / max_sample) as u8,
+                    _ => return None,
+                };
+                let output_x = start_x.checked_add(pass_x.checked_mul(step_x)?)?;
+                let output_index = output_y
+                    .checked_mul(output_row_len)?
+                    .checked_add(1)?
+                    .checked_add(output_x)?;
+                output[output_index] = value;
+            }
+        }
+        source_pos = pass_end;
+    }
+
+    if source_pos != source.len() {
+        return None;
+    }
+    Some(miniz_oxide::deflate::compress_to_vec_zlib(&output, 6))
+}
+
+fn png_pixel_bytes(bit_depth: u8, color_type: u8) -> Option<usize> {
+    let components = match color_type {
+        0 | 3 => 1usize,
+        2 => 3usize,
+        4 => 2usize,
+        6 => 4usize,
+        _ => return None,
+    };
+    components.checked_mul(usize::from(bit_depth).checked_div(8)?)
+}
+
+fn adam7_expected_scanline_len(width: usize, height: usize, components: usize) -> Option<usize> {
+    let mut total = 0usize;
+    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
+        let pass_width = adam7_pass_dimension(width, start_x, step_x);
+        let pass_height = adam7_pass_dimension(height, start_y, step_y);
+        if pass_width == 0 || pass_height == 0 {
+            continue;
+        }
+        let row_pixels_len = pass_width.checked_mul(components)?;
+        let row_len = row_pixels_len.checked_add(1)?;
+        total = total.checked_add(row_len.checked_mul(pass_height)?)?;
+    }
+    Some(total)
+}
+
+fn adam7_expected_packed_scanline_len(width: usize, height: usize, bit_depth: u8) -> Option<usize> {
+    let mut total = 0usize;
+    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
+        let pass_width = adam7_pass_dimension(width, start_x, step_x);
+        let pass_height = adam7_pass_dimension(height, start_y, step_y);
+        if pass_width == 0 || pass_height == 0 {
+            continue;
+        }
+        let row_len = adam7_packed_pass_row_len(pass_width, bit_depth)?;
+        total = total.checked_add(row_len.checked_mul(pass_height)?)?;
+    }
+    Some(total)
+}
+
+fn adam7_packed_pass_row_len(width: usize, bit_depth: u8) -> Option<usize> {
+    let row_bits = width.checked_mul(usize::from(bit_depth))?;
+    row_bits.div_ceil(8).checked_add(1)
+}
+
+fn adam7_pass_dimension(size: usize, start: usize, step: usize) -> usize {
+    if size <= start {
+        0
+    } else {
+        ((size - 1 - start) / step) + 1
+    }
+}
+
+struct NormalizedPngData {
+    idat: Vec<u8>,
+    alpha_mask: Option<StaticImageAlphaMask>,
+}
+
+struct NormalizedAlphaPngData {
+    idat: Vec<u8>,
+    alpha_mask: StaticImageAlphaMask,
+}
+
+fn normalize_16_bit_png_idat(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    color_type: u8,
+) -> Option<NormalizedPngData> {
+    let (source_components, output_components) = match color_type {
+        0 => (1usize, 1usize),
+        2 => (3usize, 3usize),
+        4 => (2usize, 1usize),
+        6 => (4usize, 3usize),
+        _ => return None,
+    };
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let source_pixel_bytes = source_components.checked_mul(2)?;
+    let source_pixels_len = width.checked_mul(source_pixel_bytes)?;
+    let source_row_len = source_pixels_len.checked_add(1)?;
+    let expected_source_len = source_row_len.checked_mul(height)?;
+    let mut scanlines = inflate_zlib_png_scanlines(idat, expected_source_len)?;
+    if !unfilter_png_scanlines(&mut scanlines, source_row_len, source_pixel_bytes) {
+        return None;
+    }
+
+    let output_pixels_len = width.checked_mul(output_components)?;
+    let output_row_len = output_pixels_len.checked_add(1)?;
+    let output_len = output_row_len.checked_mul(height)?;
+    let mut output = Vec::with_capacity(output_len);
+    let mut alpha = if matches!(color_type, 4 | 6) {
+        Some(Vec::with_capacity(
+            width.checked_add(1)?.checked_mul(height)?,
+        ))
+    } else {
+        None
+    };
+    for row in scanlines.chunks_exact(source_row_len) {
+        output.push(0);
+        if let Some(alpha) = alpha.as_mut() {
+            alpha.push(0);
+        }
+        let pixels = &row[1..];
+        match color_type {
+            0 => {
+                for sample in pixels.chunks_exact(2) {
+                    output.push(scale_png_16_to_8(u16::from_be_bytes([
+                        sample[0], sample[1],
+                    ])));
+                }
+            }
+            2 => {
+                for pixel in pixels.chunks_exact(6) {
+                    output.push(scale_png_16_to_8(u16::from_be_bytes([pixel[0], pixel[1]])));
+                    output.push(scale_png_16_to_8(u16::from_be_bytes([pixel[2], pixel[3]])));
+                    output.push(scale_png_16_to_8(u16::from_be_bytes([pixel[4], pixel[5]])));
+                }
+            }
+            4 => {
+                for pixel in pixels.chunks_exact(4) {
+                    let gray = u16::from_be_bytes([pixel[0], pixel[1]]);
+                    let alpha_sample = u16::from_be_bytes([pixel[2], pixel[3]]);
+                    output.push(scale_png_16_to_8(gray));
+                    if let Some(mask) = alpha.as_mut() {
+                        mask.push(scale_png_16_to_8(alpha_sample));
+                    }
+                }
+            }
+            6 => {
+                for pixel in pixels.chunks_exact(8) {
+                    let red = u16::from_be_bytes([pixel[0], pixel[1]]);
+                    let green = u16::from_be_bytes([pixel[2], pixel[3]]);
+                    let blue = u16::from_be_bytes([pixel[4], pixel[5]]);
+                    let alpha_sample = u16::from_be_bytes([pixel[6], pixel[7]]);
+                    output.push(scale_png_16_to_8(red));
+                    output.push(scale_png_16_to_8(green));
+                    output.push(scale_png_16_to_8(blue));
+                    if let Some(mask) = alpha.as_mut() {
+                        mask.push(scale_png_16_to_8(alpha_sample));
+                    }
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(NormalizedPngData {
+        idat: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
+        alpha_mask: alpha.map(|bytes| StaticImageAlphaMask {
+            bytes: miniz_oxide::deflate::compress_to_vec_zlib(&bytes, 6),
+        }),
+    })
+}
+
+fn scale_png_16_to_8(value: u16) -> u8 {
+    ((u32::from(value) * 255 + 32_767) / 65_535) as u8
+}
+
+#[derive(Debug)]
+enum PngTransparency {
+    Grayscale(u16),
+    Rgb { red: u16, green: u16, blue: u16 },
+    Indexed(Vec<u8>),
+}
+
+fn png_transparency_alpha_mask(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    bit_depth: u8,
+    format: ImageFormat,
+    transparency: PngTransparency,
+) -> Option<StaticImageAlphaMask> {
+    match (format, transparency) {
+        (ImageFormat::PngIndexed, PngTransparency::Indexed(alpha_values)) => {
+            indexed_png_transparency_alpha_mask(idat, width_px, height_px, &alpha_values)
+        }
+        (ImageFormat::PngGrayscale, PngTransparency::Grayscale(gray)) if bit_depth == 8 => {
+            if gray > u16::from(u8::MAX) {
+                return None;
+            }
+            grayscale_png_transparency_alpha_mask(idat, width_px, height_px, gray as u8)
+        }
+        (ImageFormat::Png, PngTransparency::Rgb { red, green, blue }) if bit_depth == 8 => {
+            if red > u16::from(u8::MAX) || green > u16::from(u8::MAX) || blue > u16::from(u8::MAX) {
+                return None;
+            }
+            rgb_png_transparency_alpha_mask(
+                idat,
+                width_px,
+                height_px,
+                red as u8,
+                green as u8,
+                blue as u8,
+            )
+        }
+        _ => None,
+    }
+}
+
+fn indexed_png_transparency_alpha_mask(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    alpha_values: &[u8],
+) -> Option<StaticImageAlphaMask> {
+    let (width, height, row_len, mut scanlines) =
+        unfiltered_png_scanlines(idat, width_px, height_px, 1)?;
+    let output_row_len = width.checked_add(1)?;
+    let output_len = output_row_len.checked_mul(height)?;
+    let mut output = Vec::with_capacity(output_len);
+    for row in scanlines.chunks_exact_mut(row_len) {
+        output.push(0);
+        for sample in &row[1..] {
+            output.push(
+                alpha_values
+                    .get(usize::from(*sample))
+                    .copied()
+                    .unwrap_or(u8::MAX),
+            );
+        }
+    }
+    Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
+    })
+}
+
+fn grayscale_png_transparency_alpha_mask(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    transparent_gray: u8,
+) -> Option<StaticImageAlphaMask> {
+    let (width, height, row_len, mut scanlines) =
+        unfiltered_png_scanlines(idat, width_px, height_px, 1)?;
+    let output_row_len = width.checked_add(1)?;
+    let output_len = output_row_len.checked_mul(height)?;
+    let mut output = Vec::with_capacity(output_len);
+    for row in scanlines.chunks_exact_mut(row_len) {
+        output.push(0);
+        for sample in &row[1..] {
+            output.push(if *sample == transparent_gray {
+                0
+            } else {
+                u8::MAX
+            });
+        }
+    }
+    Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
+    })
+}
+
+fn rgb_png_transparency_alpha_mask(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    transparent_red: u8,
+    transparent_green: u8,
+    transparent_blue: u8,
+) -> Option<StaticImageAlphaMask> {
+    let (width, height, row_len, mut scanlines) =
+        unfiltered_png_scanlines(idat, width_px, height_px, 3)?;
+    let output_row_len = width.checked_add(1)?;
+    let output_len = output_row_len.checked_mul(height)?;
+    let mut output = Vec::with_capacity(output_len);
+    for row in scanlines.chunks_exact_mut(row_len) {
+        output.push(0);
+        for pixel in row[1..].chunks_exact(3) {
+            output.push(
+                if pixel[0] == transparent_red
+                    && pixel[1] == transparent_green
+                    && pixel[2] == transparent_blue
+                {
+                    0
+                } else {
+                    u8::MAX
+                },
+            );
+        }
+    }
+    Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
+    })
+}
+
+fn unfiltered_png_scanlines(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    components: usize,
+) -> Option<(usize, usize, usize, Vec<u8>)> {
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let row_pixels_len = width.checked_mul(components)?;
+    let row_len = row_pixels_len.checked_add(1)?;
+    let expected_len = row_len.checked_mul(height)?;
+    let mut scanlines = inflate_zlib_png_scanlines(idat, expected_len)?;
+    if !unfilter_png_scanlines(&mut scanlines, row_len, components) {
+        return None;
+    }
+    Some((width, height, row_len, scanlines))
+}
+
+fn normalize_alpha_png_idat(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    color_type: u8,
+) -> Option<NormalizedAlphaPngData> {
+    let (source_components, output_components) = match color_type {
+        4 => (2usize, 1usize),
+        6 => (4usize, 3usize),
+        _ => return None,
+    };
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let source_pixels_len = width.checked_mul(source_components)?;
+    let source_row_len = source_pixels_len.checked_add(1)?;
+    let expected_source_len = source_row_len.checked_mul(height)?;
+    let mut scanlines = inflate_zlib_png_scanlines(idat, expected_source_len)?;
+    if !unfilter_png_scanlines(&mut scanlines, source_row_len, source_components) {
+        return None;
+    }
+
+    let output_pixels_len = width.checked_mul(output_components)?;
+    let output_row_len = output_pixels_len.checked_add(1)?;
+    let output_len = output_row_len.checked_mul(height)?;
+    let mut output = Vec::with_capacity(output_len);
+    let alpha_row_len = width.checked_add(1)?;
+    let alpha_len = alpha_row_len.checked_mul(height)?;
+    let mut alpha_mask = Vec::with_capacity(alpha_len);
+    for row in scanlines.chunks_exact(source_row_len) {
+        output.push(0);
+        alpha_mask.push(0);
+        let pixels = &row[1..];
+        match color_type {
+            4 => {
+                for pixel in pixels.chunks_exact(2) {
+                    output.push(pixel[0]);
+                    alpha_mask.push(pixel[1]);
+                }
+            }
+            6 => {
+                for pixel in pixels.chunks_exact(4) {
+                    output.push(pixel[0]);
+                    output.push(pixel[1]);
+                    output.push(pixel[2]);
+                    alpha_mask.push(pixel[3]);
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(NormalizedAlphaPngData {
+        idat: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
+        alpha_mask: StaticImageAlphaMask {
+            bytes: miniz_oxide::deflate::compress_to_vec_zlib(&alpha_mask, 6),
+        },
+    })
+}
+
+fn normalize_low_bit_depth_png_idat(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    bit_depth: u8,
+    format: ImageFormat,
+    palette_entries: usize,
+) -> Option<Vec<u8>> {
+    if !matches!(bit_depth, 1 | 2 | 4)
+        || !matches!(format, ImageFormat::PngGrayscale | ImageFormat::PngIndexed)
+    {
+        return None;
+    }
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let row_bits = width.checked_mul(usize::from(bit_depth))?;
+    let packed_row_len = row_bits.div_ceil(8);
+    let source_row_len = packed_row_len.checked_add(1)?;
+    let expected_source_len = source_row_len.checked_mul(height)?;
+    let mut scanlines = inflate_zlib_png_scanlines(idat, expected_source_len)?;
+    if !unfilter_png_scanlines(&mut scanlines, source_row_len, 1) {
+        return None;
+    }
+
+    let output_row_len = width.checked_add(1)?;
+    let output_len = output_row_len.checked_mul(height)?;
+    let mut output = Vec::with_capacity(output_len);
+    let max_sample = (1u16 << bit_depth) - 1;
+    for row in scanlines.chunks_exact(source_row_len) {
+        output.push(0);
+        let packed = &row[1..];
+        for index in 0..width {
+            let sample = packed_png_sample(packed, index, bit_depth)?;
+            let value = match format {
+                ImageFormat::PngIndexed => {
+                    if usize::from(sample) >= palette_entries {
+                        return None;
+                    }
+                    sample
+                }
+                ImageFormat::PngGrayscale => ((u16::from(sample) * 255) / max_sample) as u8,
+                _ => return None,
+            };
+            output.push(value);
+        }
+    }
+    Some(miniz_oxide::deflate::compress_to_vec_zlib(&output, 6))
+}
+
+fn packed_png_sample(row: &[u8], index: usize, bit_depth: u8) -> Option<u8> {
+    let bits_per_sample = usize::from(bit_depth);
+    let samples_per_byte = 8usize.checked_div(bits_per_sample)?;
+    let byte = *row.get(index.checked_div(samples_per_byte)?)?;
+    let bit_offset = index
+        .checked_rem(samples_per_byte)?
+        .checked_mul(bits_per_sample)?;
+    let shift = 8usize
+        .checked_sub(bits_per_sample)?
+        .checked_sub(bit_offset)?;
+    let mask = (1u16 << bit_depth) - 1;
+    Some(((u16::from(byte) >> shift) & mask) as u8)
 }
 
 fn is_standalone_jpeg_marker(marker: u8) -> bool {
@@ -22175,6 +23856,32 @@ mod tests {
     }
 
     #[test]
+    fn positioned_floating_table_controls_receive_default_wrap_distance() {
+        let output =
+            parse_rtf(r"{\rtf1\trowd\tposx720\tposy120\cellx2000 Offset\cell\row}").unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(
+            table.rows[0].wrap_margins.left_twips,
+            DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS
+        );
+        assert_eq!(
+            table.rows[0].wrap_margins.right_twips,
+            DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS
+        );
+        assert_eq!(table.rows[0].wrap_margins.top_twips, 0);
+        assert_eq!(table.rows[0].wrap_margins.bottom_twips, 0);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "floating table default wrap distance interpreted as bounded passive row margin",
+            )
+        }));
+    }
+
+    #[test]
     fn normalizes_negative_floating_table_horizontal_position() {
         let output =
             parse_rtf(r"{\rtf1\trowd\trleft360\tposnegx720\cellx2000 Offset\cell\row}").unwrap();
@@ -22290,6 +23997,55 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_fixed_height_floating_table_vertical_center_bottom_alignment() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\trrh720\tposy120\tposyb\cellx2000 Bottom\cell\row\trowd\trrh600\tposyc\cellx2000 Center\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].vertical_offset_twips, -600);
+        assert_eq!(table.rows[1].vertical_offset_twips, -300);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table vertical alignment \\tposyb")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "floating table vertical center/bottom alignment interpreted as bounded passive row offset",
+            )
+        }));
+        assert!(!output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table positioning approximated by passive table flow")
+        }));
+    }
+
+    #[test]
+    fn dynamic_height_floating_table_vertical_center_bottom_alignment_warns() {
+        let output = parse_rtf(r"{\rtf1\trowd\tposyb\cellx2000 Bottom\cell\row}").unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(
+            table.rows[0].vertical_offset_twips,
+            TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "floating table vertical center/bottom alignment captured for computed passive row height",
+            )
+        }));
+    }
+
+    #[test]
     fn normalizes_floating_table_wrap_distances_as_bounded_row_margins() {
         let output = parse_rtf(
             r"{\rtf1\trowd\tdfrmtxtLeft180\tdfrmtxtRight240\tdfrmtxtTop120\tdfrmtxtBottom300\cellx2000 Wrapped\cell\row}",
@@ -22363,7 +24119,7 @@ mod tests {
     #[test]
     fn normalizes_floating_table_horizontal_alignment_controls() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\tposxc\cellx2000 Center\cell\row\trowd\tposxr\cellx2000 Right\cell\row\trowd\tposxl\cellx2000 Left\cell\row\trowd\tposxi\cellx2000 Inside\cell\row}",
+            r"{\rtf1\trowd\tposxc\cellx2000 Center\cell\row\trowd\tposxr\cellx2000 Right\cell\row\trowd\tposxl\cellx2000 Left\cell\row\trowd\tposxi\cellx2000 Inside\cell\row\trowd\tposxo\cellx2000 Outside\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -22374,11 +24130,127 @@ mod tests {
         assert_eq!(table.rows[0].alignment, TableRowAlignment::Center);
         assert_eq!(table.rows[1].alignment, TableRowAlignment::Right);
         assert_eq!(table.rows[2].alignment, TableRowAlignment::Left);
-        assert_eq!(table.rows[3].alignment, TableRowAlignment::Left);
+        assert_eq!(table.rows[3].alignment, TableRowAlignment::Inside);
+        assert_eq!(table.rows[4].alignment, TableRowAlignment::Outside);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
                 .contains("floating table horizontal alignment \\tposxc")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table horizontal alignment \\tposxo")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_floating_table_horizontal_anchor_controls() {
+        let output = parse_rtf(
+            r"{\rtf1\margl720\trowd\tphpg\tposx1440\cellx2000 Page anchored\cell\row\trowd\tphmrg\tposx1440\cellx2000 Margin anchored\cell\row\trowd\tphcol\tposx1440\cellx2000 Column anchored\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].left_offset_twips, 720);
+        assert_eq!(table.rows[1].left_offset_twips, 1440);
+        assert_eq!(table.rows[2].left_offset_twips, 1440);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table horizontal anchor \\tphpg")
+        }));
+        assert!(!output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table positioning approximated by passive table flow")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn interprets_floating_table_no_overlap_through_passive_flow() {
+        let output =
+            parse_rtf(r"{\rtf1\trowd\tabsnoovrlp\cellx2000 Non overlapping\cell\row}").unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let text = table.rows[0].cells[0].paragraphs[0].runs[0].text.clone();
+
+        assert!(text.contains("Non overlapping"));
+        assert!(!text.contains("tabsnoovrlp"));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table no-overlap \\tabsnoovrlp")
+        }));
+        assert!(!output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table positioning approximated by passive table flow")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn interprets_flow_relative_floating_table_vertical_controls() {
+        let output = parse_rtf(
+            r"{\rtf1\margt720\trowd\tpvpg\tposy1440\cellx2000 Page top\cell\row\trowd\tpvmrg\tposy1440\cellx2000 Margin top\cell\row\trowd\tpvpara\tposyt\cellx2000 Paragraph top\cell\row\trowd\tposyil\cellx2000 Inline top\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].vertical_offset_twips, 720);
+        assert_eq!(table.rows[1].vertical_offset_twips, 1440);
+        assert_eq!(
+            table.rows[2].cells[0].paragraphs[0].runs[0].text,
+            "Paragraph top"
+        );
+        assert_eq!(
+            table.rows[3].cells[0].paragraphs[0].runs[0].text,
+            "Inline top"
+        );
+        for control_name in ["tpvpg", "tpvmrg", "tpvpara"] {
+            assert!(output.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains(&format!("floating table vertical anchor \\{control_name}"))
+            }));
+        }
+        for control_name in ["tposyt", "tposyil"] {
+            assert!(output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "floating table vertical flow control \\{control_name}"
+                ))
+            }));
+        }
+        assert!(!output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("floating table positioning approximated by passive table flow")
         }));
         assert!(
             output
@@ -23205,12 +25077,12 @@ mod tests {
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            "Body1"
+            format!("Body{}", footnote_reference_marker(0))
         );
         let reference = body
             .runs
             .iter()
-            .find(|run| run.text == "1")
+            .find(|run| run.text == footnote_reference_marker(0))
             .expect("footnote reference run");
         assert_eq!(
             reference.style.baseline_shift_half_points,
@@ -23332,7 +25204,7 @@ mod tests {
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            "Foot1 End1"
+            format!("Foot{} End1", footnote_reference_marker(0))
         );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
@@ -23364,7 +25236,7 @@ mod tests {
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            "BodyIV Endb"
+            format!("Body{} Endb", footnote_reference_marker(0))
         );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
@@ -23389,7 +25261,10 @@ mod tests {
             output.document.endnote_placements,
             vec![EndnotePlacement::EndOfDocument]
         );
-        assert!(document_text(&output.document).contains("Body1 End1"));
+        assert!(
+            document_text(&output.document)
+                .contains(&format!("Body{} End1", footnote_reference_marker(0)))
+        );
         assert!(!document_text(&output.document).contains("aenddoc"));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
@@ -23432,7 +25307,10 @@ mod tests {
             output.document.footnote_placement,
             FootnotePlacement::BottomOfPage
         );
-        assert!(document_text(&output.document).contains("Body1"));
+        assert!(
+            document_text(&output.document)
+                .contains(&format!("Body{}", footnote_reference_marker(0)))
+        );
         assert!(!document_text(&output.document).contains("ftnbj"));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
@@ -23470,19 +25348,58 @@ mod tests {
     #[test]
     fn note_separator_destinations_do_not_become_body_text() {
         let output = parse_rtf(
-            r"{\rtf1{\ftnsep Hidden footnote separator {\object\objdata 414243}\par}{\ftnsepc Hidden footnote continuation}{\aftnsep Hidden endnote separator}{\aftnsepc Hidden endnote continuation}Body\chftn{\footnote \chftn Footnote text\par} End\chftn{\endnote \chftn Endnote text\par}\par}",
+            r"{\rtf1{\ftnsep Safe footnote separator {\object\objdata 414243}\par}{\ftnsepc Safe footnote continuation}{\aftnsep Safe endnote separator}{\aftnsepc Safe endnote continuation}Body\chftn{\footnote \chftn Footnote text\par} End\chftn{\endnote \chftn Endnote text\par}\par}",
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Body1 End1"), "text: {text:?}");
+        assert!(
+            text.contains(&format!("Body{} End1", footnote_reference_marker(0))),
+            "text: {text:?}"
+        );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
+        assert_eq!(
+            output
+                .document
+                .footnote_separator
+                .as_ref()
+                .and_then(paragraph_plain_text)
+                .as_deref(),
+            Some("Safe footnote separator")
+        );
+        assert_eq!(
+            output
+                .document
+                .footnote_continuation_separator
+                .as_ref()
+                .and_then(paragraph_plain_text)
+                .as_deref(),
+            Some("Safe footnote continuation")
+        );
+        assert_eq!(
+            output
+                .document
+                .endnote_separator
+                .as_ref()
+                .and_then(paragraph_plain_text)
+                .as_deref(),
+            Some("Safe endnote separator")
+        );
+        assert_eq!(
+            output
+                .document
+                .endnote_continuation_separator
+                .as_ref()
+                .and_then(paragraph_plain_text)
+                .as_deref(),
+            Some("Safe endnote continuation")
+        );
         for forbidden in [
-            "Hidden footnote separator",
-            "Hidden footnote continuation",
-            "Hidden endnote separator",
-            "Hidden endnote continuation",
+            "Safe footnote separator",
+            "Safe footnote continuation",
+            "Safe endnote separator",
+            "Safe endnote continuation",
             "Embedded object removed",
             "ftnsep",
             "ftnsepc",
@@ -23535,7 +25452,10 @@ mod tests {
         let text = document_text(&output.document);
 
         assert!(
-            text.contains("Note 1 again I missing [Field removed: no passive result]"),
+            text.contains(&format!(
+                "Note {} again I missing [Field removed: no passive result]",
+                footnote_reference_marker(0)
+            )),
             "text was {text:?}"
         );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
@@ -24133,6 +26053,7 @@ After\par}"#;
         assert!(text.contains("Before"), "text was {text:?}");
         assert!(text.contains("after"), "text was {text:?}");
         assert_eq!(advance.style.character_spacing_twips, 240);
+        assert_eq!(advance.style.baseline_shift_half_points, -12);
         assert!(!text.contains("[Field removed"));
         for forbidden in ["ADVANCE", "\\r", "\\d", "fldinst"] {
             assert!(
@@ -24146,14 +26067,14 @@ After\par}"#;
             )
         }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("layout field ADVANCE vertical cursor movement stripped")
+            diagnostic.message.contains(
+                "layout field ADVANCE interpreted as bounded passive vertical cursor advance",
+            )
         }));
     }
 
     #[test]
-    fn resultless_layout_advance_field_horizontal_offset_is_bounded() {
+    fn resultless_layout_advance_field_offsets_are_bounded() {
         let options = RtfParseOptions {
             limits: RtfLimits {
                 max_character_spacing_twips: 120,
@@ -24162,7 +26083,7 @@ After\par}"#;
             ..RtfParseOptions::default()
         };
         let output = parse_rtf_bytes_with_options(
-            br"{\rtf1 Before {\field{\*\fldinst ADVANCE \\r 9999 \\l 20}} after\par}",
+            br"{\rtf1 Before {\field{\*\fldinst ADVANCE \\r 9999 \\l 20 \\u 9999 \\d 20}} after\par}",
             &options,
         )
         .unwrap();
@@ -24177,6 +26098,7 @@ After\par}"#;
             .expect("passive advance marker");
 
         assert_eq!(advance.style.character_spacing_twips, 120);
+        assert_eq!(advance.style.baseline_shift_half_points, 12);
     }
 
     #[test]
@@ -30463,6 +32385,87 @@ After\par}"#;
     }
 
     #[test]
+    fn rgb_png_grayscale_metadata_updates_stored_scanlines() {
+        let input = [
+            r"{\rtf1{\pict\pngblip{\picprop{\sp{\sn pictureGray}{\sv 1}}}\picwgoal720\pichgoal720 ",
+            bytes_to_hex(&minimal_rgb_png_with_pixel(255, 0, 0)).as_str(),
+            "}}",
+        ]
+        .concat();
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| !diagnostic
+                .message
+                .contains("picture grayscale property approximated")),
+            "RGB PNG grayscale should be applied to stored scanlines: {:?}",
+            output.diagnostics
+        );
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+            .expect("PNG scanline");
+        assert_eq!(scanlines, vec![0, 77, 77, 77]);
+    }
+
+    #[test]
+    fn rgb_png_grayscale_metadata_updates_compressed_filtered_scanlines() {
+        let input = [
+            r"{\rtf1{\pict\pngblip{\picprop{\sp{\sn pictureGray}{\sv 1}}}\picwgoal720\pichgoal720 ",
+            bytes_to_hex(&minimal_compressed_subfiltered_rgb_png()).as_str(),
+            "}}",
+        ]
+        .concat();
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| !diagnostic
+                .message
+                .contains("picture grayscale property approximated")),
+            "compressed RGB PNG grayscale should be applied after unfiltering: {:?}",
+            output.diagnostics
+        );
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 10)
+            .expect("compressed PNG scanline");
+        assert_eq!(scanlines, vec![0, 77, 77, 77, 149, 149, 149, 29, 29, 29]);
+    }
+
+    #[test]
+    fn grayscale_png_bilevel_metadata_updates_stored_scanlines() {
+        let input = [
+            r"{\rtf1{\pict\pngblip{\picprop{\sp{\sn pictureBiLevel}{\sv 1}}}\picwgoal720\pichgoal720 ",
+            bytes_to_hex(&minimal_valid_grayscale_png_with_sample(128)).as_str(),
+            "}}",
+        ]
+        .concat();
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| !diagnostic
+                .message
+                .contains("picture bilevel property approximated")),
+            "grayscale PNG bilevel should be applied to stored scanlines: {:?}",
+            output.diagnostics
+        );
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 2)
+            .expect("PNG scanline");
+        assert_eq!(scanlines, vec![0, 255]);
+    }
+
+    #[test]
     fn normalizes_header_picture_as_safe_repeating_image_metadata() {
         let input = format!(
             "{{\\rtf1{{\\header Logo {{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}\\par}}Body\\par}}",
@@ -30548,6 +32551,575 @@ After\par}"#;
         assert_eq!(image.display_height_twips, Some(720));
         assert_eq!(image.palette, vec![255, 0, 0, 0, 255, 0]);
         assert!(!image.bytes.is_empty());
+    }
+
+    #[test]
+    fn normalizes_rgba_png_picture_as_rgb_with_passive_alpha_mask() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_rgba_png(&[
+                [255, 0, 0, 255],
+                [0, 0, 255, 128],
+                [0, 0, 0, 0],
+            ]))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 3);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 10)
+            .expect("normalized RGBA PNG scanline");
+        assert_eq!(scanlines, vec![0, 255, 0, 0, 0, 0, 255, 0, 0, 0]);
+        let alpha_mask = image.alpha_mask.as_ref().expect("RGBA alpha mask");
+        let mask_scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 4)
+                .expect("normalized RGBA alpha mask scanline");
+        assert_eq!(mask_scanlines, vec![0, 255, 128, 0]);
+    }
+
+    #[test]
+    fn normalizes_grayscale_alpha_png_picture_with_passive_alpha_mask() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_grayscale_alpha_png(&[
+                [0, 255],
+                [0, 128],
+                [255, 0]
+            ]))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        assert_eq!(image.width_px, 3);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+            .expect("normalized grayscale-alpha PNG scanline");
+        assert_eq!(scanlines, vec![0, 0, 0, 255]);
+        let alpha_mask = image
+            .alpha_mask
+            .as_ref()
+            .expect("grayscale-alpha PNG alpha mask");
+        let mask_scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 4)
+                .expect("normalized grayscale-alpha PNG mask scanline");
+        assert_eq!(mask_scanlines, vec![0, 255, 128, 0]);
+    }
+
+    #[test]
+    fn normalizes_16bit_rgb_png_picture_as_8bit_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_16bit_rgb_png(&[
+                [0, 65_535, 32_768],
+                [65_535, 0, 0],
+            ]))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 7)
+            .expect("normalized 16-bit RGB PNG scanline");
+        assert_eq!(scanlines, vec![0, 0, 255, 128, 255, 0, 0]);
+    }
+
+    #[test]
+    fn normalizes_16bit_grayscale_png_picture_as_8bit_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_16bit_grayscale_png(&[0, 32_768, 65_535]))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        assert_eq!(image.width_px, 3);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+            .expect("normalized 16-bit grayscale PNG scanline");
+        assert_eq!(scanlines, vec![0, 0, 128, 255]);
+    }
+
+    #[test]
+    fn normalizes_16bit_rgba_png_picture_as_rgb_with_passive_alpha_mask() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_16bit_rgba_png(&[
+                [65_535, 0, 0, 65_535],
+                [0, 0, 65_535, 32_768],
+                [0, 0, 0, 0],
+            ]))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 3);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 10)
+            .expect("normalized 16-bit RGBA PNG scanline");
+        assert_eq!(scanlines, vec![0, 255, 0, 0, 0, 0, 255, 0, 0, 0]);
+        let alpha_mask = image.alpha_mask.as_ref().expect("16-bit RGBA alpha mask");
+        let mask_scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 4)
+                .expect("normalized 16-bit RGBA mask scanline");
+        assert_eq!(mask_scanlines, vec![0, 255, 128, 0]);
+    }
+
+    #[test]
+    fn normalizes_16bit_grayscale_alpha_png_picture_with_passive_alpha_mask() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_16bit_grayscale_alpha_png(&[
+                [0, 65_535],
+                [0, 32_768],
+                [65_535, 0],
+            ]))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        assert_eq!(image.width_px, 3);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+            .expect("normalized 16-bit grayscale-alpha PNG scanline");
+        assert_eq!(scanlines, vec![0, 0, 0, 255]);
+        let alpha_mask = image
+            .alpha_mask
+            .as_ref()
+            .expect("16-bit grayscale-alpha PNG alpha mask");
+        let mask_scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 4)
+                .expect("normalized 16-bit grayscale-alpha PNG mask scanline");
+        assert_eq!(mask_scanlines, vec![0, 255, 128, 0]);
+    }
+
+    #[test]
+    fn normalizes_indexed_png_transparency_chunk_into_passive_alpha_mask() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_indexed_png_with_transparency(&[0, 128]))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngIndexed);
+        assert_eq!(image.palette, vec![255, 0, 0, 0, 255, 0]);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 2)
+            .expect("indexed PNG scanline");
+        assert_eq!(scanlines, vec![0, 1]);
+        let alpha_mask = image.alpha_mask.as_ref().expect("indexed tRNS alpha mask");
+        let mask_scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 2)
+                .expect("indexed PNG tRNS mask scanline");
+        assert_eq!(mask_scanlines, vec![0, 128]);
+    }
+
+    #[test]
+    fn normalizes_rgb_png_transparency_chunk_into_passive_alpha_mask() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_rgb_png_with_transparency(
+                &[[255, 0, 0], [0, 255, 0]],
+                [255, 0, 0]
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 7)
+            .expect("RGB PNG scanline");
+        assert_eq!(scanlines, vec![0, 255, 0, 0, 0, 255, 0]);
+        let alpha_mask = image.alpha_mask.as_ref().expect("RGB tRNS alpha mask");
+        let mask_scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 3)
+                .expect("RGB PNG tRNS mask scanline");
+        assert_eq!(mask_scanlines, vec![0, 0, 255]);
+    }
+
+    #[test]
+    fn normalizes_grayscale_png_transparency_chunk_into_passive_alpha_mask() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_grayscale_png_with_transparency(
+                &[0, 128, 255],
+                128
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+            .expect("grayscale PNG scanline");
+        assert_eq!(scanlines, vec![0, 0, 128, 255]);
+        let alpha_mask = image
+            .alpha_mask
+            .as_ref()
+            .expect("grayscale tRNS alpha mask");
+        let mask_scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 4)
+                .expect("grayscale PNG tRNS mask scanline");
+        assert_eq!(mask_scanlines, vec![0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn normalizes_interlaced_rgb_png_picture_as_safe_static_image() {
+        let width = 5usize;
+        let height = 5usize;
+        let mut pixels = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                pixels.extend_from_slice(&[(x * 40) as u8, (y * 40) as u8, ((x + y) * 20) as u8]);
+            }
+        }
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_interlaced_png(width, height, 2, None, &pixels))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, width as u32);
+        assert_eq!(image.height_px, height as u32);
+        let expected = png_scanlines_from_pixels(width, height, 3, &pixels);
+        let scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, expected.len())
+                .expect("interlaced RGB PNG scanlines");
+        assert_eq!(scanlines, expected);
+    }
+
+    #[test]
+    fn normalizes_interlaced_grayscale_png_picture_as_safe_static_image() {
+        let width = 5usize;
+        let height = 5usize;
+        let pixels = (0..width * height)
+            .map(|index| (index * 7) as u8)
+            .collect::<Vec<_>>();
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_interlaced_png(width, height, 0, None, &pixels))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        let expected = png_scanlines_from_pixels(width, height, 1, &pixels);
+        let scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, expected.len())
+                .expect("interlaced grayscale PNG scanlines");
+        assert_eq!(scanlines, expected);
+    }
+
+    #[test]
+    fn normalizes_interlaced_indexed_png_picture_as_safe_static_image() {
+        let width = 5usize;
+        let height = 5usize;
+        let pixels = (0..width * height)
+            .map(|index| (index % 2) as u8)
+            .collect::<Vec<_>>();
+        let palette = [255, 0, 0, 0, 255, 0];
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_interlaced_png(
+                width,
+                height,
+                3,
+                Some(&palette),
+                &pixels
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngIndexed);
+        assert_eq!(image.palette, palette);
+        let expected = png_scanlines_from_pixels(width, height, 1, &pixels);
+        let scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, expected.len())
+                .expect("interlaced indexed PNG scanlines");
+        assert_eq!(scanlines, expected);
+    }
+
+    #[test]
+    fn normalizes_interlaced_low_bit_indexed_png_picture_as_8bit_safe_static_image() {
+        let width = 5usize;
+        let height = 5usize;
+        let pixels = (0..width * height)
+            .map(|index| (index % 2) as u8)
+            .collect::<Vec<_>>();
+        let palette = [255, 0, 0, 0, 255, 0];
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_interlaced_low_bit_png(
+                width,
+                height,
+                1,
+                3,
+                Some(&palette),
+                &pixels
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngIndexed);
+        assert_eq!(image.palette, palette);
+        let expected = png_scanlines_from_pixels(width, height, 1, &pixels);
+        let scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, expected.len())
+                .expect("interlaced low-bit indexed PNG scanlines");
+        assert_eq!(scanlines, expected);
+    }
+
+    #[test]
+    fn normalizes_interlaced_low_bit_grayscale_png_picture_as_8bit_safe_static_image() {
+        let width = 5usize;
+        let height = 5usize;
+        let samples = (0..width * height)
+            .map(|index| (index % 16) as u8)
+            .collect::<Vec<_>>();
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_interlaced_low_bit_png(
+                width, height, 4, 0, None, &samples
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        let expected_pixels = samples
+            .iter()
+            .map(|sample| ((u16::from(*sample) * 255) / 15) as u8)
+            .collect::<Vec<_>>();
+        let expected = png_scanlines_from_pixels(width, height, 1, &expected_pixels);
+        let scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, expected.len())
+                .expect("interlaced low-bit grayscale PNG scanlines");
+        assert_eq!(scanlines, expected);
+    }
+
+    #[test]
+    fn normalizes_interlaced_16bit_rgb_png_picture_as_8bit_safe_static_image() {
+        let width = 5usize;
+        let height = 5usize;
+        let mut pixels = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                pixels.push([
+                    (x as u16) * 10_000,
+                    (y as u16) * 10_000,
+                    ((x + y) as u16) * 5_000,
+                ]);
+            }
+        }
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_interlaced_16bit_png(width, height, 2, &pixels))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, width as u32);
+        assert_eq!(image.height_px, height as u32);
+        let expected_pixels =
+            png_16bit_samples_to_8bit_pixels(pixels.iter().flat_map(|pixel| pixel.iter().copied()));
+        let expected = png_scanlines_from_pixels(width, height, 3, &expected_pixels);
+        let scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, expected.len())
+                .expect("interlaced 16-bit RGB PNG scanlines");
+        assert_eq!(scanlines, expected);
+    }
+
+    #[test]
+    fn normalizes_interlaced_16bit_grayscale_png_picture_as_8bit_safe_static_image() {
+        let width = 5usize;
+        let height = 5usize;
+        let samples = (0..width * height)
+            .map(|index| (index as u16) * 2_500)
+            .collect::<Vec<_>>();
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_interlaced_16bit_grayscale_png(
+                width, height, &samples
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        let expected_pixels = png_16bit_samples_to_8bit_pixels(samples.iter().copied());
+        let expected = png_scanlines_from_pixels(width, height, 1, &expected_pixels);
+        let scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, expected.len())
+                .expect("interlaced 16-bit grayscale PNG scanlines");
+        assert_eq!(scanlines, expected);
+    }
+
+    #[test]
+    fn normalizes_interlaced_16bit_rgba_png_picture_as_rgb_with_passive_alpha_mask() {
+        let width = 5usize;
+        let height = 5usize;
+        let mut pixels = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                let alpha = if (x + y) % 2 == 0 { 65_535 } else { 32_768 };
+                pixels.push([(x as u16) * 10_000, 0, (y as u16) * 10_000, alpha]);
+            }
+        }
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_interlaced_16bit_png(width, height, 6, &pixels))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        let mut expected_pixels = Vec::new();
+        let mut expected_alpha = Vec::new();
+        for pixel in &pixels {
+            expected_pixels.push(scale_png_16_to_8(pixel[0]));
+            expected_pixels.push(scale_png_16_to_8(pixel[1]));
+            expected_pixels.push(scale_png_16_to_8(pixel[2]));
+            expected_alpha.push(scale_png_16_to_8(pixel[3]));
+        }
+        let expected = png_scanlines_from_pixels(width, height, 3, &expected_pixels);
+        let scanlines =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, expected.len())
+                .expect("interlaced 16-bit RGBA PNG scanlines");
+        assert_eq!(scanlines, expected);
+        let expected_mask = png_scanlines_from_pixels(width, height, 1, &expected_alpha);
+        let alpha_mask = image
+            .alpha_mask
+            .as_ref()
+            .expect("interlaced 16-bit RGBA alpha mask");
+        let mask_scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+            &alpha_mask.bytes,
+            expected_mask.len(),
+        )
+        .expect("interlaced 16-bit RGBA mask scanlines");
+        assert_eq!(mask_scanlines, expected_mask);
+    }
+
+    #[test]
+    fn normalizes_low_bit_indexed_png_picture_as_8bit_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_low_bit_indexed_png(&[0, 1, 0], 1, 2))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngIndexed);
+        assert_eq!(image.width_px, 3);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.palette, vec![255, 0, 0, 0, 255, 0]);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+            .expect("normalized indexed PNG scanline");
+        assert_eq!(scanlines, vec![0, 0, 1, 0]);
+    }
+
+    #[test]
+    fn normalizes_low_bit_grayscale_png_picture_as_8bit_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_low_bit_grayscale_png(&[0, 8, 15], 4))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::PngGrayscale);
+        assert_eq!(image.width_px, 3);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+            .expect("normalized grayscale PNG scanline");
+        assert_eq!(scanlines, vec![0, 0, 136, 255]);
+    }
+
+    #[test]
+    fn low_bit_indexed_png_with_out_of_palette_sample_becomes_placeholder() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\pngblip\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_low_bit_indexed_png(&[1], 1, 1))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Placeholder(text) if text.contains("unsupported PNG")
+        ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("PNG picture data was unsupported or malformed")
+        }));
     }
 
     #[test]
@@ -31286,6 +33858,351 @@ fn minimal_rgb_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
 }
 
 #[cfg(test)]
+fn minimal_rgb_png_with_pixel(red: u8, green: u8, blue: u8) -> Vec<u8> {
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let idat = deflate_zlib_stored_blocks(&[0, red, green, blue]);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_compressed_subfiltered_rgb_png() -> Vec<u8> {
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&3u32.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let scanline = [1, 255, 0, 0, 1, 255, 0, 0, 1, 255];
+    let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanline, 9);
+    assert!(
+        inflate_zlib_stored_blocks(&idat).is_none(),
+        "test fixture must exercise the non-stored inflater path"
+    );
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_rgba_png(pixels: &[[u8; 4]]) -> Vec<u8> {
+    minimal_alpha_png(
+        pixels.len() as u32,
+        6,
+        pixels.iter().flat_map(|pixel| pixel.iter().copied()),
+    )
+}
+
+#[cfg(test)]
+fn minimal_grayscale_alpha_png(pixels: &[[u8; 2]]) -> Vec<u8> {
+    minimal_alpha_png(
+        pixels.len() as u32,
+        4,
+        pixels.iter().flat_map(|pixel| pixel.iter().copied()),
+    )
+}
+
+#[cfg(test)]
+fn minimal_16bit_rgb_png(pixels: &[[u16; 3]]) -> Vec<u8> {
+    minimal_16bit_png(
+        pixels.len() as u32,
+        2,
+        pixels.iter().flat_map(|pixel| pixel.iter().copied()),
+    )
+}
+
+#[cfg(test)]
+fn minimal_16bit_grayscale_png(samples: &[u16]) -> Vec<u8> {
+    minimal_16bit_png(samples.len() as u32, 0, samples.iter().copied())
+}
+
+#[cfg(test)]
+fn minimal_16bit_rgba_png(pixels: &[[u16; 4]]) -> Vec<u8> {
+    minimal_16bit_png(
+        pixels.len() as u32,
+        6,
+        pixels.iter().flat_map(|pixel| pixel.iter().copied()),
+    )
+}
+
+#[cfg(test)]
+fn minimal_16bit_grayscale_alpha_png(pixels: &[[u16; 2]]) -> Vec<u8> {
+    minimal_16bit_png(
+        pixels.len() as u32,
+        4,
+        pixels.iter().flat_map(|pixel| pixel.iter().copied()),
+    )
+}
+
+#[cfg(test)]
+fn minimal_16bit_png<I>(width: u32, color_type: u8, samples: I) -> Vec<u8>
+where
+    I: IntoIterator<Item = u16>,
+{
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[16, color_type, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut scanline = vec![0u8];
+    for sample in samples {
+        scanline.extend_from_slice(&sample.to_be_bytes());
+    }
+    let idat = deflate_zlib_stored_blocks(&scanline);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_interlaced_png(
+    width: usize,
+    height: usize,
+    color_type: u8,
+    palette: Option<&[u8]>,
+    pixels: &[u8],
+) -> Vec<u8> {
+    let components = png_pixel_bytes(8, color_type).expect("test PNG color type");
+    assert_eq!(pixels.len(), width * height * components);
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&(width as u32).to_be_bytes());
+    ihdr.extend_from_slice(&(height as u32).to_be_bytes());
+    ihdr.extend_from_slice(&[8, color_type, 0, 0, 1]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+    if let Some(palette) = palette {
+        push_png_chunk(&mut png, b"PLTE", palette);
+    }
+
+    let mut scanlines = Vec::new();
+    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
+        let pass_width = adam7_pass_dimension(width, start_x, step_x);
+        let pass_height = adam7_pass_dimension(height, start_y, step_y);
+        if pass_width == 0 || pass_height == 0 {
+            continue;
+        }
+        for pass_y in 0..pass_height {
+            scanlines.push(0);
+            let output_y = start_y + (pass_y * step_y);
+            for pass_x in 0..pass_width {
+                let output_x = start_x + (pass_x * step_x);
+                let pixel_start = ((output_y * width) + output_x) * components;
+                scanlines.extend_from_slice(&pixels[pixel_start..pixel_start + components]);
+            }
+        }
+    }
+    let idat = deflate_zlib_stored_blocks(&scanlines);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_interlaced_low_bit_png(
+    width: usize,
+    height: usize,
+    bit_depth: u8,
+    color_type: u8,
+    palette: Option<&[u8]>,
+    samples: &[u8],
+) -> Vec<u8> {
+    assert_eq!(samples.len(), width * height);
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&(width as u32).to_be_bytes());
+    ihdr.extend_from_slice(&(height as u32).to_be_bytes());
+    ihdr.extend_from_slice(&[bit_depth, color_type, 0, 0, 1]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+    if let Some(palette) = palette {
+        push_png_chunk(&mut png, b"PLTE", palette);
+    }
+
+    let mut scanlines = Vec::new();
+    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
+        let pass_width = adam7_pass_dimension(width, start_x, step_x);
+        let pass_height = adam7_pass_dimension(height, start_y, step_y);
+        if pass_width == 0 || pass_height == 0 {
+            continue;
+        }
+        for pass_y in 0..pass_height {
+            scanlines.push(0);
+            let output_y = start_y + (pass_y * step_y);
+            let mut pass_samples = Vec::with_capacity(pass_width);
+            for pass_x in 0..pass_width {
+                let output_x = start_x + (pass_x * step_x);
+                pass_samples.push(samples[(output_y * width) + output_x]);
+            }
+            scanlines.extend_from_slice(&pack_png_samples(&pass_samples, bit_depth));
+        }
+    }
+    let idat = deflate_zlib_stored_blocks(&scanlines);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_interlaced_16bit_png<const COMPONENTS: usize>(
+    width: usize,
+    height: usize,
+    color_type: u8,
+    pixels: &[[u16; COMPONENTS]],
+) -> Vec<u8> {
+    assert_eq!(pixels.len(), width * height);
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&(width as u32).to_be_bytes());
+    ihdr.extend_from_slice(&(height as u32).to_be_bytes());
+    ihdr.extend_from_slice(&[16, color_type, 0, 0, 1]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut scanlines = Vec::new();
+    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
+        let pass_width = adam7_pass_dimension(width, start_x, step_x);
+        let pass_height = adam7_pass_dimension(height, start_y, step_y);
+        if pass_width == 0 || pass_height == 0 {
+            continue;
+        }
+        for pass_y in 0..pass_height {
+            scanlines.push(0);
+            let output_y = start_y + (pass_y * step_y);
+            for pass_x in 0..pass_width {
+                let output_x = start_x + (pass_x * step_x);
+                let pixel = &pixels[(output_y * width) + output_x];
+                for sample in pixel {
+                    scanlines.extend_from_slice(&sample.to_be_bytes());
+                }
+            }
+        }
+    }
+    let idat = deflate_zlib_stored_blocks(&scanlines);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_interlaced_16bit_grayscale_png(width: usize, height: usize, samples: &[u16]) -> Vec<u8> {
+    assert_eq!(samples.len(), width * height);
+    let pixels = samples
+        .iter()
+        .copied()
+        .map(|sample| [sample])
+        .collect::<Vec<_>>();
+    minimal_interlaced_16bit_png(width, height, 0, &pixels)
+}
+
+#[cfg(test)]
+fn png_scanlines_from_pixels(
+    width: usize,
+    height: usize,
+    components: usize,
+    pixels: &[u8],
+) -> Vec<u8> {
+    assert_eq!(pixels.len(), width * height * components);
+    let mut scanlines = Vec::with_capacity(height * ((width * components) + 1));
+    for row in pixels.chunks_exact(width * components) {
+        scanlines.push(0);
+        scanlines.extend_from_slice(row);
+    }
+    scanlines
+}
+
+#[cfg(test)]
+fn png_16bit_samples_to_8bit_pixels<I>(samples: I) -> Vec<u8>
+where
+    I: IntoIterator<Item = u16>,
+{
+    samples.into_iter().map(scale_png_16_to_8).collect()
+}
+
+#[cfg(test)]
+fn minimal_alpha_png<I>(width: u32, color_type: u8, pixels: I) -> Vec<u8>
+where
+    I: IntoIterator<Item = u8>,
+{
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, color_type, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut scanline = vec![0u8];
+    scanline.extend(pixels);
+    let idat = deflate_zlib_stored_blocks(&scanline);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_rgb_png_with_transparency(pixels: &[[u8; 3]], transparent: [u8; 3]) -> Vec<u8> {
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&(pixels.len() as u32).to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let trns = [0, transparent[0], 0, transparent[1], 0, transparent[2]];
+    push_png_chunk(&mut png, b"tRNS", &trns);
+
+    let mut scanline = vec![0u8];
+    scanline.extend(pixels.iter().flat_map(|pixel| pixel.iter().copied()));
+    let idat = deflate_zlib_stored_blocks(&scanline);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_grayscale_png_with_transparency(samples: &[u8], transparent: u8) -> Vec<u8> {
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&(samples.len() as u32).to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+    push_png_chunk(&mut png, b"tRNS", &[0, transparent]);
+
+    let mut scanline = vec![0u8];
+    scanline.extend_from_slice(samples);
+    let idat = deflate_zlib_stored_blocks(&scanline);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
 fn minimal_grayscale_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     let mut png = Vec::new();
     png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
@@ -31306,6 +34223,23 @@ fn minimal_grayscale_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
 }
 
 #[cfg(test)]
+fn minimal_valid_grayscale_png_with_sample(sample: u8) -> Vec<u8> {
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let idat = deflate_zlib_stored_blocks(&[0, sample]);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
 fn minimal_indexed_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     minimal_indexed_png(width, height, true)
 }
@@ -31313,6 +34247,80 @@ fn minimal_indexed_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
 #[cfg(test)]
 fn minimal_indexed_png_without_palette(width: u32, height: u32) -> Vec<u8> {
     minimal_indexed_png(width, height, false)
+}
+
+#[cfg(test)]
+fn minimal_indexed_png_with_transparency(alpha_values: &[u8]) -> Vec<u8> {
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 3, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+    push_png_chunk(&mut png, b"PLTE", &[255, 0, 0, 0, 255, 0]);
+    push_png_chunk(&mut png, b"tRNS", alpha_values);
+
+    let idat = deflate_zlib_stored_blocks(&[0, 1]);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_low_bit_indexed_png(samples: &[u8], bit_depth: u8, palette_entries: usize) -> Vec<u8> {
+    minimal_low_bit_png(samples, bit_depth, 3, palette_entries)
+}
+
+#[cfg(test)]
+fn minimal_low_bit_grayscale_png(samples: &[u8], bit_depth: u8) -> Vec<u8> {
+    minimal_low_bit_png(samples, bit_depth, 0, 0)
+}
+
+#[cfg(test)]
+fn minimal_low_bit_png(
+    samples: &[u8],
+    bit_depth: u8,
+    color_type: u8,
+    palette_entries: usize,
+) -> Vec<u8> {
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let width = samples.len() as u32;
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[bit_depth, color_type, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    if color_type == 3 {
+        let palette = [255, 0, 0, 0, 255, 0];
+        push_png_chunk(&mut png, b"PLTE", &palette[..palette_entries * 3]);
+    }
+
+    let mut scanline = vec![0u8];
+    scanline.extend_from_slice(&pack_png_samples(samples, bit_depth));
+    let idat = deflate_zlib_stored_blocks(&scanline);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn pack_png_samples(samples: &[u8], bit_depth: u8) -> Vec<u8> {
+    let bits_per_sample = usize::from(bit_depth);
+    let samples_per_byte = 8 / bits_per_sample;
+    let mut output = vec![0u8; samples.len().div_ceil(samples_per_byte)];
+    let mask = (1u16 << bit_depth) - 1;
+    for (index, sample) in samples.iter().copied().enumerate() {
+        let byte_index = index / samples_per_byte;
+        let bit_offset = (index % samples_per_byte) * bits_per_sample;
+        let shift = 8 - bits_per_sample - bit_offset;
+        output[byte_index] |= ((u16::from(sample) & mask) as u8) << shift;
+    }
+    output
 }
 
 #[cfg(test)]

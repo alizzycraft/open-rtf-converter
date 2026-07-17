@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 
 use pdf_writer::types::{
-    CidFontType, FontFlags, Predictor, SystemInfo, TextRenderingMode, UnicodeCmap,
+    BlendMode, CidFontType, FontFlags, Predictor, SystemInfo, TextRenderingMode, UnicodeCmap,
 };
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
 use ttf_parser::{Face, name_id};
@@ -32,6 +32,7 @@ const TIMES_ITALIC: &[u8] = b"F11";
 const TIMES_BOLD_ITALIC: &[u8] = b"F12";
 const SYMBOL_REGULAR: &[u8] = b"F13";
 const ZAPF_DINGBATS_REGULAR: &[u8] = b"F14";
+const PASSIVE_JPEG_LUMINOSITY_GS: &[u8] = b"GSImageLuminosity";
 
 const BUILTIN_FONTS: [(&[u8], &[u8]); 14] = [
     (HELVETICA_REGULAR, b"Helvetica"),
@@ -619,6 +620,13 @@ pub fn render_pdf_with_font_provider(
                     x_objects.pair(Name(&image.name), image.id);
                 }
             }
+            if page_uses_passive_jpeg_luminosity_blend(page) {
+                let mut ext_g_states = resources.ext_g_states();
+                ext_g_states
+                    .insert(Name(PASSIVE_JPEG_LUMINOSITY_GS))
+                    .start::<pdf_writer::writers::ExtGraphicsState>()
+                    .blend_mode(BlendMode::Luminosity);
+            }
         }
         page_writer.finish();
 
@@ -706,18 +714,31 @@ pub fn render_pdf_with_font_provider(
             };
             image_ref_cursor = image_ref_cursor.saturating_add(1);
             match fragment.image.format {
-                ImageFormat::Jpeg | ImageFormat::JpegGrayscale | ImageFormat::JpegCmyk => {
+                ImageFormat::Jpeg
+                | ImageFormat::JpegPassiveGrayscale
+                | ImageFormat::JpegPassiveBilevel
+                | ImageFormat::JpegGrayscale
+                | ImageFormat::JpegCmyk
+                | ImageFormat::JpegCmykPassiveGrayscale
+                | ImageFormat::JpegCmykPassiveBilevel => {
                     let mut image = pdf.image_xobject(image_ref.id, &fragment.image.bytes);
                     image.width(fragment.image.width_px as i32);
                     image.height(fragment.image.height_px as i32);
                     match fragment.image.format {
-                        ImageFormat::Jpeg => image.color_space().device_rgb(),
+                        ImageFormat::Jpeg
+                        | ImageFormat::JpegPassiveGrayscale
+                        | ImageFormat::JpegPassiveBilevel => image.color_space().device_rgb(),
                         ImageFormat::JpegGrayscale => image.color_space().device_gray(),
-                        ImageFormat::JpegCmyk => image.color_space().device_cmyk(),
+                        ImageFormat::JpegCmyk
+                        | ImageFormat::JpegCmykPassiveGrayscale
+                        | ImageFormat::JpegCmykPassiveBilevel => image.color_space().device_cmyk(),
                         _ => image.color_space().device_rgb(),
                     }
                     image.bits_per_component(8);
                     image.filter(Filter::DctDecode);
+                    if let Some(alpha_mask_id) = image_ref.alpha_mask_id {
+                        image.s_mask(alpha_mask_id);
+                    }
                 }
                 ImageFormat::Png | ImageFormat::PngGrayscale | ImageFormat::PngIndexed => {
                     let mut image = pdf.image_xobject(image_ref.id, &fragment.image.bytes);
@@ -760,6 +781,9 @@ pub fn render_pdf_with_font_provider(
                         .colors(color_components)
                         .bits_per_component(8)
                         .columns(fragment.image.width_px as i32);
+                    if let Some(alpha_mask_id) = image_ref.alpha_mask_id {
+                        image.s_mask(alpha_mask_id);
+                    }
                 }
                 ImageFormat::Rgb8 => {
                     let mut image = pdf.image_xobject(image_ref.id, &fragment.image.bytes);
@@ -767,13 +791,47 @@ pub fn render_pdf_with_font_provider(
                     image.height(fragment.image.height_px as i32);
                     image.color_space().device_rgb();
                     image.bits_per_component(8);
+                    if let Some(alpha_mask_id) = image_ref.alpha_mask_id {
+                        image.s_mask(alpha_mask_id);
+                    }
                 }
                 ImageFormat::WmfVector | ImageFormat::Placeholder => {}
+            }
+            if let (Some(alpha_mask), Some(alpha_mask_id)) =
+                (fragment.image.alpha_mask.as_ref(), image_ref.alpha_mask_id)
+            {
+                write_image_alpha_mask(
+                    &mut pdf,
+                    alpha_mask_id,
+                    alpha_mask,
+                    fragment.image.width_px,
+                    fragment.image.height_px,
+                );
             }
         });
     }
 
     pdf.finish()
+}
+
+fn write_image_alpha_mask(
+    pdf: &mut Pdf,
+    alpha_mask_id: Ref,
+    alpha_mask: &crate::model::StaticImageAlphaMask,
+    width_px: u32,
+    height_px: u32,
+) {
+    let mut mask = pdf.image_xobject(alpha_mask_id, &alpha_mask.bytes);
+    mask.width(width_px as i32);
+    mask.height(height_px as i32);
+    mask.color_space().device_gray();
+    mask.bits_per_component(8);
+    mask.filter(Filter::FlateDecode);
+    mask.decode_parms()
+        .predictor(Predictor::PngOptimum)
+        .colors(1)
+        .bits_per_component(8)
+        .columns(width_px as i32);
 }
 
 fn draw_layout_item(
@@ -1029,6 +1087,12 @@ fn draw_image_layout_item(
         content.rect(fragment.x, fragment.y, fragment.width, fragment.height);
         content.clip_nonzero();
         content.end_path();
+    }
+    if image_format_uses_passive_jpeg_luminosity_blend(fragment.image.format) {
+        content.set_fill_gray(1.0);
+        content.rect(fragment.x, fragment.y, fragment.width, fragment.height);
+        content.fill_nonzero();
+        content.set_parameters(Name(PASSIVE_JPEG_LUMINOSITY_GS));
     }
     content.transform([draw.width, 0.0, 0.0, draw.height, draw.x, draw.y]);
     content.x_object(Name(&image_ref.name));
@@ -1556,6 +1620,7 @@ fn clamp_crop_pair(first: &mut f32, second: &mut f32) {
 struct PdfImageRef {
     name: Vec<u8>,
     id: Ref,
+    alpha_mask_id: Option<Ref>,
 }
 
 fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<PdfImageRef>> {
@@ -1570,7 +1635,16 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
                     let id = Ref::new(next_id);
                     let name = format!("Im{}", next_id - first_image_id + 1).into_bytes();
                     next_id += 1;
-                    refs.push(PdfImageRef { name, id });
+                    let alpha_mask_id = fragment.image.alpha_mask.as_ref().map(|_| {
+                        let id = Ref::new(next_id);
+                        next_id += 1;
+                        id
+                    });
+                    refs.push(PdfImageRef {
+                        name,
+                        id,
+                        alpha_mask_id,
+                    });
                 }
             });
             refs
@@ -1582,13 +1656,35 @@ fn image_format_uses_xobject(format: ImageFormat) -> bool {
     matches!(
         format,
         ImageFormat::Jpeg
+            | ImageFormat::JpegPassiveGrayscale
+            | ImageFormat::JpegPassiveBilevel
             | ImageFormat::JpegGrayscale
             | ImageFormat::JpegCmyk
+            | ImageFormat::JpegCmykPassiveGrayscale
+            | ImageFormat::JpegCmykPassiveBilevel
             | ImageFormat::Png
             | ImageFormat::PngGrayscale
             | ImageFormat::PngIndexed
             | ImageFormat::Rgb8
     )
+}
+
+fn image_format_uses_passive_jpeg_luminosity_blend(format: ImageFormat) -> bool {
+    matches!(
+        format,
+        ImageFormat::JpegPassiveGrayscale
+            | ImageFormat::JpegPassiveBilevel
+            | ImageFormat::JpegCmykPassiveGrayscale
+            | ImageFormat::JpegCmykPassiveBilevel
+    )
+}
+
+fn page_uses_passive_jpeg_luminosity_blend(page: &crate::layout::LayoutPage) -> bool {
+    let mut uses_blend = false;
+    for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+        uses_blend |= image_format_uses_passive_jpeg_luminosity_blend(fragment.image.format);
+    });
+    uses_blend
 }
 
 fn count_image_xobjects(layout: &LayoutDocument) -> usize {
@@ -1599,7 +1695,9 @@ fn count_image_xobjects(layout: &LayoutDocument) -> usize {
             let mut count = 0usize;
             for_each_layout_image_fragment_on_page(page, &mut |fragment| {
                 if image_format_uses_xobject(fragment.image.format) {
-                    count = count.saturating_add(1);
+                    count = count
+                        .saturating_add(1)
+                        .saturating_add(usize::from(fragment.image.alpha_mask.is_some()));
                 }
             });
             count
@@ -4483,9 +4581,9 @@ mod tests {
     use crate::model::{
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
         FontPitch, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER, PageSettings, Paragraph,
-        ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticShape, StaticShapeArrowhead,
-        StaticShapeKind, TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder, TableRow,
-        TableRowWrapMargins, UnderlineStyle,
+        ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticImageAlphaMask, StaticShape,
+        StaticShapeArrowhead, StaticShapeKind, TOTAL_PAGES_MARKER, Table, TableCell,
+        TableCellBorder, TableRow, TableRowWrapMargins, UnderlineStyle,
     };
     use lopdf::{Dictionary, Object};
 
@@ -4617,6 +4715,7 @@ mod tests {
                 format: ImageFormat::Rgb8,
                 bytes: vec![255, 0, 0, 0, 0, 255],
                 palette: Vec::new(),
+                alpha_mask: None,
                 vector_commands: Vec::new(),
                 width_px: 2,
                 height_px: 1,
@@ -4718,6 +4817,7 @@ mod tests {
             format: ImageFormat::Placeholder,
             bytes: Vec::new(),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -4766,6 +4866,7 @@ mod tests {
             format: ImageFormat::Rgb8,
             bytes: vec![255, 0, 0, 0, 0, 255],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
@@ -4819,6 +4920,7 @@ mod tests {
             format: ImageFormat::Rgb8,
             bytes: vec![255, 0, 0, 0, 0, 255],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
@@ -4876,6 +4978,7 @@ mod tests {
             format: ImageFormat::Rgb8,
             bytes: vec![255, 0, 0, 0, 0, 255],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
@@ -6083,6 +6186,7 @@ endstream
             format: ImageFormat::Jpeg,
             bytes: minimal_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -6126,6 +6230,7 @@ endstream
             format: ImageFormat::JpegGrayscale,
             bytes: minimal_grayscale_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -6163,12 +6268,67 @@ endstream
     }
 
     #[test]
+    fn writes_passive_jpeg_luminosity_blend_for_authored_grayscale_metadata() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::JpegPassiveGrayscale,
+            bytes: minimal_jpeg_with_dimensions(1, 1),
+            palette: Vec::new(),
+            alpha_mask: None,
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+        assert!(
+            pdf.windows(b"/ColorSpace /DeviceRGB".len())
+                .any(|window| window == b"/ColorSpace /DeviceRGB")
+        );
+        assert!(
+            pdf.windows(b"/DCTDecode".len())
+                .any(|window| window == b"/DCTDecode")
+        );
+        assert!(
+            pdf.windows(b"/BM /Luminosity".len())
+                .any(|window| window == b"/BM /Luminosity")
+        );
+        assert!(content.operations.iter().any(|operation| {
+            operation.operator == "gs"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_name().ok())
+                    .is_some_and(|name| name == b"GSImageLuminosity")
+        }));
+        assert!(
+            !pdf.windows(b"/JavaScript".len())
+                .any(|window| window == b"/JavaScript")
+        );
+    }
+
+    #[test]
     fn writes_passive_cmyk_jpeg_image_xobject() {
         let mut document = Document::default();
         document.blocks = vec![Block::Image(StaticImage {
             format: ImageFormat::JpegCmyk,
             bytes: minimal_cmyk_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -6212,6 +6372,7 @@ endstream
             format: ImageFormat::Png,
             bytes: minimal_png_idat_for_1x1_rgb(),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -6253,12 +6414,65 @@ endstream
     }
 
     #[test]
+    fn writes_passive_png_alpha_mask_xobject() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Png,
+            bytes: minimal_png_idat_for_1x1_rgb(),
+            palette: Vec::new(),
+            alpha_mask: Some(StaticImageAlphaMask {
+                bytes: miniz_oxide::deflate::compress_to_vec_zlib(&[0, 128], 6),
+            }),
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        assert!(
+            pdf.windows(b"/SMask".len())
+                .any(|window| window == b"/SMask")
+        );
+        assert_eq!(
+            pdf.windows(b"/Subtype /Image".len())
+                .filter(|window| *window == b"/Subtype /Image")
+                .count(),
+            2
+        );
+        assert!(
+            pdf.windows(b"/ColorSpace /DeviceGray".len())
+                .any(|window| window == b"/ColorSpace /DeviceGray")
+        );
+        assert!(
+            !pdf.windows(b"/EmbeddedFile".len())
+                .any(|window| window == b"/EmbeddedFile")
+        );
+        assert!(
+            !pdf.windows(b"/JavaScript".len())
+                .any(|window| window == b"/JavaScript")
+        );
+    }
+
+    #[test]
     fn writes_passive_indexed_png_image_xobject() {
         let mut document = Document::default();
         document.blocks = vec![Block::Image(StaticImage {
             format: ImageFormat::PngIndexed,
             bytes: minimal_png_idat_for_1x1_indexed(),
             palette: vec![255, 0, 0, 0, 255, 0],
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -6310,6 +6524,7 @@ endstream
             format: ImageFormat::Rgb8,
             bytes: vec![255, 0, 0, 0, 255, 0],
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
@@ -6357,6 +6572,7 @@ endstream
             format: ImageFormat::Jpeg,
             bytes: minimal_jpeg_with_dimensions(100, 100),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 100,
             height_px: 100,
@@ -6410,6 +6626,7 @@ endstream
             format: ImageFormat::Jpeg,
             bytes: minimal_jpeg_with_dimensions(2, 1),
             palette: Vec::new(),
+            alpha_mask: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,

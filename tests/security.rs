@@ -8,12 +8,13 @@ use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, DOCUMENT_CHARS_MARKER,
-    DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, EndnotePlacement, FontFamilyHint,
-    FontPitch, ImageFormat, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment,
-    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
-    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageWrapSide, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
-    TableRowAlignment, TextRelief, UnderlineStyle,
+    DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, ENDNOTE_REFERENCE_MARKER,
+    ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
+    FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, PAGE_NUMBER_MARKER,
+    PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER,
+    ShadingPattern, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageWrapSide, TOTAL_PAGES_MARKER,
+    TabAlignment, TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -40,6 +41,14 @@ fn convert_rtf_file_to_pdf(
         diagnostics: converted.diagnostics,
         pages: converted.pages,
     })
+}
+
+fn footnote_reference_marker(index: usize) -> String {
+    format!("{FOOTNOTE_REFERENCE_MARKER}{index}{FOOTNOTE_REFERENCE_MARKER_END}")
+}
+
+fn endnote_reference_marker(index: usize) -> String {
+    format!("{ENDNOTE_REFERENCE_MARKER}{index}{ENDNOTE_REFERENCE_MARKER_END}")
 }
 
 #[test]
@@ -1214,6 +1223,8 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "\\",
         "trgaph108",
         "\\",
+        "trrh720",
+        "\\",
         "trftsWidth3",
         "\\",
         "trwWidth3600",
@@ -1234,9 +1245,15 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "\\",
         "tposxr",
         "\\",
+        "tposxo",
+        "\\",
         "tpvmrg",
         "\\",
+        "tpvpara",
+        "\\",
         "tposy360",
+        "\\",
+        "tposyb",
         "\\",
         "clftsWidth3",
         "\\",
@@ -1274,12 +1291,12 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
     assert!(text.contains("Positioned right"));
     assert!(text.contains("After table"));
     assert_eq!(table.rows[0].left_offset_twips, 1080);
-    assert_eq!(table.rows[0].vertical_offset_twips, 360);
+    assert_eq!(table.rows[0].vertical_offset_twips, -360);
     assert_eq!(table.rows[0].wrap_margins.left_twips, 180);
     assert_eq!(table.rows[0].wrap_margins.right_twips, 180);
     assert_eq!(table.rows[0].wrap_margins.top_twips, 120);
     assert_eq!(table.rows[0].wrap_margins.bottom_twips, 120);
-    assert_eq!(table.rows[0].alignment, TableRowAlignment::Right);
+    assert_eq!(table.rows[0].alignment, TableRowAlignment::Outside);
     assert!(!table.rows[0].cells[0].fit_text);
     assert!(table.rows[0].cells[1].fit_text);
     for forbidden in [
@@ -1291,8 +1308,11 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "tphmrg",
         "tposx",
         "tposxr",
+        "tposxo",
         "tpvmrg",
+        "tpvpara",
         "tposy",
+        "tposyb",
         "clFitText",
     ] {
         assert!(
@@ -1308,10 +1328,15 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "floating table controls should not be reported as unsupported: {:?}",
         parsed.diagnostics
     );
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+    assert!(!parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
             .contains("floating table positioning approximated by passive table flow")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating table no-overlap \\tabsnoovrlp")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains(
@@ -1321,12 +1346,42 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
+            .contains("floating table horizontal anchor \\tphmrg")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
             .contains("floating table horizontal alignment \\tposxr")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
+            .contains("floating table horizontal alignment \\tposxo")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
             .contains("floating table vertical position interpreted as bounded passive row offset")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating table vertical alignment \\tposyb")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "floating table vertical center/bottom alignment interpreted as bounded passive row offset",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating table vertical anchor \\tpvpara")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("floating table vertical anchor \\tpvmrg")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -1357,8 +1412,11 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         b"tphmrg",
         b"tposx",
         b"tposxr",
+        b"tposxo",
         b"tpvmrg",
+        b"tpvpara",
         b"tposy",
+        b"tposyb",
         b"clFitText",
         b"/JavaScript",
         b"/EmbeddedFile",
@@ -6985,6 +7043,20 @@ fn advance_field_offsets_passively_without_instruction_or_marker_pdf_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert!(text.contains(PASSIVE_ADVANCE_MARKER));
+    let advance = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => paragraph
+                .runs
+                .iter()
+                .find(|run| run.text == PASSIVE_ADVANCE_MARKER),
+            _ => None,
+        })
+        .expect("passive advance marker");
+    assert_eq!(advance.style.character_spacing_twips, 240);
+    assert_eq!(advance.style.baseline_shift_half_points, -12);
     for forbidden in ["ADVANCE", "fldinst", "\\r", "\\d"] {
         assert!(
             !text.contains(forbidden),
@@ -6999,7 +7071,7 @@ fn advance_field_offsets_passively_without_instruction_or_marker_pdf_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("layout field ADVANCE vertical cursor movement stripped")
+            .contains("layout field ADVANCE interpreted as bounded passive vertical cursor advance")
     }));
 
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
@@ -10282,7 +10354,10 @@ fn resultless_noteref_fields_render_bookmarked_note_reference_without_instructio
     let text = collect_text(&parsed.document);
     let visible_text = strip_bookmark_page_markers(&text);
 
-    assert!(visible_text.contains("Note 1"), "text was {text:?}");
+    assert!(
+        visible_text.contains(&format!("Note {}", footnote_reference_marker(0))),
+        "text was {text:?}"
+    );
     assert!(visible_text.contains("again I."), "text was {text:?}");
     assert_eq!(
         text.matches("[Field removed: no passive result]").count(),
@@ -22976,7 +23051,7 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("Body1"));
+    assert!(text.contains(&format!("Body{}", footnote_reference_marker(0))));
     assert!(text.contains("Footnote text"));
     for forbidden in [
         "deflang",
@@ -25566,15 +25641,17 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
 
     assert!(text.contains("before"));
     assert!(text.contains("after"));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("picture grayscale property approximated")),
+        "JPEG grayscale should be represented by a passive PDF color-mode model: {:?}",
+        parsed.diagnostics
+    );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("picture grayscale property approximated")
-    }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("picture bilevel property approximated")
+            .contains("JPEG picture bilevel property approximated by passive PDF grayscale blend")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -25588,6 +25665,19 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
             .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
         "picture color-mode metadata should not be unsupported: {:?}",
         parsed.diagnostics
+    );
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+    assert_eq!(
+        image.format,
+        open_rtf_converter::model::ImageFormat::JpegPassiveBilevel
     );
     for forbidden in [
         "pictureGray",
@@ -25619,6 +25709,29 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
             .iter()
             .any(|operation| operation.operator == "Do"),
         "valid JPEG should still render as a passive image"
+    );
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "gs"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_name().ok())
+                    .is_some_and(|name| name == b"GSImageLuminosity")
+        }),
+        "JPEG color-mode metadata should apply passive luminosity graphics state"
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/ExtGState".len())
+            .any(|window| window == b"/ExtGState")
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/BM /Luminosity".len())
+            .any(|window| window == b"/BM /Luminosity")
     );
     for forbidden in [
         b"pictureGray".as_slice(),
@@ -26568,7 +26681,7 @@ fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
         "\\",
         "shpbottom1080{",
         "\\",
-        "shpwr1",
+        "shpwr2",
         "\\",
         "sp{",
         "\\",
@@ -33908,7 +34021,7 @@ fn footnotes_strip_active_content_without_losing_safe_text() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Body1"));
+    assert!(text.contains(&format!("Body{}", footnote_reference_marker(0))));
     assert!(text.contains("safe footnote"));
     assert!(text.contains("text"));
     assert!(text.contains("[Embedded object removed]"));
@@ -33987,7 +34100,7 @@ fn bottom_footnote_placement_renders_passively_without_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Body1"));
+    assert!(text.contains(&format!("Body{}", footnote_reference_marker(0))));
     assert!(text.contains("Bottom footnote"));
     assert!(text.contains("text"));
     for forbidden in ["ftnbj", "chftn", "objdata"] {
@@ -34035,6 +34148,1026 @@ fn bottom_footnote_placement_renders_passively_without_control_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden bottom-footnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn section_footnotes_render_at_passive_section_boundary_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 First section",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn First section footnote {",
+        "\\",
+        "object",
+        "\\",
+        "objdata ",
+        payload_hex(),
+        "}",
+        "\\",
+        "par}",
+        "\\",
+        "par",
+        "\\",
+        "sect Second section",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(&format!("First section{}", footnote_reference_marker(0))));
+    assert!(text.contains("Second section"));
+    assert!(text.contains("First section footnote"));
+    assert_eq!(parsed.document.footnote_section_indices, vec![1]);
+    for forbidden in ["chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "section footnote control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(page_texts.len(), 2);
+    assert!(
+        page_texts[0].contains("First section1"),
+        "page texts: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("1. First section footnote"),
+        "first section footnote should render before the next section: {page_texts:?}"
+    );
+    assert!(
+        page_texts[1].contains("Second section"),
+        "page texts: {page_texts:?}"
+    );
+    assert!(
+        !page_texts[1].contains("First section footnote"),
+        "first section footnote should not drift to the next section page: {page_texts:?}"
+    );
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden section footnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn explicit_page_break_flushes_prior_footnotes_without_later_note_duplication() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 First page",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn First page footnote {",
+        "\\",
+        "object",
+        "\\",
+        "objdata ",
+        payload_hex(),
+        "}",
+        "\\",
+        "par}",
+        "\\",
+        "page Second page",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn Second page footnote",
+        "\\",
+        "par}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(&format!("First page{}", footnote_reference_marker(0))));
+    assert!(text.contains(&format!("Second page{}", footnote_reference_marker(1))));
+    assert_eq!(parsed.document.footnote_block_indices.len(), 2);
+    assert!(
+        parsed.document.footnote_block_indices[0] < parsed.document.footnote_block_indices[1],
+        "footnote reference block order should be monotonic: {:?}",
+        parsed.document.footnote_block_indices
+    );
+    for forbidden in ["chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "page-break footnote control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(page_texts.len(), 2);
+    assert!(
+        page_texts[0].contains("First page1"),
+        "page texts: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("1. First page footnote"),
+        "first page footnote should be flushed before explicit page break: {page_texts:?}"
+    );
+    assert!(
+        !page_texts[0].contains("Second page footnote"),
+        "later footnote should not render on the earlier page: {page_texts:?}"
+    );
+    assert!(
+        page_texts[1].contains("Second page2"),
+        "page texts: {page_texts:?}"
+    );
+    assert!(
+        page_texts[1].contains("2. Second page footnote"),
+        "second page footnote should render after its reference page: {page_texts:?}"
+    );
+    assert!(
+        !page_texts[1].contains("First page footnote"),
+        "first page footnote should not duplicate on the later page: {page_texts:?}"
+    );
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden page-break footnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn automatic_page_flow_flushes_prior_footnotes_without_tail_drift() {
+    let mut input = "{\\rtf1\\paperw6120\\paperh7200\\margt360\\margb360\\fs48 First".to_string();
+    input.push_str("\\chftn{\\footnote \\chftn First automatic footnote {\\object\\objdata ");
+    input.push_str(payload_hex());
+    input.push_str("}\\par} page automatic\\par ");
+    for idx in 0..60 {
+        input.push_str("Filler paragraph ");
+        input.push_str(&idx.to_string());
+        input.push_str("\\par ");
+    }
+    input.push('}');
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(&format!(
+        "First{} page automatic",
+        footnote_reference_marker(0)
+    )));
+    assert!(text.contains("First automatic footnote"));
+    assert_eq!(
+        parsed.document.footnote_block_indices,
+        vec![0],
+        "automatic-flow fixture should reference the first body paragraph block"
+    );
+    for forbidden in ["chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "automatic-flow footnote control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        page_texts.len() >= 2,
+        "fixture should paginate through automatic flow: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("First1"),
+        "page texts: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("1. First automatic footnote"),
+        "first-page footnote should render before automatic flow advances: {page_texts:?}"
+    );
+    assert!(
+        page_texts
+            .iter()
+            .skip(1)
+            .all(|text| !text.contains("First automatic footnote")),
+        "first-page footnote should not drift to a later page: {page_texts:?}"
+    );
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden automatic-flow footnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn footnote_page_restart_uses_authored_page_breaks_for_passive_numbering() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ftnrstpg",
+        "\\",
+        "ftnstart4",
+        "\\",
+        "ftnnruc First page",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn First page footnote",
+        "\\",
+        "par}",
+        "\\",
+        "page Second page",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn Second page footnote",
+        "\\",
+        "par}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains(&format!(
+            "First page{FOOTNOTE_REFERENCE_MARKER}0{FOOTNOTE_REFERENCE_MARKER_END}"
+        )),
+        "first page note reference should be a safe layout-resolved marker: {text:?}"
+    );
+    assert!(
+        text.contains(&format!(
+            "Second page{FOOTNOTE_REFERENCE_MARKER}1{FOOTNOTE_REFERENCE_MARKER_END}"
+        )),
+        "second authored page note reference should be a safe layout-resolved marker: {text:?}"
+    );
+    assert_eq!(parsed.document.footnote_block_indices.len(), 2);
+    assert!(
+        parsed.document.footnote_block_indices[0] < parsed.document.footnote_block_indices[1],
+        "footnote reference block order should be monotonic: {:?}",
+        parsed.document.footnote_block_indices
+    );
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("footnote page restart")),
+        "footnote page restart should be layout-resolved, not reported as approximated: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["ftnrstpg", "ftnstart", "ftnnruc", "chftn"] {
+        assert!(
+            !text.contains(forbidden),
+            "page-restart footnote control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(page_texts.len(), 2);
+    assert!(
+        page_texts[0].contains("First pageIV"),
+        "page texts: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("IV. First page footnote"),
+        "first page footnote label should start at IV: {page_texts:?}"
+    );
+    assert!(
+        page_texts[1].contains("Second pageIV"),
+        "page texts: {page_texts:?}"
+    );
+    assert!(
+        page_texts[1].contains("IV. Second page footnote"),
+        "second authored page footnote label should restart at IV: {page_texts:?}"
+    );
+    assert!(
+        !page_texts[1].contains("First page footnote"),
+        "first page footnote should not duplicate on second page: {page_texts:?}"
+    );
+    for forbidden in [
+        b"ftnrstpg".as_slice(),
+        b"ftnstart",
+        b"ftnnruc",
+        b"chftn",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden footnote page-restart content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn footnote_page_restart_body_references_use_automatic_layout_pages() {
+    let mut input =
+        "{\\rtf1\\paperw6120\\paperh7200\\margt360\\margb360\\fs48\\ftnrstpg\\ftnstart4\\ftnnruc First"
+            .to_string();
+    input.push_str("\\chftn{\\footnote \\chftn First automatic page footnote\\par}\\par ");
+    for idx in 0..26 {
+        input.push_str("Filler paragraph ");
+        input.push_str(&idx.to_string());
+        input.push_str("\\par ");
+    }
+    input.push_str("Second");
+    input.push_str("\\chftn{\\footnote \\chftn Second automatic page footnote {\\object\\objdata ");
+    input.push_str(payload_hex());
+    input.push_str("}\\par}\\par}");
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains(&format!("First{}", footnote_reference_marker(0))),
+        "first automatic-page reference should be layout-resolved: {text:?}"
+    );
+    assert!(
+        text.contains(&format!("Second{}", footnote_reference_marker(1))),
+        "second automatic-page reference should be layout-resolved: {text:?}"
+    );
+    for forbidden in ["ftnrstpg", "ftnstart", "ftnnruc", "chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "automatic page-restart footnote control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    let second_page_index = page_texts
+        .iter()
+        .position(|text| text.contains("SecondIV"))
+        .expect("second footnote reference should render as page-local IV");
+    assert!(
+        second_page_index > 0,
+        "second reference should be on an automatic later page: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("FirstIV"),
+        "first page reference should start at IV: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("IV. First automatic page footnote"),
+        "first page footnote label should start at IV: {page_texts:?}"
+    );
+    assert!(
+        page_texts[second_page_index].contains("IV. Second automatic page footnote"),
+        "second automatic page footnote label should restart on its reference page: {page_texts:?}"
+    );
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"ftnrstpg".as_slice(),
+        b"ftnstart",
+        b"ftnnruc",
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden automatic page-restart content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn footnote_page_restart_uses_line_owned_references_inside_spanning_paragraph() {
+    let mut input =
+        "{\\rtf1\\paperw6120\\paperh7200\\margt360\\margb360\\fs48\\ftnrstpg\\ftnstart4\\ftnnruc First"
+            .to_string();
+    input.push_str("\\chftn{\\footnote \\chftn First line-owned footnote\\par} ");
+    for _ in 0..120 {
+        input.push_str("middle text ");
+    }
+    input.push_str("Second");
+    input.push_str("\\chftn{\\footnote \\chftn Second line-owned footnote {\\object\\objdata ");
+    input.push_str(payload_hex());
+    input.push_str("}\\par} ");
+    for _ in 0..40 {
+        input.push_str("tail text ");
+    }
+    input.push_str("\\par}");
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains(&format!(
+            "First{FOOTNOTE_REFERENCE_MARKER}0{FOOTNOTE_REFERENCE_MARKER_END}"
+        )),
+        "first spanning-paragraph reference should be layout-resolved: {text:?}"
+    );
+    assert!(
+        text.contains(&format!(
+            "Second{FOOTNOTE_REFERENCE_MARKER}1{FOOTNOTE_REFERENCE_MARKER_END}"
+        )),
+        "second spanning-paragraph reference should be layout-resolved: {text:?}"
+    );
+    for forbidden in ["ftnrstpg", "ftnstart", "ftnnruc", "chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "line-owned footnote control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        page_texts.len() >= 2,
+        "spanning paragraph fixture should create automatic pages: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("FirstIV"),
+        "first reference should render on page 1: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("IV. First line-owned footnote"),
+        "first line-owned footnote should render before page 1 advances: {page_texts:?}"
+    );
+    assert!(
+        !page_texts[0].contains("Second line-owned footnote"),
+        "second line-owned footnote should not be pulled back to page 1: {page_texts:?}"
+    );
+    let second_page_index = page_texts
+        .iter()
+        .position(|text| text.contains("SecondIV"))
+        .expect("second line-owned reference should render as page-local IV");
+    assert!(
+        second_page_index > 0,
+        "second reference should render on a later automatic page: {page_texts:?}"
+    );
+    assert!(
+        page_texts[second_page_index].contains("IV. Second line-owned footnote")
+            || page_texts
+                .iter()
+                .skip(second_page_index)
+                .any(|text| text.contains("IV. Second line-owned footnote")),
+        "second line-owned footnote should restart at IV on or after its reference page: {page_texts:?}"
+    );
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"ftnrstpg".as_slice(),
+        b"ftnstart",
+        b"ftnnruc",
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden line-owned footnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn continuous_footnotes_use_line_owned_references_inside_spanning_paragraph() {
+    let mut input = "{\\rtf1\\paperw6120\\paperh7200\\margt360\\margb360\\fs48 First".to_string();
+    input.push_str("\\chftn{\\footnote \\chftn First continuous footnote\\par} ");
+    for _ in 0..120 {
+        input.push_str("middle text ");
+    }
+    input.push_str("Second");
+    input.push_str("\\chftn{\\footnote \\chftn Second continuous footnote {\\object\\objdata ");
+    input.push_str(payload_hex());
+    input.push_str("}\\par} ");
+    for _ in 0..40 {
+        input.push_str("tail text ");
+    }
+    input.push_str("\\par}");
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains(&format!("First{}", footnote_reference_marker(0))),
+        "first continuous reference should be layout-resolved: {text:?}"
+    );
+    assert!(
+        text.contains(&format!("Second{}", footnote_reference_marker(1))),
+        "second continuous reference should be layout-resolved: {text:?}"
+    );
+    for forbidden in ["chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "continuous footnote control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        page_texts.len() >= 2,
+        "continuous spanning paragraph fixture should create automatic pages: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("First1"),
+        "first continuous reference should render on page 1: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("1. First continuous footnote"),
+        "first continuous footnote should render before page 1 advances: {page_texts:?}"
+    );
+    assert!(
+        !page_texts[0].contains("Second continuous footnote"),
+        "second continuous footnote should not be pulled back to page 1: {page_texts:?}"
+    );
+    let second_page_index = page_texts
+        .iter()
+        .position(|text| text.contains("Second2"))
+        .expect("second continuous reference should render with continuous label 2");
+    assert!(
+        second_page_index > 0,
+        "second continuous reference should render on a later automatic page: {page_texts:?}"
+    );
+    assert!(
+        page_texts[second_page_index].contains("2. Second continuous footnote")
+            || page_texts
+                .iter()
+                .skip(second_page_index)
+                .any(|text| text.contains("2. Second continuous footnote")),
+        "second continuous footnote should render on or after its reference page: {page_texts:?}"
+    );
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"chftn".as_slice(),
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden continuous footnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn section_restarting_footnotes_use_line_owned_references_inside_spanning_paragraph() {
+    let mut input =
+        "{\\rtf1\\paperw6120\\paperh7200\\margt360\\margb360\\fs48\\ftnrestart\\ftnstart1 First"
+            .to_string();
+    input.push_str("\\chftn{\\footnote \\chftn First section-owned footnote\\par} ");
+    for _ in 0..120 {
+        input.push_str("middle text ");
+    }
+    input.push_str("Second");
+    input.push_str("\\chftn{\\footnote \\chftn Second section-owned footnote {\\object\\objdata ");
+    input.push_str(payload_hex());
+    input.push_str("}\\par} ");
+    for _ in 0..40 {
+        input.push_str("tail text ");
+    }
+    input.push_str("\\par}");
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains(&format!("First{}", footnote_reference_marker(0))),
+        "first section-restarting reference should be layout-resolved: {text:?}"
+    );
+    assert!(
+        text.contains(&format!("Second{}", footnote_reference_marker(1))),
+        "second section-restarting reference should be layout-resolved: {text:?}"
+    );
+    for forbidden in ["ftnrestart", "ftnstart", "chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "section-restarting footnote control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        page_texts.len() >= 2,
+        "section-restarting spanning paragraph fixture should create automatic pages: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("First1"),
+        "first section-restarting reference should render on page 1: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("1. First section-owned footnote"),
+        "first section-restarting footnote should render before page 1 advances: {page_texts:?}"
+    );
+    assert!(
+        !page_texts[0].contains("Second section-owned footnote"),
+        "second section-restarting footnote should not be pulled back to page 1: {page_texts:?}"
+    );
+    let second_page_index = page_texts
+        .iter()
+        .position(|text| text.contains("Second2"))
+        .expect("second section-restarting reference should render with section-local label 2");
+    assert!(
+        second_page_index > 0,
+        "second section-restarting reference should render on a later automatic page: {page_texts:?}"
+    );
+    assert!(
+        page_texts[second_page_index].contains("2. Second section-owned footnote")
+            || page_texts
+                .iter()
+                .skip(second_page_index)
+                .any(|text| text.contains("2. Second section-owned footnote")),
+        "second section-restarting footnote should render on or after its reference page: {page_texts:?}"
+    );
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"ftnrestart".as_slice(),
+        b"ftnstart",
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden section-restarting footnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn later_large_footnote_does_not_reserve_space_before_its_reference_line() {
+    let mut input = "{\\rtf1\\paperw6120\\paperh4320\\margt360\\margb360\\fs48 First".to_string();
+    input.push_str("\\chftn{\\footnote \\chftn First small footnote\\par}");
+    for label in [
+        "Line one",
+        "Line two",
+        "Line three",
+        "Line four",
+        "Line five",
+        "Line six",
+        "Line seven",
+    ] {
+        input.push_str("\\line ");
+        input.push_str(label);
+    }
+    input.push_str("\\line Late");
+    input.push_str("\\chftn{\\footnote \\chftn Late large footnote {\\object\\objdata ");
+    input.push_str(payload_hex());
+    input.push_str("} ");
+    for _ in 0..80 {
+        input.push_str("large note text ");
+    }
+    input.push_str("\\par} tail\\par}");
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains(&format!("First{}", footnote_reference_marker(0))),
+        "first reference should be a safe layout marker: {text:?}"
+    );
+    assert!(
+        text.contains(&format!("Late{}", footnote_reference_marker(1))),
+        "late reference should be a safe layout marker: {text:?}"
+    );
+    for forbidden in ["chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "large-footnote fixture control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_contents = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| parsed_pdf.get_and_decode_page_content(*page_id).unwrap())
+        .collect::<Vec<_>>();
+    let page_texts = page_contents
+        .iter()
+        .map(decoded_pdf_text)
+        .collect::<Vec<_>>();
+    let page_stroke_counts = page_contents
+        .iter()
+        .map(|content| {
+            content
+                .operations
+                .iter()
+                .filter(|operation| operation.operator == "S")
+                .count()
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        page_texts.len() >= 2,
+        "large later footnote fixture should paginate: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("First1"),
+        "first reference should render on page 1: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("Line four"),
+        "later large footnote should not pre-reserve page 1 before its reference: {page_texts:?}"
+    );
+    assert!(
+        page_texts[0].contains("1. First small footnote"),
+        "first small footnote should still render on the first page: {page_texts:?}"
+    );
+    assert!(
+        !page_texts[0].contains("Late large footnote"),
+        "late large footnote should not render before its reference page: {page_texts:?}"
+    );
+    let late_page_index = page_texts
+        .iter()
+        .position(|text| text.contains("Late2"))
+        .expect("late reference should render with continuous label 2");
+    assert!(
+        late_page_index > 0,
+        "late reference should render after page 1: {page_texts:?}"
+    );
+    assert!(
+        page_texts
+            .iter()
+            .skip(late_page_index)
+            .any(|text| text.contains("2. Late large footnote")),
+        "late large footnote should render on or after its reference page: {page_texts:?}"
+    );
+    let continuation_note_pages = page_texts
+        .iter()
+        .enumerate()
+        .skip(late_page_index + 1)
+        .filter_map(|(idx, text)| text.contains("large note text").then_some(idx))
+        .collect::<Vec<_>>();
+    assert!(
+        !continuation_note_pages.is_empty(),
+        "fixture should force the large footnote onto continuation pages: {page_texts:?}"
+    );
+    for page_idx in continuation_note_pages {
+        assert!(
+            page_stroke_counts[page_idx] >= 1,
+            "continued footnote page should include a passive continuation separator: page {page_idx}, strokes {:?}, texts {page_texts:?}",
+            page_stroke_counts
+        );
+    }
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"chftn".as_slice(),
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden large-footnote content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -34114,6 +35247,107 @@ fn endnotes_strip_active_content_without_losing_safe_text_or_pdf_passivity() {
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden endnote content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn continued_endnotes_use_safe_authored_continuation_separator() {
+    let mut input = "{\\rtf1\\paperw6120\\paperh4320\\margt360\\margb360\\fs48\\aenddoc{\\aftnsep Safe endnote separator\\par}{\\aftnsepc Safe endnote continuation {\\object\\objdata ".to_string();
+    input.push_str(payload_hex());
+    input.push_str("}\\par}Body\\chftn{\\endnote \\chftn Long endnote ");
+    for _ in 0..120 {
+        input.push_str("continued endnote text ");
+    }
+    input.push_str("\\par}\\par}");
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Body1"), "text: {text:?}");
+    assert!(text.contains("Long endnote"));
+    assert!(text.contains("continued endnote text"));
+    for forbidden in [
+        "Safe endnote separator",
+        "Safe endnote continuation",
+        "Embedded object removed",
+        "aftnsep",
+        "aftnsepc",
+        "objdata",
+        payload_hex(),
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "endnote separator definition leaked to model text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        page_texts.len() >= 3,
+        "long endnote fixture should span continuation pages: {page_texts:?}"
+    );
+    assert!(
+        page_texts
+            .iter()
+            .any(|text| text.contains("Safe endnote separator")),
+        "initial authored endnote separator should render: {page_texts:?}"
+    );
+    let continuation_pages = page_texts
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter_map(|(idx, text)| text.contains("Safe endnote continuation").then_some(idx))
+        .collect::<Vec<_>>();
+    assert!(
+        !continuation_pages.is_empty(),
+        "continued endnote pages should render the authored continuation separator: {page_texts:?}"
+    );
+    for page_idx in continuation_pages {
+        assert!(
+            page_texts[page_idx].contains("continued endnote text"),
+            "continuation separator should appear on a carried-over endnote page: {page_texts:?}"
+        );
+    }
+    for forbidden in [
+        payload_hex().as_bytes(),
+        b"aftnsep".as_slice(),
+        b"aftnsepc",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/AcroForm",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden continued-endnote content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -34480,13 +35714,13 @@ fn fet1_legacy_footnote_groups_render_as_passive_endnotes_without_control_leakag
 }
 
 #[test]
-fn note_separator_definitions_do_not_reach_text_or_pdf() {
+fn note_separator_definitions_render_safely_without_body_or_payload_leakage() {
     let input = rtf(&[
         "{",
         "\\",
         "rtf1{",
         "\\",
-        "ftnsep Hidden footnote separator {",
+        "ftnsep Safe footnote separator {",
         "\\",
         "object",
         "\\",
@@ -34496,11 +35730,11 @@ fn note_separator_definitions_do_not_reach_text_or_pdf() {
         "\\",
         "par}{",
         "\\",
-        "ftnsepc Hidden footnote continuation}{",
+        "ftnsepc Safe footnote continuation}{",
         "\\",
-        "aftnsep Hidden endnote separator}{",
+        "aftnsep Safe endnote separator}{",
         "\\",
-        "aftnsepc Hidden endnote continuation}Body",
+        "aftnsepc Safe endnote continuation}Body",
         "\\",
         "chftn{",
         "\\",
@@ -34519,14 +35753,14 @@ fn note_separator_definitions_do_not_reach_text_or_pdf() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Body1 End1"));
+    assert!(text.contains(&format!("Body{} End1", footnote_reference_marker(0))));
     assert!(text.contains("Footnote text"));
     assert!(text.contains("Endnote text"));
     for forbidden in [
-        "Hidden footnote separator",
-        "Hidden footnote continuation",
-        "Hidden endnote separator",
-        "Hidden endnote continuation",
+        "Safe footnote separator",
+        "Safe footnote continuation",
+        "Safe endnote separator",
+        "Safe endnote continuation",
         "Embedded object removed",
         "ftnsep",
         "ftnsepc",
@@ -34561,14 +35795,12 @@ fn note_separator_definitions_do_not_reach_text_or_pdf() {
     let rendered_text = decoded_pdf_text(&content);
 
     assert!(rendered_text.contains("Body1 End1"));
+    assert!(rendered_text.contains("Safe footnote separator"));
+    assert!(rendered_text.contains("Safe endnote separator"));
     assert!(rendered_text.contains("Footnote text"));
     assert!(rendered_text.contains("Endnote text"));
     for forbidden in [
-        b"Hidden footnote separator".as_slice(),
-        b"Hidden footnote continuation",
-        b"Hidden endnote separator",
-        b"Hidden endnote continuation",
-        b"ftnsep",
+        b"ftnsep".as_slice(),
         b"ftnsepc",
         b"aftnsep",
         b"aftnsepc",
@@ -34625,7 +35857,10 @@ fn note_numbering_controls_render_passively_without_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("BodyIV Endb"), "text: {text:?}");
+    assert!(
+        text.contains(&format!("Body{} Endb", footnote_reference_marker(0))),
+        "text: {text:?}"
+    );
     assert!(text.contains("Footnote text"));
     assert!(text.contains("Endnote text"));
     for forbidden in ["ftnstart", "ftnnruc", "aftnstart", "aftnnalc", "chftn"] {
@@ -34737,7 +35972,14 @@ fn note_restart_controls_warn_without_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("BodyIV MiddleV Endb"), "text: {text:?}");
+    assert!(
+        text.contains(&format!(
+            "Body{} Middle{} Endb",
+            footnote_reference_marker(0),
+            footnote_reference_marker(1)
+        )),
+        "text: {text:?}"
+    );
     assert!(text.contains("First footnote"));
     assert!(text.contains("Second footnote"));
     assert!(text.contains("Endnote text"));
@@ -34749,16 +35991,21 @@ fn note_restart_controls_warn_without_control_leakage() {
         "note restart controls should not be unsupported: {:?}",
         parsed.diagnostics
     );
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("footnote page restart")),
+        "footnote page restart should be layout-resolved, not reported as approximated: {:?}",
+        parsed.diagnostics
+    );
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
             .message
-            .contains("footnote restart behavior approximated by passive sequential numbering")
-    }));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("endnote restart behavior approximated by passive sequential numbering")
-    }));
+            .contains("endnote page restart behavior approximated")),
+        "endnote page restart should be layout-resolved, not reported as approximated: {:?}",
+        parsed.diagnostics
+    );
     for forbidden in [
         "ftnrestart",
         "ftnrstpg",
@@ -34828,6 +36075,271 @@ fn note_restart_controls_warn_without_control_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "note restart content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn endnote_page_restart_uses_layout_resolved_endnote_pages() {
+    let mut input =
+        "{\\rtf1\\paperw6120\\paperh3600\\margt360\\margb360\\fs48\\aenddoc\\aftnrstpg\\aftnstart2\\aftnnalc First".to_string();
+    input.push_str("\\chftn{\\endnote \\chftn First long endnote ");
+    for idx in 0..42 {
+        input.push_str("line ");
+        input.push_str(&idx.to_string());
+        input.push_str(" ");
+    }
+    input.push_str("{\\object\\objdata ");
+    input.push_str(payload_hex());
+    input.push_str("}\\par} Second");
+    input.push_str("\\chftn{\\endnote \\chftn Second endnote text\\par} End\\par}");
+    let input = input.into_bytes();
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains(&format!(
+            "First{} Second{} End",
+            endnote_reference_marker(0),
+            endnote_reference_marker(1)
+        )),
+        "page-restarting endnote references should stay internal until layout: {text:?}"
+    );
+    assert_eq!(parsed.document.endnotes.len(), 2);
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("endnote page restart behavior approximated")),
+        "endnote page restart should not be reported as approximated: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["aftnrstpg", "aftnstart", "aftnnalc", "chftn", "objdata"] {
+        assert!(
+            !text.contains(forbidden),
+            "endnote page-restart control leaked into text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let rendered_text = page_texts.join("\n");
+
+    assert!(
+        rendered_text.contains("Firstb Secondb End"),
+        "body endnote references should resolve to page-local labels: {page_texts:?}"
+    );
+    assert!(
+        rendered_text.contains("b. First long endnote"),
+        "first endnote should restart at configured lower-alpha start: {page_texts:?}"
+    );
+    assert!(
+        rendered_text.contains("b. Second endnote text"),
+        "second endnote should restart on its later rendered endnote page: {page_texts:?}"
+    );
+    let first_note_page = page_texts
+        .iter()
+        .position(|page| page.contains("b. First long endnote"))
+        .expect("first endnote page");
+    let second_note_page = page_texts
+        .iter()
+        .position(|page| page.contains("b. Second endnote text"))
+        .expect("second endnote page");
+    assert!(
+        second_note_page > first_note_page,
+        "fixture should prove page-local endnote restart across different pages: {page_texts:?}"
+    );
+    for forbidden in [
+        ENDNOTE_REFERENCE_MARKER.as_bytes(),
+        ENDNOTE_REFERENCE_MARKER_END.as_bytes(),
+        payload_hex().as_bytes(),
+        b"aftnrstpg".as_slice(),
+        b"aftnstart",
+        b"aftnnalc",
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "endnote page-restart content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn section_note_restart_controls_render_passive_section_local_numbering() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "ftnstart4",
+        "\\",
+        "ftnnruc",
+        "\\",
+        "aftnstart2",
+        "\\",
+        "aftnnalc",
+        "\\",
+        "aenddoc",
+        "\\",
+        "ftnrestart",
+        "\\",
+        "aftnrestart First section",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn First section footnote",
+        "\\",
+        "par} First end",
+        "\\",
+        "chftn{",
+        "\\",
+        "endnote ",
+        "\\",
+        "chftn First section endnote",
+        "\\",
+        "par}",
+        "\\",
+        "par",
+        "\\",
+        "sect Second section",
+        "\\",
+        "chftn{",
+        "\\",
+        "footnote ",
+        "\\",
+        "chftn Second section footnote",
+        "\\",
+        "par} Second end",
+        "\\",
+        "chftn{",
+        "\\",
+        "endnote ",
+        "\\",
+        "chftn Second section endnote",
+        "\\",
+        "par}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains(&format!(
+            "First section{} First endb",
+            footnote_reference_marker(0)
+        )),
+        "text: {text:?}"
+    );
+    assert!(
+        text.contains(&format!(
+            "Second section{} Second endb",
+            footnote_reference_marker(1)
+        )),
+        "text: {text:?}"
+    );
+    assert_eq!(parsed.document.footnote_section_indices, vec![1, 2]);
+    assert_eq!(parsed.document.endnote_section_indices, vec![1, 2]);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("restart behavior approximated")),
+        "section restart should be normalized as safe metadata: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["ftnrestart", "aftnrestart", "chftn"] {
+        assert!(
+            !text.contains(forbidden),
+            "section note restart control leaked into text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered_text.contains("First sectionIV First endb"),
+        "rendered text: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("Second sectionIV Second endb"),
+        "rendered text: {rendered_text:?}"
+    );
+    assert!(rendered_text.contains("IV. First section footnote"));
+    assert!(rendered_text.contains("IV. Second section footnote"));
+    assert!(rendered_text.contains("b. First section endnote"));
+    assert!(rendered_text.contains("b. Second section endnote"));
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("restart behavior approximated")),
+        "section restart should not emit approximation diagnostics: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"ftnrestart".as_slice(),
+        b"aftnrestart",
+        b"chftn",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "section note restart content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -36214,11 +37726,15 @@ fn modern_static_shape_properties_render_passively_without_property_leakage() {
             .message
             .contains("stripping unsupported/active drawing properties")
     }));
-    assert!(report.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("shape text wrapping approximated")
-    }));
+    assert!(
+        report.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("shape text wrapping approximated")
+        }),
+        "no-wrap shape should not be reported as a wrapping approximation: {:?}",
+        report.diagnostics
+    );
     assert!(
         report.diagnostics.iter().all(|diagnostic| !diagnostic
             .message
@@ -36959,7 +38475,7 @@ fn square_shape_wrap_metadata_is_consumed_by_passive_line_exclusion() {
         "\\",
         "shpbypara",
         "\\",
-        "shpwr1",
+        "shpwr2",
         "\\",
         "shpwrk0",
         "\\",
@@ -37024,6 +38540,113 @@ fn square_shape_wrap_metadata_is_consumed_by_passive_line_exclusion() {
 }
 
 #[test]
+fn top_bottom_shape_wrap_keeps_following_text_below_passive_frame() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft0",
+        "\\",
+        "shptop0",
+        "\\",
+        "shpright1440",
+        "\\",
+        "shpbottom720",
+        "\\",
+        "shpbxcolumn",
+        "\\",
+        "shpbypara",
+        "\\",
+        "shpwr1",
+        "\\",
+        "shpwrk0",
+        "\\",
+        "shpfblwtxt0",
+        "\\",
+        "shpz0{",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip ",
+        image_hex.as_str(),
+        "}}}} Wrapped text below picture",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("shape picture image");
+    let placement = image.placement.expect("shape picture placement");
+    assert!(
+        !placement.text_wrap,
+        "top/bottom wrap should keep the passive frame in block flow"
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("shape text wrapping approximated")
+        }),
+        "top/bottom wrapped shape should be handled by passive block flow: {:?}",
+        output.diagnostics
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("Wrapped text below picture"));
+    for forbidden in [
+        b"shpwr".as_slice(),
+        b"shpwrk",
+        b"shppict",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden top-bottom shape content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shape_picture_wrap_side_metadata_is_consumed_by_passive_line_exclusion() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     for (control_value, expected_side) in [
@@ -37057,7 +38680,7 @@ fn shape_picture_wrap_side_metadata_is_consumed_by_passive_line_exclusion() {
             "\\",
             "shpbypara",
             "\\",
-            "shpwr1",
+            "shpwr2",
             "\\",
             "shpwrk",
             control_value.as_str(),
