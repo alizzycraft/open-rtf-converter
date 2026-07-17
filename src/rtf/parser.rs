@@ -20015,6 +20015,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYPOLYLINE16: u32 = 90;
     const EMR_POLYPOLYGON16: u32 = 91;
     const EMR_POLYDRAW16: u32 = 92;
+    const EMR_EXTCREATEPEN: u32 = 95;
 
     let header = parse_emf_header_dimensions(bytes)?;
     if header
@@ -20142,6 +20143,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_CREATEPEN => {
                 let (handle, object) = parse_emf_pen_object(data)?;
+                store_emf_object(&mut objects, handle, object)?;
+            }
+            EMR_EXTCREATEPEN => {
+                let (handle, object) = parse_emf_ext_pen_object(data)?;
                 store_emf_object(&mut objects, handle, object)?;
             }
             EMR_CREATEBRUSHINDIRECT => {
@@ -21088,6 +21093,66 @@ fn parse_emf_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
             style: wmf_pen_border_style((style & 0xffff) as u16),
         },
     ))
+}
+
+fn parse_emf_ext_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
+    const BS_NULL: u32 = 1;
+
+    if data.len() < 44 {
+        return None;
+    }
+    let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
+    validate_emf_optional_record_payload(data, read_le_u32(data, 4)?, read_le_u32(data, 8)?)?;
+    validate_emf_optional_record_payload(data, read_le_u32(data, 12)?, read_le_u32(data, 16)?)?;
+
+    let pen_style = read_le_u32(data, 20)?;
+    let width = i32::try_from(read_le_u32(data, 24)?.max(1)).unwrap_or(i32::MAX);
+    let brush_style = read_le_u32(data, 28)?;
+    let color = color_from_colorref(data, 32)?;
+    let style_entry_count = usize::try_from(read_le_u32(data, 40)?).ok()?;
+    if style_entry_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+        return None;
+    }
+    let entries_end = 44usize.checked_add(style_entry_count.checked_mul(4)?)?;
+    if entries_end > data.len() {
+        return None;
+    }
+
+    let style = wmf_pen_border_style((pen_style & 0xffff) as u16);
+    let color = if (pen_style & 0x000f) == 5 || brush_style == BS_NULL {
+        None
+    } else {
+        Some(color)
+    };
+
+    Some((
+        handle,
+        EmfObject::Pen {
+            color,
+            width,
+            style,
+        },
+    ))
+}
+
+fn validate_emf_optional_record_payload(
+    data: &[u8],
+    record_offset: u32,
+    byte_count: u32,
+) -> Option<()> {
+    if record_offset == 0 && byte_count == 0 {
+        return Some(());
+    }
+    if record_offset < 8 || byte_count == 0 {
+        return None;
+    }
+    let data_offset = usize::try_from(record_offset).ok()?.checked_sub(8)?;
+    let byte_count = usize::try_from(byte_count).ok()?;
+    let end = data_offset.checked_add(byte_count)?;
+    if end > data.len() {
+        return None;
+    }
+    Some(())
 }
 
 fn parse_emf_brush_object(data: &[u8]) -> Option<(usize, EmfObject)> {
@@ -35966,6 +36031,78 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_extcreatepen_objects_style_passive_vector_commands() {
+        let records = [
+            emf_extcreatepen_record(
+                4,
+                1,
+                5,
+                0,
+                Color {
+                    red: 90,
+                    green: 30,
+                    blue: 210,
+                },
+                b"ignored-dib-pen-payload",
+            ),
+            emf_select_object_record(4),
+            emf_point_record(27, 10, 20),
+            emf_point_record(54, 80, 60),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![StaticImageVectorCommand::Line {
+                x1: 10.0,
+                y1: 20.0,
+                x2: 80.0,
+                y2: 60.0,
+                stroke_color: Some(Color {
+                    red: 90,
+                    green: 30,
+                    blue: 210,
+                }),
+                stroke_width: 5.0,
+                stroke_style: BorderStyle::Dashed,
+            }]
+        );
+    }
+
+    #[test]
+    fn emf_extcreatepen_with_invalid_optional_payload_becomes_passive_placeholder() {
+        let records = [
+            emf_malformed_extcreatepen_record(4, 999, 4),
+            emf_select_object_record(4),
+            emf_point_record(27, 10, 20),
+            emf_point_record(54, 80, 60),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_stock_null_objects_suppress_passive_stroke_and_fill() {
         let records = [
             emf_select_object_record(0x8000_0005),
@@ -37444,6 +37581,45 @@ fn emf_create_pen_record(handle: u32, style: u32, width: i32, color: Color) -> V
     record[24] = color.red;
     record[25] = color.green;
     record[26] = color.blue;
+    record
+}
+
+#[cfg(test)]
+fn emf_extcreatepen_record(
+    handle: u32,
+    pen_style: u32,
+    width: u32,
+    brush_style: u32,
+    color: Color,
+    optional_payload: &[u8],
+) -> Vec<u8> {
+    let payload_offset = 52usize;
+    let size = (payload_offset + optional_payload.len()).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 95);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_u32(&mut record, 8, handle);
+    if !optional_payload.is_empty() {
+        write_test_le_u32(&mut record, 12, payload_offset as u32);
+        write_test_le_u32(&mut record, 16, optional_payload.len() as u32);
+        record[payload_offset..payload_offset + optional_payload.len()]
+            .copy_from_slice(optional_payload);
+    }
+    write_test_le_u32(&mut record, 28, pen_style);
+    write_test_le_u32(&mut record, 32, width);
+    write_test_le_u32(&mut record, 36, brush_style);
+    record[40] = color.red;
+    record[41] = color.green;
+    record[42] = color.blue;
+    write_test_le_u32(&mut record, 48, 0);
+    record
+}
+
+#[cfg(test)]
+fn emf_malformed_extcreatepen_record(handle: u32, off_bmi: u32, cb_bmi: u32) -> Vec<u8> {
+    let mut record = emf_extcreatepen_record(handle, 0, 1, 0, Color::default(), &[]);
+    write_test_le_u32(&mut record, 12, off_bmi);
+    write_test_le_u32(&mut record, 16, cb_bmi);
     record
 }
 

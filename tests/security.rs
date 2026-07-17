@@ -30589,6 +30589,118 @@ fn emf_pen_and_brush_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_extcreatepen_records_render_passively_without_payload_leakage() {
+    let payload = b"EXTCREATEPEN-DIB-PAYLOAD";
+    let records = [
+        emf_extcreatepen_record(
+            4,
+            1,
+            5,
+            0,
+            Color {
+                red: 90,
+                green: 30,
+                blue: 210,
+            },
+            payload,
+        ),
+        emf_select_object_record(4),
+        emf_point_record(27, 10, 20),
+        emf_point_record(54, 80, 60),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF EXTCREATEPEN vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("EXTCREATEPEN-DIB-PAYLOAD"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Line {
+            stroke_color: Some(Color {
+                red: 90,
+                green: 30,
+                blue: 210
+            }),
+            stroke_width: 5.0,
+            stroke_style: BorderStyle::Dashed,
+            ..
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF EXTCREATEPEN payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "RG"),
+        "EMF EXTCREATEPEN stroke color should render as passive PDF stroke color"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "w"),
+        "EMF EXTCREATEPEN stroke width should render as passive PDF line width"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        payload.as_slice(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF EXTCREATEPEN payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_exttextoutw_records_render_passively_without_payload_leakage() {
     let records = [
         emf_u32_record(24, 0x0033_2211),
@@ -43448,6 +43560,36 @@ fn emf_create_pen_record(handle: u32, style: u32, width: i32, color: Color) -> V
     record[24] = color.red;
     record[25] = color.green;
     record[26] = color.blue;
+    record
+}
+
+fn emf_extcreatepen_record(
+    handle: u32,
+    pen_style: u32,
+    width: u32,
+    brush_style: u32,
+    color: Color,
+    optional_payload: &[u8],
+) -> Vec<u8> {
+    let payload_offset = 52usize;
+    let size = (payload_offset + optional_payload.len()).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 95);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_u32(&mut record, 8, handle);
+    if !optional_payload.is_empty() {
+        write_test_le_u32(&mut record, 12, payload_offset as u32);
+        write_test_le_u32(&mut record, 16, optional_payload.len() as u32);
+        record[payload_offset..payload_offset + optional_payload.len()]
+            .copy_from_slice(optional_payload);
+    }
+    write_test_le_u32(&mut record, 28, pen_style);
+    write_test_le_u32(&mut record, 32, width);
+    write_test_le_u32(&mut record, 36, brush_style);
+    record[40] = color.red;
+    record[41] = color.green;
+    record[42] = color.blue;
+    write_test_le_u32(&mut record, 48, 0);
     record
 }
 
