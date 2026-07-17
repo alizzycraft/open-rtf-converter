@@ -30777,6 +30777,97 @@ fn emf_polyline_and_polygon_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_polypolyline_and_polypolygon_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_poly_poly_record(7, &[vec![(0, 0), (40, 20)], vec![(50, 10), (200, 100)]]),
+        emf_poly_poly_record(
+            8,
+            &[
+                vec![(20, 10), (60, 70), (100, 10)],
+                vec![(100, 20), (140, 70), (200, 20)],
+            ],
+        ),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF multi-poly vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 4);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Polyline { ref points, .. } if points.len() == 2
+    ));
+    assert!(matches!(
+        image.vector_commands[2],
+        StaticImageVectorCommand::Polygon { ref points, .. } if points.len() == 3
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF multi-poly payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s" | "B" | "B*")),
+        "EMF multi-poly vector preview should render passive stroked or filled paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF multi-poly payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_move_to_and_line_to_records_render_passively_without_payload_leakage() {
     let records = [
         emf_point_record(27, 10, 10),
@@ -42071,6 +42162,43 @@ fn emf_poly_record(record_type: u32, points: &[(i32, i32)]) -> Vec<u8> {
     write_test_le_u32(&mut record, 24, points.len() as u32);
     for (idx, (x, y)) in points.iter().enumerate() {
         let offset = 28 + (idx * 8);
+        write_test_le_i32(&mut record, offset, *x);
+        write_test_le_i32(&mut record, offset + 4, *y);
+    }
+    record
+}
+
+fn emf_poly_poly_record(record_type: u32, polygons: &[Vec<(i32, i32)>]) -> Vec<u8> {
+    let counts: Vec<usize> = polygons.iter().map(Vec::len).collect();
+    let points: Vec<(i32, i32)> = polygons
+        .iter()
+        .flat_map(|points| points.iter().copied())
+        .collect();
+    let counts: Vec<u32> = counts.into_iter().map(|count| count as u32).collect();
+    emf_poly_poly_record_with_counts(record_type, &counts, &points)
+}
+
+fn emf_poly_poly_record_with_counts(
+    record_type: u32,
+    counts: &[u32],
+    points: &[(i32, i32)],
+) -> Vec<u8> {
+    let size = 32 + (counts.len() * 4) + (points.len() * 8);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, counts.len() as u32);
+    write_test_le_u32(&mut record, 28, points.len() as u32);
+    for (idx, count) in counts.iter().enumerate() {
+        write_test_le_u32(&mut record, 32 + (idx * 4), *count);
+    }
+    let points_start = 32 + (counts.len() * 4);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = points_start + (idx * 8);
         write_test_le_i32(&mut record, offset, *x);
         write_test_le_i32(&mut record, offset + 4, *y);
     }
