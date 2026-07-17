@@ -19718,6 +19718,63 @@ struct EmfDrawingState {
     text_vertical_align: StaticImageTextVerticalAlign,
 }
 
+#[derive(Debug, Copy, Clone)]
+struct EmfCoordinateState {
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_extent_x: i32,
+    window_extent_y: i32,
+    viewport_origin_x: i32,
+    viewport_origin_y: i32,
+    viewport_extent_x: i32,
+    viewport_extent_y: i32,
+}
+
+impl EmfCoordinateState {
+    fn from_header(header: &ParsedEmfHeader) -> Self {
+        let width = i32::try_from(header.width_px.max(1)).unwrap_or(i32::MAX);
+        let height = i32::try_from(header.height_px.max(1)).unwrap_or(i32::MAX);
+        Self {
+            window_origin_x: header.bounds_left,
+            window_origin_y: header.bounds_top,
+            window_extent_x: width,
+            window_extent_y: height,
+            viewport_origin_x: 0,
+            viewport_origin_y: 0,
+            viewport_extent_x: width,
+            viewport_extent_y: height,
+        }
+    }
+
+    fn set_window_extent(&mut self, width: i32, height: i32) -> Option<()> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        self.window_extent_x = width;
+        self.window_extent_y = height;
+        Some(())
+    }
+
+    fn set_window_origin(&mut self, x: i32, y: i32) {
+        self.window_origin_x = x;
+        self.window_origin_y = y;
+    }
+
+    fn set_viewport_extent(&mut self, width: i32, height: i32) -> Option<()> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        self.viewport_extent_x = width;
+        self.viewport_extent_y = height;
+        Some(())
+    }
+
+    fn set_viewport_origin(&mut self, x: i32, y: i32) {
+        self.viewport_origin_x = x;
+        self.viewport_origin_y = y;
+    }
+}
+
 impl Default for EmfDrawingState {
     fn default() -> Self {
         Self {
@@ -19864,6 +19921,10 @@ fn parse_emf_header_dimensions(bytes: &[u8]) -> Option<ParsedEmfHeader> {
 
 fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_EOF: u32 = 14;
+    const EMR_SETWINDOWEXTEX: u32 = 9;
+    const EMR_SETWINDOWORGEX: u32 = 10;
+    const EMR_SETVIEWPORTEXTEX: u32 = 11;
+    const EMR_SETVIEWPORTORGEX: u32 = 12;
     const EMR_MOVETOEX: u32 = 27;
     const EMR_POLYGON: u32 = 3;
     const EMR_POLYLINE: u32 = 4;
@@ -19901,7 +19962,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     let mut commands = Vec::new();
     let mut skipped_record_count = 0usize;
     let mut reached_eof = false;
-    let mut current_position = normalized_emf_point(0, 0, &header);
+    let mut coordinates = EmfCoordinateState::from_header(&header);
+    let mut current_position = (0i32, 0i32);
     let mut objects: Vec<Option<EmfObject>> = Vec::new();
     let mut state = EmfDrawingState::default();
 
@@ -19932,8 +19994,24 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 reached_eof = true;
                 break;
             }
+            EMR_SETWINDOWEXTEX => {
+                let (width, height) = parse_emf_size_record(data)?;
+                coordinates.set_window_extent(width, height)?;
+            }
+            EMR_SETWINDOWORGEX => {
+                let (x, y) = parse_emf_raw_point_record(data)?;
+                coordinates.set_window_origin(x, y);
+            }
+            EMR_SETVIEWPORTEXTEX => {
+                let (width, height) = parse_emf_size_record(data)?;
+                coordinates.set_viewport_extent(width, height)?;
+            }
+            EMR_SETVIEWPORTORGEX => {
+                let (x, y) = parse_emf_raw_point_record(data)?;
+                coordinates.set_viewport_origin(x, y);
+            }
             EMR_MOVETOEX => {
-                current_position = parse_emf_point_record(data, &header)?;
+                current_position = parse_emf_raw_point_record(data)?;
             }
             EMR_SETBKMODE => {
                 state.text_background_mode =
@@ -19992,16 +20070,24 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_LINETO => {
-                let endpoint = parse_emf_point_record(data, &header)?;
-                if segment_is_visible(current_position, endpoint) {
+                let endpoint = parse_emf_raw_point_record(data)?;
+                let start = normalized_emf_point(
+                    current_position.0,
+                    current_position.1,
+                    &header,
+                    &coordinates,
+                );
+                let endpoint_normalized =
+                    normalized_emf_point(endpoint.0, endpoint.1, &header, &coordinates);
+                if segment_is_visible(start, endpoint_normalized) {
                     if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                         return None;
                     }
                     commands.push(StaticImageVectorCommand::Line {
-                        x1: current_position.0,
-                        y1: current_position.1,
-                        x2: endpoint.0,
-                        y2: endpoint.1,
+                        x1: start.0,
+                        y1: start.1,
+                        x2: endpoint_normalized.0,
+                        y2: endpoint_normalized.1,
                         stroke_color: state.stroke_color,
                         stroke_width: state.stroke_width,
                         stroke_style: state.stroke_style,
@@ -20013,7 +20099,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some(text) = parse_emf_exttextoutw(data, &header) {
+                if let Some(text) = parse_emf_exttextoutw(data, &header, &coordinates) {
                     commands.push(StaticImageVectorCommand::Text {
                         x: text.x,
                         y: text.y,
@@ -20047,7 +20133,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 if let Some((left, top, right, bottom, color)) =
-                    parse_emf_setpixelv_rect(data, &header)
+                    parse_emf_setpixelv_rect(data, &header, &coordinates)
                 {
                     commands.push(StaticImageVectorCommand::Rectangle {
                         left,
@@ -20066,7 +20152,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let Some((left, top, right, bottom)) = parse_emf_record_rect(data, &header) else {
+                let Some((left, top, right, bottom)) =
+                    parse_emf_record_rect(data, &header, &coordinates)
+                else {
                     return None;
                 };
                 if bounds_is_visible((left, top, right, bottom)) {
@@ -20119,7 +20207,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let Some(points) = parse_emf_poly_points(data, &header) else {
+                let Some(points) = parse_emf_poly_points(data, &header, &coordinates) else {
                     return None;
                 };
                 if record_type == EMR_POLYGON {
@@ -20147,7 +20235,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let Some(points) = parse_emf_poly16_points(data, &header) else {
+                let Some(points) = parse_emf_poly16_points(data, &header, &coordinates) else {
                     return None;
                 };
                 if record_type == EMR_POLYGON16 {
@@ -20172,7 +20260,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_POLYPOLYGON | EMR_POLYPOLYLINE => {
-                let polygons = parse_emf_poly_poly_points(data, &header)?;
+                let polygons = parse_emf_poly_poly_points(data, &header, &coordinates)?;
                 for points in polygons {
                     if record_type == EMR_POLYPOLYGON {
                         if points.len() >= 3 && point_bounds_are_visible(&points) {
@@ -20206,7 +20294,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_POLYPOLYGON16 | EMR_POLYPOLYLINE16 => {
-                let polygons = parse_emf_poly_poly16_points(data, &header)?;
+                let polygons = parse_emf_poly_poly16_points(data, &header, &coordinates)?;
                 for points in polygons {
                     if record_type == EMR_POLYPOLYGON16 {
                         if points.len() >= 3 && point_bounds_are_visible(&points) {
@@ -20264,7 +20352,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     })
 }
 
-fn parse_emf_record_rect(data: &[u8], header: &ParsedEmfHeader) -> Option<(f32, f32, f32, f32)> {
+fn parse_emf_record_rect(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<(f32, f32, f32, f32)> {
     if data.len() < 16 {
         return None;
     }
@@ -20272,10 +20364,14 @@ fn parse_emf_record_rect(data: &[u8], header: &ParsedEmfHeader) -> Option<(f32, 
     let top = read_le_i32(data, 4)?;
     let right = read_le_i32(data, 8)?;
     let bottom = read_le_i32(data, 12)?;
-    normalized_emf_rect(left, top, right, bottom, header)
+    normalized_emf_rect(left, top, right, bottom, header, coordinates)
 }
 
-fn parse_emf_exttextoutw(data: &[u8], header: &ParsedEmfHeader) -> Option<ParsedEmfExtTextOut> {
+fn parse_emf_exttextoutw(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<ParsedEmfExtTextOut> {
     const EMF_ETO_OPAQUE: u32 = 0x0002;
     const EMF_ETO_CLIPPED: u32 = 0x0004;
     const EMF_ETO_GLYPH_INDEX: u32 = 0x0010;
@@ -20301,6 +20397,7 @@ fn parse_emf_exttextoutw(data: &[u8], header: &ParsedEmfHeader) -> Option<Parsed
             read_le_i32(data, 56)?,
             read_le_i32(data, 60)?,
             header,
+            coordinates,
         )
     } else {
         None
@@ -20312,7 +20409,7 @@ fn parse_emf_exttextoutw(data: &[u8], header: &ParsedEmfHeader) -> Option<Parsed
         return None;
     }
     let text = sanitize_emf_utf16le_text(data.get(string_offset..string_end)?)?;
-    let (x, y) = normalized_emf_point(x, y, header);
+    let (x, y) = normalized_emf_point(x, y, header, coordinates);
     Some(ParsedEmfExtTextOut {
         x,
         y,
@@ -20357,6 +20454,7 @@ fn normalized_emf_text_height(header: &ParsedEmfHeader) -> f32 {
 fn parse_emf_setpixelv_rect(
     data: &[u8],
     header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
 ) -> Option<(f32, f32, f32, f32, Color)> {
     if data.len() < 12 {
         return None;
@@ -20364,7 +20462,7 @@ fn parse_emf_setpixelv_rect(
     let x = read_le_i32(data, 0)?;
     let y = read_le_i32(data, 4)?;
     let color = color_from_colorref(data, 8)?;
-    let (x, y) = normalized_emf_point(x, y, header);
+    let (x, y) = normalized_emf_point(x, y, header, coordinates);
     let max_x = header.width_px.max(1) as f32;
     let max_y = header.height_px.max(1) as f32;
     Some((
@@ -20495,7 +20593,11 @@ fn emf_stock_object(handle: u32) -> Option<EmfObject> {
     }
 }
 
-fn parse_emf_poly_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f32, f32)>> {
+fn parse_emf_poly_points(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<Vec<(f32, f32)>> {
     if data.len() < 20 {
         return None;
     }
@@ -20515,12 +20617,16 @@ fn parse_emf_poly_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f
         let offset = points_start + (idx * 8);
         let x = read_le_i32(data, offset)?;
         let y = read_le_i32(data, offset + 4)?;
-        points.push(normalized_emf_point(x, y, header));
+        points.push(normalized_emf_point(x, y, header, coordinates));
     }
     Some(points)
 }
 
-fn parse_emf_poly16_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f32, f32)>> {
+fn parse_emf_poly16_points(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<Vec<(f32, f32)>> {
     if data.len() < 20 {
         return None;
     }
@@ -20540,7 +20646,7 @@ fn parse_emf_poly16_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<
         let offset = points_start + (idx * 4);
         let x = i32::from(read_le_i16(data, offset)?);
         let y = i32::from(read_le_i16(data, offset + 2)?);
-        points.push(normalized_emf_point(x, y, header));
+        points.push(normalized_emf_point(x, y, header, coordinates));
     }
     Some(points)
 }
@@ -20548,6 +20654,7 @@ fn parse_emf_poly16_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<
 fn parse_emf_poly_poly_points(
     data: &[u8],
     header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
 ) -> Option<Vec<Vec<(f32, f32)>>> {
     if data.len() < 24 {
         return None;
@@ -20595,7 +20702,7 @@ fn parse_emf_poly_poly_points(
             let offset = points_start + (point_index * 8);
             let x = read_le_i32(data, offset)?;
             let y = read_le_i32(data, offset + 4)?;
-            points.push(normalized_emf_point(x, y, header));
+            points.push(normalized_emf_point(x, y, header, coordinates));
             point_index += 1;
         }
         polygons.push(points);
@@ -20606,6 +20713,7 @@ fn parse_emf_poly_poly_points(
 fn parse_emf_poly_poly16_points(
     data: &[u8],
     header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
 ) -> Option<Vec<Vec<(f32, f32)>>> {
     if data.len() < 24 {
         return None;
@@ -20653,7 +20761,7 @@ fn parse_emf_poly_poly16_points(
             let offset = points_start + (point_index * 4);
             let x = i32::from(read_le_i16(data, offset)?);
             let y = i32::from(read_le_i16(data, offset + 2)?);
-            points.push(normalized_emf_point(x, y, header));
+            points.push(normalized_emf_point(x, y, header, coordinates));
             point_index += 1;
         }
         polygons.push(points);
@@ -20673,13 +20781,17 @@ fn parse_emf_roundrect_corners(data: &[u8], width: f32, height: f32) -> Option<(
     ))
 }
 
-fn parse_emf_point_record(data: &[u8], header: &ParsedEmfHeader) -> Option<(f32, f32)> {
+fn parse_emf_raw_point_record(data: &[u8]) -> Option<(i32, i32)> {
     if data.len() < 8 {
         return None;
     }
     let x = read_le_i32(data, 0)?;
     let y = read_le_i32(data, 4)?;
-    Some(normalized_emf_point(x, y, header))
+    Some((x, y))
+}
+
+fn parse_emf_size_record(data: &[u8]) -> Option<(i32, i32)> {
+    parse_emf_raw_point_record(data)
 }
 
 fn normalized_emf_rect(
@@ -20688,25 +20800,59 @@ fn normalized_emf_rect(
     right: i32,
     bottom: i32,
     header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
 ) -> Option<(f32, f32, f32, f32)> {
-    let width = i64::from(header.width_px);
-    let height = i64::from(header.height_px);
-    let x1 = (i64::from(left.min(right)) - i64::from(header.bounds_left)).clamp(0, width) as f32;
-    let x2 = (i64::from(left.max(right)) - i64::from(header.bounds_left)).clamp(0, width) as f32;
-    let y1 = (i64::from(top.min(bottom)) - i64::from(header.bounds_top)).clamp(0, height) as f32;
-    let y2 = (i64::from(top.max(bottom)) - i64::from(header.bounds_top)).clamp(0, height) as f32;
+    let (x1, y1) = normalized_emf_point(left, top, header, coordinates);
+    let (x2, y2) = normalized_emf_point(right, bottom, header, coordinates);
+    let (x1, x2) = (x1.min(x2), x1.max(x2));
+    let (y1, y2) = (y1.min(y2), y1.max(y2));
     if x2 <= x1 || y2 <= y1 {
         return None;
     }
     Some((x1, y1, x2, y2))
 }
 
-fn normalized_emf_point(x: i32, y: i32, header: &ParsedEmfHeader) -> (f32, f32) {
-    let width = i64::from(header.width_px);
-    let height = i64::from(header.height_px);
-    let x = (i64::from(x) - i64::from(header.bounds_left)).clamp(0, width) as f32;
-    let y = (i64::from(y) - i64::from(header.bounds_top)).clamp(0, height) as f32;
+fn normalized_emf_point(
+    x: i32,
+    y: i32,
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> (f32, f32) {
+    let x = map_emf_axis(
+        x,
+        coordinates.window_origin_x,
+        coordinates.window_extent_x,
+        coordinates.viewport_origin_x,
+        coordinates.viewport_extent_x,
+        header.width_px,
+    );
+    let y = map_emf_axis(
+        y,
+        coordinates.window_origin_y,
+        coordinates.window_extent_y,
+        coordinates.viewport_origin_y,
+        coordinates.viewport_extent_y,
+        header.height_px,
+    );
     (x, y)
+}
+
+fn map_emf_axis(
+    value: i32,
+    window_origin: i32,
+    window_extent: i32,
+    viewport_origin: i32,
+    viewport_extent: i32,
+    max: u32,
+) -> f32 {
+    let max = i128::from(max);
+    if window_extent == 0 || viewport_extent == 0 {
+        return 0.0;
+    }
+    let relative = i128::from(value) - i128::from(window_origin);
+    let scaled = (relative * i128::from(viewport_extent)) / i128::from(window_extent);
+    let device = i128::from(viewport_origin) + scaled;
+    device.clamp(0, max) as f32
 }
 
 fn signed_rect_extent(start: i32, end: i32) -> Option<u32> {
@@ -35370,6 +35516,84 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_window_and_viewport_records_map_passive_coordinates() {
+        let records = [
+            emf_size_record(9, 320, 160),
+            emf_point_record(10, 10, 20),
+            emf_size_record(11, 160, 80),
+            emf_point_record(12, 5, 3),
+            emf_rect_record(43, 10, 20, 170, 100),
+            emf_point_record(27, 10, 20),
+            emf_point_record(54, 330, 180),
+            emf_poly_record(4, &[(10, 20), (170, 100), (330, 180)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![
+                StaticImageVectorCommand::Rectangle {
+                    left: 5.0,
+                    top: 3.0,
+                    right: 85.0,
+                    bottom: 43.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: None,
+                },
+                StaticImageVectorCommand::Line {
+                    x1: 5.0,
+                    y1: 3.0,
+                    x2: 160.0,
+                    y2: 80.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                },
+                StaticImageVectorCommand::Polyline {
+                    points: vec![(5.0, 3.0), (85.0, 43.0), (160.0, 80.0)],
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn emf_coordinate_records_with_zero_extent_become_passive_placeholders() {
+        let records = [
+            emf_size_record(9, 0, 160),
+            emf_rect_record(43, 10, 20, 170, 100),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_poly_records_with_excessive_points_become_passive_placeholders() {
         let points = vec![(1, 1); MAX_PASSIVE_WMF_POINTS_PER_RECORD + 1];
         let records = [emf_poly_record(4, &points)];
@@ -35897,6 +36121,11 @@ fn emf_point_record(record_type: u32, x: i32, y: i32) -> Vec<u8> {
     write_test_le_i32(&mut record, 8, x);
     write_test_le_i32(&mut record, 12, y);
     record
+}
+
+#[cfg(test)]
+fn emf_size_record(record_type: u32, width: i32, height: i32) -> Vec<u8> {
+    emf_point_record(record_type, width, height)
 }
 
 #[cfg(test)]

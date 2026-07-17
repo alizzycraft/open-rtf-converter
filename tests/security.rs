@@ -31301,6 +31301,114 @@ fn emf_move_to_and_line_to_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_coordinate_mapping_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_size_record(9, 320, 160),
+        emf_point_record(10, 10, 20),
+        emf_size_record(11, 160, 80),
+        emf_point_record(12, 5, 3),
+        emf_rect_record(43, 10, 20, 170, 100),
+        emf_point_record(27, 10, 20),
+        emf_point_record(54, 330, 180),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF coordinate-mapped vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 5.0,
+            top: 3.0,
+            right: 85.0,
+            bottom: 43.0,
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Line {
+            x1: 5.0,
+            y1: 3.0,
+            x2: 160.0,
+            y2: 80.0,
+            ..
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF coordinate payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "EMF coordinate-mapped rectangle should render passive PDF rectangle paths"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "l"),
+        "EMF coordinate-mapped line should render passive PDF line operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF coordinate payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn extreme_character_spacing_is_bounded_before_pdf_rendering() {
     let input = rtf(&[
         "{",
@@ -42595,6 +42703,10 @@ fn emf_point_record(record_type: u32, x: i32, y: i32) -> Vec<u8> {
     write_test_le_i32(&mut record, 8, x);
     write_test_le_i32(&mut record, 12, y);
     record
+}
+
+fn emf_size_record(record_type: u32, width: i32, height: i32) -> Vec<u8> {
+    emf_point_record(record_type, width, height)
 }
 
 fn emf_unknown_record(record_type: u32) -> Vec<u8> {
