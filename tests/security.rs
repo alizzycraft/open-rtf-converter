@@ -30967,6 +30967,107 @@ fn emf_poly16_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_setpolyfillmode_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_u32_record(19, 2),
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 220,
+                green: 180,
+                blue: 120,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_poly_record(3, &[(20, 10), (60, 70), (100, 10)]),
+        emf_poly16_record(86, &[(100, 20), (140, 70), (200, 20)]),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF polyfill vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(image.vector_commands.iter().all(|command| matches!(
+        command,
+        StaticImageVectorCommand::Polygon {
+            fill_rule: StaticImageVectorFillRule::Winding,
+            fill_color: Some(Color {
+                red: 220,
+                green: 180,
+                blue: 120
+            }),
+            ..
+        }
+    )));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF polyfill payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "B")),
+        "EMF winding polyfill should render passive nonzero fill operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF polyfill payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_setpixelv_records_render_passively_without_payload_leakage() {
     let records = [
         emf_setpixelv_record(

@@ -19871,6 +19871,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYPOLYGON: u32 = 8;
     const EMR_SETPIXELV: u32 = 15;
     const EMR_SETBKMODE: u32 = 18;
+    const EMR_SETPOLYFILLMODE: u32 = 19;
     const EMR_SETTEXTALIGN: u32 = 22;
     const EMR_SETTEXTCOLOR: u32 = 24;
     const EMR_SETBKCOLOR: u32 = 25;
@@ -19941,6 +19942,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     } else {
                         WmfTextBackgroundMode::Transparent
                     };
+            }
+            EMR_SETPOLYFILLMODE => {
+                state.fill_rule = if read_le_u32(data, 0)? == u32::from(WMF_POLYFILLMODE_WINDING) {
+                    StaticImageVectorFillRule::Winding
+                } else {
+                    StaticImageVectorFillRule::Alternate
+                };
             }
             EMR_SETTEXTALIGN => {
                 let mode = (read_le_u32(data, 0)? & 0xffff) as u16;
@@ -35206,6 +35214,42 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_setpolyfillmode_changes_passive_polygon_fill_rule() {
+        let records = [
+            emf_u32_record(19, 2),
+            emf_poly_record(3, &[(20, 10), (60, 70), (100, 10)]),
+            emf_poly16_record(86, &[(100, 20), (140, 70), (200, 20)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Polygon {
+                fill_rule: StaticImageVectorFillRule::Winding,
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Polygon {
+                fill_rule: StaticImageVectorFillRule::Winding,
+                ..
+            }
         ));
     }
 
