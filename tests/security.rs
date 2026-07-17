@@ -30868,6 +30868,105 @@ fn emf_polypolyline_and_polypolygon_records_render_passively_without_payload_lea
 }
 
 #[test]
+fn emf_poly16_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_poly16_record(87, &[(0, 0), (40, 20), (200, 100)]),
+        emf_poly16_record(86, &[(20, 10), (60, 70), (100, 10)]),
+        emf_poly_poly16_record(90, &[vec![(0, 0), (40, 20)], vec![(50, 10), (200, 100)]]),
+        emf_poly_poly16_record(
+            91,
+            &[
+                vec![(20, 10), (60, 70), (100, 10)],
+                vec![(100, 20), (140, 70), (200, 20)],
+            ],
+        ),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF 16-bit poly vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 6);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Polyline { ref points, .. }
+            if points == &vec![(0.0, 0.0), (40.0, 20.0), (160.0, 80.0)]
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Polygon { ref points, .. } if points.len() == 3
+    ));
+    assert!(matches!(
+        image.vector_commands[5],
+        StaticImageVectorCommand::Polygon { ref points, .. }
+            if points == &vec![(100.0, 20.0), (140.0, 70.0), (160.0, 20.0)]
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF 16-bit poly payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s" | "B" | "B*")),
+        "EMF 16-bit poly vector preview should render passive stroked or filled paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF 16-bit poly payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_setpixelv_records_render_passively_without_payload_leakage() {
     let records = [
         emf_setpixelv_record(
@@ -42284,6 +42383,24 @@ fn emf_poly_record(record_type: u32, points: &[(i32, i32)]) -> Vec<u8> {
     record
 }
 
+fn emf_poly16_record(record_type: u32, points: &[(i16, i16)]) -> Vec<u8> {
+    let size = 28 + (points.len() * 4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, points.len() as u32);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = 28 + (idx * 4);
+        write_test_le_i16(&mut record, offset, *x);
+        write_test_le_i16(&mut record, offset + 2, *y);
+    }
+    record
+}
+
 fn emf_poly_poly_record(record_type: u32, polygons: &[Vec<(i32, i32)>]) -> Vec<u8> {
     let counts: Vec<usize> = polygons.iter().map(Vec::len).collect();
     let points: Vec<(i32, i32)> = polygons
@@ -42317,6 +42434,43 @@ fn emf_poly_poly_record_with_counts(
         let offset = points_start + (idx * 8);
         write_test_le_i32(&mut record, offset, *x);
         write_test_le_i32(&mut record, offset + 4, *y);
+    }
+    record
+}
+
+fn emf_poly_poly16_record(record_type: u32, polygons: &[Vec<(i16, i16)>]) -> Vec<u8> {
+    let counts: Vec<usize> = polygons.iter().map(Vec::len).collect();
+    let points: Vec<(i16, i16)> = polygons
+        .iter()
+        .flat_map(|points| points.iter().copied())
+        .collect();
+    let counts: Vec<u32> = counts.into_iter().map(|count| count as u32).collect();
+    emf_poly_poly16_record_with_counts(record_type, &counts, &points)
+}
+
+fn emf_poly_poly16_record_with_counts(
+    record_type: u32,
+    counts: &[u32],
+    points: &[(i16, i16)],
+) -> Vec<u8> {
+    let size = 32 + (counts.len() * 4) + (points.len() * 4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, counts.len() as u32);
+    write_test_le_u32(&mut record, 28, points.len() as u32);
+    for (idx, count) in counts.iter().enumerate() {
+        write_test_le_u32(&mut record, 32 + (idx * 4), *count);
+    }
+    let points_start = 32 + (counts.len() * 4);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = points_start + (idx * 4);
+        write_test_le_i16(&mut record, offset, *x);
+        write_test_le_i16(&mut record, offset + 2, *y);
     }
     record
 }
@@ -42362,6 +42516,10 @@ fn write_test_le_u32(bytes: &mut [u8], offset: usize, value: u32) {
 
 fn write_test_le_i32(bytes: &mut [u8], offset: usize, value: i32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+fn write_test_le_i16(bytes: &mut [u8], offset: usize, value: i16) {
+    bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
 }
 
 fn minimal_grayscale_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {

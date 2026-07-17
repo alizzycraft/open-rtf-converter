@@ -19883,6 +19883,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_ROUNDRECT: u32 = 44;
     const EMR_LINETO: u32 = 54;
     const EMR_EXTTEXTOUTW: u32 = 84;
+    const EMR_POLYGON16: u32 = 86;
+    const EMR_POLYLINE16: u32 = 87;
+    const EMR_POLYPOLYLINE16: u32 = 90;
+    const EMR_POLYPOLYGON16: u32 = 91;
 
     let header = parse_emf_header_dimensions(bytes)?;
     if header
@@ -20131,10 +20135,72 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     });
                 }
             }
+            EMR_POLYGON16 | EMR_POLYLINE16 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let Some(points) = parse_emf_poly16_points(data, &header) else {
+                    return None;
+                };
+                if record_type == EMR_POLYGON16 {
+                    if points.len() >= 3 {
+                        commands.push(StaticImageVectorCommand::Polygon {
+                            points,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                            fill_rule: state.fill_rule,
+                            fill_pattern: state.fill_pattern,
+                            fill_color: state.fill_color,
+                        });
+                    }
+                } else if points.len() >= 2 {
+                    commands.push(StaticImageVectorCommand::Polyline {
+                        points,
+                        stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
+                    });
+                }
+            }
             EMR_POLYPOLYGON | EMR_POLYPOLYLINE => {
                 let polygons = parse_emf_poly_poly_points(data, &header)?;
                 for points in polygons {
                     if record_type == EMR_POLYPOLYGON {
+                        if points.len() >= 3 && point_bounds_are_visible(&points) {
+                            if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                                return None;
+                            }
+                            commands.push(StaticImageVectorCommand::Polygon {
+                                points,
+                                stroke_color: state.stroke_color,
+                                stroke_width: state.stroke_width,
+                                stroke_style: state.stroke_style,
+                                fill_rule: state.fill_rule,
+                                fill_pattern: state.fill_pattern,
+                                fill_color: state.fill_color,
+                            });
+                        }
+                    } else if points
+                        .windows(2)
+                        .any(|pair| segment_is_visible(pair[0], pair[1]))
+                    {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
+                        commands.push(StaticImageVectorCommand::Polyline {
+                            points,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                        });
+                    }
+                }
+            }
+            EMR_POLYPOLYGON16 | EMR_POLYPOLYLINE16 => {
+                let polygons = parse_emf_poly_poly16_points(data, &header)?;
+                for points in polygons {
+                    if record_type == EMR_POLYPOLYGON16 {
                         if points.len() >= 3 && point_bounds_are_visible(&points) {
                             if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                                 return None;
@@ -20446,6 +20512,31 @@ fn parse_emf_poly_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f
     Some(points)
 }
 
+fn parse_emf_poly16_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f32, f32)>> {
+    if data.len() < 20 {
+        return None;
+    }
+    let count = usize::try_from(read_le_u32(data, 16)?).ok()?;
+    if count == 0 || count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+        return None;
+    }
+    let points_start = 20usize;
+    let points_bytes = count.checked_mul(4)?;
+    let points_end = points_start.checked_add(points_bytes)?;
+    if points_end > data.len() {
+        return None;
+    }
+
+    let mut points = Vec::with_capacity(count);
+    for idx in 0..count {
+        let offset = points_start + (idx * 4);
+        let x = i32::from(read_le_i16(data, offset)?);
+        let y = i32::from(read_le_i16(data, offset + 2)?);
+        points.push(normalized_emf_point(x, y, header));
+    }
+    Some(points)
+}
+
 fn parse_emf_poly_poly_points(
     data: &[u8],
     header: &ParsedEmfHeader,
@@ -20496,6 +20587,64 @@ fn parse_emf_poly_poly_points(
             let offset = points_start + (point_index * 8);
             let x = read_le_i32(data, offset)?;
             let y = read_le_i32(data, offset + 4)?;
+            points.push(normalized_emf_point(x, y, header));
+            point_index += 1;
+        }
+        polygons.push(points);
+    }
+    Some(polygons)
+}
+
+fn parse_emf_poly_poly16_points(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+) -> Option<Vec<Vec<(f32, f32)>>> {
+    if data.len() < 24 {
+        return None;
+    }
+    let polygon_count = usize::try_from(read_le_u32(data, 16)?).ok()?;
+    let point_count = usize::try_from(read_le_u32(data, 20)?).ok()?;
+    if polygon_count == 0
+        || polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD
+        || point_count == 0
+        || point_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD
+    {
+        return None;
+    }
+    let counts_start = 24usize;
+    let counts_bytes = polygon_count.checked_mul(4)?;
+    let points_start = counts_start.checked_add(counts_bytes)?;
+    let points_bytes = point_count.checked_mul(4)?;
+    let points_end = points_start.checked_add(points_bytes)?;
+    if points_end > data.len() {
+        return None;
+    }
+
+    let mut counts = Vec::with_capacity(polygon_count);
+    let mut total_count = 0usize;
+    for idx in 0..polygon_count {
+        let count = usize::try_from(read_le_u32(data, counts_start + (idx * 4))?).ok()?;
+        if count == 0 {
+            return None;
+        }
+        total_count = total_count.checked_add(count)?;
+        if total_count > point_count {
+            return None;
+        }
+        counts.push(count);
+    }
+    if total_count != point_count {
+        return None;
+    }
+
+    let mut polygons = Vec::with_capacity(polygon_count);
+    let mut point_index = 0usize;
+    for count in counts {
+        let mut points = Vec::with_capacity(count);
+        for _ in 0..count {
+            let offset = points_start + (point_index * 4);
+            let x = i32::from(read_le_i16(data, offset)?);
+            let y = i32::from(read_le_i16(data, offset + 2)?);
             points.push(normalized_emf_point(x, y, header));
             point_index += 1;
         }
@@ -34961,6 +35110,106 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_polyline16_and_polygon16_records_become_passive_vector_commands() {
+        let records = [
+            emf_poly16_record(87, &[(0, 0), (40, 20), (200, 100)]),
+            emf_poly16_record(86, &[(20, 10), (60, 70), (100, 10)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Polyline { ref points, .. }
+                if points == &vec![(0.0, 0.0), (40.0, 20.0), (160.0, 80.0)]
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Polygon { ref points, .. }
+                if points == &vec![(20.0, 10.0), (60.0, 70.0), (100.0, 10.0)]
+        ));
+    }
+
+    #[test]
+    fn emf_polypolyline16_and_polypolygon16_records_become_passive_vector_commands() {
+        let records = [
+            emf_poly_poly16_record(90, &[vec![(0, 0), (40, 20)], vec![(50, 10), (200, 100)]]),
+            emf_poly_poly16_record(
+                91,
+                &[
+                    vec![(20, 10), (60, 70), (100, 10)],
+                    vec![(100, 20), (140, 70), (200, 20)],
+                ],
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 4);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Polyline { ref points, .. }
+                if points == &vec![(0.0, 0.0), (40.0, 20.0)]
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Polyline { ref points, .. }
+                if points == &vec![(50.0, 10.0), (160.0, 80.0)]
+        ));
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Polygon { ref points, .. }
+                if points == &vec![(20.0, 10.0), (60.0, 70.0), (100.0, 10.0)]
+        ));
+        assert!(matches!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::Polygon { ref points, .. }
+                if points == &vec![(100.0, 20.0), (140.0, 70.0), (160.0, 20.0)]
+        ));
+    }
+
+    #[test]
+    fn emf_polypolygon16_with_mismatched_point_counts_becomes_passive_placeholder() {
+        let records = [emf_poly_poly16_record_with_counts(
+            91,
+            &[2, 2],
+            &[(20, 10), (60, 70), (100, 10)],
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_setpixelv_records_become_passive_filled_rectangles() {
         let records = [
             emf_setpixelv_record(
@@ -35487,6 +35736,25 @@ fn emf_poly_record(record_type: u32, points: &[(i32, i32)]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+fn emf_poly16_record(record_type: u32, points: &[(i16, i16)]) -> Vec<u8> {
+    let size = 28 + (points.len() * 4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, points.len() as u32);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = 28 + (idx * 4);
+        write_test_le_i16(&mut record, offset, *x);
+        write_test_le_i16(&mut record, offset + 2, *y);
+    }
+    record
+}
+
+#[cfg(test)]
 fn emf_poly_poly_record(record_type: u32, polygons: &[Vec<(i32, i32)>]) -> Vec<u8> {
     let counts: Vec<usize> = polygons.iter().map(Vec::len).collect();
     let points: Vec<(i32, i32)> = polygons
@@ -35521,6 +35789,45 @@ fn emf_poly_poly_record_with_counts(
         let offset = points_start + (idx * 8);
         write_test_le_i32(&mut record, offset, *x);
         write_test_le_i32(&mut record, offset + 4, *y);
+    }
+    record
+}
+
+#[cfg(test)]
+fn emf_poly_poly16_record(record_type: u32, polygons: &[Vec<(i16, i16)>]) -> Vec<u8> {
+    let counts: Vec<usize> = polygons.iter().map(Vec::len).collect();
+    let points: Vec<(i16, i16)> = polygons
+        .iter()
+        .flat_map(|points| points.iter().copied())
+        .collect();
+    let counts: Vec<u32> = counts.into_iter().map(|count| count as u32).collect();
+    emf_poly_poly16_record_with_counts(record_type, &counts, &points)
+}
+
+#[cfg(test)]
+fn emf_poly_poly16_record_with_counts(
+    record_type: u32,
+    counts: &[u32],
+    points: &[(i16, i16)],
+) -> Vec<u8> {
+    let size = 32 + (counts.len() * 4) + (points.len() * 4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, counts.len() as u32);
+    write_test_le_u32(&mut record, 28, points.len() as u32);
+    for (idx, count) in counts.iter().enumerate() {
+        write_test_le_u32(&mut record, 32 + (idx * 4), *count);
+    }
+    let points_start = 32 + (counts.len() * 4);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = points_start + (idx * 4);
+        write_test_le_i16(&mut record, offset, *x);
+        write_test_le_i16(&mut record, offset + 2, *y);
     }
     record
 }
@@ -35572,6 +35879,11 @@ fn write_test_le_u32(bytes: &mut [u8], offset: usize, value: u32) {
 #[cfg(test)]
 fn write_test_le_i32(bytes: &mut [u8], offset: usize, value: i32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+#[cfg(test)]
+fn write_test_le_i16(bytes: &mut [u8], offset: usize, value: i16) {
+    bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
 }
 
 #[cfg(test)]
