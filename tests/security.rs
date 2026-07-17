@@ -13,8 +13,9 @@ use open_rtf_converter::model::{
     FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, PAGE_NUMBER_MARKER,
     PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER,
     ShadingPattern, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageWrapSide, TOTAL_PAGES_MARKER,
-    TabAlignment, TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
+    StaticImageWrapSide, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
+    TableRowAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -30745,7 +30746,7 @@ fn emf_stroked_path_records_render_passively_without_payload_leakage() {
     assert!(image.bytes.is_empty());
     assert!(matches!(
         image.vector_commands[0],
-        StaticImageVectorCommand::Polyline {
+        StaticImageVectorCommand::Path {
             stroke_color: Some(Color {
                 red: 120,
                 green: 40,
@@ -30757,10 +30758,14 @@ fn emf_stroked_path_records_render_passively_without_payload_leakage() {
         }
     ));
     assert!(
-        image
-            .vector_commands
-            .iter()
-            .any(|command| matches!(command, StaticImageVectorCommand::Bezier { .. })),
+        matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Path { segments, .. }
+                if segments.iter().any(|segment| matches!(
+                    segment,
+                    StaticImageVectorPathSegment::CubicTo { .. }
+                ))
+        ),
         "stroked EMF path Bezier segment should be preserved passively"
     );
     for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
@@ -31064,6 +31069,119 @@ fn emf_filled_bezier_paths_render_passively_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "EMF filled Bezier path payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emf_multi_subpath_fillpaths_render_passively_without_payload_leakage() {
+    let records = [
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 30,
+                green: 170,
+                blue: 210,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_unknown_record(59),
+        emf_point_record(27, 10, 10),
+        emf_poly_record(6, &[(50, 10), (30, 40)]),
+        emf_unknown_record(61),
+        emf_point_record(27, 80, 20),
+        emf_poly_record(6, &[(120, 20), (100, 50)]),
+        emf_unknown_record(61),
+        emf_unknown_record(60),
+        emf_unknown_record(62),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF multi-subpath fill image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Path {
+            fill_color: Some(Color {
+                red: 30,
+                green: 170,
+                blue: 210
+            }),
+            ..
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF multi-subpath payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "m")
+            .count()
+            >= 2,
+        "multi-subpath EMF fill should render separate passive PDF move operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*")),
+        "multi-subpath EMF fill should render passive PDF fill operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF multi-subpath payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

@@ -19713,6 +19713,7 @@ struct EmfPathBuilder {
 
 #[derive(Debug)]
 enum EmfPathSegment {
+    MoveTo((f32, f32)),
     Polyline(Vec<(f32, f32)>),
     Bezier(Vec<(f32, f32)>),
 }
@@ -19883,9 +19884,26 @@ impl EmfPathBuilder {
         Some(())
     }
 
-    fn move_to(&mut self, point: (i32, i32)) -> Option<()> {
+    fn move_to(
+        &mut self,
+        point: (i32, i32),
+        header: &ParsedEmfHeader,
+        coordinates: &EmfCoordinateState,
+    ) -> Option<()> {
         if !self.collecting {
             return None;
+        }
+        if !self.segments.is_empty() {
+            if self.segments.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                return None;
+            }
+            self.segments
+                .push(EmfPathSegment::MoveTo(normalized_emf_point(
+                    point.0,
+                    point.1,
+                    header,
+                    coordinates,
+                )));
         }
         self.figure_start = point;
         self.current_position = point;
@@ -19998,9 +20016,28 @@ impl EmfPathBuilder {
         if self.collecting {
             return None;
         }
+        if self
+            .segments
+            .iter()
+            .any(|segment| matches!(segment, EmfPathSegment::MoveTo(_)))
+        {
+            let (start, segments, closed) = self.path_segments()?;
+            return Some(vec![StaticImageVectorCommand::Path {
+                start,
+                segments,
+                closed,
+                stroke_color,
+                stroke_width,
+                stroke_style,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                fill_pattern: ShadingPattern::None,
+                fill_color: None,
+            }]);
+        }
         let mut commands = Vec::with_capacity(self.segments.len());
         for segment in self.segments {
             match segment {
+                EmfPathSegment::MoveTo(_) => return None,
                 EmfPathSegment::Polyline(points) => {
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
@@ -20087,6 +20124,7 @@ impl EmfPathBuilder {
         let mut points = Vec::new();
         for segment in &self.segments {
             match segment {
+                EmfPathSegment::MoveTo(_) => return None,
                 EmfPathSegment::Polyline(segment_points) => {
                     if segment_points.len() < 2 {
                         return None;
@@ -20111,6 +20149,7 @@ impl EmfPathBuilder {
         let mut iter = self.segments.iter();
         let first_segment = iter.next()?;
         let start = match first_segment {
+            EmfPathSegment::MoveTo(point) => *point,
             EmfPathSegment::Polyline(points) => *points.first()?,
             EmfPathSegment::Bezier(points) => *points.first()?,
         };
@@ -20119,6 +20158,13 @@ impl EmfPathBuilder {
         let mut saw_visible_segment = false;
         for segment in std::iter::once(first_segment).chain(iter) {
             match segment {
+                EmfPathSegment::MoveTo(point) => {
+                    if path_segments.len() >= MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+                        return None;
+                    }
+                    path_segments.push(StaticImageVectorPathSegment::MoveTo(point.0, point.1));
+                    current = *point;
+                }
                 EmfPathSegment::Polyline(points) => {
                     if points.len() < 2 {
                         return None;
@@ -20441,7 +20487,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_MOVETOEX => {
                 current_position = parse_emf_raw_point_record(data)?;
                 if let Some(path) = active_path.as_mut() {
-                    path.move_to(current_position)?;
+                    path.move_to(current_position, &header, &coordinates)?;
                 }
             }
             EMR_SETBKMODE => {
@@ -36595,30 +36641,32 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 4);
+        assert_eq!(image.vector_commands.len(), 1);
         assert!(matches!(
             &image.vector_commands[0],
-            StaticImageVectorCommand::Polyline {
-                points,
+            StaticImageVectorCommand::Path {
+                start: (10.0, 10.0),
+                segments,
                 stroke_color: Some(Color { red: 120, green: 40, blue: 10 }),
                 stroke_width: 4.0,
-                stroke_style: BorderStyle::Dashed
-            } if points == &vec![(10.0, 10.0), (50.0, 10.0)]
-        ));
-        assert!(matches!(
-            &image.vector_commands[1],
-            StaticImageVectorCommand::Polyline { points, .. }
-                if points == &vec![(50.0, 10.0), (50.0, 40.0), (10.0, 40.0)]
-        ));
-        assert!(matches!(
-            &image.vector_commands[2],
-            StaticImageVectorCommand::Polyline { points, .. }
-                if points == &vec![(10.0, 40.0), (10.0, 10.0)]
-        ));
-        assert!(matches!(
-            &image.vector_commands[3],
-            StaticImageVectorCommand::Bezier { points, .. }
-                if points == &vec![(70.0, 20.0), (80.0, 5.0), (100.0, 35.0), (110.0, 20.0)]
+                stroke_style: BorderStyle::Dashed,
+                fill_color: None,
+                ..
+            } if matches!(
+                &segments[..],
+                [
+                    StaticImageVectorPathSegment::LineTo(50.0, 10.0),
+                    StaticImageVectorPathSegment::LineTo(50.0, 40.0),
+                    StaticImageVectorPathSegment::LineTo(10.0, 40.0),
+                    StaticImageVectorPathSegment::LineTo(10.0, 10.0),
+                    StaticImageVectorPathSegment::MoveTo(70.0, 20.0),
+                    StaticImageVectorPathSegment::CubicTo {
+                        control1: (80.0, 5.0),
+                        control2: (100.0, 35.0),
+                        end: (110.0, 20.0),
+                    },
+                ]
+            )
         ));
     }
 
@@ -36929,6 +36977,102 @@ After\par}"#;
                     end: (80.0, 20.0),
                 }]
             )
+        ));
+    }
+
+    #[test]
+    fn emf_multi_subpath_fillpath_becomes_passive_path_command() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 30,
+                    green: 170,
+                    blue: 210,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_unknown_record(59),
+            emf_point_record(27, 10, 10),
+            emf_poly_record(6, &[(50, 10), (30, 40)]),
+            emf_unknown_record(61),
+            emf_point_record(27, 80, 20),
+            emf_poly_record(6, &[(120, 20), (100, 50)]),
+            emf_unknown_record(61),
+            emf_unknown_record(60),
+            emf_unknown_record(62),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Path {
+                start: (10.0, 10.0),
+                segments,
+                fill_color: Some(Color { red: 30, green: 170, blue: 210 }),
+                ..
+            } if matches!(
+                &segments[..],
+                [
+                    StaticImageVectorPathSegment::LineTo(50.0, 10.0),
+                    StaticImageVectorPathSegment::LineTo(30.0, 40.0),
+                    StaticImageVectorPathSegment::LineTo(10.0, 10.0),
+                    StaticImageVectorPathSegment::MoveTo(80.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(120.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(100.0, 50.0),
+                    StaticImageVectorPathSegment::LineTo(80.0, 20.0),
+                ]
+            )
+        ));
+    }
+
+    #[test]
+    fn emf_multi_subpath_strokepath_becomes_passive_path_command() {
+        let records = [
+            emf_unknown_record(59),
+            emf_point_record(27, 10, 10),
+            emf_poly_record(6, &[(50, 10), (30, 40)]),
+            emf_point_record(27, 80, 20),
+            emf_poly_record(6, &[(120, 20), (100, 50)]),
+            emf_unknown_record(60),
+            emf_unknown_record(64),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Path {
+                start: (10.0, 10.0),
+                segments,
+                stroke_color: Some(Color { red: 0, green: 0, blue: 0 }),
+                fill_color: None,
+                ..
+            } if segments.iter().any(|segment| matches!(
+                segment,
+                StaticImageVectorPathSegment::MoveTo(80.0, 20.0)
+            ))
         ));
     }
 

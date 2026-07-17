@@ -2070,6 +2070,10 @@ fn vector_command_path_segments(
     segments
         .iter()
         .map(|segment| match segment {
+            StaticImageVectorPathSegment::MoveTo(x, y) => {
+                let point = vector_command_point(draw, source_width, source_height, *x, *y);
+                StaticImageVectorPathSegment::MoveTo(point.x, point.y)
+            }
             StaticImageVectorPathSegment::LineTo(x, y) => {
                 let point = vector_command_point(draw, source_width, source_height, *x, *y);
                 StaticImageVectorPathSegment::LineTo(point.x, point.y)
@@ -2345,6 +2349,9 @@ fn append_passive_vector_path(
     content.move_to(start.x, start.y);
     for segment in segments {
         match segment {
+            StaticImageVectorPathSegment::MoveTo(x, y) => {
+                content.move_to(*x, *y);
+            }
             StaticImageVectorPathSegment::LineTo(x, y) => {
                 content.line_to(*x, *y);
             }

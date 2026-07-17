@@ -566,6 +566,7 @@ pub enum StaticImageVectorCommand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StaticImageVectorPathSegment {
+    MoveTo(f32, f32),
     LineTo(f32, f32),
     CubicTo {
         control1: (f32, f32),
