@@ -32942,6 +32942,118 @@ fn emf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_arcto_fillpath_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 210,
+                green: 120,
+                blue: 40,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_unknown_record(59),
+        emf_point_record(27, 60, 70),
+        emf_arc_record(55, 20, 10, 100, 70, 100, 40, 60, 70),
+        emf_unknown_record(61),
+        emf_unknown_record(60),
+        emf_unknown_record(62),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF ArcTo fill path image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Polygon {
+            fill_color: Some(Color {
+                red: 210,
+                green: 120,
+                blue: 40
+            }),
+            ..
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF ArcTo fill path payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "l")
+            .count()
+            >= 4,
+        "EMF ArcTo fill path should render sampled passive PDF line segments"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*")),
+        "EMF ArcTo fill path should render passive PDF fill operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF ArcTo fill path payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_polydraw_records_render_passively_without_payload_leakage() {
     let records = [
         emf_polydraw_record(

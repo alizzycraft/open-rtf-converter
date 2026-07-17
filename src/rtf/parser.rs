@@ -19969,6 +19969,27 @@ impl EmfPathBuilder {
         Some(())
     }
 
+    fn normalized_polyline_to(
+        &mut self,
+        points: Vec<(f32, f32)>,
+        end_position: (i32, i32),
+    ) -> Option<()> {
+        if !self.collecting || points.len() < 2 {
+            return None;
+        }
+        if points
+            .windows(2)
+            .any(|pair| segment_is_visible(pair[0], pair[1]))
+        {
+            if self.segments.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                return None;
+            }
+            self.segments.push(EmfPathSegment::Polyline(points));
+        }
+        self.current_position = end_position;
+        Some(())
+    }
+
     fn bezier_to(
         &mut self,
         raw_points: &[(i32, i32)],
@@ -20802,7 +20823,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 let (points, end_position) =
                     parse_emf_anglearc_record(data, &header, &coordinates, current_position)?;
-                if points
+                if let Some(path) = active_path.as_mut() {
+                    path.normalized_polyline_to(points, end_position)?;
+                } else if points
                     .windows(2)
                     .any(|pair| segment_is_visible(pair[0], pair[1]))
                 {
@@ -20822,7 +20845,20 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 let arc = parse_emf_arc_record(data, &header, &coordinates, state.arc_clockwise)?;
                 match record_type {
                     EMR_ARC | EMR_ARCTO => {
-                        if arc
+                        if record_type == EMR_ARCTO
+                            && let Some(path) = active_path.as_mut()
+                        {
+                            let mut points = Vec::with_capacity(arc.points.len().checked_add(1)?);
+                            points.push(normalized_emf_point(
+                                current_position.0,
+                                current_position.1,
+                                &header,
+                                &coordinates,
+                            ));
+                            points.extend(arc.points);
+                            path.normalized_polyline_to(points, arc.end_position)?;
+                            current_position = arc.end_position;
+                        } else if arc
                             .points
                             .windows(2)
                             .any(|pair| segment_is_visible(pair[0], pair[1]))
@@ -38013,6 +38049,54 @@ After\par}"#;
                 y2: 70.0,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn emf_arcto_inside_fillpath_becomes_passive_filled_polygon() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 210,
+                    green: 120,
+                    blue: 40,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_unknown_record(59),
+            emf_point_record(27, 60, 70),
+            emf_arc_record(55, 20, 10, 100, 70, 100, 40, 60, 70),
+            emf_unknown_record(61),
+            emf_unknown_record(60),
+            emf_unknown_record(62),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Polygon {
+                points,
+                stroke_color: None,
+                fill_color: Some(Color { red: 210, green: 120, blue: 40 }),
+                ..
+            } if points.first() == Some(&(60.0, 70.0))
+                && points.last() == Some(&(60.0, 70.0))
+                && points.len() > 4
+                && points.len() <= MAX_PASSIVE_WMF_POINTS_PER_RECORD
         ));
     }
 
