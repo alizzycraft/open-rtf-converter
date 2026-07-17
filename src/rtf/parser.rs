@@ -23754,6 +23754,63 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     commands.push(command);
                 }
             }
+            0x0817 | 0x081a | 0x0830 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let (points, center) = parse_wmf_arc_record(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                )?;
+                match function {
+                    0x0817 => {
+                        if points
+                            .windows(2)
+                            .any(|pair| segment_is_visible(pair[0], pair[1]))
+                        {
+                            commands.push(StaticImageVectorCommand::Polyline {
+                                points,
+                                stroke_color: state.stroke_color,
+                                stroke_width: state.stroke_width,
+                                stroke_style: state.stroke_style,
+                            });
+                        }
+                    }
+                    0x081a => {
+                        let mut pie_points = Vec::with_capacity(points.len().checked_add(1)?);
+                        pie_points.push(center);
+                        pie_points.extend(points);
+                        if pie_points.len() >= 3 && point_bounds_are_visible(&pie_points) {
+                            commands.push(StaticImageVectorCommand::Polygon {
+                                points: pie_points,
+                                stroke_color: state.stroke_color,
+                                stroke_width: state.stroke_width,
+                                stroke_style: state.stroke_style,
+                                fill_rule: state.fill_rule,
+                                fill_pattern: state.fill_pattern,
+                                fill_color: state.fill_color,
+                            });
+                        }
+                    }
+                    0x0830 => {
+                        if points.len() >= 3 && point_bounds_are_visible(&points) {
+                            commands.push(StaticImageVectorCommand::Polygon {
+                                points,
+                                stroke_color: state.stroke_color,
+                                stroke_width: state.stroke_width,
+                                stroke_style: state.stroke_style,
+                                fill_rule: state.fill_rule,
+                                fill_pattern: state.fill_pattern,
+                                fill_color: state.fill_color,
+                            });
+                        }
+                    }
+                    _ => return None,
+                }
+            }
             0x0521 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -24236,6 +24293,55 @@ fn parse_wmf_setpixel_rect(
         pixel_rect_end(y, max_y),
         color,
     ))
+}
+
+fn parse_wmf_arc_record(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(Vec<(f32, f32)>, (f32, f32))> {
+    if data.len() < 16 {
+        return None;
+    }
+    let end_y = i32::from(read_le_i16(data, 0)?);
+    let end_x = i32::from(read_le_i16(data, 2)?);
+    let start_y = i32::from(read_le_i16(data, 4)?);
+    let start_x = i32::from(read_le_i16(data, 6)?);
+    let bottom = i32::from(read_le_i16(data, 8)?);
+    let right = i32::from(read_le_i16(data, 10)?);
+    let top = i32::from(read_le_i16(data, 12)?);
+    let left = i32::from(read_le_i16(data, 14)?);
+    let raw_points = sample_emf_arc_points(
+        left,
+        top,
+        right,
+        bottom,
+        (start_x, start_y),
+        (end_x, end_y),
+        false,
+    )?;
+    let mut points = Vec::with_capacity(raw_points.len());
+    for (x, y) in raw_points {
+        points.push(normalize_wmf_point(
+            x,
+            y,
+            window_origin_x,
+            window_origin_y,
+            window_width,
+            window_height,
+        ));
+    }
+    let center = normalize_wmf_point(
+        left.saturating_add(right) / 2,
+        top.saturating_add(bottom) / 2,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    Some((points, center))
 }
 
 fn wmf_escape_is_non_visual_comment(data: &[u8]) -> bool {

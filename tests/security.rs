@@ -27656,6 +27656,133 @@ fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000033d0000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "0b000000170846003c0028006400460064000a001400",
+        "0b000000300846003c0028006400460064000a001400",
+        "0b0000001a0846003c0028006400460064000a001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF arc vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 3);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::Polyline { points, .. }
+            if points.first() == Some(&(100.0, 40.0))
+                && points.last() == Some(&(60.0, 70.0))
+                && points.len() <= 128
+    ));
+    assert!(matches!(
+        &image.vector_commands[1],
+        StaticImageVectorCommand::Polygon {
+            points,
+            fill_color: Some(Color { red: 220, green: 220, blue: 220 }),
+            ..
+        } if points.first() == Some(&(100.0, 40.0))
+            && points.last() == Some(&(60.0, 70.0))
+            && points.len() <= 128
+    ));
+    assert!(matches!(
+        &image.vector_commands[2],
+        StaticImageVectorCommand::Polygon {
+            points,
+            fill_color: Some(Color { red: 220, green: 220, blue: 220 }),
+            ..
+        } if points.first() == Some(&(60.0, 40.0))
+            && points.get(1) == Some(&(100.0, 40.0))
+            && points.last() == Some(&(60.0, 70.0))
+            && points.len() <= 128
+    ));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in [
+        "wmetafile",
+        "010009",
+        "1708",
+        "3008",
+        "1a08",
+        "dcdcdc",
+        "JavaScript",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF arc internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "l")
+            .count()
+            >= 4,
+        "WMF arc family should render as passive PDF path segments"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*" | "B" | "B*")),
+        "WMF chord/pie records should render as passive filled paths"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"1708",
+        b"3008",
+        b"1a08",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF arc preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_cliprect_records_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032a0000000100070000000000",
