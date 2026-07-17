@@ -23686,6 +23686,32 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     }
                 }
             }
+            0x1005 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let points = parse_wmf_point_list(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                )?;
+                if !polybezier_point_count_is_valid(points.len()) {
+                    return None;
+                }
+                if points
+                    .windows(2)
+                    .any(|pair| segment_is_visible(pair[0], pair[1]))
+                {
+                    commands.push(StaticImageVectorCommand::Bezier {
+                        points,
+                        stroke_color: state.stroke_color,
+                        stroke_width: state.stroke_width,
+                        stroke_style: state.stroke_style,
+                    });
+                }
+            }
             0x041b | 0x0418 | 0x061c => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -38322,6 +38348,25 @@ After\par}"#;
             bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
         );
         let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn wmf_polybezier_with_partial_segments_becomes_passive_placeholder() {
+        let wmf_hex = concat!(
+            "0100090000031b00000001000a0000000000",
+            "050000000c026400c800",
+            "0a000000051003000a000a001e00050046003200",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
         assert!(matches!(
             &output.document.blocks[0],
