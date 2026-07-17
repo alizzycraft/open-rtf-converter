@@ -2294,14 +2294,38 @@ fn draw_passive_vector_path(
     if segments.is_empty() {
         return;
     }
-    if fill_pattern != ShadingPattern::None {
-        return;
-    }
     if fill_color.is_none() && stroke_color.is_none() {
         return;
     }
 
     let has_stroke = stroke_color.is_some() && stroke_width > 0.0;
+    if fill_pattern != ShadingPattern::None
+        && let Some(color) = fill_color
+    {
+        draw_passive_hatch_path(
+            content,
+            start,
+            segments,
+            closed,
+            fill_rule,
+            fill_pattern,
+            pdf_color_from_model(color),
+        );
+        if !has_stroke {
+            return;
+        }
+        content.save_state();
+        if let Some(color) = stroke_color {
+            set_stroke_color(content, pdf_color_from_model(color));
+            content.set_line_width(stroke_width.max(0.25));
+            set_passive_path_stroke_style(content, stroke_width, stroke_style);
+        }
+        append_passive_vector_path(content, start, segments, closed);
+        content.stroke();
+        content.restore_state();
+        return;
+    }
+
     content.save_state();
     if let Some(color) = stroke_color {
         if has_stroke {
@@ -2442,6 +2466,36 @@ fn draw_passive_hatch_polygon(
     }
     content.save_state();
     append_passive_polygon_path(content, points);
+    match fill_rule {
+        StaticImageVectorFillRule::Alternate => {
+            content.clip_even_odd();
+        }
+        StaticImageVectorFillRule::Winding => {
+            content.clip_nonzero();
+        }
+    }
+    content.end_path();
+    draw_passive_hatch_lines(content, bounds, pattern, color);
+    content.restore_state();
+}
+
+fn draw_passive_hatch_path(
+    content: &mut Content,
+    start: crate::layout::LayoutPoint,
+    segments: &[StaticImageVectorPathSegment],
+    closed: bool,
+    fill_rule: StaticImageVectorFillRule,
+    pattern: ShadingPattern,
+    color: PdfColor,
+) {
+    let Some(bounds) = vector_path_bounds(start, segments) else {
+        return;
+    };
+    if pattern == ShadingPattern::None || bounds.width <= 0.5 || bounds.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    append_passive_vector_path(content, start, segments, closed);
     match fill_rule {
         StaticImageVectorFillRule::Alternate => {
             content.clip_even_odd();
@@ -3789,6 +3843,54 @@ fn vector_points_bounds(points: &[crate::layout::LayoutPoint]) -> Option<VectorD
         min_y = min_y.min(point.y);
         max_y = max_y.max(point.y);
     }
+    Some(VectorDrawRect {
+        x: min_x,
+        y: min_y,
+        width: (max_x - min_x).max(0.1),
+        height: (max_y - min_y).max(0.1),
+    })
+}
+
+fn vector_path_bounds(
+    start: crate::layout::LayoutPoint,
+    segments: &[StaticImageVectorPathSegment],
+) -> Option<VectorDrawRect> {
+    let mut min_x = start.x;
+    let mut max_x = start.x;
+    let mut min_y = start.y;
+    let mut max_y = start.y;
+    let mut saw_segment = false;
+
+    for segment in segments {
+        match segment {
+            StaticImageVectorPathSegment::MoveTo(x, y)
+            | StaticImageVectorPathSegment::LineTo(x, y) => {
+                min_x = min_x.min(*x);
+                max_x = max_x.max(*x);
+                min_y = min_y.min(*y);
+                max_y = max_y.max(*y);
+                saw_segment = true;
+            }
+            StaticImageVectorPathSegment::CubicTo {
+                control1,
+                control2,
+                end,
+            } => {
+                for (x, y) in [*control1, *control2, *end] {
+                    min_x = min_x.min(x);
+                    max_x = max_x.max(x);
+                    min_y = min_y.min(y);
+                    max_y = max_y.max(y);
+                }
+                saw_segment = true;
+            }
+        }
+    }
+
+    if !saw_segment {
+        return None;
+    }
+
     Some(VectorDrawRect {
         x: min_x,
         y: min_y,

@@ -20086,8 +20086,7 @@ impl EmfPathBuilder {
             });
         }
 
-        if fill_pattern != ShadingPattern::None || (fill_color.is_none() && stroke_color.is_none())
-        {
+        if fill_color.is_none() && stroke_color.is_none() {
             return None;
         }
         let (start, segments, closed) = self.path_segments()?;
@@ -36968,6 +36967,58 @@ After\par}"#;
                 stroke_color: None,
                 stroke_width: 0.0,
                 fill_color: Some(Color { red: 80, green: 140, blue: 210 }),
+                ..
+            } if matches!(
+                &segments[..],
+                [StaticImageVectorPathSegment::CubicTo {
+                    control1: (30.0, 5.0),
+                    control2: (60.0, 55.0),
+                    end: (80.0, 20.0),
+                }]
+            )
+        ));
+    }
+
+    #[test]
+    fn emf_hatched_bezier_fillpath_becomes_passive_path_command() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                2,
+                Color {
+                    red: 20,
+                    green: 90,
+                    blue: 180,
+                },
+                5,
+            ),
+            emf_select_object_record(3),
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_poly_record(5, &[(30, 5), (60, 55), (80, 20)]),
+            emf_unknown_record(60),
+            emf_unknown_record(62),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Path {
+                start: (20.0, 20.0),
+                segments,
+                fill_pattern: ShadingPattern::DiagonalCross,
+                fill_color: Some(Color { red: 20, green: 90, blue: 180 }),
                 ..
             } if matches!(
                 &segments[..],

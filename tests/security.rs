@@ -31075,6 +31075,124 @@ fn emf_filled_bezier_paths_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_hatched_bezier_paths_render_passively_without_payload_leakage() {
+    let records = [
+        emf_create_brush_record(
+            3,
+            2,
+            Color {
+                red: 20,
+                green: 90,
+                blue: 180,
+            },
+            5,
+        ),
+        emf_select_object_record(3),
+        emf_unknown_record(59),
+        emf_point_record(27, 20, 20),
+        emf_poly_record(5, &[(30, 5), (60, 55), (80, 20)]),
+        emf_unknown_record(60),
+        emf_unknown_record(62),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF hatched Bezier path image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Path {
+            fill_pattern: ShadingPattern::DiagonalCross,
+            fill_color: Some(Color {
+                red: 20,
+                green: 90,
+                blue: 180
+            }),
+            ..
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF hatched Bezier payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "EMF hatched Bezier path should preserve passive cubic clipping path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "W" | "W*")),
+        "EMF hatched Bezier path should clip hatch lines to the passive path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "l")
+            .count()
+            >= 4,
+        "EMF hatched Bezier path should render bounded passive hatch lines"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF hatched Bezier path payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_multi_subpath_fillpaths_render_passively_without_payload_leakage() {
     let records = [
         emf_create_brush_record(
