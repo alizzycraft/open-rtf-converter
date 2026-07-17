@@ -31410,6 +31410,106 @@ fn emf_polylineto_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_polybezier_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_poly_record(2, &[(10, 10), (30, 5), (50, 35), (70, 30)]),
+        emf_point_record(27, 80, 20),
+        emf_poly_record(5, &[(90, 10), (110, 50), (130, 40)]),
+        emf_poly16_record(85, &[(20, 50), (40, 30), (60, 70), (80, 60)]),
+        emf_point_record(27, 90, 50),
+        emf_poly16_record(88, &[(100, 40), (120, 70), (200, 100)]),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF Bezier vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 4);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Bezier { ref points, .. }
+            if points == &vec![(10.0, 10.0), (30.0, 5.0), (50.0, 35.0), (70.0, 30.0)]
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Bezier { ref points, .. }
+            if points == &vec![(80.0, 20.0), (90.0, 10.0), (110.0, 50.0), (130.0, 40.0)]
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF Bezier payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "c")
+            .count()
+            >= 4,
+        "EMF Bezier paths should render passive PDF cubic curve operations"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s")),
+        "EMF Bezier paths should render passive stroked paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF Bezier payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_coordinate_mapping_records_render_passively_without_payload_leakage() {
     let records = [
         emf_size_record(9, 320, 160),

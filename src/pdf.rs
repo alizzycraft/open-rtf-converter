@@ -1755,6 +1755,24 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     stroke_style,
                 );
             }
+            StaticImageVectorCommand::Bezier {
+                points,
+                stroke_color,
+                stroke_width,
+                stroke_style,
+            } => {
+                let points = vector_command_points(draw, source_width, source_height, points);
+                let stroke_width =
+                    vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
+                draw_passive_vector_bezier(
+                    content,
+                    &points,
+                    *stroke_color,
+                    stroke_width,
+                    stroke_style,
+                );
+            }
             StaticImageVectorCommand::Polygon {
                 points,
                 stroke_color,
@@ -2052,6 +2070,31 @@ fn draw_passive_vector_polyline(
             stroke_style,
         );
     }
+}
+
+fn draw_passive_vector_bezier(
+    content: &mut Content,
+    points: &[crate::layout::LayoutPoint],
+    stroke_color: Option<crate::model::Color>,
+    stroke_width: f32,
+    stroke_style: LineStyle,
+) {
+    let Some(color) = stroke_color else {
+        return;
+    };
+    if stroke_width <= 0.0 || points.len() < 4 || (points.len() - 1) % 3 != 0 {
+        return;
+    }
+    set_stroke_color(content, pdf_color_from_model(color));
+    content.set_line_width(stroke_width.max(0.25));
+    set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    content.move_to(points[0].x, points[0].y);
+    for chunk in points[1..].chunks_exact(3) {
+        content.cubic_to(
+            chunk[0].x, chunk[0].y, chunk[1].x, chunk[1].y, chunk[2].x, chunk[2].y,
+        );
+    }
+    content.stroke();
 }
 
 fn draw_passive_vector_polygon(

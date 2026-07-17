@@ -474,6 +474,12 @@ pub enum StaticImageVectorCommand {
         stroke_width: f32,
         stroke_style: BorderStyle,
     },
+    Bezier {
+        points: Vec<(f32, f32)>,
+        stroke_color: Option<Color>,
+        stroke_width: f32,
+        stroke_style: BorderStyle,
+    },
     Polygon {
         points: Vec<(f32, f32)>,
         stroke_color: Option<Color>,
