@@ -31813,6 +31813,106 @@ fn emf_coordinate_mapping_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_scaled_extent_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_scale_record(31, 2, 1, 2, 1),
+        emf_rect_record(43, 10, 10, 50, 30),
+        emf_scale_record(32, 2, 1, 2, 1),
+        emf_rect_record(43, 10, 10, 50, 30),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF scaled-extent vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 20.0,
+            top: 20.0,
+            right: 100.0,
+            bottom: 60.0,
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 10.0,
+            right: 50.0,
+            bottom: 30.0,
+            ..
+        }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF scaled-extent payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let rect_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "re")
+        .count();
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        rect_count >= 2,
+        "scaled EMF rectangles should render passive PDF rectangle paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF scaled-extent payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_savedc_and_restoredc_records_render_passively_without_payload_leakage() {
     let records = [
         emf_create_pen_record(
@@ -43271,6 +43371,23 @@ fn emf_point_record(record_type: u32, x: i32, y: i32) -> Vec<u8> {
 
 fn emf_size_record(record_type: u32, width: i32, height: i32) -> Vec<u8> {
     emf_point_record(record_type, width, height)
+}
+
+fn emf_scale_record(
+    record_type: u32,
+    x_num: i32,
+    x_denom: i32,
+    y_num: i32,
+    y_denom: i32,
+) -> Vec<u8> {
+    let mut record = vec![0; 24];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 24);
+    write_test_le_i32(&mut record, 8, x_num);
+    write_test_le_i32(&mut record, 12, x_denom);
+    write_test_le_i32(&mut record, 16, y_num);
+    write_test_le_i32(&mut record, 20, y_denom);
+    record
 }
 
 fn emf_unknown_record(record_type: u32) -> Vec<u8> {

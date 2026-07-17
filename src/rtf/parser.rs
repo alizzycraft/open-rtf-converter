@@ -19774,6 +19774,30 @@ impl EmfCoordinateState {
         self.viewport_origin_x = x;
         self.viewport_origin_y = y;
     }
+
+    fn scale_window_extent(
+        &mut self,
+        x_num: i32,
+        x_denom: i32,
+        y_num: i32,
+        y_denom: i32,
+    ) -> Option<()> {
+        self.window_extent_x = scale_emf_extent(self.window_extent_x, x_num, x_denom)?;
+        self.window_extent_y = scale_emf_extent(self.window_extent_y, y_num, y_denom)?;
+        Some(())
+    }
+
+    fn scale_viewport_extent(
+        &mut self,
+        x_num: i32,
+        x_denom: i32,
+        y_num: i32,
+        y_denom: i32,
+    ) -> Option<()> {
+        self.viewport_extent_x = scale_emf_extent(self.viewport_extent_x, x_num, x_denom)?;
+        self.viewport_extent_y = scale_emf_extent(self.viewport_extent_y, y_num, y_denom)?;
+        Some(())
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -19948,6 +19972,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETTEXTALIGN: u32 = 22;
     const EMR_SETTEXTCOLOR: u32 = 24;
     const EMR_SETBKCOLOR: u32 = 25;
+    const EMR_SCALEVIEWPORTEXTEX: u32 = 31;
+    const EMR_SCALEWINDOWEXTEX: u32 = 32;
     const EMR_SETTEXTJUSTIFICATION: u32 = 120;
     const EMR_SAVEDC: u32 = 33;
     const EMR_RESTOREDC: u32 = 34;
@@ -20028,6 +20054,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_SETVIEWPORTORGEX => {
                 let (x, y) = parse_emf_raw_point_record(data)?;
                 coordinates.set_viewport_origin(x, y);
+            }
+            EMR_SCALEVIEWPORTEXTEX => {
+                let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
+                coordinates.scale_viewport_extent(x_num, x_denom, y_num, y_denom)?;
+            }
+            EMR_SCALEWINDOWEXTEX => {
+                let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
+                coordinates.scale_window_extent(x_num, x_denom, y_num, y_denom)?;
             }
             EMR_MOVETOEX => {
                 current_position = parse_emf_raw_point_record(data)?;
@@ -21076,6 +21110,26 @@ fn parse_emf_raw_point_record(data: &[u8]) -> Option<(i32, i32)> {
 
 fn parse_emf_size_record(data: &[u8]) -> Option<(i32, i32)> {
     parse_emf_raw_point_record(data)
+}
+
+fn parse_emf_scale_record(data: &[u8]) -> Option<(i32, i32, i32, i32)> {
+    if data.len() < 16 {
+        return None;
+    }
+    Some((
+        read_le_i32(data, 0)?,
+        read_le_i32(data, 4)?,
+        read_le_i32(data, 8)?,
+        read_le_i32(data, 12)?,
+    ))
+}
+
+fn scale_emf_extent(value: i32, numerator: i32, denominator: i32) -> Option<i32> {
+    if value == 0 || numerator == 0 || denominator == 0 {
+        return None;
+    }
+    let scaled = (i128::from(value) * i128::from(numerator)) / i128::from(denominator);
+    i32::try_from(scaled).ok().filter(|value| *value != 0)
 }
 
 fn normalized_emf_rect(
@@ -36076,6 +36130,76 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_scale_window_and_viewport_records_map_passive_coordinates() {
+        let records = [
+            emf_scale_record(31, 2, 1, 2, 1),
+            emf_rect_record(43, 10, 10, 50, 30),
+            emf_scale_record(32, 2, 1, 2, 1),
+            emf_rect_record(43, 10, 10, 50, 30),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![
+                StaticImageVectorCommand::Rectangle {
+                    left: 20.0,
+                    top: 20.0,
+                    right: 100.0,
+                    bottom: 60.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: None,
+                },
+                StaticImageVectorCommand::Rectangle {
+                    left: 10.0,
+                    top: 10.0,
+                    right: 50.0,
+                    bottom: 30.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                    fill_pattern: ShadingPattern::None,
+                    fill_color: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn emf_scale_records_with_zero_factor_become_passive_placeholders() {
+        let records = [
+            emf_scale_record(31, 0, 1, 1, 1),
+            emf_rect_record(43, 10, 20, 170, 100),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_coordinate_records_with_zero_extent_become_passive_placeholders() {
         let records = [
             emf_size_record(9, 0, 160),
@@ -36748,6 +36872,24 @@ fn emf_point_record(record_type: u32, x: i32, y: i32) -> Vec<u8> {
 #[cfg(test)]
 fn emf_size_record(record_type: u32, width: i32, height: i32) -> Vec<u8> {
     emf_point_record(record_type, width, height)
+}
+
+#[cfg(test)]
+fn emf_scale_record(
+    record_type: u32,
+    x_num: i32,
+    x_denom: i32,
+    y_num: i32,
+    y_denom: i32,
+) -> Vec<u8> {
+    let mut record = vec![0; 24];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 24);
+    write_test_le_i32(&mut record, 8, x_num);
+    write_test_le_i32(&mut record, 12, x_denom);
+    write_test_le_i32(&mut record, 16, y_num);
+    write_test_le_i32(&mut record, 20, y_denom);
+    record
 }
 
 #[cfg(test)]
