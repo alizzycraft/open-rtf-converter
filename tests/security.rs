@@ -27884,6 +27884,119 @@ fn wmf_polybezier_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_polybezierto_records_update_current_point_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000033100000001000a0000000000",
+        "050000000c026400c800",
+        "08000000fa020000020002003c281400",
+        "040000002d010000",
+        "0500000014020a000a00",
+        "0a000000041003001e0005004600320050001400",
+        "0500000013023c005a00",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF polybezierto vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::Bezier {
+            points,
+            stroke_color: Some(Color { red: 60, green: 40, blue: 20 }),
+            stroke_width: 2.0,
+            ..
+        } if points == &vec![(10.0, 10.0), (30.0, 5.0), (70.0, 50.0), (80.0, 20.0)]
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Line {
+            x1: 80.0,
+            y1: 20.0,
+            x2: 90.0,
+            y2: 60.0,
+            ..
+        }
+    ));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in [
+        "wmetafile",
+        "010009",
+        "1004",
+        "3c2814",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF polybezierto internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "c"),
+        "WMF PolyBezierTo should render as a passive PDF cubic path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "l"),
+        "WMF PolyBezierTo should update current point before following LineTo"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"1004",
+        b"3c2814",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF polybezierto preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_cliprect_records_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032a0000000100070000000000",
