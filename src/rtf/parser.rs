@@ -19702,6 +19702,20 @@ struct ParsedEmfPolyDraw {
     end_position: (i32, i32),
 }
 
+#[derive(Debug)]
+struct EmfPathBuilder {
+    collecting: bool,
+    segments: Vec<EmfPathSegment>,
+    figure_start: (i32, i32),
+    current_position: (i32, i32),
+}
+
+#[derive(Debug)]
+enum EmfPathSegment {
+    Polyline(Vec<(f32, f32)>),
+    Bezier(Vec<(f32, f32)>),
+}
+
 #[derive(Debug, Copy, Clone)]
 enum EmfObject {
     Pen {
@@ -19841,6 +19855,164 @@ impl Default for EmfDrawingState {
             text_word_extra: 0.0,
             arc_clockwise: false,
         }
+    }
+}
+
+impl EmfPathBuilder {
+    fn new(current_position: (i32, i32)) -> Self {
+        Self {
+            collecting: true,
+            segments: Vec::new(),
+            figure_start: current_position,
+            current_position,
+        }
+    }
+
+    fn end(&mut self) -> Option<()> {
+        if !self.collecting {
+            return None;
+        }
+        self.collecting = false;
+        Some(())
+    }
+
+    fn move_to(&mut self, point: (i32, i32)) -> Option<()> {
+        if !self.collecting {
+            return None;
+        }
+        self.figure_start = point;
+        self.current_position = point;
+        Some(())
+    }
+
+    fn line_to(
+        &mut self,
+        point: (i32, i32),
+        header: &ParsedEmfHeader,
+        coordinates: &EmfCoordinateState,
+    ) -> Option<()> {
+        if !self.collecting {
+            return None;
+        }
+        let start = normalized_emf_point(
+            self.current_position.0,
+            self.current_position.1,
+            header,
+            coordinates,
+        );
+        let end = normalized_emf_point(point.0, point.1, header, coordinates);
+        if segment_is_visible(start, end) {
+            if self.segments.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                return None;
+            }
+            self.segments
+                .push(EmfPathSegment::Polyline(vec![start, end]));
+        }
+        self.current_position = point;
+        Some(())
+    }
+
+    fn polyline_to(
+        &mut self,
+        raw_points: &[(i32, i32)],
+        header: &ParsedEmfHeader,
+        coordinates: &EmfCoordinateState,
+    ) -> Option<()> {
+        if !self.collecting || raw_points.is_empty() {
+            return None;
+        }
+        let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
+        points.push(normalized_emf_point(
+            self.current_position.0,
+            self.current_position.1,
+            header,
+            coordinates,
+        ));
+        for (x, y) in raw_points {
+            points.push(normalized_emf_point(*x, *y, header, coordinates));
+        }
+        if points
+            .windows(2)
+            .any(|pair| segment_is_visible(pair[0], pair[1]))
+        {
+            if self.segments.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                return None;
+            }
+            self.segments.push(EmfPathSegment::Polyline(points));
+        }
+        self.current_position = *raw_points.last()?;
+        Some(())
+    }
+
+    fn bezier_to(
+        &mut self,
+        raw_points: &[(i32, i32)],
+        header: &ParsedEmfHeader,
+        coordinates: &EmfCoordinateState,
+    ) -> Option<()> {
+        if !self.collecting || !polybezierto_point_count_is_valid(raw_points.len()) {
+            return None;
+        }
+        let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
+        points.push(normalized_emf_point(
+            self.current_position.0,
+            self.current_position.1,
+            header,
+            coordinates,
+        ));
+        for (x, y) in raw_points {
+            points.push(normalized_emf_point(*x, *y, header, coordinates));
+        }
+        if point_bounds_are_visible(&points) {
+            if self.segments.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                return None;
+            }
+            self.segments.push(EmfPathSegment::Bezier(points));
+        }
+        self.current_position = *raw_points.last()?;
+        Some(())
+    }
+
+    fn close_figure(
+        &mut self,
+        header: &ParsedEmfHeader,
+        coordinates: &EmfCoordinateState,
+    ) -> Option<()> {
+        let figure_start = self.figure_start;
+        self.line_to(figure_start, header, coordinates)
+    }
+
+    fn stroke_commands(
+        self,
+        stroke_color: Option<Color>,
+        stroke_width: f32,
+        stroke_style: BorderStyle,
+    ) -> Option<Vec<StaticImageVectorCommand>> {
+        if self.collecting {
+            return None;
+        }
+        let mut commands = Vec::with_capacity(self.segments.len());
+        for segment in self.segments {
+            match segment {
+                EmfPathSegment::Polyline(points) => {
+                    commands.push(StaticImageVectorCommand::Polyline {
+                        points,
+                        stroke_color,
+                        stroke_width,
+                        stroke_style,
+                    });
+                }
+                EmfPathSegment::Bezier(points) => {
+                    commands.push(StaticImageVectorCommand::Bezier {
+                        points,
+                        stroke_color,
+                        stroke_width,
+                        stroke_style,
+                    });
+                }
+            }
+        }
+        Some(commands)
     }
 }
 
@@ -20006,6 +20178,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_LINETO: u32 = 54;
     const EMR_ARCTO: u32 = 55;
     const EMR_POLYDRAW: u32 = 56;
+    const EMR_BEGINPATH: u32 = 59;
+    const EMR_ENDPATH: u32 = 60;
+    const EMR_CLOSEFIGURE: u32 = 61;
+    const EMR_STROKEPATH: u32 = 64;
     const EMR_EXTTEXTOUTW: u32 = 84;
     const EMR_POLYBEZIER16: u32 = 85;
     const EMR_POLYGON16: u32 = 86;
@@ -20034,6 +20210,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     let mut objects: Vec<Option<EmfObject>> = Vec::new();
     let mut state = EmfDrawingState::default();
     let mut saved_states: Vec<EmfSavedState> = Vec::new();
+    let mut active_path: Option<EmfPathBuilder> = None;
 
     while pos + 8 <= header.declared_size {
         if header
@@ -20088,6 +20265,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_MOVETOEX => {
                 current_position = parse_emf_raw_point_record(data)?;
+                if let Some(path) = active_path.as_mut() {
+                    path.move_to(current_position)?;
+                }
             }
             EMR_SETBKMODE => {
                 state.text_background_mode =
@@ -20173,29 +20353,59 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_LINETO => {
                 let endpoint = parse_emf_raw_point_record(data)?;
-                let start = normalized_emf_point(
-                    current_position.0,
-                    current_position.1,
-                    &header,
-                    &coordinates,
-                );
-                let endpoint_normalized =
-                    normalized_emf_point(endpoint.0, endpoint.1, &header, &coordinates);
-                if segment_is_visible(start, endpoint_normalized) {
-                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                        return None;
+                if let Some(path) = active_path.as_mut() {
+                    path.line_to(endpoint, &header, &coordinates)?;
+                } else {
+                    let start = normalized_emf_point(
+                        current_position.0,
+                        current_position.1,
+                        &header,
+                        &coordinates,
+                    );
+                    let endpoint_normalized =
+                        normalized_emf_point(endpoint.0, endpoint.1, &header, &coordinates);
+                    if segment_is_visible(start, endpoint_normalized) {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
+                        commands.push(StaticImageVectorCommand::Line {
+                            x1: start.0,
+                            y1: start.1,
+                            x2: endpoint_normalized.0,
+                            y2: endpoint_normalized.1,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                        });
                     }
-                    commands.push(StaticImageVectorCommand::Line {
-                        x1: start.0,
-                        y1: start.1,
-                        x2: endpoint_normalized.0,
-                        y2: endpoint_normalized.1,
-                        stroke_color: state.stroke_color,
-                        stroke_width: state.stroke_width,
-                        stroke_style: state.stroke_style,
-                    });
                 }
                 current_position = endpoint;
+            }
+            EMR_BEGINPATH => {
+                if active_path.is_some() {
+                    return None;
+                }
+                active_path = Some(EmfPathBuilder::new(current_position));
+            }
+            EMR_ENDPATH => {
+                active_path.as_mut()?.end()?;
+            }
+            EMR_CLOSEFIGURE => {
+                let path = active_path.as_mut()?;
+                path.close_figure(&header, &coordinates)?;
+                current_position = path.current_position;
+            }
+            EMR_STROKEPATH => {
+                let path = active_path.take()?;
+                let path_commands = path.stroke_commands(
+                    state.stroke_color,
+                    state.stroke_width,
+                    state.stroke_style,
+                )?;
+                if commands.len().checked_add(path_commands.len())? > MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                commands.extend(path_commands);
             }
             EMR_EXTTEXTOUTW => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -20428,23 +20638,27 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if !polybezierto_point_count_is_valid(raw_points.len()) {
                     return None;
                 }
-                let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
-                points.push(normalized_emf_point(
-                    current_position.0,
-                    current_position.1,
-                    &header,
-                    &coordinates,
-                ));
-                for (x, y) in &raw_points {
-                    points.push(normalized_emf_point(*x, *y, &header, &coordinates));
-                }
-                if point_bounds_are_visible(&points) {
-                    commands.push(StaticImageVectorCommand::Bezier {
-                        points,
-                        stroke_color: state.stroke_color,
-                        stroke_width: state.stroke_width,
-                        stroke_style: state.stroke_style,
-                    });
+                if let Some(path) = active_path.as_mut() {
+                    path.bezier_to(&raw_points, &header, &coordinates)?;
+                } else {
+                    let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
+                    points.push(normalized_emf_point(
+                        current_position.0,
+                        current_position.1,
+                        &header,
+                        &coordinates,
+                    ));
+                    for (x, y) in &raw_points {
+                        points.push(normalized_emf_point(*x, *y, &header, &coordinates));
+                    }
+                    if point_bounds_are_visible(&points) {
+                        commands.push(StaticImageVectorCommand::Bezier {
+                            points,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                        });
+                    }
                 }
                 current_position = *raw_points.last()?;
             }
@@ -20481,26 +20695,30 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 let raw_points = parse_emf_raw_poly_points(data)?;
-                let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
-                points.push(normalized_emf_point(
-                    current_position.0,
-                    current_position.1,
-                    &header,
-                    &coordinates,
-                ));
-                for (x, y) in &raw_points {
-                    points.push(normalized_emf_point(*x, *y, &header, &coordinates));
-                }
-                if points
-                    .windows(2)
-                    .any(|pair| segment_is_visible(pair[0], pair[1]))
-                {
-                    commands.push(StaticImageVectorCommand::Polyline {
-                        points,
-                        stroke_color: state.stroke_color,
-                        stroke_width: state.stroke_width,
-                        stroke_style: state.stroke_style,
-                    });
+                if let Some(path) = active_path.as_mut() {
+                    path.polyline_to(&raw_points, &header, &coordinates)?;
+                } else {
+                    let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
+                    points.push(normalized_emf_point(
+                        current_position.0,
+                        current_position.1,
+                        &header,
+                        &coordinates,
+                    ));
+                    for (x, y) in &raw_points {
+                        points.push(normalized_emf_point(*x, *y, &header, &coordinates));
+                    }
+                    if points
+                        .windows(2)
+                        .any(|pair| segment_is_visible(pair[0], pair[1]))
+                    {
+                        commands.push(StaticImageVectorCommand::Polyline {
+                            points,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                        });
+                    }
                 }
                 current_position = *raw_points.last()?;
             }
@@ -20562,23 +20780,27 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if !polybezierto_point_count_is_valid(raw_points.len()) {
                     return None;
                 }
-                let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
-                points.push(normalized_emf_point(
-                    current_position.0,
-                    current_position.1,
-                    &header,
-                    &coordinates,
-                ));
-                for (x, y) in &raw_points {
-                    points.push(normalized_emf_point(*x, *y, &header, &coordinates));
-                }
-                if point_bounds_are_visible(&points) {
-                    commands.push(StaticImageVectorCommand::Bezier {
-                        points,
-                        stroke_color: state.stroke_color,
-                        stroke_width: state.stroke_width,
-                        stroke_style: state.stroke_style,
-                    });
+                if let Some(path) = active_path.as_mut() {
+                    path.bezier_to(&raw_points, &header, &coordinates)?;
+                } else {
+                    let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
+                    points.push(normalized_emf_point(
+                        current_position.0,
+                        current_position.1,
+                        &header,
+                        &coordinates,
+                    ));
+                    for (x, y) in &raw_points {
+                        points.push(normalized_emf_point(*x, *y, &header, &coordinates));
+                    }
+                    if point_bounds_are_visible(&points) {
+                        commands.push(StaticImageVectorCommand::Bezier {
+                            points,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                        });
+                    }
                 }
                 current_position = *raw_points.last()?;
             }
@@ -20587,26 +20809,30 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 let raw_points = parse_emf_raw_poly16_points(data)?;
-                let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
-                points.push(normalized_emf_point(
-                    current_position.0,
-                    current_position.1,
-                    &header,
-                    &coordinates,
-                ));
-                for (x, y) in &raw_points {
-                    points.push(normalized_emf_point(*x, *y, &header, &coordinates));
-                }
-                if points
-                    .windows(2)
-                    .any(|pair| segment_is_visible(pair[0], pair[1]))
-                {
-                    commands.push(StaticImageVectorCommand::Polyline {
-                        points,
-                        stroke_color: state.stroke_color,
-                        stroke_width: state.stroke_width,
-                        stroke_style: state.stroke_style,
-                    });
+                if let Some(path) = active_path.as_mut() {
+                    path.polyline_to(&raw_points, &header, &coordinates)?;
+                } else {
+                    let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
+                    points.push(normalized_emf_point(
+                        current_position.0,
+                        current_position.1,
+                        &header,
+                        &coordinates,
+                    ));
+                    for (x, y) in &raw_points {
+                        points.push(normalized_emf_point(*x, *y, &header, &coordinates));
+                    }
+                    if points
+                        .windows(2)
+                        .any(|pair| segment_is_visible(pair[0], pair[1]))
+                    {
+                        commands.push(StaticImageVectorCommand::Polyline {
+                            points,
+                            stroke_color: state.stroke_color,
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                        });
+                    }
                 }
                 current_position = *raw_points.last()?;
             }
@@ -20718,6 +20944,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     }
 
     if !reached_eof {
+        return None;
+    }
+    if active_path.is_some() {
         return None;
     }
     if commands.is_empty() {
@@ -36086,6 +36315,91 @@ After\par}"#;
             emf_select_object_record(4),
             emf_point_record(27, 10, 20),
             emf_point_record(54, 80, 60),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_stroked_path_records_become_passive_vector_commands() {
+        let records = [
+            emf_create_pen_record(
+                2,
+                1,
+                4,
+                Color {
+                    red: 120,
+                    green: 40,
+                    blue: 10,
+                },
+            ),
+            emf_select_object_record(2),
+            emf_unknown_record(59),
+            emf_point_record(27, 10, 10),
+            emf_point_record(54, 50, 10),
+            emf_poly_record(6, &[(50, 40), (10, 40)]),
+            emf_unknown_record(61),
+            emf_point_record(27, 70, 20),
+            emf_poly_record(5, &[(80, 5), (100, 35), (110, 20)]),
+            emf_unknown_record(60),
+            emf_unknown_record(64),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 4);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Polyline {
+                points,
+                stroke_color: Some(Color { red: 120, green: 40, blue: 10 }),
+                stroke_width: 4.0,
+                stroke_style: BorderStyle::Dashed
+            } if points == &vec![(10.0, 10.0), (50.0, 10.0)]
+        ));
+        assert!(matches!(
+            &image.vector_commands[1],
+            StaticImageVectorCommand::Polyline { points, .. }
+                if points == &vec![(50.0, 10.0), (50.0, 40.0), (10.0, 40.0)]
+        ));
+        assert!(matches!(
+            &image.vector_commands[2],
+            StaticImageVectorCommand::Polyline { points, .. }
+                if points == &vec![(10.0, 40.0), (10.0, 10.0)]
+        ));
+        assert!(matches!(
+            &image.vector_commands[3],
+            StaticImageVectorCommand::Bezier { points, .. }
+                if points == &vec![(70.0, 20.0), (80.0, 5.0), (100.0, 35.0), (110.0, 20.0)]
+        ));
+    }
+
+    #[test]
+    fn emf_unstroked_open_path_becomes_passive_placeholder() {
+        let records = [
+            emf_unknown_record(59),
+            emf_point_record(27, 10, 10),
+            emf_point_record(54, 50, 10),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
