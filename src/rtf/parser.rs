@@ -19805,10 +19805,12 @@ fn parse_emf_header_dimensions(bytes: &[u8]) -> Option<ParsedEmfHeader> {
 
 fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_EOF: u32 = 14;
+    const EMR_MOVETOEX: u32 = 27;
     const EMR_POLYGON: u32 = 3;
     const EMR_POLYLINE: u32 = 4;
     const EMR_RECTANGLE: u32 = 43;
     const EMR_ELLIPSE: u32 = 42;
+    const EMR_LINETO: u32 = 54;
 
     let header = parse_emf_header_dimensions(bytes)?;
     if header
@@ -19822,6 +19824,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     let mut commands = Vec::new();
     let mut skipped_record_count = 0usize;
     let mut reached_eof = false;
+    let mut current_position = normalized_emf_point(0, 0, &header);
 
     while pos + 8 <= header.declared_size {
         if header
@@ -19849,6 +19852,27 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_EOF => {
                 reached_eof = true;
                 break;
+            }
+            EMR_MOVETOEX => {
+                current_position = parse_emf_point_record(data, &header)?;
+            }
+            EMR_LINETO => {
+                let endpoint = parse_emf_point_record(data, &header)?;
+                if segment_is_visible(current_position, endpoint) {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
+                    commands.push(StaticImageVectorCommand::Line {
+                        x1: current_position.0,
+                        y1: current_position.1,
+                        x2: endpoint.0,
+                        y2: endpoint.1,
+                        stroke_color: Some(Color::default()),
+                        stroke_width: 1.0,
+                        stroke_style: BorderStyle::Single,
+                    });
+                }
+                current_position = endpoint;
             }
             EMR_RECTANGLE | EMR_ELLIPSE => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -19975,6 +19999,15 @@ fn parse_emf_poly_points(data: &[u8], header: &ParsedEmfHeader) -> Option<Vec<(f
         points.push(normalized_emf_point(x, y, header));
     }
     Some(points)
+}
+
+fn parse_emf_point_record(data: &[u8], header: &ParsedEmfHeader) -> Option<(f32, f32)> {
+    if data.len() < 8 {
+        return None;
+    }
+    let x = read_le_i32(data, 0)?;
+    let y = read_le_i32(data, 4)?;
+    Some(normalized_emf_point(x, y, header))
 }
 
 fn normalized_emf_rect(
@@ -34115,6 +34148,51 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_move_to_and_line_to_records_become_passive_line_commands() {
+        let records = [
+            emf_point_record(27, 10, 10),
+            emf_point_record(54, 70, 40),
+            emf_point_record(54, 70, 40),
+            emf_point_record(54, 200, 100),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(
+            image.vector_commands,
+            vec![
+                StaticImageVectorCommand::Line {
+                    x1: 10.0,
+                    y1: 10.0,
+                    x2: 70.0,
+                    y2: 40.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                },
+                StaticImageVectorCommand::Line {
+                    x1: 70.0,
+                    y1: 40.0,
+                    x2: 160.0,
+                    y2: 80.0,
+                    stroke_color: Some(Color::default()),
+                    stroke_width: 1.0,
+                    stroke_style: BorderStyle::Single,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn emf_poly_records_with_excessive_points_become_passive_placeholders() {
         let points = vec![(1, 1); MAX_PASSIVE_WMF_POINTS_PER_RECORD + 1];
         let records = [emf_poly_record(4, &points)];
@@ -34404,6 +34482,16 @@ fn emf_poly_record(record_type: u32, points: &[(i32, i32)]) -> Vec<u8> {
         write_test_le_i32(&mut record, offset, *x);
         write_test_le_i32(&mut record, offset + 4, *y);
     }
+    record
+}
+
+#[cfg(test)]
+fn emf_point_record(record_type: u32, x: i32, y: i32) -> Vec<u8> {
+    let mut record = vec![0; 16];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 16);
+    write_test_le_i32(&mut record, 8, x);
+    write_test_le_i32(&mut record, 12, y);
     record
 }
 
