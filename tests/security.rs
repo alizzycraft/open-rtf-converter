@@ -31913,6 +31913,120 @@ fn emf_scaled_extent_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 40,
+                green: 120,
+                blue: 200,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_arc_record(45, 20, 10, 100, 70, 100, 40, 60, 70),
+        emf_arc_record(46, 20, 10, 100, 70, 100, 40, 60, 70),
+        emf_arc_record(47, 20, 10, 100, 70, 100, 40, 60, 70),
+        emf_u32_record(57, 2),
+        emf_arc_record(55, 20, 10, 100, 70, 100, 40, 60, 70),
+        emf_point_record(54, 120, 70),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF arc-family vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Polyline { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Polygon { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[2],
+        StaticImageVectorCommand::Polygon { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[3],
+        StaticImageVectorCommand::Polyline { .. }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF arc-family payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "l"),
+        "EMF arc-family paths should render passive PDF line segments"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*" | "B" | "B*")),
+        "EMF chord/pie paths should render passive PDF fill operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF arc-family payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_savedc_and_restoredc_records_render_passively_without_payload_leakage() {
     let records = [
         emf_create_pen_record(
@@ -43387,6 +43501,31 @@ fn emf_scale_record(
     write_test_le_i32(&mut record, 12, x_denom);
     write_test_le_i32(&mut record, 16, y_num);
     write_test_le_i32(&mut record, 20, y_denom);
+    record
+}
+
+fn emf_arc_record(
+    record_type: u32,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    start_x: i32,
+    start_y: i32,
+    end_x: i32,
+    end_y: i32,
+) -> Vec<u8> {
+    let mut record = vec![0; 40];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, 40);
+    write_test_le_i32(&mut record, 8, left);
+    write_test_le_i32(&mut record, 12, top);
+    write_test_le_i32(&mut record, 16, right);
+    write_test_le_i32(&mut record, 20, bottom);
+    write_test_le_i32(&mut record, 24, start_x);
+    write_test_le_i32(&mut record, 28, start_y);
+    write_test_le_i32(&mut record, 32, end_x);
+    write_test_le_i32(&mut record, 36, end_y);
     record
 }
 
