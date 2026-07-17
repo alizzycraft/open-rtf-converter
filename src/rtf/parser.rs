@@ -20378,6 +20378,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETBKCOLOR: u32 = 25;
     const EMR_SCALEVIEWPORTEXTEX: u32 = 31;
     const EMR_SCALEWINDOWEXTEX: u32 = 32;
+    const EMR_EXCLUDECLIPRECT: u32 = 29;
     const EMR_INTERSECTCLIPRECT: u32 = 30;
     const EMR_SETARCDIRECTION: u32 = 57;
     const EMR_SETTEXTJUSTIFICATION: u32 = 120;
@@ -20485,6 +20486,22 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_SCALEWINDOWEXTEX => {
                 let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
                 coordinates.scale_window_extent(x_num, x_denom, y_num, y_denom)?;
+            }
+            EMR_EXCLUDECLIPRECT => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let Some((left, top, right, bottom)) =
+                    parse_emf_record_rect(data, &header, &coordinates)
+                else {
+                    return None;
+                };
+                if !bounds_is_visible((left, top, right, bottom)) {
+                    return None;
+                }
+                commands.push(emf_exclude_clip_rect_command(
+                    &header, left, top, right, bottom,
+                )?);
             }
             EMR_INTERSECTCLIPRECT => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -22269,6 +22286,33 @@ fn append_emf_polypolygon_path_segments(
         segments.push(StaticImageVectorPathSegment::LineTo(first.0, first.1));
     }
     Some(())
+}
+
+fn emf_exclude_clip_rect_command(
+    header: &ParsedEmfHeader,
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+) -> Option<StaticImageVectorCommand> {
+    let image_right = header.width_px.max(1) as f32;
+    let image_bottom = header.height_px.max(1) as f32;
+    Some(StaticImageVectorCommand::ClipPath {
+        start: (0.0, 0.0),
+        segments: vec![
+            StaticImageVectorPathSegment::LineTo(image_right, 0.0),
+            StaticImageVectorPathSegment::LineTo(image_right, image_bottom),
+            StaticImageVectorPathSegment::LineTo(0.0, image_bottom),
+            StaticImageVectorPathSegment::LineTo(0.0, 0.0),
+            StaticImageVectorPathSegment::MoveTo(left, top),
+            StaticImageVectorPathSegment::LineTo(right, top),
+            StaticImageVectorPathSegment::LineTo(right, bottom),
+            StaticImageVectorPathSegment::LineTo(left, bottom),
+            StaticImageVectorPathSegment::LineTo(left, top),
+        ],
+        closed: false,
+        fill_rule: StaticImageVectorFillRule::Alternate,
+    })
 }
 
 fn parse_emf_poly_poly_points(
@@ -37083,6 +37127,53 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_excludecliprect_records_become_passive_even_odd_clip_path() {
+        let records = [
+            emf_rect_record(29, 20, 20, 100, 60),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::ClipPath {
+                start: (0.0, 0.0),
+                segments,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                ..
+            } if matches!(
+                &segments[..],
+                [
+                    StaticImageVectorPathSegment::LineTo(160.0, 0.0),
+                    StaticImageVectorPathSegment::LineTo(160.0, 80.0),
+                    StaticImageVectorPathSegment::LineTo(0.0, 80.0),
+                    StaticImageVectorPathSegment::LineTo(0.0, 0.0),
+                    StaticImageVectorPathSegment::MoveTo(20.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(100.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(100.0, 60.0),
+                    StaticImageVectorPathSegment::LineTo(20.0, 60.0),
+                    StaticImageVectorPathSegment::LineTo(20.0, 20.0),
+                ]
+            )
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
