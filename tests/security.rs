@@ -27656,6 +27656,200 @@ fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_cliprect_records_render_passively_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000032a0000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "0700000016043c00640014001400",
+        "070000001b045000b4000a001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF intersect-clipped vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::ClipRect {
+            left: 20.0,
+            top: 20.0,
+            right: 100.0,
+            bottom: 60.0
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in ["wmetafile", "010009", "1604", "dcdcdc", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF clip rect internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "WMF IntersectClipRect should render a passive PDF clipping path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "n"),
+        "WMF IntersectClipRect should terminate the clipping path before painting"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"1604",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF clip rect preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn wmf_excludecliprect_records_render_passively_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000032a0000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "0700000015043c00640014001400",
+        "070000001b045000b4000a001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF exclude-clipped vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::ClipPath {
+            fill_rule: StaticImageVectorFillRule::Alternate,
+            segments,
+            ..
+        } if segments.iter().any(|segment| matches!(
+            segment,
+            StaticImageVectorPathSegment::MoveTo(20.0, 20.0)
+        ))
+    ));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in ["wmetafile", "010009", "1504", "dcdcdc", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF exclude clip rect internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W*"),
+        "WMF ExcludeClipRect should render a passive PDF even-odd clipping path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "n"),
+        "WMF ExcludeClipRect should terminate the clipping path before painting"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"1504",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF exclude clip rect preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_non_rectangular_hatched_brushes_render_with_passive_clipping() {
     let wmf_hex = concat!(
         "0100090000032d00000001000a0000000000",

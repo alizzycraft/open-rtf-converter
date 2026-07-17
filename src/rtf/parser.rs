@@ -23592,6 +23592,40 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 current_point = end;
             }
+            0x0415 | 0x0416 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                let Some((left, top, right, bottom)) = parse_wmf_bounds(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                ) else {
+                    return None;
+                };
+                if !bounds_is_visible((left, top, right, bottom)) {
+                    return None;
+                }
+                if function == 0x0416 {
+                    commands.push(StaticImageVectorCommand::ClipRect {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                    });
+                } else {
+                    commands.push(wmf_exclude_clip_rect_command(
+                        window_width,
+                        window_height,
+                        left,
+                        top,
+                        right,
+                        bottom,
+                    )?);
+                }
+            }
             0x0324 | 0x0325 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -23920,6 +23954,34 @@ fn restore_wmf_saved_state(
         restored = saved_states.pop();
     }
     restored
+}
+
+fn wmf_exclude_clip_rect_command(
+    window_width: i32,
+    window_height: i32,
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+) -> Option<StaticImageVectorCommand> {
+    let image_right = window_width.max(1) as f32;
+    let image_bottom = window_height.max(1) as f32;
+    Some(StaticImageVectorCommand::ClipPath {
+        start: (0.0, 0.0),
+        segments: vec![
+            StaticImageVectorPathSegment::LineTo(image_right, 0.0),
+            StaticImageVectorPathSegment::LineTo(image_right, image_bottom),
+            StaticImageVectorPathSegment::LineTo(0.0, image_bottom),
+            StaticImageVectorPathSegment::LineTo(0.0, 0.0),
+            StaticImageVectorPathSegment::MoveTo(left, top),
+            StaticImageVectorPathSegment::LineTo(right, top),
+            StaticImageVectorPathSegment::LineTo(right, bottom),
+            StaticImageVectorPathSegment::LineTo(left, bottom),
+            StaticImageVectorPathSegment::LineTo(left, top),
+        ],
+        closed: false,
+        fill_rule: StaticImageVectorFillRule::Alternate,
+    })
 }
 
 fn parse_wmf_header_info(bytes: &[u8]) -> Option<WmfHeaderInfo> {
