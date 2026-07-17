@@ -29474,6 +29474,20 @@ fn wmf_saved_dc_restores_passive_text_state_without_record_leakage() {
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("In"));
     assert!(rendered_text.contains("Hi"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "q"),
+        "WMF SaveDC should emit a passive PDF graphics-state save"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Q"),
+        "WMF RestoreDC should emit a passive PDF graphics-state restore"
+    );
     for forbidden in [
         b"/Subtype /Image".as_slice(),
         b"wmetafile",
@@ -29491,6 +29505,124 @@ fn wmf_saved_dc_restores_passive_text_state_without_record_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "WMF SaveDC/RestoreDC leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn wmf_saved_dc_restores_passive_clip_scope_without_record_leakage() {
+    let wmf_hex = concat!(
+        "010009000003380000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "030000001e00",
+        "0700000016043c00640014001400",
+        "070000001b045000b4000a001400",
+        "040000002701ffff",
+        "070000001b045000b40078001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF SaveDC/RestoreDC clipped vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 5);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::SaveState
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::ClipRect { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[3],
+        StaticImageVectorCommand::RestoreState
+    ));
+    assert!(matches!(
+        image.vector_commands[4],
+        StaticImageVectorCommand::Rectangle {
+            left: 20.0,
+            top: 80.0,
+            right: 180.0,
+            bottom: 100.0,
+            ..
+        }
+    ));
+    for forbidden in ["wmetafile", "001e", "0127", "1604", "dcdcdc", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SaveDC clip internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "WMF clipped SaveDC scope should emit passive clipping"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "q"),
+        "WMF SaveDC clip scope should save PDF graphics state"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Q"),
+        "WMF RestoreDC clip scope should restore PDF graphics state"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"001e",
+        b"0127",
+        b"1604",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SaveDC clip leaked forbidden PDF content: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

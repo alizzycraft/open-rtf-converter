@@ -21291,6 +21291,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             commands.push(StaticImageVectorCommand::RestoreState);
         }
     }
+
     if commands.is_empty() {
         return None;
     }
@@ -23066,6 +23067,12 @@ struct WmfSavedDrawingState {
     window_height: i32,
 }
 
+#[derive(Debug, Copy, Clone)]
+struct RestoredWmfSavedDrawingState {
+    state: WmfSavedDrawingState,
+    restore_count: usize,
+}
+
 impl Default for WmfDrawingState {
     fn default() -> Self {
         Self {
@@ -23457,6 +23464,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if saved_states.len() >= MAX_PASSIVE_WMF_SAVED_STATES {
                     return None;
                 }
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
                 saved_states.push(WmfSavedDrawingState {
                     state,
                     current_point,
@@ -23465,16 +23475,25 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_width,
                     window_height,
                 });
+                commands.push(StaticImageVectorCommand::SaveState);
             }
             0x0127 => {
                 let restore_index = read_le_i16(data, 0)?;
-                if let Some(saved) = restore_wmf_saved_state(&mut saved_states, restore_index) {
-                    state = saved.state;
-                    current_point = saved.current_point;
-                    window_origin_x = saved.window_origin_x;
-                    window_origin_y = saved.window_origin_y;
-                    window_width = saved.window_width;
-                    window_height = saved.window_height;
+                if let Some(restored) = restore_wmf_saved_state(&mut saved_states, restore_index) {
+                    if commands.len().checked_add(restored.restore_count)?
+                        > MAX_PASSIVE_WMF_COMMANDS
+                    {
+                        return None;
+                    }
+                    state = restored.state.state;
+                    current_point = restored.state.current_point;
+                    window_origin_x = restored.state.window_origin_x;
+                    window_origin_y = restored.state.window_origin_y;
+                    window_width = restored.state.window_width;
+                    window_height = restored.state.window_height;
+                    for _ in 0..restored.restore_count {
+                        commands.push(StaticImageVectorCommand::RestoreState);
+                    }
                 }
             }
             0x020b => {
@@ -24033,6 +24052,15 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
         pos = record_end;
     }
 
+    if !saved_states.is_empty() {
+        if commands.len().checked_add(saved_states.len())? > MAX_PASSIVE_WMF_COMMANDS {
+            return None;
+        }
+        for _ in 0..saved_states.len() {
+            commands.push(StaticImageVectorCommand::RestoreState);
+        }
+    }
+
     if commands.is_empty() {
         return None;
     }
@@ -24060,7 +24088,7 @@ fn store_wmf_object(objects: &mut Vec<Option<WmfObject>>, object: WmfObject) -> 
 fn restore_wmf_saved_state(
     saved_states: &mut Vec<WmfSavedDrawingState>,
     restore_index: i16,
-) -> Option<WmfSavedDrawingState> {
+) -> Option<RestoredWmfSavedDrawingState> {
     if saved_states.is_empty() {
         return None;
     }
@@ -24076,7 +24104,10 @@ fn restore_wmf_saved_state(
     for _ in 0..restore_count {
         restored = saved_states.pop();
     }
-    restored
+    Some(RestoredWmfSavedDrawingState {
+        state: restored?,
+        restore_count,
+    })
 }
 
 fn wmf_exclude_clip_rect_command(
