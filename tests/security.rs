@@ -25533,6 +25533,87 @@ fn binary_jpeg_picture_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn jpeg_picture_trailing_bytes_are_stripped_before_pdf_without_payload_leakage() {
+    let image = minimal_jpeg_with_dimensions(2, 2);
+    let mut payload = image.clone();
+    payload.extend_from_slice(b"TRAILING-JPEG-AFTER-EOI /JavaScript /EmbeddedFile");
+    let payload_hex = bytes_to_hex(&payload);
+    let input =
+        format!("{{\\rtf1 before {{\\pict\\jpegblip {payload_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image_block = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("JPEG picture image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image_block.format, ImageFormat::Jpeg);
+    assert_eq!(image_block.width_px, 2);
+    assert_eq!(image_block.height_px, 2);
+    assert_eq!(image_block.bytes, image);
+    for forbidden in [
+        "jpegblip",
+        "TRAILING-JPEG-AFTER-EOI",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "trailing JPEG payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "trimmed JPEG should still render as a passive image XObject"
+    );
+    for forbidden in [
+        b"jpegblip".as_slice(),
+        payload_hex.as_bytes(),
+        b"TRAILING-JPEG-AFTER-EOI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "trailing JPEG payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn grayscale_jpeg_picture_renders_passively_without_control_leakage() {
     let image_hex = bytes_to_hex(&minimal_grayscale_jpeg_with_dimensions(1, 1));
     let input = rtf(&[

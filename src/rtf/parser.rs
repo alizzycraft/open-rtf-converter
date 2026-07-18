@@ -11451,7 +11451,7 @@ impl Parser {
                         self.normalized_picture_natural_size_hint(&picture, false, offset);
                     let mut image = StaticImage {
                         format: jpeg.format,
-                        bytes: picture.bytes,
+                        bytes: picture.bytes[..jpeg.data_end].to_vec(),
                         palette: Vec::new(),
                         alpha_mask: None,
                         vector_commands: Vec::new(),
@@ -19692,6 +19692,7 @@ struct ParsedJpeg {
     width_px: u32,
     height_px: u32,
     format: ImageFormat,
+    data_end: usize,
 }
 
 #[derive(Debug)]
@@ -20275,6 +20276,7 @@ fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
     if bytes.len() < 4 || bytes[0] != 0xff || bytes[1] != 0xd8 {
         return None;
     }
+    let data_end = jpeg_eoi_end(bytes)?;
 
     let mut pos = 2;
     while pos + 3 < bytes.len() {
@@ -20330,12 +20332,70 @@ fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
                 width_px: width,
                 height_px: height,
                 format,
+                data_end,
             });
         }
 
         pos += segment_len;
     }
 
+    None
+}
+
+fn jpeg_eoi_end(bytes: &[u8]) -> Option<usize> {
+    let mut pos = 2;
+    while pos < bytes.len() {
+        while pos < bytes.len() && bytes[pos] != 0xff {
+            pos += 1;
+        }
+        while pos < bytes.len() && bytes[pos] == 0xff {
+            pos += 1;
+        }
+        if pos >= bytes.len() {
+            return None;
+        }
+
+        let marker = bytes[pos];
+        pos += 1;
+        if marker == 0xd9 {
+            return Some(pos);
+        }
+        if marker == 0xda {
+            if pos + 1 >= bytes.len() {
+                return None;
+            }
+            let segment_len = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+            if segment_len < 2 || pos.checked_add(segment_len)? > bytes.len() {
+                return None;
+            }
+            pos += segment_len;
+            while pos + 1 < bytes.len() {
+                if bytes[pos] == 0xff {
+                    let marker = bytes[pos + 1];
+                    if marker == 0x00 {
+                        pos += 2;
+                        continue;
+                    }
+                    if marker == 0xd9 {
+                        return Some(pos + 2);
+                    }
+                }
+                pos += 1;
+            }
+            return None;
+        }
+        if is_standalone_jpeg_marker(marker) {
+            continue;
+        }
+        if pos + 1 >= bytes.len() {
+            return None;
+        }
+        let segment_len = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+        if segment_len < 2 || pos.checked_add(segment_len)? > bytes.len() {
+            return None;
+        }
+        pos += segment_len;
+    }
     None
 }
 
@@ -24975,7 +25035,7 @@ fn parse_compressed_dib_image_data(
                 width_px,
                 height_px,
                 format: jpeg.format,
-                bytes: payload.to_vec(),
+                bytes: payload[..jpeg.data_end].to_vec(),
                 palette: Vec::new(),
                 alpha_mask: None,
                 top_down: raw_height < 0,
@@ -38651,9 +38711,10 @@ After\par}"#;
 
     #[test]
     fn normalizes_jpeg_picture_as_safe_static_image() {
+        let jpeg = minimal_jpeg_with_dimensions(1, 1);
         let input = format!(
             "{{\\rtf1{{\\pict\\jpegblip\\picwgoal720\\pichgoal720 {}}}}}",
-            bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1))
+            bytes_to_hex(&jpeg)
         );
         let output = parse_rtf(&input).unwrap();
         let image = match &output.document.blocks[0] {
@@ -38663,10 +38724,28 @@ After\par}"#;
         assert_eq!(image.format, ImageFormat::Jpeg);
         assert_eq!(image.width_px, 1);
         assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, jpeg);
         assert_eq!(image.display_width_twips, Some(720));
         assert_eq!(image.display_height_twips, Some(720));
         assert_eq!(image.scale_x_percent, None);
         assert_eq!(image.scale_y_percent, None);
+    }
+
+    #[test]
+    fn normalizes_jpeg_picture_without_trailing_bytes() {
+        let jpeg = minimal_jpeg_with_dimensions(1, 1);
+        let mut payload = jpeg.clone();
+        payload.extend_from_slice(b"TRAILING-JPEG-PAYLOAD /JavaScript");
+        let input = format!(r"{{\rtf1{{\pict\jpegblip {}}}}}", bytes_to_hex(&payload));
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+        assert_eq!(image.format, ImageFormat::Jpeg);
+        assert_eq!(image.width_px, 1);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, jpeg);
     }
 
     #[test]
