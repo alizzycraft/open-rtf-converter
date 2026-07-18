@@ -39330,9 +39330,11 @@ fn black_brush_mergecopy_raster_transfers_render_passively_without_payload_leaka
 }
 
 #[test]
-fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leakage() {
-    let srcerase_payload = b"SRCERASE-BLANK-SOURCE-PAYLOAD";
-    let patpaint_payload = b"PATPAINT-BLANK-SOURCE-PAYLOAD";
+fn blank_destination_source_raster_ops_render_passively_without_payload_leakage() {
+    let emf_srcerase_payload = b"EMF-SRCERASE-BLANK-SOURCE-PAYLOAD /JavaScript";
+    let emf_patpaint_payload = b"EMF-PATPAINT-BLANK-SOURCE-PAYLOAD /EmbeddedFile";
+    let wmf_srcerase_payload = b"WMF-SRCERASE-BLANK-SOURCE-PAYLOAD /Launch";
+    let wmf_patpaint_payload = b"WMF-PATPAINT-BLANK-SOURCE-PAYLOAD /OpenAction";
     let srcerase_emf = minimal_emf_with_records(
         160,
         80,
@@ -39344,7 +39346,7 @@ fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leak
             30,
             15,
             0x0044_0328,
-            srcerase_payload,
+            emf_srcerase_payload,
         )],
     );
     let patpaint_emf = minimal_emf_with_records(
@@ -39358,13 +39360,31 @@ fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leak
             35,
             20,
             0x00fb_0a09,
-            patpaint_payload,
+            emf_patpaint_payload,
         )],
+    );
+    let srcerase_wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[
+            wmf_set_window_ext_record(200, 100),
+            wmf_dibbitblt_record(15, 25, 80, 40, 0x0044_0328, wmf_srcerase_payload),
+        ],
+    );
+    let patpaint_wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[
+            wmf_set_window_ext_record(200, 100),
+            wmf_dibbitblt_record(45, 20, 70, 35, 0x00fb_0a09, wmf_patpaint_payload),
+        ],
     );
     let srcerase_hex = bytes_to_hex(&srcerase_emf);
     let patpaint_hex = bytes_to_hex(&patpaint_emf);
+    let srcerase_wmf_hex = bytes_to_hex(&srcerase_wmf);
+    let patpaint_wmf_hex = bytes_to_hex(&patpaint_wmf);
     let input = format!(
-        "{{\\rtf1 before {{\\pict\\emfblip {srcerase_hex}}} middle {{\\pict\\emfblip {patpaint_hex}}} after\\par}}"
+        "{{\\rtf1 before {{\\pict\\emfblip {srcerase_hex}}} middle {{\\pict\\emfblip {patpaint_hex}}} wmf {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {srcerase_wmf_hex}}} more {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {patpaint_wmf_hex}}} after\\par}}"
     )
     .into_bytes();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -39381,8 +39401,10 @@ fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leak
 
     assert!(text.contains("before"));
     assert!(text.contains("middle"));
+    assert!(text.contains("wmf"));
+    assert!(text.contains("more"));
     assert!(text.contains("after"));
-    assert_eq!(images.len(), 2);
+    assert_eq!(images.len(), 4);
     assert!(matches!(
         images[0].vector_commands[0],
         StaticImageVectorCommand::Rectangle {
@@ -39413,17 +39435,52 @@ fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leak
             ..
         }
     ));
+    assert!(matches!(
+        images[2].vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 15.0,
+            top: 25.0,
+            right: 95.0,
+            bottom: 65.0,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        images[3].vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 45.0,
+            top: 20.0,
+            right: 115.0,
+            bottom: 55.0,
+            fill_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255
+            }),
+            ..
+        }
+    ));
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
-        "SRCERASE-BLANK-SOURCE-PAYLOAD",
-        "PATPAINT-BLANK-SOURCE-PAYLOAD",
+        "wmetafile",
+        "EMF-SRCERASE-BLANK-SOURCE-PAYLOAD",
+        "EMF-PATPAINT-BLANK-SOURCE-PAYLOAD",
+        "WMF-SRCERASE-BLANK-SOURCE-PAYLOAD",
+        "WMF-PATPAINT-BLANK-SOURCE-PAYLOAD",
         "JavaScript",
         "EmbeddedFile",
+        "Launch",
+        "OpenAction",
     ] {
         assert!(
             !text.contains(forbidden),
-            "blank-destination EMF raster payload/control leaked to normalized text: {forbidden}"
+            "blank-destination raster payload/control leaked to normalized text: {forbidden}"
         );
     }
 
@@ -39442,6 +39499,8 @@ fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leak
 
     assert!(rendered_text.contains("before"));
     assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("wmf"));
+    assert!(rendered_text.contains("more"));
     assert!(rendered_text.contains("after"));
     assert!(
         content
@@ -39449,15 +39508,20 @@ fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leak
             .iter()
             .filter(|operation| operation.operator == "re")
             .count()
-            >= 2,
-        "blank-destination EMF raster ops should render passive PDF rectangles"
+            >= 4,
+        "blank-destination raster ops should render passive PDF rectangles"
     );
     for forbidden in [
         b"emfblip".as_slice(),
+        b"wmetafile",
         srcerase_hex.as_bytes(),
         patpaint_hex.as_bytes(),
-        srcerase_payload.as_slice(),
-        patpaint_payload.as_slice(),
+        srcerase_wmf_hex.as_bytes(),
+        patpaint_wmf_hex.as_bytes(),
+        emf_srcerase_payload.as_slice(),
+        emf_patpaint_payload.as_slice(),
+        wmf_srcerase_payload.as_slice(),
+        wmf_patpaint_payload.as_slice(),
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -39469,7 +39533,7 @@ fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leak
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "blank-destination EMF raster payload leaked to PDF: {:?}",
+            "blank-destination raster payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
