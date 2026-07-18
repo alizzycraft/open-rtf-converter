@@ -21024,6 +21024,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     } else {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
+                } else if matches!(record_type, EMR_BITBLT | EMR_STRETCHBLT) {
+                    if let Some(command) =
+                        parse_emf_bitmap_blt_srcopy(data, record_type, &header, &coordinates)
+                    {
+                        commands.push(command);
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -22553,6 +22561,76 @@ fn parse_emf_passive_raster_transfer(
         left_top.1.max(right_bottom.1),
         fill_color,
     ))
+}
+
+fn parse_emf_bitmap_blt_srcopy(
+    data: &[u8],
+    record_type: u32,
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<StaticImageVectorCommand> {
+    const EMR_BITBLT: u32 = 76;
+    const EMR_STRETCHBLT: u32 = 77;
+
+    if data.len() < 92 || read_le_u32(data, 32)? != WMF_SRCCOPY_RASTER_OP {
+        return None;
+    }
+
+    let x_dest = read_le_i32(data, 16)?;
+    let y_dest = read_le_i32(data, 20)?;
+    let cx_dest = read_le_i32(data, 24)?;
+    let cy_dest = read_le_i32(data, 28)?;
+    let x_src = read_le_i32(data, 36)?;
+    let y_src = read_le_i32(data, 40)?;
+    let off_bmi_src = emf_record_offset_to_data_offset(read_le_u32(data, 76)?)?;
+    let cb_bmi_src = usize::try_from(read_le_u32(data, 80)?).ok()?;
+    let off_bits_src = emf_record_offset_to_data_offset(read_le_u32(data, 84)?)?;
+    let cb_bits_src = usize::try_from(read_le_u32(data, 88)?).ok()?;
+    let (cx_src, cy_src) = match record_type {
+        EMR_BITBLT => (
+            i32::try_from(cx_dest.unsigned_abs()).ok()?,
+            i32::try_from(cy_dest.unsigned_abs()).ok()?,
+        ),
+        EMR_STRETCHBLT => {
+            if data.len() < 100 {
+                return None;
+            }
+            (read_le_i32(data, 92)?, read_le_i32(data, 96)?)
+        }
+        _ => return None,
+    };
+
+    if cx_dest == 0 || cy_dest == 0 || cx_src <= 0 || cy_src <= 0 {
+        return None;
+    }
+
+    let dib_bytes =
+        emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
+    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+
+    let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let left_top = normalized_emf_point(x_dest, y_dest, header, coordinates);
+    let right_bottom = normalized_emf_point(
+        x_dest.saturating_add(width),
+        y_dest.saturating_add(height),
+        header,
+        coordinates,
+    );
+    Some(StaticImageVectorCommand::RasterImage {
+        left: left_top.0.min(right_bottom.0),
+        top: left_top.1.min(right_bottom.1),
+        right: left_top.0.max(right_bottom.0),
+        bottom: left_top.1.max(right_bottom.1),
+        image: StaticImageVectorRaster {
+            format: image.format,
+            width_px: image.width_px,
+            height_px: image.height_px,
+            bytes: image.bytes,
+            palette: image.palette,
+            alpha_mask: image.alpha_mask,
+        },
+    })
 }
 
 fn parse_emf_stretchdibits_srcopy(
@@ -41668,6 +41746,86 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_srccopy_bitblt_dib_record_becomes_passive_raster_image() {
+        let records = [emf_bitblt_dib_record(
+            10,
+            20,
+            2,
+            1,
+            WMF_SRCCOPY_RASTER_OP,
+            &minimal_24bit_dib_with_dimensions(2, 1),
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 10.0,
+                top: 20.0,
+                right: 12.0,
+                bottom: 21.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![255, 0, 0, 0, 255, 0]
+        ));
+    }
+
+    #[test]
+    fn emf_srccopy_stretchblt_bi_png_record_becomes_passive_raster_image() {
+        let png = minimal_rgb_png_with_dimensions(2, 1);
+        let records = [emf_stretchblt_dib_record(
+            15,
+            25,
+            70,
+            35,
+            WMF_SRCCOPY_RASTER_OP,
+            &minimal_compressed_dib_with_payload(2, 1, 5, &png),
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 15.0,
+                top: 25.0,
+                right: 85.0,
+                bottom: 60.0,
+                image,
+            } if image.format == ImageFormat::Png
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.palette.is_empty()
+                && image.alpha_mask.is_none()
+        ));
+    }
+
+    #[test]
     fn emf_blackness_and_whiteness_raster_transfers_become_passive_filled_rectangles() {
         let records = [
             emf_bitblt_record(
@@ -44712,6 +44870,28 @@ fn emf_bitblt_record(
 }
 
 #[cfg(test)]
+fn emf_bitblt_dib_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    raster_op: u32,
+    dib: &[u8],
+) -> Vec<u8> {
+    let payload_len = dib.len().next_multiple_of(4);
+    let size = 100 + payload_len;
+    let mut record = emf_bitblt_record(x, y, width, height, raster_op, &[]);
+    record.resize(size, 0);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_u32(&mut record, 84, 100);
+    write_test_le_u32(&mut record, 88, payload_len as u32);
+    write_test_le_u32(&mut record, 92, 100);
+    write_test_le_u32(&mut record, 96, payload_len as u32);
+    record[100..100 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+#[cfg(test)]
 fn emf_stretchblt_record(
     x: i32,
     y: i32,
@@ -44737,6 +44917,34 @@ fn emf_stretchblt_record(
     write_test_le_i32(&mut record, 100, width);
     write_test_le_i32(&mut record, 104, height);
     record[108..108 + payload.len()].copy_from_slice(payload);
+    record
+}
+
+#[cfg(test)]
+fn emf_stretchblt_dib_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    raster_op: u32,
+    dib: &[u8],
+) -> Vec<u8> {
+    let payload_len = dib.len().next_multiple_of(4);
+    let mut record = emf_stretchblt_record(x, y, width, height, raster_op, &[]);
+    record.resize(108 + payload_len, 0);
+    write_test_le_u32(&mut record, 4, (108 + payload_len) as u32);
+    write_test_le_u32(&mut record, 84, 108);
+    write_test_le_u32(&mut record, 88, payload_len as u32);
+    write_test_le_u32(&mut record, 92, 108);
+    write_test_le_u32(&mut record, 96, payload_len as u32);
+    if dib.len() >= 12 {
+        let source_width = i32::from_le_bytes(dib[4..8].try_into().unwrap());
+        let source_height =
+            i32::from_le_bytes(dib[8..12].try_into().unwrap()).unsigned_abs() as i32;
+        write_test_le_i32(&mut record, 100, source_width);
+        write_test_le_i32(&mut record, 104, source_height);
+    }
+    record[108..108 + dib.len()].copy_from_slice(dib);
     record
 }
 

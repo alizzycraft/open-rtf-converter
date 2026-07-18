@@ -37172,6 +37172,117 @@ fn emf_patcopy_stretchblt_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_srccopy_bitblt_and_stretchblt_dibs_render_as_passive_images_without_payload_leakage() {
+    let rgb_dib = minimal_24bit_dib_with_dimensions(2, 1);
+    let jpeg = minimal_jpeg_with_dimensions(2, 1);
+    let mut jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
+    jpeg_dib.extend_from_slice(b"TRAILING-EMF-STRETCHBLT-JPEG /JavaScript");
+    let records = [
+        emf_bitblt_dib_record(10, 20, 2, 1, 0x00cc_0020, &rgb_dib),
+        emf_stretchblt_dib_record(35, 30, 45, 25, 0x00cc_0020, &jpeg_dib),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF BITBLT/STRETCHBLT vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::RasterImage {
+            left: 10.0,
+            top: 20.0,
+            right: 12.0,
+            bottom: 21.0,
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![255, 0, 0, 0, 255, 0]
+    ));
+    assert!(matches!(
+        &image.vector_commands[1],
+        StaticImageVectorCommand::RasterImage {
+            left: 35.0,
+            top: 30.0,
+            right: 80.0,
+            bottom: 55.0,
+            image,
+        } if image.format == ImageFormat::Jpeg
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == jpeg
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "TRAILING-EMF-STRETCHBLT-JPEG",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF BITBLT/STRETCHBLT DIB payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let image_paints = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "Do")
+        .count();
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(image_paints >= 2, "both EMF blit DIBs should render");
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"TRAILING-EMF-STRETCHBLT-JPEG",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF BITBLT/STRETCHBLT DIB payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_patcopy_stretchdibits_records_render_passively_without_payload_leakage() {
     let payload = b"STRETCHDIBITS-SOURCE-PAYLOAD";
     let records = [
@@ -50990,6 +51101,27 @@ fn emf_bitblt_record(
     record
 }
 
+fn emf_bitblt_dib_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    raster_op: u32,
+    dib: &[u8],
+) -> Vec<u8> {
+    let payload_len = dib.len().next_multiple_of(4);
+    let size = 100 + payload_len;
+    let mut record = emf_bitblt_record(x, y, width, height, raster_op, &[]);
+    record.resize(size, 0);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_u32(&mut record, 84, 100);
+    write_test_le_u32(&mut record, 88, payload_len as u32);
+    write_test_le_u32(&mut record, 92, 100);
+    write_test_le_u32(&mut record, 96, payload_len as u32);
+    record[100..100 + dib.len()].copy_from_slice(dib);
+    record
+}
+
 fn emf_stretchblt_record(
     x: i32,
     y: i32,
@@ -51015,6 +51147,33 @@ fn emf_stretchblt_record(
     write_test_le_i32(&mut record, 100, width);
     write_test_le_i32(&mut record, 104, height);
     record[108..108 + payload.len()].copy_from_slice(payload);
+    record
+}
+
+fn emf_stretchblt_dib_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    raster_op: u32,
+    dib: &[u8],
+) -> Vec<u8> {
+    let payload_len = dib.len().next_multiple_of(4);
+    let mut record = emf_stretchblt_record(x, y, width, height, raster_op, &[]);
+    record.resize(108 + payload_len, 0);
+    write_test_le_u32(&mut record, 4, (108 + payload_len) as u32);
+    write_test_le_u32(&mut record, 84, 108);
+    write_test_le_u32(&mut record, 88, payload_len as u32);
+    write_test_le_u32(&mut record, 92, 108);
+    write_test_le_u32(&mut record, 96, payload_len as u32);
+    if dib.len() >= 12 {
+        let source_width = i32::from_le_bytes(dib[4..8].try_into().unwrap());
+        let source_height =
+            i32::from_le_bytes(dib[8..12].try_into().unwrap()).unsigned_abs() as i32;
+        write_test_le_i32(&mut record, 100, source_width);
+        write_test_le_i32(&mut record, 104, source_height);
+    }
+    record[108..108 + dib.len()].copy_from_slice(dib);
     record
 }
 
