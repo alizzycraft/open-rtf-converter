@@ -36069,6 +36069,162 @@ fn emf_patcopy_stretchdibits_records_render_passively_without_payload_leakage() 
 }
 
 #[test]
+fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload_leakage() {
+    let blackness_payload = b"BLACKNESS-SOURCE-PAYLOAD";
+    let whiteness_payload = b"WHITENESS-STRETCH-PAYLOAD";
+    let dib_payload = b"BLACKNESS-DIB-PAYLOAD";
+    let unsupported_payload = b"UNSUPPORTED-SRCCOPY-PAYLOAD";
+    let records = [
+        emf_bitblt_record(10, 20, 30, 15, 0x0000_0042, blackness_payload),
+        emf_stretchblt_record(50, 25, 35, 20, 0x00ff_0062, whiteness_payload),
+        emf_stretchdibits_record(90, 30, 40, 25, 0x0000_0042, dib_payload),
+        emf_bitblt_record(15, 35, 20, 10, 0x00cc_0020, unsupported_payload),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF solid raster transfer vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 3);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 20.0,
+            right: 40.0,
+            bottom: 35.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle {
+            left: 50.0,
+            top: 25.0,
+            right: 85.0,
+            bottom: 45.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[2],
+        StaticImageVectorCommand::Rectangle {
+            left: 90.0,
+            top: 30.0,
+            right: 130.0,
+            bottom: 55.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        "emfblip",
+        "BLACKNESS-SOURCE-PAYLOAD",
+        "WHITENESS-STRETCH-PAYLOAD",
+        "BLACKNESS-DIB-PAYLOAD",
+        "UNSUPPORTED-SRCCOPY-PAYLOAD",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF solid raster transfer payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 3,
+        "EMF BLACKNESS/WHITENESS transfers should render passive PDF rectangles"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*" | "B" | "B*")),
+        "EMF BLACKNESS/WHITENESS transfers should render passive PDF fills"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        blackness_payload.as_slice(),
+        whiteness_payload.as_slice(),
+        dib_payload.as_slice(),
+        unsupported_payload.as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF solid raster transfer payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_move_to_and_line_to_records_render_passively_without_payload_leakage() {
     let records = [
         emf_point_record(27, 10, 10),

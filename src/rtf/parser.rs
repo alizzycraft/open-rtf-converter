@@ -20939,16 +20939,18 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     EMR_STRETCHDIBITS => (72, 60, 16, 64),
                     _ => unreachable!(),
                 };
-                if let Some((left, top, right, bottom)) = parse_emf_patcopy_raster_transfer_bounds(
-                    data,
-                    raster_transfer.0,
-                    raster_transfer.1,
-                    raster_transfer.2,
-                    raster_transfer.3,
-                    &header,
-                    &coordinates,
-                ) && bounds_is_visible((left, top, right, bottom))
-                    && state.fill_color.is_some()
+                if let Some((left, top, right, bottom, fill_color)) =
+                    parse_emf_passive_raster_transfer(
+                        data,
+                        raster_transfer.0,
+                        raster_transfer.1,
+                        raster_transfer.2,
+                        raster_transfer.3,
+                        &header,
+                        &coordinates,
+                        state.fill_color,
+                    )
+                    && bounds_is_visible((left, top, right, bottom))
                 {
                     commands.push(StaticImageVectorCommand::Rectangle {
                         left,
@@ -20959,7 +20961,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         stroke_width: 0.0,
                         stroke_style: BorderStyle::Single,
                         fill_pattern: ShadingPattern::None,
-                        fill_color: state.fill_color,
+                        fill_color: Some(fill_color),
                     });
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -22422,7 +22424,7 @@ fn scoped_vector_clip_commands(
     (!clip_commands.is_empty()).then_some(clip_commands)
 }
 
-fn parse_emf_patcopy_raster_transfer_bounds(
+fn parse_emf_passive_raster_transfer(
     data: &[u8],
     min_data_len: usize,
     raster_op_offset: usize,
@@ -22430,8 +22432,24 @@ fn parse_emf_patcopy_raster_transfer_bounds(
     destination_extent_offset: usize,
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
-) -> Option<(f32, f32, f32, f32)> {
-    if data.len() < min_data_len || read_le_u32(data, raster_op_offset)? != WMF_PATCOPY_RASTER_OP {
+    selected_fill_color: Option<Color>,
+) -> Option<(f32, f32, f32, f32, Color)> {
+    let raster_op = read_le_u32(data, raster_op_offset)?;
+    let fill_color = match raster_op {
+        WMF_BLACKNESS_RASTER_OP => Color {
+            red: 0,
+            green: 0,
+            blue: 0,
+        },
+        WMF_WHITENESS_RASTER_OP => Color {
+            red: 255,
+            green: 255,
+            blue: 255,
+        },
+        WMF_PATCOPY_RASTER_OP => selected_fill_color?,
+        _ => return None,
+    };
+    if data.len() < min_data_len {
         return None;
     }
     let x = read_le_i32(data, destination_position_offset)?;
@@ -22460,6 +22478,7 @@ fn parse_emf_patcopy_raster_transfer_bounds(
         left_top.1.min(right_bottom.1),
         left_top.0.max(right_bottom.0),
         left_top.1.max(right_bottom.1),
+        fill_color,
     ))
 }
 
@@ -23889,7 +23908,9 @@ const WMF_TA_BOTTOM: u16 = 0x0008;
 const WMF_TA_BASELINE: u16 = 0x0018;
 const WMF_TA_HORIZONTAL_MASK: u16 = 0x0006;
 const WMF_TA_VERTICAL_MASK: u16 = 0x0018;
+const WMF_BLACKNESS_RASTER_OP: u32 = 0x0000_0042;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
+const WMF_WHITENESS_RASTER_OP: u32 = 0x00ff_0062;
 const WMF_ESCAPE_MFCOMMENT: u16 = 0x000f;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
 const PLACEABLE_WMF_HEADER_BYTES: usize = 22;
@@ -40387,6 +40408,98 @@ After\par}"#;
                     red: 30,
                     green: 150,
                     blue: 200
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_blackness_and_whiteness_raster_transfers_become_passive_filled_rectangles() {
+        let records = [
+            emf_bitblt_record(
+                10,
+                20,
+                30,
+                15,
+                WMF_BLACKNESS_RASTER_OP,
+                b"BLACKNESS-SOURCE-PAYLOAD",
+            ),
+            emf_stretchblt_record(
+                50,
+                25,
+                35,
+                20,
+                WMF_WHITENESS_RASTER_OP,
+                b"WHITENESS-STRETCH-PAYLOAD",
+            ),
+            emf_stretchdibits_record(
+                90,
+                30,
+                40,
+                25,
+                WMF_BLACKNESS_RASTER_OP,
+                b"BLACKNESS-DIB-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 3);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 10.0,
+                top: 20.0,
+                right: 40.0,
+                bottom: 35.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 50.0,
+                top: 25.0,
+                right: 85.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255
+                }),
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle {
+                left: 90.0,
+                top: 30.0,
+                right: 130.0,
+                bottom: 55.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
                 }),
                 ..
             }
