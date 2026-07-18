@@ -40997,7 +40997,7 @@ After\par}"#;
             let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
             let image = match &output.document.blocks[0] {
                 Block::Image(image) => image,
-                _ => panic!("expected passive WMF vector image"),
+                _ => panic!("expected passive WMF vector image for {wmf_hex}"),
             };
 
             assert_eq!(image.format, ImageFormat::WmfVector, "{wmf_hex}");
@@ -41021,6 +41021,44 @@ After\par}"#;
                     && actual_fill_color == fill_color
             ));
         }
+    }
+
+    #[test]
+    fn wmf_whiteness_stretchdib_record_becomes_passive_filled_rectangle() {
+        let wmf_hex = concat!(
+            "010009000003340000000200180000000000",
+            "050000000c026400c800",
+            "07000000fc020000a04628000000",
+            "040000002d010000",
+            "18000000430f6200ff000000000000000000000019002d001e0023005241572d535452455443484449422d5748495445",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 35.0,
+                top: 30.0,
+                right: 80.0,
+                bottom: 55.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255
+                }),
+                ..
+            }
+        ));
+        assert_eq!(output.diagnostics.len(), 0);
     }
 
     #[test]

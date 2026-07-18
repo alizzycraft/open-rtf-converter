@@ -30214,13 +30214,14 @@ fn wmf_patcopy_stretchdib_renders_passive_brush_rectangle_without_payload_leakag
 #[test]
 fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
-        "010009000003780000000400190000000000",
+        "010009000003900000000400190000000000",
         "050000000c026400c800",
         "07000000fc020000ff0000000000",
         "040000002d010000",
         "160000002209420000000000000019002d001e0023005241572d424c41434b4e4553532d5041594c4f414400",
         "18000000230b6200ff0000000000000000002800500019000f005241572d57484954454e4553532d5041594c4f414400",
         "190000004009420000000000000019002d001e00230000005241572d4449422d424c41434b4e4553532d5041594c4f414400",
+        "18000000430f6200ff000000000000000000000019002d001e0023005241572d535452455443484449422d5748495445",
         "1500000022092000cc00000000000019002d001e0023005241572d535243434f50592d424954424c5400",
         "030000000000",
     );
@@ -30244,7 +30245,7 @@ fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakag
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 3);
+    assert_eq!(image.vector_commands.len(), 4);
     assert!(matches!(
         image.vector_commands[0],
         StaticImageVectorCommand::Rectangle {
@@ -30293,6 +30294,22 @@ fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakag
             ..
         }
     ));
+    assert!(matches!(
+        image.vector_commands[3],
+        StaticImageVectorCommand::Rectangle {
+            left: 35.0,
+            top: 30.0,
+            right: 80.0,
+            bottom: 55.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255
+            }),
+            ..
+        }
+    ));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
@@ -30303,6 +30320,7 @@ fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakag
         "RAW-BLACKNESS-PAYLOAD",
         "RAW-WHITENESS-PAYLOAD",
         "RAW-DIB-BLACKNESS-PAYLOAD",
+        "RAW-STRETCHDIB-WHITE",
         "RAW-SRCCOPY-BITBLT",
         "JavaScript",
         "EmbeddedFile",
@@ -30330,7 +30348,7 @@ fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakag
             .iter()
             .filter(|operation| operation.operator == "re")
             .count()
-            >= 3,
+            >= 4,
         "WMF BLACKNESS/WHITENESS transfers should render passive PDF rectangles"
     );
     assert!(
@@ -30346,6 +30364,7 @@ fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakag
         b"RAW-BLACKNESS-PAYLOAD",
         b"RAW-WHITENESS-PAYLOAD",
         b"RAW-DIB-BLACKNESS-PAYLOAD",
+        b"RAW-STRETCHDIB-WHITE",
         b"RAW-SRCCOPY-BITBLT",
         b"/JavaScript",
         b"/EmbeddedFile",
