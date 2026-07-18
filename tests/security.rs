@@ -37956,6 +37956,11 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
 fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payload_leakage() {
     let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
     dib.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT /JavaScript");
+    let jpeg = minimal_jpeg_with_dimensions(2, 1);
+    let mut jpeg_payload = jpeg.clone();
+    jpeg_payload.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT-JPEG /EmbeddedFile");
+    let mut jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg_payload);
+    jpeg_dib.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT-JPEG-DIB /Launch");
     let records = [
         emf_transparentblt_dib_record(
             18,
@@ -37968,6 +37973,18 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
                 blue: 56,
             },
             &dib,
+        ),
+        emf_transparentblt_dib_record(
+            92,
+            32,
+            48,
+            28,
+            Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            &jpeg_dib,
         ),
         emf_transparentblt_dib_record(
             70,
@@ -38081,7 +38098,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 7);
+    assert_eq!(image.vector_commands.len(), 8);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -38096,7 +38113,21 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             && image.bytes == vec![255, 0, 0, 0, 255, 0]
             && image.alpha_mask.is_none()
     ));
-    let alpha_mask = match &image.vector_commands[1] {
+    assert!(matches!(
+        &image.vector_commands[1],
+        StaticImageVectorCommand::RasterImage {
+            left: 92.0,
+            top: 32.0,
+            right: 140.0,
+            bottom: 60.0,
+            image,
+        } if image.format == ImageFormat::Jpeg
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == jpeg
+            && image.alpha_mask.is_none()
+    ));
+    let alpha_mask = match &image.vector_commands[2] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -38108,7 +38139,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
         vec![0, 0, 255]
     );
     assert!(matches!(
-        &image.vector_commands[2],
+        &image.vector_commands[3],
         StaticImageVectorCommand::RasterImage {
             left: 100.0,
             top: 34.0,
@@ -38120,7 +38151,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             && image.height_px == 1
             && image.alpha_mask.is_none()
     ));
-    let compressed_png_alpha_mask = match &image.vector_commands[3] {
+    let compressed_png_alpha_mask = match &image.vector_commands[4] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -38135,7 +38166,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
         .unwrap(),
         vec![0, 0, 255]
     );
-    let rgba_png_alpha_mask = match &image.vector_commands[4] {
+    let rgba_png_alpha_mask = match &image.vector_commands[5] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -38147,7 +38178,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             .unwrap(),
         vec![0, 128, 0]
     );
-    let indexed_png_alpha_mask = match &image.vector_commands[5] {
+    let indexed_png_alpha_mask = match &image.vector_commands[6] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -38159,7 +38190,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             .unwrap(),
         vec![0, 0, 255]
     );
-    let grayscale_png_alpha_mask = match &image.vector_commands[6] {
+    let grayscale_png_alpha_mask = match &image.vector_commands[7] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -38179,6 +38210,8 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
         "emfblip",
         "TRANSPARENTBLT",
         "TRAILING-EMF-TRANSPARENTBLT",
+        "TRAILING-EMF-TRANSPARENTBLT-JPEG",
+        "TRAILING-EMF-TRANSPARENTBLT-JPEG-DIB",
         "JavaScript",
         "EmbeddedFile",
     ] {
@@ -38209,7 +38242,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 7,
+            >= 8,
         "keyed EMF TRANSPARENTBLT DIBs should render as passive image XObjects"
     );
     assert!(
@@ -38224,6 +38257,8 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
         emf_hex.as_bytes(),
         b"TRANSPARENTBLT",
         b"TRAILING-EMF-TRANSPARENTBLT",
+        b"TRAILING-EMF-TRANSPARENTBLT-JPEG",
+        b"TRAILING-EMF-TRANSPARENTBLT-JPEG-DIB",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

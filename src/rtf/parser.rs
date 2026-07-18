@@ -23048,6 +23048,7 @@ fn keyed_vector_raster_alpha_mask(
             existing_mask,
             keyed_png_grayscale_alpha_mask(bytes, width_px, height_px, transparent)?,
         ),
+        ImageFormat::Jpeg => Some(existing_mask),
         _ => None,
     }
 }
@@ -43625,6 +43626,28 @@ After\par}"#;
                 .unwrap(),
             vec![0, 64, 192]
         );
+        let jpeg = minimal_jpeg_with_dimensions(2, 1);
+        let jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
+        let jpeg_image = parse_vector_raster_dib_image(&jpeg_dib, 0, 0, 2, 1, false)
+            .expect("JPEG compressed DIB fixture should normalize");
+        assert_eq!(jpeg_image.format, ImageFormat::Jpeg);
+        assert_eq!(jpeg_image.bytes, jpeg);
+        assert!(matches!(
+            keyed_vector_raster_alpha_mask(
+                jpeg_image.format,
+                &jpeg_image.bytes,
+                jpeg_image.width_px,
+                jpeg_image.height_px,
+                Color {
+                    red: 255,
+                    green: 0,
+                    blue: 0,
+                },
+                &jpeg_image.palette,
+                jpeg_image.alpha_mask,
+            ),
+            Some(None)
+        ));
         let records = [
             emf_transparentblt_dib_record(
                 18,
@@ -43730,6 +43753,18 @@ After\par}"#;
                 },
                 &minimal_compressed_dib_with_payload(2, 1, 5, &minimal_grayscale_png(&[128, 255])),
             ),
+            emf_transparentblt_dib_record(
+                10,
+                54,
+                42,
+                20,
+                Color {
+                    red: 255,
+                    green: 0,
+                    blue: 0,
+                },
+                &minimal_compressed_dib_with_payload(2, 1, 4, &minimal_jpeg_with_dimensions(2, 1)),
+            ),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
@@ -43743,7 +43778,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 7);
+        assert_eq!(image.vector_commands.len(), 8);
         assert_eq!(output.diagnostics.len(), 0);
         assert!(matches!(
             &image.vector_commands[0],
@@ -43840,6 +43875,19 @@ After\par}"#;
             .unwrap(),
             vec![0, 0, 255]
         );
+        assert!(matches!(
+            &image.vector_commands[7],
+            StaticImageVectorCommand::RasterImage {
+                left: 10.0,
+                top: 54.0,
+                right: 52.0,
+                bottom: 74.0,
+                image,
+            } if image.format == ImageFormat::Jpeg
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.alpha_mask.is_none()
+        ));
     }
 
     #[test]
