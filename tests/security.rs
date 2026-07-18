@@ -38570,14 +38570,18 @@ fn emf_srccopy_stretchdibits_crop_renders_as_passive_image_without_payload_leaka
 
 #[test]
 fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload_leakage() {
+    let dstinvert_payload = b"DSTINVERT-SOURCE-PAYLOAD";
     let blackness_payload = b"BLACKNESS-SOURCE-PAYLOAD";
     let whiteness_payload = b"WHITENESS-STRETCH-PAYLOAD";
     let dib_payload = b"BLACKNESS-DIB-PAYLOAD";
+    let backdrop_dstinvert_payload = b"BACKDROP-DSTINVERT-PAYLOAD";
     let unsupported_payload = b"UNSUPPORTED-SRCCOPY-PAYLOAD";
     let records = [
+        emf_bitblt_record(4, 8, 24, 12, 0x0055_0009, dstinvert_payload),
         emf_bitblt_record(10, 20, 30, 15, 0x0000_0042, blackness_payload),
         emf_stretchblt_record(50, 25, 35, 20, 0x00ff_0062, whiteness_payload),
         emf_stretchdibits_record(90, 30, 40, 25, 0x0000_0042, dib_payload),
+        emf_bitblt_record(110, 12, 20, 10, 0x0055_0009, backdrop_dstinvert_payload),
         emf_bitblt_record(15, 35, 20, 10, 0x00cc_0020, unsupported_payload),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
@@ -38599,9 +38603,25 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 3);
+    assert_eq!(image.vector_commands.len(), 4);
     assert!(matches!(
         image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 4.0,
+            top: 8.0,
+            right: 28.0,
+            bottom: 20.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
         StaticImageVectorCommand::Rectangle {
             left: 10.0,
             top: 20.0,
@@ -38617,7 +38637,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
         }
     ));
     assert!(matches!(
-        image.vector_commands[1],
+        image.vector_commands[2],
         StaticImageVectorCommand::Rectangle {
             left: 50.0,
             top: 25.0,
@@ -38633,7 +38653,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
         }
     ));
     assert!(matches!(
-        image.vector_commands[2],
+        image.vector_commands[3],
         StaticImageVectorCommand::Rectangle {
             left: 90.0,
             top: 30.0,
@@ -38651,13 +38671,15 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("1 unsupported record(s) skipped")
+            .contains("2 unsupported record(s) skipped")
     }));
     for forbidden in [
         "emfblip",
+        "DSTINVERT-SOURCE-PAYLOAD",
         "BLACKNESS-SOURCE-PAYLOAD",
         "WHITENESS-STRETCH-PAYLOAD",
         "BLACKNESS-DIB-PAYLOAD",
+        "BACKDROP-DSTINVERT-PAYLOAD",
         "UNSUPPORTED-SRCCOPY-PAYLOAD",
         "JavaScript",
         "EmbeddedFile",
@@ -38689,8 +38711,8 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
             .iter()
             .filter(|operation| operation.operator == "re")
             .count()
-            >= 3,
-        "EMF BLACKNESS/WHITENESS transfers should render passive PDF rectangles"
+            >= 4,
+        "EMF solid and blank DSTINVERT transfers should render passive PDF rectangles"
     );
     assert!(
         content
@@ -38702,9 +38724,11 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     for forbidden in [
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
+        dstinvert_payload.as_slice(),
         blackness_payload.as_slice(),
         whiteness_payload.as_slice(),
         dib_payload.as_slice(),
+        backdrop_dstinvert_payload.as_slice(),
         unsupported_payload.as_slice(),
         b"/JavaScript",
         b"/EmbeddedFile",

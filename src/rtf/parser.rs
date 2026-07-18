@@ -21007,6 +21007,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             &header,
                             &coordinates,
                             state.fill_color,
+                            emf_commands_are_unpainted_clip_scope(&commands),
                         )
                     && bounds_is_visible((left, top, right, bottom))
                 {
@@ -22547,6 +22548,7 @@ fn parse_emf_passive_raster_transfer(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
     selected_fill_color: Option<Color>,
+    blank_destination: bool,
 ) -> Option<(f32, f32, f32, f32, Color)> {
     let raster_op = read_le_u32(data, raster_op_offset)?;
     let fill_color = match raster_op {
@@ -22561,6 +22563,11 @@ fn parse_emf_passive_raster_transfer(
             blue: 255,
         },
         WMF_PATCOPY_RASTER_OP => selected_fill_color?,
+        WMF_DSTINVERT_RASTER_OP if blank_destination => Color {
+            red: 0,
+            green: 0,
+            blue: 0,
+        },
         _ => return None,
     };
     if data.len() < min_data_len {
@@ -24731,6 +24738,7 @@ const WMF_TA_BASELINE: u16 = 0x0018;
 const WMF_TA_HORIZONTAL_MASK: u16 = 0x0006;
 const WMF_TA_VERTICAL_MASK: u16 = 0x0018;
 const WMF_BLACKNESS_RASTER_OP: u32 = 0x0000_0042;
+const WMF_DSTINVERT_RASTER_OP: u32 = 0x0055_0009;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
 const WMF_SRCCOPY_RASTER_OP: u32 = 0x00cc_0020;
 const WMF_WHITENESS_RASTER_OP: u32 = 0x00ff_0062;
@@ -26464,6 +26472,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         window_width,
                         window_height,
                         state.fill_color,
+                        emf_commands_are_unpainted_clip_scope(&commands),
                     )
                     && bounds_is_visible((left, top, right, bottom))
                 {
@@ -26514,6 +26523,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_width,
                     window_height,
                     state.fill_color,
+                    emf_commands_are_unpainted_clip_scope(&commands),
                 ) && bounds_is_visible((left, top, right, bottom))
                 {
                     commands.push(StaticImageVectorCommand::Rectangle {
@@ -26932,8 +26942,13 @@ fn parse_wmf_patblt_passive_transfer(
     window_width: i32,
     window_height: i32,
     selected_fill_color: Option<Color>,
+    blank_destination: bool,
 ) -> Option<(f32, f32, f32, f32, Color)> {
-    let fill_color = passive_wmf_raster_transfer_color(read_le_u32(data, 0)?, selected_fill_color)?;
+    let fill_color = passive_wmf_raster_transfer_color(
+        read_le_u32(data, 0)?,
+        selected_fill_color,
+        blank_destination,
+    )?;
     if data.len() < 12 {
         return None;
     }
@@ -26974,8 +26989,13 @@ fn parse_wmf_blt_passive_transfer(
     window_width: i32,
     window_height: i32,
     selected_fill_color: Option<Color>,
+    blank_destination: bool,
 ) -> Option<(f32, f32, f32, f32, Color)> {
-    let fill_color = passive_wmf_raster_transfer_color(read_le_u32(data, 0)?, selected_fill_color)?;
+    let fill_color = passive_wmf_raster_transfer_color(
+        read_le_u32(data, 0)?,
+        selected_fill_color,
+        blank_destination,
+    )?;
     if data.len() < destination_offset.checked_add(8)? {
         return None;
     }
@@ -27256,6 +27276,7 @@ fn wmf_raster_image_command(
 fn passive_wmf_raster_transfer_color(
     raster_op: u32,
     selected_fill_color: Option<Color>,
+    blank_destination: bool,
 ) -> Option<Color> {
     match raster_op {
         WMF_BLACKNESS_RASTER_OP => Some(Color {
@@ -27269,6 +27290,11 @@ fn passive_wmf_raster_transfer_color(
             blue: 255,
         }),
         WMF_PATCOPY_RASTER_OP => selected_fill_color,
+        WMF_DSTINVERT_RASTER_OP if blank_destination => Some(Color {
+            red: 0,
+            green: 0,
+            blue: 0,
+        }),
         _ => None,
     }
 }
@@ -42543,6 +42569,85 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_initial_dstinvert_bitblt_record_becomes_passive_black_rectangle() {
+        let records = [emf_bitblt_record(
+            10,
+            20,
+            80,
+            40,
+            WMF_DSTINVERT_RASTER_OP,
+            b"DSTINVERT-SOURCE-PAYLOAD",
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 10.0,
+                top: 20.0,
+                right: 90.0,
+                bottom: 60.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_dstinvert_bitblt_after_paint_is_skipped_as_backdrop_dependent() {
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_bitblt_record(
+                10,
+                20,
+                80,
+                40,
+                WMF_DSTINVERT_RASTER_OP,
+                b"DSTINVERT-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected partial passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+    }
+
+    #[test]
     fn emf_patcopy_stretchblt_records_become_passive_filled_rectangles() {
         let records = [
             emf_create_brush_record(
@@ -43863,6 +43968,51 @@ After\par}"#;
             }
         ));
         assert_eq!(output.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn wmf_initial_dstinvert_bitblt_record_becomes_passive_black_rectangle() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_dibbitblt_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_DSTINVERT_RASTER_OP,
+                b"DSTINVERT-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
     }
 
     #[test]
