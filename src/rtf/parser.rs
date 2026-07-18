@@ -39431,6 +39431,40 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_polytextouta_dx_records_become_positioned_passive_text_commands() {
+        let records = [
+            emf_u32_record(24, 0x0066_4422),
+            emf_polytextouta_dx_record(30, 18, b"ABC", &[8, 12, 16]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 3);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Text { x: 30.0, text, .. } if text == "A"
+        ));
+        assert!(matches!(
+            &image.vector_commands[1],
+            StaticImageVectorCommand::Text { x: 38.0, text, .. } if text == "B"
+        ));
+        assert!(matches!(
+            &image.vector_commands[2],
+            StaticImageVectorCommand::Text { x: 50.0, text, .. } if text == "C"
+        ));
+    }
+
+    #[test]
     fn emf_polytextoutw_with_excessive_total_text_becomes_passive_placeholder() {
         let first = "A".repeat(MAX_PASSIVE_WMF_TEXT_BYTES / 4);
         let second = "B".repeat((MAX_PASSIVE_WMF_TEXT_BYTES / 4) + 1);
@@ -42347,6 +42381,37 @@ fn emf_polytextoutw_dx_record(x: i32, y: i32, text: &str, dx: &[i32]) -> Vec<u8>
     write_test_le_u32(&mut record, text_objects_start + 16, 0);
     write_test_le_u32(&mut record, text_objects_start + 36, dx_offset as u32);
     record[string_offset..string_offset + bytes.len()].copy_from_slice(&bytes);
+    for (index, value) in dx.iter().enumerate() {
+        write_test_le_i32(&mut record, dx_offset + (index * 4), *value);
+    }
+    record
+}
+
+#[cfg(test)]
+fn emf_polytextouta_dx_record(x: i32, y: i32, text: &[u8], dx: &[i32]) -> Vec<u8> {
+    assert_eq!(dx.len(), text.len());
+    let text_objects_start = 40usize;
+    let string_offset = text_objects_start + 40;
+    let dx_offset = string_offset + text.len();
+    let size = (dx_offset + (dx.len() * 4)).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 96);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, 1);
+    write_test_le_u32(&mut record, 28, 0x3f80_0000);
+    write_test_le_u32(&mut record, 32, 0x3f80_0000);
+    write_test_le_u32(&mut record, 36, 1);
+    write_test_le_i32(&mut record, text_objects_start, x);
+    write_test_le_i32(&mut record, text_objects_start + 4, y);
+    write_test_le_u32(&mut record, text_objects_start + 8, text.len() as u32);
+    write_test_le_u32(&mut record, text_objects_start + 12, string_offset as u32);
+    write_test_le_u32(&mut record, text_objects_start + 16, 0);
+    write_test_le_u32(&mut record, text_objects_start + 36, dx_offset as u32);
+    record[string_offset..string_offset + text.len()].copy_from_slice(text);
     for (index, value) in dx.iter().enumerate() {
         write_test_le_i32(&mut record, dx_offset + (index * 4), *value);
     }
