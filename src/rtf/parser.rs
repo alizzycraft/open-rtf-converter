@@ -20409,6 +20409,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_STROKEPATH: u32 = 64;
     const EMR_SELECTCLIPPATH: u32 = 67;
     const EMR_FILLRGN: u32 = 71;
+    const EMR_PAINTRGN: u32 = 74;
     const EMR_BITBLT: u32 = 76;
     const EMR_STRETCHBLT: u32 = 77;
     const EMR_STRETCHDIBITS: u32 = 81;
@@ -20790,29 +20791,15 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     continue;
                 };
                 let rects = parse_emf_region_data_rects(data, 16, 24, &header, &coordinates)?;
-                if commands.len().checked_add(rects.len())? > MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let mut emitted = false;
-                for (left, top, right, bottom) in rects {
-                    if bounds_is_visible((left, top, right, bottom)) {
-                        commands.push(StaticImageVectorCommand::Rectangle {
-                            left,
-                            top,
-                            right,
-                            bottom,
-                            stroke_color: None,
-                            stroke_width: 0.0,
-                            stroke_style: BorderStyle::Single,
-                            fill_pattern: pattern,
-                            fill_color: Some(fill_color),
-                        });
-                        emitted = true;
-                    }
-                }
-                if !emitted {
-                    return None;
-                }
+                push_emf_region_rectangles(&mut commands, rects, fill_color, pattern)?;
+            }
+            EMR_PAINTRGN => {
+                let Some(fill_color) = state.fill_color else {
+                    pos = record_end;
+                    continue;
+                };
+                let rects = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)?;
+                push_emf_region_rectangles(&mut commands, rects, fill_color, state.fill_pattern)?;
             }
             EMR_SELECTCLIPPATH => {
                 const RGN_AND: u32 = 1;
@@ -21551,6 +21538,38 @@ fn parse_emf_region_data_rects(
         )?);
     }
     Some(rects)
+}
+
+fn push_emf_region_rectangles(
+    commands: &mut Vec<StaticImageVectorCommand>,
+    rects: Vec<(f32, f32, f32, f32)>,
+    fill_color: Color,
+    fill_pattern: ShadingPattern,
+) -> Option<()> {
+    if commands.len().checked_add(rects.len())? > MAX_PASSIVE_WMF_COMMANDS {
+        return None;
+    }
+    let mut emitted = false;
+    for (left, top, right, bottom) in rects {
+        if bounds_is_visible((left, top, right, bottom)) {
+            commands.push(StaticImageVectorCommand::Rectangle {
+                left,
+                top,
+                right,
+                bottom,
+                stroke_color: None,
+                stroke_width: 0.0,
+                stroke_style: BorderStyle::Single,
+                fill_pattern,
+                fill_color: Some(fill_color),
+            });
+            emitted = true;
+        }
+    }
+    if !emitted {
+        return None;
+    }
+    Some(())
 }
 
 fn parse_emf_anglearc_record(
@@ -39437,6 +39456,94 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_paintrgn_records_become_passive_filled_rectangles() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 220,
+                    green: 90,
+                    blue: 30,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_paintrgn_record(&[(15, 12, 70, 40), (80, 20, 130, 65)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 12.0,
+                right: 70.0,
+                bottom: 40.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 220,
+                    green: 90,
+                    blue: 30
+                }),
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 80.0,
+                top: 20.0,
+                right: 130.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 220,
+                    green: 90,
+                    blue: 30
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_paintrgn_with_malformed_region_data_becomes_passive_placeholder() {
+        let mut record = emf_paintrgn_record(&[(20, 10, 90, 50)]);
+        write_test_le_u32(&mut record, 24, 31);
+        let records = [
+            emf_create_brush_record(3, 0, Color::default(), 0),
+            emf_select_object_record(3),
+            record,
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
     fn emf_patcopy_bitblt_records_become_passive_filled_rectangles() {
         let records = [
             emf_create_brush_record(
@@ -41232,6 +41339,37 @@ fn emf_fillrgn_record(brush_handle: u32, rects: &[(i32, i32, i32, i32)]) -> Vec<
     write_test_le_i32(&mut record, 60, bottom);
     for (index, (left, top, right, bottom)) in rects.iter().copied().enumerate() {
         let offset = 64 + (index * 16);
+        write_test_le_i32(&mut record, offset, left);
+        write_test_le_i32(&mut record, offset + 4, top);
+        write_test_le_i32(&mut record, offset + 8, right);
+        write_test_le_i32(&mut record, offset + 12, bottom);
+    }
+    record
+}
+
+#[cfg(test)]
+fn emf_paintrgn_record(rects: &[(i32, i32, i32, i32)]) -> Vec<u8> {
+    let region_size = 32 + (rects.len() * 16);
+    let size = 28 + region_size;
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 74);
+    write_test_le_u32(&mut record, 4, size as u32);
+    let (left, top, right, bottom) = rects.first().copied().unwrap_or((0, 0, 0, 0));
+    write_test_le_i32(&mut record, 8, left);
+    write_test_le_i32(&mut record, 12, top);
+    write_test_le_i32(&mut record, 16, right);
+    write_test_le_i32(&mut record, 20, bottom);
+    write_test_le_u32(&mut record, 24, region_size as u32);
+    write_test_le_u32(&mut record, 28, 32);
+    write_test_le_u32(&mut record, 32, 1);
+    write_test_le_u32(&mut record, 36, rects.len() as u32);
+    write_test_le_u32(&mut record, 40, (rects.len() * 16) as u32);
+    write_test_le_i32(&mut record, 44, left);
+    write_test_le_i32(&mut record, 48, top);
+    write_test_le_i32(&mut record, 52, right);
+    write_test_le_i32(&mut record, 56, bottom);
+    for (index, (left, top, right, bottom)) in rects.iter().copied().enumerate() {
+        let offset = 60 + (index * 16);
         write_test_le_i32(&mut record, offset, left);
         write_test_le_i32(&mut record, offset + 4, top);
         write_test_le_i32(&mut record, offset + 8, right);
