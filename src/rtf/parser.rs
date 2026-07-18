@@ -25771,6 +25771,22 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
+            0x0d33 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some(command) = parse_wmf_setdibits_to_device(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                ) {
+                    commands.push(command);
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
             0x0922 | 0x0940 | 0x0b23 | 0x0b41 | 0x0f43 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -26414,6 +26430,57 @@ fn parse_wmf_dibstretchblt_srcopy(
         destination_y,
         destination_width,
         destination_height,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+        image,
+    )
+}
+
+fn parse_wmf_setdibits_to_device(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<StaticImageVectorCommand> {
+    const DIB_RGB_COLORS: u16 = 0;
+    const DIB_HEADER_OFFSET: usize = 18;
+
+    if data.len() < DIB_HEADER_OFFSET || read_le_u16(data, 0)? != DIB_RGB_COLORS {
+        return None;
+    }
+
+    let scan_count = read_le_u16(data, 2)?;
+    let start_scan = read_le_u16(data, 4)?;
+    let source_y = i32::from(read_le_i16(data, 6)?);
+    let source_x = i32::from(read_le_i16(data, 8)?);
+    let source_height = i32::from(read_le_i16(data, 10)?.unsigned_abs());
+    let source_width = i32::from(read_le_i16(data, 12)?.unsigned_abs());
+    let destination_y = i32::from(read_le_i16(data, 14)?);
+    let destination_x = i32::from(read_le_i16(data, 16)?);
+
+    if source_width == 0 || source_height == 0 || start_scan != 0 {
+        return None;
+    }
+    if scan_count != u16::try_from(source_height).ok()? {
+        return None;
+    }
+
+    let image = parse_vector_raster_dib_image(
+        &data[DIB_HEADER_OFFSET..],
+        source_x,
+        source_y,
+        source_width,
+        source_height,
+    )?;
+
+    wmf_raster_image_command(
+        destination_x,
+        destination_y,
+        source_width,
+        source_height,
         window_origin_x,
         window_origin_y,
         window_width,
@@ -42876,6 +42943,45 @@ After\par}"#;
     }
 
     #[test]
+    fn wmf_setdib_to_dev_record_becomes_passive_raster_image() {
+        let records = [
+            wmf_setdib_to_dev_record(12, 18, 2, 1, 0, 1, &minimal_24bit_dib_with_dimensions(2, 1)),
+            wmf_setdib_to_dev_record(50, 30, 2, 1, 1, 1, &minimal_24bit_dib_with_dimensions(2, 1)),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 12.0,
+                top: 18.0,
+                right: 14.0,
+                bottom: 19.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![255, 0, 0, 0, 255, 0]
+        ));
+    }
+
+    #[test]
     fn wmf_srccopy_dibbitblt_record_becomes_passive_raster_image() {
         let record = wmf_dibbitblt_record(
             15,
@@ -44215,6 +44321,33 @@ fn wmf_stretchdib_dib_record_with_source(
     write_test_le_i16(&mut record, 14, source_width);
     write_test_le_i16(&mut record, 16, source_y);
     write_test_le_i16(&mut record, 18, source_x);
+    record
+}
+
+#[cfg(test)]
+fn wmf_setdib_to_dev_record(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    start_scan: u16,
+    scan_count: u16,
+    dib: &[u8],
+) -> Vec<u8> {
+    let size = (6 + 18 + dib.len()).next_multiple_of(2);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, (size / 2) as u32);
+    write_test_le_u16(&mut record, 4, 0x0d33);
+    write_test_le_u16(&mut record, 6, 0);
+    write_test_le_u16(&mut record, 8, scan_count);
+    write_test_le_u16(&mut record, 10, start_scan);
+    write_test_le_i16(&mut record, 12, 0);
+    write_test_le_i16(&mut record, 14, 0);
+    write_test_le_i16(&mut record, 16, height);
+    write_test_le_i16(&mut record, 18, width);
+    write_test_le_i16(&mut record, 20, y);
+    write_test_le_i16(&mut record, 22, x);
+    record[24..24 + dib.len()].copy_from_slice(dib);
     record
 }
 
