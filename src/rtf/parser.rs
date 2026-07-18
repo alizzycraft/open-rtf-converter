@@ -24855,6 +24855,7 @@ const WMF_DSTINVERT_RASTER_OP: u32 = 0x0055_0009;
 const WMF_MERGEPAINT_RASTER_OP: u32 = 0x00bb_0226;
 const WMF_MERGECOPY_RASTER_OP: u32 = 0x00c0_00ca;
 const WMF_NOTSRCERASE_RASTER_OP: u32 = 0x0011_00a6;
+const WMF_NOTSRCCOPY_RASTER_OP: u32 = 0x0033_0008;
 const WMF_NOTPATCOPY_RASTER_OP: u32 = 0x000f_0001;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
 const WMF_PATINVERT_RASTER_OP: u32 = 0x005a_0049;
@@ -27484,6 +27485,7 @@ fn passive_source_raster_transfer_mode(
 ) -> Option<PassiveSourceRasterTransferMode> {
     match raster_op {
         WMF_SRCCOPY_RASTER_OP => Some(PassiveSourceRasterTransferMode::Copy),
+        WMF_NOTSRCCOPY_RASTER_OP => Some(PassiveSourceRasterTransferMode::Invert),
         WMF_SRCAND_RASTER_OP if blank_destination => Some(PassiveSourceRasterTransferMode::Copy),
         WMF_SRCINVERT_RASTER_OP if blank_destination => {
             Some(PassiveSourceRasterTransferMode::Invert)
@@ -45173,6 +45175,52 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_notsrccopy_stretchdibits_after_paint_becomes_passive_inverted_raster_image() {
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_NOTSRCCOPY_RASTER_OP,
+                &minimal_24bit_dib_with_dimensions(2, 1),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(matches!(
+            &image.vector_commands[1],
+            StaticImageVectorCommand::RasterImage {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![0, 255, 255, 255, 0, 255]
+        ));
+    }
+
+    #[test]
     fn emf_srcand_stretchdibits_after_paint_is_skipped_as_backdrop_dependent() {
         let records = [
             emf_rect_record(43, 0, 0, 30, 30),
@@ -45494,6 +45542,45 @@ After\par}"#;
             80,
             40,
             WMF_SRCINVERT_RASTER_OP,
+            &minimal_24bit_dib_with_dimensions(2, 1),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &[record]))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![0, 255, 255, 255, 0, 255]
+        ));
+    }
+
+    #[test]
+    fn wmf_notsrccopy_stretchdib_record_becomes_passive_inverted_raster_image() {
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_NOTSRCCOPY_RASTER_OP,
             &minimal_24bit_dib_with_dimensions(2, 1),
         );
         let input = format!(
