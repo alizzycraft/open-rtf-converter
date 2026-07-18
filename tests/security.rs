@@ -37821,6 +37821,35 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
                 &minimal_rgba_png(&[[255, 0, 0, 128], [0, 255, 0, 255]]),
             ),
         ),
+        emf_transparentblt_dib_record(
+            152,
+            46,
+            48,
+            28,
+            Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            &minimal_compressed_dib_with_payload(
+                2,
+                1,
+                5,
+                &minimal_indexed_png_with_samples(&[0, 1]),
+            ),
+        ),
+        emf_transparentblt_dib_record(
+            156,
+            50,
+            48,
+            28,
+            Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
+            &minimal_compressed_dib_with_payload(2, 1, 5, &minimal_grayscale_png(&[128, 255])),
+        ),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
@@ -37841,7 +37870,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 4);
+    assert_eq!(image.vector_commands.len(), 6);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37895,6 +37924,33 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
         .unwrap(),
         vec![0, 0, 255]
     );
+    let indexed_png_alpha_mask = match &image.vector_commands[4] {
+        StaticImageVectorCommand::RasterImage { image, .. } => image
+            .alpha_mask
+            .as_ref()
+            .expect("indexed PNG transparent color key alpha mask"),
+        _ => panic!("expected indexed PNG keyed transparent raster image"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&indexed_png_alpha_mask.bytes, 3,)
+            .unwrap(),
+        vec![0, 0, 255]
+    );
+    let grayscale_png_alpha_mask = match &image.vector_commands[5] {
+        StaticImageVectorCommand::RasterImage { image, .. } => image
+            .alpha_mask
+            .as_ref()
+            .expect("grayscale PNG transparent color key alpha mask"),
+        _ => panic!("expected grayscale PNG keyed transparent raster image"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+            &grayscale_png_alpha_mask.bytes,
+            3,
+        )
+        .unwrap(),
+        vec![0, 0, 255]
+    );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
@@ -37934,7 +37990,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 4,
+            >= 6,
         "keyed EMF TRANSPARENTBLT DIBs should render as passive image XObjects"
     );
     assert!(
@@ -52230,6 +52286,26 @@ fn minimal_grayscale_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     png
 }
 
+fn minimal_grayscale_png(samples: &[u8]) -> Vec<u8> {
+    let width = u32::try_from(samples.len()).expect("test PNG width fits u32");
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut scanline = Vec::with_capacity(1 + samples.len());
+    scanline.push(0);
+    scanline.extend_from_slice(samples);
+    let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanline, 6);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
 fn minimal_indexed_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     let mut png = Vec::new();
     png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
@@ -52244,6 +52320,27 @@ fn minimal_indexed_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     let idat = [
         0x78, 0x01, 0x01, 0x02, 0x00, 0xfd, 0xff, 0x00, 0x01, 0x00, 0x02, 0x00, 0x02,
     ];
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+fn minimal_indexed_png_with_samples(samples: &[u8]) -> Vec<u8> {
+    let width = u32::try_from(samples.len()).expect("test PNG width fits u32");
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 3, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+    push_png_chunk(&mut png, b"PLTE", &[255, 0, 0, 0, 255, 0]);
+
+    let mut scanline = Vec::with_capacity(1 + samples.len());
+    scanline.push(0);
+    scanline.extend_from_slice(samples);
+    let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanline, 6);
     push_png_chunk(&mut png, b"IDAT", &idat);
     push_png_chunk(&mut png, b"IEND", &[]);
     png

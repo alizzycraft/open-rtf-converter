@@ -22904,6 +22904,7 @@ fn parse_emf_transparentblt_keyed(
         image.width_px,
         image.height_px,
         transparent,
+        &image.palette,
         image.alpha_mask,
     )?;
 
@@ -22938,12 +22939,19 @@ fn keyed_vector_raster_alpha_mask(
     width_px: u32,
     height_px: u32,
     transparent: Color,
+    palette: &[u8],
     existing_mask: Option<StaticImageAlphaMask>,
 ) -> Option<Option<StaticImageAlphaMask>> {
     match format {
         ImageFormat::Rgb8 => keyed_rgb_alpha_mask(bytes, width_px, height_px, transparent),
         ImageFormat::Png if existing_mask.is_none() => {
             keyed_png_rgb_alpha_mask(bytes, width_px, height_px, transparent)
+        }
+        ImageFormat::PngIndexed if existing_mask.is_none() => {
+            keyed_png_indexed_alpha_mask(bytes, width_px, height_px, transparent, palette)
+        }
+        ImageFormat::PngGrayscale if existing_mask.is_none() => {
+            keyed_png_grayscale_alpha_mask(bytes, width_px, height_px, transparent)
         }
         _ => None,
     }
@@ -23000,6 +23008,68 @@ fn keyed_png_rgb_alpha_mask(
             let is_transparent = pixel[0] == transparent.red
                 && pixel[1] == transparent.green
                 && pixel[2] == transparent.blue;
+            has_transparent_pixel |= is_transparent;
+            mask.push(if is_transparent { 0 } else { u8::MAX });
+        }
+    }
+    if !has_transparent_pixel {
+        return Some(None);
+    }
+    Some(Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&mask, 6),
+    }))
+}
+
+fn keyed_png_indexed_alpha_mask(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    transparent: Color,
+    palette: &[u8],
+) -> Option<Option<StaticImageAlphaMask>> {
+    let (width, height, row_len, mut scanlines) =
+        unfiltered_png_scanlines(idat, width_px, height_px, 1)?;
+    let output_row_len = width.checked_add(1)?;
+    let mut mask = Vec::with_capacity(output_row_len.checked_mul(height)?);
+    let mut has_transparent_pixel = false;
+    for row in scanlines.chunks_exact_mut(row_len) {
+        mask.push(0);
+        for sample in &row[1..] {
+            let palette_start = usize::from(*sample).checked_mul(3)?;
+            let entry = palette.get(palette_start..palette_start.checked_add(3)?)?;
+            let is_transparent = entry[0] == transparent.red
+                && entry[1] == transparent.green
+                && entry[2] == transparent.blue;
+            has_transparent_pixel |= is_transparent;
+            mask.push(if is_transparent { 0 } else { u8::MAX });
+        }
+    }
+    if !has_transparent_pixel {
+        return Some(None);
+    }
+    Some(Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&mask, 6),
+    }))
+}
+
+fn keyed_png_grayscale_alpha_mask(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    transparent: Color,
+) -> Option<Option<StaticImageAlphaMask>> {
+    if transparent.red != transparent.green || transparent.red != transparent.blue {
+        return Some(None);
+    }
+    let (width, height, row_len, mut scanlines) =
+        unfiltered_png_scanlines(idat, width_px, height_px, 1)?;
+    let output_row_len = width.checked_add(1)?;
+    let mut mask = Vec::with_capacity(output_row_len.checked_mul(height)?);
+    let mut has_transparent_pixel = false;
+    for row in scanlines.chunks_exact_mut(row_len) {
+        mask.push(0);
+        for sample in &row[1..] {
+            let is_transparent = *sample == transparent.red;
             has_transparent_pixel |= is_transparent;
             mask.push(if is_transparent { 0 } else { u8::MAX });
         }
@@ -42660,6 +42730,53 @@ After\par}"#;
 
     #[test]
     fn emf_transparentblt_keyed_color_becomes_passive_alpha_mask() {
+        let indexed_dib = minimal_compressed_dib_with_payload(
+            2,
+            1,
+            5,
+            &minimal_low_bit_indexed_png(&[0, 1], 8, 2),
+        );
+        let indexed_image = parse_vector_raster_dib_image(&indexed_dib, 0, 0, 2, 1, false)
+            .expect("indexed compressed DIB fixture should normalize");
+        assert_eq!(indexed_image.format, ImageFormat::PngIndexed);
+        assert_eq!(indexed_image.palette, vec![255, 0, 0, 0, 255, 0]);
+        assert!(
+            keyed_vector_raster_alpha_mask(
+                indexed_image.format,
+                &indexed_image.bytes,
+                indexed_image.width_px,
+                indexed_image.height_px,
+                Color {
+                    red: 255,
+                    green: 0,
+                    blue: 0,
+                },
+                &indexed_image.palette,
+                indexed_image.alpha_mask,
+            )
+            .is_some()
+        );
+        let grayscale_dib =
+            minimal_compressed_dib_with_payload(2, 1, 5, &minimal_grayscale_png(&[128, 255]));
+        let grayscale_image = parse_vector_raster_dib_image(&grayscale_dib, 0, 0, 2, 1, false)
+            .expect("grayscale compressed DIB fixture should normalize");
+        assert_eq!(grayscale_image.format, ImageFormat::PngGrayscale);
+        assert!(
+            keyed_vector_raster_alpha_mask(
+                grayscale_image.format,
+                &grayscale_image.bytes,
+                grayscale_image.width_px,
+                grayscale_image.height_px,
+                Color {
+                    red: 128,
+                    green: 128,
+                    blue: 128,
+                },
+                &grayscale_image.palette,
+                grayscale_image.alpha_mask,
+            )
+            .is_some()
+        );
         let records = [
             emf_transparentblt_dib_record(
                 18,
@@ -42736,6 +42853,35 @@ After\par}"#;
                     &minimal_rgba_png(&[[255, 0, 0, 128], [0, 255, 0, 255]]),
                 ),
             ),
+            emf_transparentblt_dib_record(
+                150,
+                46,
+                42,
+                20,
+                Color {
+                    red: 255,
+                    green: 0,
+                    blue: 0,
+                },
+                &minimal_compressed_dib_with_payload(
+                    2,
+                    1,
+                    5,
+                    &minimal_low_bit_indexed_png(&[0, 1], 8, 2),
+                ),
+            ),
+            emf_transparentblt_dib_record(
+                154,
+                50,
+                42,
+                20,
+                Color {
+                    red: 128,
+                    green: 128,
+                    blue: 128,
+                },
+                &minimal_compressed_dib_with_payload(2, 1, 5, &minimal_grayscale_png(&[128, 255])),
+            ),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
@@ -42749,7 +42895,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 4);
+        assert_eq!(image.vector_commands.len(), 6);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -42803,6 +42949,36 @@ After\par}"#;
         assert_eq!(
             miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
                 &compressed_png_alpha_mask.bytes,
+                3,
+            )
+            .unwrap(),
+            vec![0, 0, 255]
+        );
+        let indexed_png_alpha_mask = match &image.vector_commands[4] {
+            StaticImageVectorCommand::RasterImage { image, .. } => image
+                .alpha_mask
+                .as_ref()
+                .expect("indexed PNG transparent color key alpha mask"),
+            _ => panic!("expected indexed PNG keyed transparent raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+                &indexed_png_alpha_mask.bytes,
+                3,
+            )
+            .unwrap(),
+            vec![0, 0, 255]
+        );
+        let grayscale_png_alpha_mask = match &image.vector_commands[5] {
+            StaticImageVectorCommand::RasterImage { image, .. } => image
+                .alpha_mask
+                .as_ref()
+                .expect("grayscale PNG transparent color key alpha mask"),
+            _ => panic!("expected grayscale PNG keyed transparent raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+                &grayscale_png_alpha_mask.bytes,
                 3,
             )
             .unwrap(),
@@ -46858,6 +47034,27 @@ fn minimal_grayscale_alpha_png(pixels: &[[u8; 2]]) -> Vec<u8> {
         4,
         pixels.iter().flat_map(|pixel| pixel.iter().copied()),
     )
+}
+
+#[cfg(test)]
+fn minimal_grayscale_png(samples: &[u8]) -> Vec<u8> {
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let width = u32::try_from(samples.len()).expect("test PNG width fits u32");
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut scanline = Vec::with_capacity(1 + samples.len());
+    scanline.push(0);
+    scanline.extend_from_slice(samples);
+    let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanline, 6);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
 }
 
 #[cfg(test)]
