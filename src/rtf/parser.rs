@@ -24077,6 +24077,34 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
+            0x0b23 => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some((left, top, right, bottom)) = parse_wmf_stretchblt_patcopy_bounds(
+                    data,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                ) && bounds_is_visible((left, top, right, bottom))
+                    && state.fill_color.is_some()
+                {
+                    commands.push(StaticImageVectorCommand::Rectangle {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        stroke_color: None,
+                        stroke_width: 0.0,
+                        stroke_style: BorderStyle::Single,
+                        fill_pattern: ShadingPattern::None,
+                        fill_color: state.fill_color,
+                    });
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
             0x041f => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -24395,6 +24423,44 @@ fn parse_wmf_patblt_bounds(
     let x = i32::from(read_le_i16(data, 6)?);
     let height = i32::from(read_le_i16(data, 8)?.unsigned_abs().max(1));
     let width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
+    let left_top = normalize_wmf_point(
+        x,
+        y,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    let right_bottom = normalize_wmf_point(
+        x.saturating_add(width),
+        y.saturating_add(height),
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    Some((
+        left_top.0.min(right_bottom.0),
+        left_top.1.min(right_bottom.1),
+        left_top.0.max(right_bottom.0),
+        left_top.1.max(right_bottom.1),
+    ))
+}
+
+fn parse_wmf_stretchblt_patcopy_bounds(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32, f32, f32)> {
+    if data.len() < 20 || read_le_u32(data, 0)? != WMF_PATCOPY_RASTER_OP {
+        return None;
+    }
+    let y = i32::from(read_le_i16(data, 16)?);
+    let x = i32::from(read_le_i16(data, 18)?);
+    let height = i32::from(read_le_i16(data, 12)?.unsigned_abs().max(1));
+    let width = i32::from(read_le_i16(data, 14)?.unsigned_abs().max(1));
     let left_top = normalize_wmf_point(
         x,
         y,
@@ -38779,6 +38845,44 @@ After\par}"#;
                 segment,
                 StaticImageVectorPathSegment::MoveTo(50.0, 25.0)
             ))
+        ));
+    }
+
+    #[test]
+    fn wmf_patcopy_stretchblt_records_become_passive_filled_rectangles() {
+        let wmf_hex = concat!(
+            "0100090000032900000001000d0000000000",
+            "050000000c026400c800",
+            "07000000fc020000285078000000",
+            "040000002d010000",
+            "0d000000230b2100f00000000000000000002800500019000f00",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 40,
+                    green: 80,
+                    blue: 120
+                }),
+                ..
+            }
         ));
     }
 
