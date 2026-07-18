@@ -37802,6 +37802,11 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
 fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_payload_leakage() {
     let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
     dib.extend_from_slice(b"TRAILING-EMF-ALPHABLEND /JavaScript");
+    let jpeg = minimal_jpeg_with_dimensions(2, 1);
+    let mut jpeg_payload = jpeg.clone();
+    jpeg_payload.extend_from_slice(b"TRAILING-EMF-ALPHABLEND-JPEG /EmbeddedFile");
+    let mut jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg_payload);
+    jpeg_dib.extend_from_slice(b"TRAILING-EMF-ALPHABLEND-JPEG-DIB /Launch");
     let records = [
         emf_alphablend_dib_record(18, 24, 48, 28, 0xff, 0, &dib),
         emf_alphablend_dib_record(70, 30, 48, 28, 0x80, 0, &dib),
@@ -37841,6 +37846,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
                 &minimal_rgba_png(&[[255, 0, 0, 16], [0, 255, 0, 240]]),
             ),
         ),
+        emf_alphablend_dib_record(10, 50, 48, 28, 0x60, 0, &jpeg_dib),
         emf_alphablend_dib_record(142, 50, 48, 28, 0xff, 1, &dib),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
@@ -37862,7 +37868,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 5);
+    assert_eq!(image.vector_commands.len(), 6);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37927,6 +37933,30 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
         .unwrap(),
         vec![0, 16, 240]
     );
+    assert!(matches!(
+        &image.vector_commands[5],
+            StaticImageVectorCommand::RasterImage {
+            left: 10.0,
+            top: 50.0,
+            right: 58.0,
+            bottom: 78.0,
+            image,
+        } if image.format == ImageFormat::Jpeg
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == jpeg
+    ));
+    let jpeg_alpha_mask = match &image.vector_commands[5] {
+        StaticImageVectorCommand::RasterImage { image, .. } => image
+            .alpha_mask
+            .as_ref()
+            .expect("constant-alpha JPEG EMF ALPHABLEND should render as a passive alpha mask"),
+        _ => panic!("expected constant-alpha JPEG raster image"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&jpeg_alpha_mask.bytes, 3).unwrap(),
+        vec![0, 0x60, 0x60]
+    );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
@@ -37936,8 +37966,11 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
         "emfblip",
         "ALPHABLEND",
         "TRAILING-EMF-ALPHABLEND",
+        "TRAILING-EMF-ALPHABLEND-JPEG",
+        "TRAILING-EMF-ALPHABLEND-JPEG-DIB",
         "JavaScript",
         "EmbeddedFile",
+        "Launch",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -37966,7 +37999,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 4,
+            >= 5,
         "EMF ALPHABLEND DIBs should render as passive image XObjects"
     );
     assert!(
@@ -37981,6 +38014,8 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
         emf_hex.as_bytes(),
         b"ALPHABLEND",
         b"TRAILING-EMF-ALPHABLEND",
+        b"TRAILING-EMF-ALPHABLEND-JPEG",
+        b"TRAILING-EMF-ALPHABLEND-JPEG-DIB",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

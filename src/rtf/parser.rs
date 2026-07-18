@@ -43449,6 +43449,15 @@ After\par}"#;
                 ),
             ),
             emf_alphablend_dib_record(
+                10,
+                56,
+                44,
+                20,
+                0x60,
+                0,
+                &minimal_compressed_dib_with_payload(2, 1, 4, &minimal_jpeg_with_dimensions(2, 1)),
+            ),
+            emf_alphablend_dib_record(
                 144,
                 52,
                 44,
@@ -43470,7 +43479,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 5);
+        assert_eq!(image.vector_commands.len(), 6);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -43539,6 +43548,30 @@ After\par}"#;
             .unwrap(),
             vec![0, 16, 240]
         );
+        let jpeg_alpha_mask = match &image.vector_commands[5] {
+            StaticImageVectorCommand::RasterImage { image, .. } => image
+                .alpha_mask
+                .as_ref()
+                .expect("constant-alpha JPEG source mask"),
+            _ => panic!("expected constant-alpha JPEG raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&jpeg_alpha_mask.bytes, 3)
+                .unwrap(),
+            vec![0, 0x60, 0x60]
+        );
+        assert!(matches!(
+            &image.vector_commands[5],
+            StaticImageVectorCommand::RasterImage {
+                left: 10.0,
+                top: 56.0,
+                right: 54.0,
+                bottom: 76.0,
+                image,
+            } if image.format == ImageFormat::Jpeg
+                && image.width_px == 2
+                && image.height_px == 1
+        ));
     }
 
     #[test]
