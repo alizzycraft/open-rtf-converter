@@ -42503,8 +42503,22 @@ After\par}"#;
                 ),
             ),
             emf_alphablend_dib_record(
-                120,
-                50,
+                128,
+                48,
+                44,
+                24,
+                0xff,
+                1,
+                &minimal_compressed_dib_with_payload(
+                    2,
+                    1,
+                    5,
+                    &minimal_rgba_png(&[[255, 0, 0, 16], [0, 255, 0, 240]]),
+                ),
+            ),
+            emf_alphablend_dib_record(
+                144,
+                52,
                 44,
                 24,
                 0xff,
@@ -42524,7 +42538,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 4);
+        assert_eq!(image.vector_commands.len(), 5);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -42577,6 +42591,21 @@ After\par}"#;
             miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&bitfield_alpha_mask.bytes, 3)
                 .unwrap(),
             vec![0, 32, 224]
+        );
+        let compressed_png_alpha_mask = match &image.vector_commands[4] {
+            StaticImageVectorCommand::RasterImage { image, .. } => image
+                .alpha_mask
+                .as_ref()
+                .expect("compressed PNG source alpha mask"),
+            _ => panic!("expected compressed PNG alpha raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+                &compressed_png_alpha_mask.bytes,
+                3,
+            )
+            .unwrap(),
+            vec![0, 16, 240]
         );
     }
 

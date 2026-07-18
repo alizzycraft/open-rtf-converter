@@ -37570,7 +37570,21 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
                 &[[255, 0, 0, 32], [0, 255, 0, 224]],
             ),
         ),
-        emf_alphablend_dib_record(130, 46, 48, 28, 0xff, 1, &dib),
+        emf_alphablend_dib_record(
+            130,
+            46,
+            48,
+            28,
+            0xff,
+            1,
+            &minimal_compressed_dib_with_payload(
+                2,
+                1,
+                5,
+                &minimal_rgba_png(&[[255, 0, 0, 16], [0, 255, 0, 240]]),
+            ),
+        ),
+        emf_alphablend_dib_record(142, 50, 48, 28, 0xff, 1, &dib),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
@@ -37591,7 +37605,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 4);
+    assert_eq!(image.vector_commands.len(), 5);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37640,6 +37654,21 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
         miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&bitfield_alpha_mask.bytes, 3)
             .unwrap(),
         vec![0, 32, 224]
+    );
+    let compressed_png_alpha_mask = match &image.vector_commands[4] {
+        StaticImageVectorCommand::RasterImage { image, .. } => image
+            .alpha_mask
+            .as_ref()
+            .expect("compressed PNG EMF ALPHABLEND should render as a passive alpha mask"),
+        _ => panic!("expected compressed PNG alpha raster image"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+            &compressed_png_alpha_mask.bytes,
+            3,
+        )
+        .unwrap(),
+        vec![0, 16, 240]
     );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -52132,6 +52161,28 @@ fn minimal_indexed_png_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     let idat = [
         0x78, 0x01, 0x01, 0x02, 0x00, 0xfd, 0xff, 0x00, 0x01, 0x00, 0x02, 0x00, 0x02,
     ];
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+fn minimal_rgba_png(pixels: &[[u8; 4]]) -> Vec<u8> {
+    let width = u32::try_from(pixels.len()).expect("test PNG width fits u32");
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&1u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut scanline = Vec::with_capacity(1 + pixels.len() * 4);
+    scanline.push(0);
+    for pixel in pixels {
+        scanline.extend_from_slice(pixel);
+    }
+    let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanline, 6);
     push_png_chunk(&mut png, b"IDAT", &idat);
     push_png_chunk(&mut png, b"IEND", &[]);
     png
