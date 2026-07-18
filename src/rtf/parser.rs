@@ -22705,11 +22705,11 @@ fn parse_emf_bitmap_blt_srcopy(
     const EMR_BITBLT: u32 = 76;
     const EMR_STRETCHBLT: u32 = 77;
 
-    if data.len() < 92
-        || !is_passive_source_raster_transfer(read_le_u32(data, 32)?, blank_destination)
-    {
+    if data.len() < 92 {
         return None;
     }
+    let transfer_mode =
+        passive_source_raster_transfer_mode(read_le_u32(data, 32)?, blank_destination)?;
 
     let x_dest = read_le_i32(data, 16)?;
     let y_dest = read_le_i32(data, 20)?;
@@ -22741,7 +22741,10 @@ fn parse_emf_bitmap_blt_srcopy(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?;
+    let image = apply_passive_source_raster_transfer_mode(
+        parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?,
+        transfer_mode,
+    )?;
 
     let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
@@ -22774,11 +22777,11 @@ fn parse_emf_stretchdibits_srcopy(
     coordinates: &EmfCoordinateState,
     blank_destination: bool,
 ) -> Option<StaticImageVectorCommand> {
-    if data.len() < 72
-        || !is_passive_source_raster_transfer(read_le_u32(data, 60)?, blank_destination)
-    {
+    if data.len() < 72 {
         return None;
     }
+    let transfer_mode =
+        passive_source_raster_transfer_mode(read_le_u32(data, 60)?, blank_destination)?;
     let x_dest = read_le_i32(data, 16)?;
     let y_dest = read_le_i32(data, 20)?;
     let x_src = read_le_i32(data, 24)?;
@@ -22798,7 +22801,10 @@ fn parse_emf_stretchdibits_srcopy(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?;
+    let image = apply_passive_source_raster_transfer_mode(
+        parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?,
+        transfer_mode,
+    )?;
 
     let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
@@ -24681,6 +24687,12 @@ struct ParsedVectorRasterImage {
     alpha_mask: Option<StaticImageAlphaMask>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum PassiveSourceRasterTransferMode {
+    Copy,
+    Invert,
+}
+
 #[derive(Debug, Copy, Clone)]
 struct DibColorMasks {
     red: u32,
@@ -24850,6 +24862,7 @@ const WMF_PATPAINT_RASTER_OP: u32 = 0x00fb_0a09;
 const WMF_SRCAND_RASTER_OP: u32 = 0x0088_00c6;
 const WMF_SRCCOPY_RASTER_OP: u32 = 0x00cc_0020;
 const WMF_SRCERASE_RASTER_OP: u32 = 0x0044_0328;
+const WMF_SRCINVERT_RASTER_OP: u32 = 0x0066_0046;
 const WMF_SRCPAINT_RASTER_OP: u32 = 0x00ee_0086;
 const WMF_WHITENESS_RASTER_OP: u32 = 0x00ff_0062;
 const WMF_ESCAPE_MFCOMMENT: u16 = 0x000f;
@@ -27166,11 +27179,11 @@ fn parse_wmf_stretchdib_srcopy(
     const DIB_RGB_COLORS: u16 = 0;
     const DIB_HEADER_OFFSET: usize = 22;
 
-    if data.len() < DIB_HEADER_OFFSET
-        || !is_passive_source_raster_transfer(read_le_u32(data, 0)?, blank_destination)
-    {
+    if data.len() < DIB_HEADER_OFFSET {
         return None;
     }
+    let transfer_mode =
+        passive_source_raster_transfer_mode(read_le_u32(data, 0)?, blank_destination)?;
     if read_le_u16(data, 4)? != DIB_RGB_COLORS {
         return None;
     }
@@ -27187,13 +27200,16 @@ fn parse_wmf_stretchdib_srcopy(
     let destination_width = i32::from(read_le_i16(data, 16)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 18)?);
     let destination_x = i32::from(read_le_i16(data, 20)?);
-    let image = parse_vector_raster_dib_image(
-        &data[DIB_HEADER_OFFSET..],
-        source_x,
-        source_y,
-        source_width,
-        i32::try_from(source_height.unsigned_abs()).ok()?,
-        false,
+    let image = apply_passive_source_raster_transfer_mode(
+        parse_vector_raster_dib_image(
+            &data[DIB_HEADER_OFFSET..],
+            source_x,
+            source_y,
+            source_width,
+            i32::try_from(source_height.unsigned_abs()).ok()?,
+            false,
+        )?,
+        transfer_mode,
     )?;
 
     wmf_raster_image_command(
@@ -27219,11 +27235,11 @@ fn parse_wmf_dibbitblt_srcopy(
 ) -> Option<StaticImageVectorCommand> {
     const DIB_HEADER_OFFSET: usize = 16;
 
-    if data.len() < DIB_HEADER_OFFSET
-        || !is_passive_source_raster_transfer(read_le_u32(data, 0)?, blank_destination)
-    {
+    if data.len() < DIB_HEADER_OFFSET {
         return None;
     }
+    let transfer_mode =
+        passive_source_raster_transfer_mode(read_le_u32(data, 0)?, blank_destination)?;
     let source_y = i32::from(read_le_i16(data, 4)?);
     let source_x = i32::from(read_le_i16(data, 6)?);
 
@@ -27231,13 +27247,16 @@ fn parse_wmf_dibbitblt_srcopy(
     let destination_width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 12)?);
     let destination_x = i32::from(read_le_i16(data, 14)?);
-    let image = parse_vector_raster_dib_image(
-        &data[DIB_HEADER_OFFSET..],
-        source_x,
-        source_y,
-        destination_width,
-        destination_height,
-        false,
+    let image = apply_passive_source_raster_transfer_mode(
+        parse_vector_raster_dib_image(
+            &data[DIB_HEADER_OFFSET..],
+            source_x,
+            source_y,
+            destination_width,
+            destination_height,
+            false,
+        )?,
+        transfer_mode,
     )?;
 
     wmf_raster_image_command(
@@ -27263,11 +27282,11 @@ fn parse_wmf_dibstretchblt_srcopy(
 ) -> Option<StaticImageVectorCommand> {
     const DIB_HEADER_OFFSET: usize = 20;
 
-    if data.len() < DIB_HEADER_OFFSET
-        || !is_passive_source_raster_transfer(read_le_u32(data, 0)?, blank_destination)
-    {
+    if data.len() < DIB_HEADER_OFFSET {
         return None;
     }
+    let transfer_mode =
+        passive_source_raster_transfer_mode(read_le_u32(data, 0)?, blank_destination)?;
     let source_height = i32::from(read_le_i16(data, 4)?);
     let source_width = i32::from(read_le_i16(data, 6)?);
     let source_y = i32::from(read_le_i16(data, 8)?);
@@ -27280,13 +27299,16 @@ fn parse_wmf_dibstretchblt_srcopy(
     let destination_width = i32::from(read_le_i16(data, 14)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 16)?);
     let destination_x = i32::from(read_le_i16(data, 18)?);
-    let image = parse_vector_raster_dib_image(
-        &data[DIB_HEADER_OFFSET..],
-        source_x,
-        source_y,
-        source_width,
-        i32::try_from(source_height.unsigned_abs()).ok()?,
-        false,
+    let image = apply_passive_source_raster_transfer_mode(
+        parse_vector_raster_dib_image(
+            &data[DIB_HEADER_OFFSET..],
+            source_x,
+            source_y,
+            source_width,
+            i32::try_from(source_height.unsigned_abs()).ok()?,
+            false,
+        )?,
+        transfer_mode,
     )?;
 
     wmf_raster_image_command(
@@ -27456,8 +27478,36 @@ fn is_passive_noop_raster_transfer(data: &[u8], raster_op_offset: usize) -> bool
     read_le_u32(data, raster_op_offset) == Some(WMF_DSTCOPY_RASTER_OP)
 }
 
-fn is_passive_source_raster_transfer(raster_op: u32, blank_destination: bool) -> bool {
-    raster_op == WMF_SRCCOPY_RASTER_OP || (blank_destination && raster_op == WMF_SRCAND_RASTER_OP)
+fn passive_source_raster_transfer_mode(
+    raster_op: u32,
+    blank_destination: bool,
+) -> Option<PassiveSourceRasterTransferMode> {
+    match raster_op {
+        WMF_SRCCOPY_RASTER_OP => Some(PassiveSourceRasterTransferMode::Copy),
+        WMF_SRCAND_RASTER_OP if blank_destination => Some(PassiveSourceRasterTransferMode::Copy),
+        WMF_SRCINVERT_RASTER_OP if blank_destination => {
+            Some(PassiveSourceRasterTransferMode::Invert)
+        }
+        _ => None,
+    }
+}
+
+fn apply_passive_source_raster_transfer_mode(
+    mut image: ParsedVectorRasterImage,
+    mode: PassiveSourceRasterTransferMode,
+) -> Option<ParsedVectorRasterImage> {
+    match mode {
+        PassiveSourceRasterTransferMode::Copy => Some(image),
+        PassiveSourceRasterTransferMode::Invert => {
+            if image.format != ImageFormat::Rgb8 || !image.palette.is_empty() {
+                return None;
+            }
+            for byte in &mut image.bytes {
+                *byte = u8::MAX.saturating_sub(*byte);
+            }
+            Some(image)
+        }
+    }
 }
 
 fn inverted_color(color: Color) -> Color {
@@ -45083,6 +45133,46 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_blank_destination_srcinvert_stretchdibits_record_becomes_passive_inverted_raster_image()
+    {
+        let records = [emf_stretchdibits_dib_record(
+            20,
+            15,
+            60,
+            30,
+            WMF_SRCINVERT_RASTER_OP,
+            &minimal_24bit_dib_with_dimensions(2, 1),
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![0, 255, 255, 255, 0, 255]
+        ));
+    }
+
+    #[test]
     fn emf_srcand_stretchdibits_after_paint_is_skipped_as_backdrop_dependent() {
         let records = [
             emf_rect_record(43, 0, 0, 30, 30),
@@ -45092,6 +45182,43 @@ After\par}"#;
                 60,
                 30,
                 WMF_SRCAND_RASTER_OP,
+                &minimal_24bit_dib_with_dimensions(2, 1),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected partial passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+    }
+
+    #[test]
+    fn emf_srcinvert_stretchdibits_after_paint_is_skipped_as_backdrop_dependent() {
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_SRCINVERT_RASTER_OP,
                 &minimal_24bit_dib_with_dimensions(2, 1),
             ),
         ];
@@ -45356,6 +45483,45 @@ After\par}"#;
                 && image.width_px == 2
                 && image.height_px == 1
                 && image.bytes == vec![255, 0, 0, 0, 255, 0]
+        ));
+    }
+
+    #[test]
+    fn wmf_blank_destination_srcinvert_stretchdib_record_becomes_passive_inverted_raster_image() {
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_SRCINVERT_RASTER_OP,
+            &minimal_24bit_dib_with_dimensions(2, 1),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &[record]))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![0, 255, 255, 255, 0, 255]
         ));
     }
 
