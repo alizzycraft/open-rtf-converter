@@ -24077,13 +24077,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
-            0x0922 | 0x0940 | 0x0b23 => {
+            0x0922 | 0x0940 | 0x0b23 | 0x0b41 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
                 if let Some((left, top, right, bottom)) = parse_wmf_blt_patcopy_bounds(
                     data,
-                    function == 0x0b23,
+                    matches!(function, 0x0b23 | 0x0b41),
                     window_origin_x,
                     window_origin_y,
                     window_width,
@@ -38965,6 +38965,44 @@ After\par}"#;
                     red: 120,
                     green: 80,
                     blue: 40
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_patcopy_dibstretchblt_records_become_passive_filled_rectangles() {
+        let wmf_hex = concat!(
+            "0100090000032900000001000d0000000000",
+            "050000000c026400c800",
+            "07000000fc0200002846a0000000",
+            "040000002d010000",
+            "0d000000410b2100f00000000000000000002800500019000f00",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 40,
+                    green: 70,
+                    blue: 160
                 }),
                 ..
             }
