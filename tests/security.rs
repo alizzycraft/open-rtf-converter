@@ -37463,9 +37463,22 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
         ],
     );
     partial_dib.extend_from_slice(b"TRAILING-EMF-PARTIAL-SETDIBITS /JavaScript");
+    let png_rows = [
+        [10, 20, 30],
+        [40, 50, 60],
+        [70, 80, 90],
+        [100, 110, 120],
+        [130, 140, 150],
+        [160, 170, 180],
+    ];
+    let mut compressed_png_dib =
+        minimal_compressed_dib_with_payload(2, 3, 5, &minimal_rgb_png_with_rows(2, 3, &png_rows));
+    compressed_png_dib
+        .extend_from_slice(b"TRAILING-EMF-COMPRESSED-PARTIAL-SETDIBITS /EmbeddedFile");
     let records = [
         emf_setdibitstodevice_dib_record(18, 22, 2, 1, 0, 1, &dib),
         emf_setdibitstodevice_dib_record(42, 34, 2, 3, 1, 1, &partial_dib),
+        emf_setdibitstodevice_dib_record(68, 42, 2, 3, 1, 1, &compressed_png_dib),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
@@ -37486,7 +37499,7 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(image.vector_commands.len(), 3);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37513,11 +37526,31 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
             && image.height_px == 1
             && image.bytes == vec![70, 80, 90, 100, 110, 120]
     ));
+    match &image.vector_commands[2] {
+        StaticImageVectorCommand::RasterImage {
+            left: 68.0,
+            top: 42.0,
+            right: 70.0,
+            bottom: 43.0,
+            image,
+        } => {
+            assert_eq!(image.format, ImageFormat::Png);
+            assert_eq!(image.width_px, 2);
+            assert_eq!(image.height_px, 1);
+            assert_eq!(
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 7).unwrap(),
+                vec![0, 70, 80, 90, 100, 110, 120]
+            );
+            assert!(image.alpha_mask.is_none());
+        }
+        _ => panic!("expected compressed partial SETDIB PNG raster image"),
+    }
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
         "TRAILING-EMF-SETDIBITS",
         "TRAILING-EMF-PARTIAL-SETDIBITS",
+        "TRAILING-EMF-COMPRESSED-PARTIAL-SETDIBITS",
         "JavaScript",
         "EmbeddedFile",
     ] {
@@ -37548,7 +37581,7 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 2,
+            >= 3,
         "EMF SETDIBITSTODEVICE DIB should render as a passive image XObject"
     );
     for forbidden in [
@@ -37556,6 +37589,7 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
         emf_hex.as_bytes(),
         b"TRAILING-EMF-SETDIBITS",
         b"TRAILING-EMF-PARTIAL-SETDIBITS",
+        b"TRAILING-EMF-COMPRESSED-PARTIAL-SETDIBITS",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -52403,6 +52437,30 @@ fn minimal_rgb_png(pixels: &[[u8; 3]]) -> Vec<u8> {
         scanline.extend_from_slice(pixel);
     }
     let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanline, 6);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+fn minimal_rgb_png_with_rows(width: u32, height: u32, pixels: &[[u8; 3]]) -> Vec<u8> {
+    assert_eq!(pixels.len(), (width as usize) * (height as usize));
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut scanlines = Vec::with_capacity((height as usize) * (1 + (width as usize * 3)));
+    for row in pixels.chunks(width as usize) {
+        scanlines.push(0);
+        for pixel in row {
+            scanlines.extend_from_slice(pixel);
+        }
+    }
+    let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanlines, 6);
     push_png_chunk(&mut png, b"IDAT", &idat);
     push_png_chunk(&mut png, b"IEND", &[]);
     png

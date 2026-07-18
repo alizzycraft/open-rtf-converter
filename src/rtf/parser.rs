@@ -25217,28 +25217,51 @@ fn parse_vector_raster_dib_scan_lines(
     start_scan: u32,
     scan_count: u32,
 ) -> Option<ParsedVectorRasterImage> {
-    let dib = parse_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    let dib = crop_parsed_dib_scan_lines(
-        dib,
+    if let Some(dib) = parse_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS) {
+        let dib = crop_parsed_dib_scan_lines(
+            dib,
+            source_x,
+            source_y,
+            source_width,
+            start_scan,
+            scan_count,
+        )?;
+        let pixels = usize::try_from(dib.width_px)
+            .ok()?
+            .checked_mul(usize::try_from(dib.height_px).ok()?)?;
+        if pixels > MAX_PASSIVE_VECTOR_RASTER_PIXELS {
+            return None;
+        }
+        return Some(ParsedVectorRasterImage {
+            width_px: dib.width_px,
+            height_px: dib.height_px,
+            format: ImageFormat::Rgb8,
+            bytes: dib.rgb,
+            palette: Vec::new(),
+            alpha_mask: None,
+        });
+    }
+
+    let compressed = parse_compressed_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
+    let scan_bottom = start_scan.checked_add(scan_count)?;
+    if scan_count == 0 || scan_bottom > compressed.height_px {
+        return None;
+    }
+    let source_y = i32::try_from(start_scan).ok()?.checked_add(source_y)?;
+    let compressed = crop_compressed_png_vector_raster_image(
+        compressed,
         source_x,
         source_y,
         source_width,
-        start_scan,
-        scan_count,
+        i32::try_from(scan_count).ok()?,
     )?;
-    let pixels = usize::try_from(dib.width_px)
-        .ok()?
-        .checked_mul(usize::try_from(dib.height_px).ok()?)?;
-    if pixels > MAX_PASSIVE_VECTOR_RASTER_PIXELS {
-        return None;
-    }
     Some(ParsedVectorRasterImage {
-        width_px: dib.width_px,
-        height_px: dib.height_px,
-        format: ImageFormat::Rgb8,
-        bytes: dib.rgb,
-        palette: Vec::new(),
-        alpha_mask: None,
+        width_px: compressed.width_px,
+        height_px: compressed.height_px,
+        format: compressed.format,
+        bytes: compressed.bytes,
+        palette: compressed.palette,
+        alpha_mask: compressed.alpha_mask,
     })
 }
 
@@ -42692,6 +42715,20 @@ After\par}"#;
                 1,
                 &minimal_24bit_dib_with_rgb_pixels(2, 3, &rows),
             ),
+            emf_setdibitstodevice_dib_record(
+                86,
+                48,
+                2,
+                3,
+                1,
+                1,
+                &minimal_compressed_dib_with_payload(
+                    2,
+                    3,
+                    5,
+                    &minimal_rgb_png_with_rows(2, 3, &rows),
+                ),
+            ),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
@@ -42705,7 +42742,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(image.vector_commands.len(), 3);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -42736,6 +42773,22 @@ After\par}"#;
                 && image.width_px == 2
                 && image.height_px == 1
                 && image.bytes == vec![70, 80, 90, 100, 110, 120]
+        ));
+        assert!(matches!(
+            &image.vector_commands[2],
+            StaticImageVectorCommand::RasterImage {
+                left: 86.0,
+                top: 48.0,
+                right: 88.0,
+                bottom: 49.0,
+                image,
+            } if image.format == ImageFormat::Png
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.palette.is_empty()
+                && image.alpha_mask.is_none()
+                && unfiltered_png_scanlines(&image.bytes, 2, 1, 3).unwrap().3
+                    == vec![0, 70, 80, 90, 100, 110, 120]
         ));
     }
 
@@ -44144,6 +44197,20 @@ After\par}"#;
                 1,
                 &minimal_24bit_dib_with_rgb_pixels(2, 3, &rows),
             ),
+            wmf_setdib_to_dev_record(
+                86,
+                48,
+                2,
+                3,
+                1,
+                1,
+                &minimal_compressed_dib_with_payload(
+                    2,
+                    3,
+                    5,
+                    &minimal_rgb_png_with_rows(2, 3, &rows),
+                ),
+            ),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
@@ -44157,7 +44224,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(image.vector_commands.len(), 3);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -44188,6 +44255,22 @@ After\par}"#;
                 && image.width_px == 2
                 && image.height_px == 1
                 && image.bytes == vec![70, 80, 90, 100, 110, 120]
+        ));
+        assert!(matches!(
+            &image.vector_commands[2],
+            StaticImageVectorCommand::RasterImage {
+                left: 86.0,
+                top: 48.0,
+                right: 88.0,
+                bottom: 49.0,
+                image,
+            } if image.format == ImageFormat::Png
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.palette.is_empty()
+                && image.alpha_mask.is_none()
+                && unfiltered_png_scanlines(&image.bytes, 2, 1, 3).unwrap().3
+                    == vec![0, 70, 80, 90, 100, 110, 120]
         ));
     }
 
@@ -47196,6 +47279,31 @@ fn minimal_rgb_png(pixels: &[[u8; 3]]) -> Vec<u8> {
         scanline.extend_from_slice(pixel);
     }
     let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanline, 6);
+    push_png_chunk(&mut png, b"IDAT", &idat);
+    push_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+fn minimal_rgb_png_with_rows(width: u32, height: u32, pixels: &[[u8; 3]]) -> Vec<u8> {
+    assert_eq!(pixels.len(), (width as usize) * (height as usize));
+    let mut png = Vec::new();
+    png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    push_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut scanlines = Vec::with_capacity((height as usize) * (1 + (width as usize * 3)));
+    for row in pixels.chunks(width as usize) {
+        scanlines.push(0);
+        for pixel in row {
+            scanlines.extend_from_slice(pixel);
+        }
+    }
+    let idat = miniz_oxide::deflate::compress_to_vec_zlib(&scanlines, 6);
     push_png_chunk(&mut png, b"IDAT", &idat);
     push_png_chunk(&mut png, b"IEND", &[]);
     png
