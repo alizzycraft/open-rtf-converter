@@ -39068,6 +39068,137 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
 }
 
 #[test]
+fn black_brush_mergecopy_raster_transfers_render_passively_without_payload_leakage() {
+    let emf_payload = b"EMF-MERGECOPY-SOURCE-PAYLOAD /JavaScript";
+    let wmf_payload = b"WMF-MERGECOPY-SOURCE-PAYLOAD /EmbeddedFile";
+    let emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[
+            emf_create_brush_record(3, 0, Color::default(), 0),
+            emf_select_object_record(3),
+            emf_bitblt_record(10, 20, 30, 15, 0x00c0_00ca, emf_payload),
+        ],
+    );
+    let wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color::default()),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(15, 25, 80, 40, 0x00c0_00ca, wmf_payload),
+        ],
+    );
+    let emf_hex = bytes_to_hex(&emf);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert!(images.iter().all(|image| {
+        image.format == ImageFormat::WmfVector
+            && image.bytes.is_empty()
+            && image.vector_commands.len() == 1
+    }));
+    for image in &images {
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+    }
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "wmetafile",
+        "EMF-MERGECOPY-SOURCE-PAYLOAD",
+        "WMF-MERGECOPY-SOURCE-PAYLOAD",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "MERGECOPY payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "black-brush MERGECOPY transfers should render passive PDF rectangles"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        b"wmetafile",
+        emf_hex.as_bytes(),
+        wmf_hex.as_bytes(),
+        emf_payload.as_slice(),
+        wmf_payload.as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "MERGECOPY payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leakage() {
     let srcerase_payload = b"SRCERASE-BLANK-SOURCE-PAYLOAD";
     let patpaint_payload = b"PATPAINT-BLANK-SOURCE-PAYLOAD";
@@ -51621,6 +51752,26 @@ fn wmf_set_window_ext_record(width: i16, height: i16) -> Vec<u8> {
     write_test_le_u16(&mut record, 4, 0x020c);
     write_test_le_i16(&mut record, 6, height);
     write_test_le_i16(&mut record, 8, width);
+    record
+}
+
+fn wmf_create_brush_record(color: Color) -> Vec<u8> {
+    let mut record = vec![0; 14];
+    write_test_le_u32(&mut record, 0, 7);
+    write_test_le_u16(&mut record, 4, 0x02fc);
+    write_test_le_u16(&mut record, 6, 0);
+    record[8] = color.red;
+    record[9] = color.green;
+    record[10] = color.blue;
+    write_test_le_u16(&mut record, 12, 0);
+    record
+}
+
+fn wmf_select_object_record(handle: u16) -> Vec<u8> {
+    let mut record = vec![0; 8];
+    write_test_le_u32(&mut record, 0, 4);
+    write_test_le_u16(&mut record, 4, 0x012d);
+    write_test_le_u16(&mut record, 6, handle);
     record
 }
 
