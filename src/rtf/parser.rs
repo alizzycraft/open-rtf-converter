@@ -23809,6 +23809,24 @@ struct ParsedDib {
     rgb: Vec<u8>,
 }
 
+#[derive(Debug, Copy, Clone)]
+struct DibColorMasks {
+    red: u32,
+    green: u32,
+    blue: u32,
+}
+
+impl DibColorMasks {
+    fn are_supported(self) -> bool {
+        self.red != 0
+            && self.green != 0
+            && self.blue != 0
+            && self.red & self.green == 0
+            && self.red & self.blue == 0
+            && self.green & self.blue == 0
+    }
+}
+
 #[derive(Debug)]
 struct ParsedWmfVector {
     width_px: u32,
@@ -23949,6 +23967,7 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     const BITMAPCOREHEADER_SIZE: usize = 12;
     const BITMAPINFOHEADER_SIZE: usize = 40;
     const BI_RGB: u32 = 0;
+    const BI_BITFIELDS: u32 = 3;
 
     if bytes.len() < 4 {
         return None;
@@ -23967,7 +23986,11 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     let planes = read_le_u16(bytes, 12)?;
     let bits_per_pixel = read_le_u16(bytes, 14)?;
     let compression = read_le_u32(bytes, 16)?;
-    if width <= 0 || raw_height == 0 || planes != 1 || compression != BI_RGB {
+    if width <= 0 || raw_height == 0 || planes != 1 {
+        return None;
+    }
+    let uses_bitfields = compression == BI_BITFIELDS && matches!(bits_per_pixel, 16 | 32);
+    if compression != BI_RGB && !uses_bitfields {
         return None;
     }
 
@@ -23982,8 +24005,41 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
 
     let width = usize::try_from(width_px).ok()?;
     let colors_used = read_le_u32(bytes, 32)?;
+    let color_masks = if uses_bitfields {
+        let mask_offset = if header_size == BITMAPINFOHEADER_SIZE {
+            BITMAPINFOHEADER_SIZE
+        } else if header_size >= BITMAPINFOHEADER_SIZE + 12 {
+            BITMAPINFOHEADER_SIZE
+        } else {
+            return None;
+        };
+        let masks = DibColorMasks {
+            red: read_le_u32(bytes, mask_offset)?,
+            green: read_le_u32(bytes, mask_offset + 4)?,
+            blue: read_le_u32(bytes, mask_offset + 8)?,
+        };
+        if !masks.are_supported() {
+            return None;
+        }
+        Some(masks)
+    } else {
+        None
+    };
+    let bitfield_mask_bytes = if uses_bitfields && header_size == BITMAPINFOHEADER_SIZE {
+        12
+    } else {
+        0
+    };
+    let pixel_data_start = header_size.checked_add(bitfield_mask_bytes)?;
+    if pixel_data_start > bytes.len() {
+        return None;
+    }
+
     let (row_stride, pixel_start, palette_entries) = match bits_per_pixel {
         1 | 4 | 8 => {
+            if color_masks.is_some() {
+                return None;
+            }
             let palette_capacity = 1usize.checked_shl(u32::from(bits_per_pixel))?;
             let palette_entries = if colors_used == 0 {
                 palette_capacity
@@ -23994,7 +24050,7 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
                 return None;
             }
             let palette_bytes = palette_entries.checked_mul(4)?;
-            let palette_end = header_size.checked_add(palette_bytes)?;
+            let palette_end = pixel_data_start.checked_add(palette_bytes)?;
             if palette_end > bytes.len() {
                 return None;
             }
@@ -24005,19 +24061,22 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         16 => {
             let row_bits = width.checked_mul(16)?;
             let row_stride = row_bits.checked_add(31)?.checked_div(32)?.checked_mul(4)?;
-            (row_stride, header_size, None)
+            (row_stride, pixel_data_start, None)
         }
         24 => {
+            if color_masks.is_some() {
+                return None;
+            }
             let unpadded_row_bytes = width.checked_mul(3)?;
             let row_stride = unpadded_row_bytes
                 .checked_add(3)?
                 .checked_div(4)?
                 .checked_mul(4)?;
-            (row_stride, header_size, None)
+            (row_stride, pixel_data_start, None)
         }
         32 => {
             let row_stride = width.checked_mul(4)?;
-            (row_stride, header_size, None)
+            (row_stride, pixel_data_start, None)
         }
         _ => return None,
     };
@@ -24038,6 +24097,7 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         header_size,
         4,
         raw_height < 0,
+        color_masks,
     )
 }
 
@@ -24084,6 +24144,7 @@ fn parse_bitmap_core_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<P
         BITMAPCOREHEADER_SIZE,
         3,
         false,
+        None,
     )
 }
 
@@ -24126,6 +24187,7 @@ fn decode_uncompressed_dib_pixels(
     palette_start: usize,
     palette_entry_size: usize,
     top_down: bool,
+    color_masks: Option<DibColorMasks>,
 ) -> Option<ParsedDib> {
     let width = usize::try_from(width_px).ok()?;
     let height = usize::try_from(height_px).ok()?;
@@ -24190,19 +24252,40 @@ fn decode_uncompressed_dib_pixels(
                 16 => {
                     let source = source_row.checked_add(x.checked_mul(2)?)?;
                     let pixel = read_le_u16(bytes, source)?;
-                    let red = ((pixel >> 10) & 0x1f) as u8;
-                    let green = ((pixel >> 5) & 0x1f) as u8;
-                    let blue = (pixel & 0x1f) as u8;
-                    rgb[output] = expand_5bit_color_channel(red);
-                    rgb[output + 1] = expand_5bit_color_channel(green);
-                    rgb[output + 2] = expand_5bit_color_channel(blue);
+                    if let Some(masks) = color_masks {
+                        rgb[output] = expand_masked_color_channel(u32::from(pixel), masks.red)?;
+                        rgb[output + 1] =
+                            expand_masked_color_channel(u32::from(pixel), masks.green)?;
+                        rgb[output + 2] =
+                            expand_masked_color_channel(u32::from(pixel), masks.blue)?;
+                    } else {
+                        let red = ((pixel >> 10) & 0x1f) as u8;
+                        let green = ((pixel >> 5) & 0x1f) as u8;
+                        let blue = (pixel & 0x1f) as u8;
+                        rgb[output] = expand_5bit_color_channel(red);
+                        rgb[output + 1] = expand_5bit_color_channel(green);
+                        rgb[output + 2] = expand_5bit_color_channel(blue);
+                    }
                 }
-                24 | 32 => {
+                24 => {
                     let bytes_per_pixel = usize::from(bits_per_pixel / 8);
                     let source = source_row.checked_add(x.checked_mul(bytes_per_pixel)?)?;
                     rgb[output] = bytes[source + 2];
                     rgb[output + 1] = bytes[source + 1];
                     rgb[output + 2] = bytes[source];
+                }
+                32 => {
+                    let source = source_row.checked_add(x.checked_mul(4)?)?;
+                    if let Some(masks) = color_masks {
+                        let pixel = read_le_u32(bytes, source)?;
+                        rgb[output] = expand_masked_color_channel(pixel, masks.red)?;
+                        rgb[output + 1] = expand_masked_color_channel(pixel, masks.green)?;
+                        rgb[output + 2] = expand_masked_color_channel(pixel, masks.blue)?;
+                    } else {
+                        rgb[output] = bytes[source + 2];
+                        rgb[output + 1] = bytes[source + 1];
+                        rgb[output + 2] = bytes[source];
+                    }
                 }
                 _ => return None,
             }
@@ -24239,6 +24322,23 @@ fn copy_dib_palette_color(
 
 fn expand_5bit_color_channel(value: u8) -> u8 {
     (value << 3) | (value >> 2)
+}
+
+fn expand_masked_color_channel(pixel: u32, mask: u32) -> Option<u8> {
+    if mask == 0 {
+        return None;
+    }
+    let shift = mask.trailing_zeros();
+    let raw = (pixel & mask) >> shift;
+    let max = mask >> shift;
+    if max == 0 {
+        return None;
+    }
+    let scaled = raw
+        .checked_mul(255)?
+        .checked_add(max / 2)?
+        .checked_div(max)?;
+    u8::try_from(scaled).ok()
 }
 
 fn read_le_u16(bytes: &[u8], offset: usize) -> Option<u16> {
@@ -37577,6 +37677,26 @@ After\par}"#;
     }
 
     #[test]
+    fn normalizes_16bit_bitfields_dib_picture_as_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_16bit_bitfields_dib_with_dimensions(2, 1))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Rgb8);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0]);
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(720));
+    }
+
+    #[test]
     fn normalizes_8bit_paletted_dib_picture_as_safe_static_image() {
         let input = format!(
             "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
@@ -43405,6 +43525,38 @@ fn minimal_16bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
         let mut row = Vec::with_capacity(row_stride);
         for x in 0..width {
             let pixel = if x % 2 == 0 { 0x7c00u16 } else { 0x03e0u16 };
+            row.extend_from_slice(&pixel.to_le_bytes());
+        }
+        row.resize(row_stride, 0);
+        dib.extend_from_slice(&row);
+    }
+    dib
+}
+
+#[cfg(test)]
+fn minimal_16bit_bitfields_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
+    let row_stride = ((width as usize * 16).div_ceil(32)) * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let mut dib = Vec::with_capacity(52 + pixel_bytes);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&16u16.to_le_bytes());
+    dib.extend_from_slice(&3u32.to_le_bytes());
+    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0xf800u32.to_le_bytes());
+    dib.extend_from_slice(&0x07e0u32.to_le_bytes());
+    dib.extend_from_slice(&0x001fu32.to_le_bytes());
+
+    for _ in 0..height {
+        let mut row = Vec::with_capacity(row_stride);
+        for x in 0..width {
+            let pixel = if x % 2 == 0 { 0xf800u16 } else { 0x07e0u16 };
             row.extend_from_slice(&pixel.to_le_bytes());
         }
         row.resize(row_stride, 0);
