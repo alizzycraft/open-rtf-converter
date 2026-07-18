@@ -11525,48 +11525,83 @@ impl Parser {
                 }
             },
             PictureKind::Dib => {
-                match parse_dib_image_data(&picture.bytes, self.limits().max_image_pixels) {
-                    Some(dib) => {
-                        self.ensure_image_pixels(dib.width_px, dib.height_px, offset)?;
-                        let natural_width_px_hint =
-                            self.normalized_picture_natural_size_hint(&picture, true, offset);
-                        let natural_height_px_hint =
-                            self.normalized_picture_natural_size_hint(&picture, false, offset);
-                        let mut image = StaticImage {
-                            format: ImageFormat::Rgb8,
-                            bytes: dib.rgb,
-                            palette: Vec::new(),
-                            alpha_mask: None,
-                            vector_commands: Vec::new(),
-                            width_px: dib.width_px,
-                            height_px: dib.height_px,
-                            natural_width_px_hint,
-                            natural_height_px_hint,
-                            display_width_twips: picture.display_width_twips,
-                            display_height_twips: picture.display_height_twips,
-                            scale_x_percent: picture.scale_x_percent,
-                            scale_y_percent: picture.scale_y_percent,
-                            crop: picture.crop,
-                            placement: None,
-                        };
-                        self.apply_picture_color_mode(
-                            &mut image,
-                            picture.grayscale,
-                            picture.bilevel,
-                            offset,
-                        );
-                        self.push_static_image(picture.owner_destination, image, offset)?;
-                        self.mark_shape_visual_result_rendered();
-                    }
-                    None => {
-                        self.diagnostics.push(Diagnostic::warning(
-                        "DIB picture data was unsupported or malformed and replaced with a placeholder",
-                        Some(offset),
-                    ));
-                        self.push_placeholder(
-                            "[Image skipped: unsupported DIB]".to_string(),
-                            offset,
-                        )?;
+                if let Some(compressed) =
+                    parse_compressed_dib_image_data(&picture.bytes, self.limits().max_image_pixels)
+                {
+                    self.ensure_image_pixels(compressed.width_px, compressed.height_px, offset)?;
+                    let natural_width_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, true, offset);
+                    let natural_height_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, false, offset);
+                    let mut image = StaticImage {
+                        format: compressed.format,
+                        bytes: compressed.bytes,
+                        palette: compressed.palette,
+                        alpha_mask: compressed.alpha_mask,
+                        vector_commands: Vec::new(),
+                        width_px: compressed.width_px,
+                        height_px: compressed.height_px,
+                        natural_width_px_hint,
+                        natural_height_px_hint,
+                        display_width_twips: picture.display_width_twips,
+                        display_height_twips: picture.display_height_twips,
+                        scale_x_percent: picture.scale_x_percent,
+                        scale_y_percent: picture.scale_y_percent,
+                        crop: picture.crop,
+                        placement: None,
+                    };
+                    self.apply_picture_color_mode(
+                        &mut image,
+                        picture.grayscale,
+                        picture.bilevel,
+                        offset,
+                    );
+                    self.push_static_image(picture.owner_destination, image, offset)?;
+                    self.mark_shape_visual_result_rendered();
+                } else {
+                    match parse_dib_image_data(&picture.bytes, self.limits().max_image_pixels) {
+                        Some(dib) => {
+                            self.ensure_image_pixels(dib.width_px, dib.height_px, offset)?;
+                            let natural_width_px_hint =
+                                self.normalized_picture_natural_size_hint(&picture, true, offset);
+                            let natural_height_px_hint =
+                                self.normalized_picture_natural_size_hint(&picture, false, offset);
+                            let mut image = StaticImage {
+                                format: ImageFormat::Rgb8,
+                                bytes: dib.rgb,
+                                palette: Vec::new(),
+                                alpha_mask: None,
+                                vector_commands: Vec::new(),
+                                width_px: dib.width_px,
+                                height_px: dib.height_px,
+                                natural_width_px_hint,
+                                natural_height_px_hint,
+                                display_width_twips: picture.display_width_twips,
+                                display_height_twips: picture.display_height_twips,
+                                scale_x_percent: picture.scale_x_percent,
+                                scale_y_percent: picture.scale_y_percent,
+                                crop: picture.crop,
+                                placement: None,
+                            };
+                            self.apply_picture_color_mode(
+                                &mut image,
+                                picture.grayscale,
+                                picture.bilevel,
+                                offset,
+                            );
+                            self.push_static_image(picture.owner_destination, image, offset)?;
+                            self.mark_shape_visual_result_rendered();
+                        }
+                        None => {
+                            self.diagnostics.push(Diagnostic::warning(
+                                "DIB picture data was unsupported or malformed and replaced with a placeholder",
+                                Some(offset),
+                            ));
+                            self.push_placeholder(
+                                "[Image skipped: unsupported DIB]".to_string(),
+                                offset,
+                            )?;
+                        }
                     }
                 }
             }
@@ -23901,6 +23936,16 @@ struct ParsedDib {
     rgb: Vec<u8>,
 }
 
+#[derive(Debug)]
+struct ParsedCompressedDibImage {
+    width_px: u32,
+    height_px: u32,
+    format: ImageFormat,
+    bytes: Vec<u8>,
+    palette: Vec<u8>,
+    alpha_mask: Option<StaticImageAlphaMask>,
+}
+
 #[derive(Debug, Copy, Clone)]
 struct DibColorMasks {
     red: u32,
@@ -24204,6 +24249,76 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         raw_height < 0,
         color_masks,
     )
+}
+
+fn parse_compressed_dib_image_data(
+    bytes: &[u8],
+    max_pixels: usize,
+) -> Option<ParsedCompressedDibImage> {
+    const BITMAPINFOHEADER_SIZE: usize = 40;
+    const BI_JPEG: u32 = 4;
+    const BI_PNG: u32 = 5;
+
+    if bytes.len() < BITMAPINFOHEADER_SIZE {
+        return None;
+    }
+    let header_size = read_le_u32(bytes, 0)? as usize;
+    if header_size < BITMAPINFOHEADER_SIZE || header_size > bytes.len() {
+        return None;
+    }
+    let width = read_le_i32(bytes, 4)?;
+    let raw_height = read_le_i32(bytes, 8)?;
+    let planes = read_le_u16(bytes, 12)?;
+    let compression = read_le_u32(bytes, 16)?;
+    if width <= 0 || raw_height == 0 || planes != 1 || !matches!(compression, BI_JPEG | BI_PNG) {
+        return None;
+    }
+    let payload_len = usize::try_from(read_le_u32(bytes, 20)?).ok()?;
+    if payload_len == 0 {
+        return None;
+    }
+    let payload_end = header_size.checked_add(payload_len)?;
+    let payload = bytes.get(header_size..payload_end)?;
+    let width_px = u32::try_from(width).ok()?;
+    let height_px = raw_height.unsigned_abs();
+    let pixels = usize::try_from(width_px)
+        .ok()?
+        .checked_mul(usize::try_from(height_px).ok()?)?;
+    if pixels == 0 || pixels > max_pixels {
+        return None;
+    }
+
+    match compression {
+        BI_JPEG => {
+            let jpeg = parse_jpeg_image_data(payload)?;
+            if jpeg.width_px != width_px || jpeg.height_px != height_px {
+                return None;
+            }
+            Some(ParsedCompressedDibImage {
+                width_px,
+                height_px,
+                format: jpeg.format,
+                bytes: payload.to_vec(),
+                palette: Vec::new(),
+                alpha_mask: None,
+            })
+        }
+        BI_PNG => {
+            let png = parse_png_image_data(payload)?;
+            if png.width_px != width_px || png.height_px != height_px {
+                return None;
+            }
+            Some(ParsedCompressedDibImage {
+                width_px,
+                height_px,
+                format: png.format,
+                bytes: png.idat,
+                palette: png.palette,
+                alpha_mask: png.alpha_mask,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn crop_parsed_dib(
@@ -38300,6 +38415,51 @@ After\par}"#;
     }
 
     #[test]
+    fn normalizes_bi_jpeg_dib_picture_as_safe_static_image() {
+        let jpeg = minimal_jpeg_with_dimensions(2, 1);
+        let mut dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
+        dib.extend_from_slice(b"TRAILING-DIB-JPEG-PAYLOAD");
+        let input = format!(
+            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&dib)
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Jpeg);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, jpeg);
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(720));
+    }
+
+    #[test]
+    fn normalizes_bi_png_dib_picture_as_safe_static_image() {
+        let png = minimal_rgb_png_with_dimensions(2, 1);
+        let input = format!(
+            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_compressed_dib_with_payload(2, 1, 5, &png))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert!(image.palette.is_empty());
+        assert!(image.alpha_mask.is_none());
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(720));
+    }
+
+    #[test]
     fn normalizes_16bit_dib_picture_as_safe_static_image() {
         let input = format!(
             "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
@@ -44694,6 +44854,30 @@ fn minimal_24bit_dib_with_rgb_pixels(width: u32, height: u32, pixels: &[[u8; 3]]
         row.resize(row_stride, 0);
         dib.extend_from_slice(&row);
     }
+    dib
+}
+
+#[cfg(test)]
+fn minimal_compressed_dib_with_payload(
+    width: u32,
+    height: u32,
+    compression: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let payload_len = u32::try_from(payload.len()).expect("test payload fits in DIB header");
+    let mut dib = Vec::with_capacity(40 + payload.len());
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&0u16.to_le_bytes());
+    dib.extend_from_slice(&compression.to_le_bytes());
+    dib.extend_from_slice(&payload_len.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(payload);
     dib
 }
 

@@ -26108,6 +26108,105 @@ fn dib_picture_bilevel_metadata_renders_passively_without_payload_leakage() {
 }
 
 #[test]
+fn compressed_dib_picture_payloads_render_passively_without_raw_dib_leakage() {
+    let jpeg = minimal_jpeg_with_dimensions(2, 1);
+    let png = minimal_grayscale_png_with_dimensions(2, 1);
+    let mut jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
+    let mut png_dib = minimal_compressed_dib_with_payload(2, 1, 5, &png);
+    jpeg_dib.extend_from_slice(b"TRAILING-DIB-JPEG-PAYLOAD /JavaScript");
+    png_dib.extend_from_slice(b"TRAILING-DIB-PNG-PAYLOAD /EmbeddedFile");
+    let jpeg_hex = bytes_to_hex(&jpeg_dib);
+    let png_hex = bytes_to_hex(&png_dib);
+
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "dibitmap",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        jpeg_hex.as_str(),
+        "}{",
+        "\\",
+        "pict",
+        "\\",
+        "dibitmap",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        png_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].format, ImageFormat::Jpeg);
+    assert_eq!(images[0].width_px, 2);
+    assert_eq!(images[0].height_px, 1);
+    assert_eq!(images[0].bytes, jpeg);
+    assert_eq!(images[1].format, ImageFormat::PngGrayscale);
+    assert_eq!(images[1].width_px, 2);
+    assert_eq!(images[1].height_px, 1);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let image_paints = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "Do")
+        .count();
+    assert!(image_paints >= 2, "both compressed DIBs should render");
+    for forbidden in [
+        b"dibitmap".as_slice(),
+        b"TRAILING-DIB-JPEG-PAYLOAD",
+        b"TRAILING-DIB-PNG-PAYLOAD",
+        b"89504e470d0a1a0a",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "compressed DIB payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn hostile_binary_picture_payload_is_not_retokenized_or_copied_to_pdf() {
     let payload = br"{\object\objdata 414243 /JavaScript /EmbeddedFile}";
     let mut input = br"{\rtf1 before {\pict\jpegblip\bin".to_vec();
@@ -51058,6 +51157,29 @@ fn minimal_24bit_dib_with_rgb_pixels(width: u32, height: u32, pixels: &[[u8; 3]]
         row.resize(row_stride, 0);
         dib.extend_from_slice(&row);
     }
+    dib
+}
+
+fn minimal_compressed_dib_with_payload(
+    width: u32,
+    height: u32,
+    compression: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let payload_len = u32::try_from(payload.len()).expect("test payload fits in DIB header");
+    let mut dib = Vec::with_capacity(40 + payload.len());
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&0u16.to_le_bytes());
+    dib.extend_from_slice(&compression.to_le_bytes());
+    dib.extend_from_slice(&payload_len.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(payload);
     dib
 }
 
