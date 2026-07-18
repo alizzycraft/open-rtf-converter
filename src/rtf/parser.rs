@@ -20465,6 +20465,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYPOLYGON16: u32 = 91;
     const EMR_POLYDRAW16: u32 = 92;
     const EMR_EXTCREATEPEN: u32 = 95;
+    const EMR_ALPHABLEND: u32 = 114;
 
     let header = parse_emf_header_dimensions(bytes)?;
     if header
@@ -21043,6 +21044,16 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     } else {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
+            EMR_ALPHABLEND => {
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
+                if let Some(command) = parse_emf_alphablend_opaque(data, &header, &coordinates) {
+                    commands.push(command);
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -22736,6 +22747,77 @@ fn parse_emf_setdibitstodevice_srcopy(
 
     let width = i32::try_from(cx_src.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_src.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let left_top = normalized_emf_point(x_dest, y_dest, header, coordinates);
+    let right_bottom = normalized_emf_point(
+        x_dest.saturating_add(width),
+        y_dest.saturating_add(height),
+        header,
+        coordinates,
+    );
+    Some(StaticImageVectorCommand::RasterImage {
+        left: left_top.0.min(right_bottom.0),
+        top: left_top.1.min(right_bottom.1),
+        right: left_top.0.max(right_bottom.0),
+        bottom: left_top.1.max(right_bottom.1),
+        image: StaticImageVectorRaster {
+            format: image.format,
+            width_px: image.width_px,
+            height_px: image.height_px,
+            bytes: image.bytes,
+            palette: image.palette,
+            alpha_mask: image.alpha_mask,
+        },
+    })
+}
+
+fn parse_emf_alphablend_opaque(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<StaticImageVectorCommand> {
+    const AC_SRC_OVER: u8 = 0;
+    const DIB_RGB_COLORS: u32 = 0;
+
+    if data.len() < 100 {
+        return None;
+    }
+
+    let blend_op = *data.get(32)?;
+    let blend_flags = *data.get(33)?;
+    let source_constant_alpha = *data.get(34)?;
+    let alpha_format = *data.get(35)?;
+    if blend_op != AC_SRC_OVER
+        || blend_flags != 0
+        || source_constant_alpha != u8::MAX
+        || alpha_format != 0
+    {
+        return None;
+    }
+
+    let x_dest = read_le_i32(data, 16)?;
+    let y_dest = read_le_i32(data, 20)?;
+    let cx_dest = read_le_i32(data, 24)?;
+    let cy_dest = read_le_i32(data, 28)?;
+    let x_src = read_le_i32(data, 36)?;
+    let y_src = read_le_i32(data, 40)?;
+    let usage_src = read_le_u32(data, 72)?;
+    let off_bmi_src = emf_record_offset_to_data_offset(read_le_u32(data, 76)?)?;
+    let cb_bmi_src = usize::try_from(read_le_u32(data, 80)?).ok()?;
+    let off_bits_src = emf_record_offset_to_data_offset(read_le_u32(data, 84)?)?;
+    let cb_bits_src = usize::try_from(read_le_u32(data, 88)?).ok()?;
+    let cx_src = read_le_i32(data, 92)?;
+    let cy_src = read_le_i32(data, 96)?;
+
+    if usage_src != DIB_RGB_COLORS || cx_dest == 0 || cy_dest == 0 || cx_src <= 0 || cy_src <= 0 {
+        return None;
+    }
+
+    let dib_bytes =
+        emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
+    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+
+    let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let left_top = normalized_emf_point(x_dest, y_dest, header, coordinates);
     let right_bottom = normalized_emf_point(
         x_dest.saturating_add(width),
@@ -42020,6 +42102,61 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_opaque_alphablend_dib_record_becomes_passive_raster_image() {
+        let records = [
+            emf_alphablend_dib_record(
+                14,
+                22,
+                44,
+                24,
+                0xff,
+                0,
+                &minimal_24bit_dib_with_dimensions(2, 1),
+            ),
+            emf_alphablend_dib_record(
+                60,
+                30,
+                44,
+                24,
+                0x80,
+                0,
+                &minimal_24bit_dib_with_dimensions(2, 1),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 14.0,
+                top: 22.0,
+                right: 58.0,
+                bottom: 46.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![255, 0, 0, 0, 255, 0]
+        ));
+    }
+
+    #[test]
     fn emf_blackness_and_whiteness_raster_transfers_become_passive_filled_rectangles() {
         let records = [
             emf_bitblt_record(
@@ -45295,6 +45432,50 @@ fn emf_setdibitstodevice_dib_record(
     write_test_le_u32(&mut record, 68, start_scan);
     write_test_le_u32(&mut record, 72, scan_count);
     record[76..76 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn emf_alphablend_dib_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    source_constant_alpha: u8,
+    alpha_format: u8,
+    dib: &[u8],
+) -> Vec<u8> {
+    let payload_len = dib.len().next_multiple_of(4);
+    let size = 108 + payload_len;
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 114);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, x);
+    write_test_le_i32(&mut record, 12, y);
+    write_test_le_i32(&mut record, 16, x.saturating_add(width));
+    write_test_le_i32(&mut record, 20, y.saturating_add(height));
+    write_test_le_i32(&mut record, 24, x);
+    write_test_le_i32(&mut record, 28, y);
+    write_test_le_i32(&mut record, 32, width);
+    write_test_le_i32(&mut record, 36, height);
+    record[40] = 0;
+    record[41] = 0;
+    record[42] = source_constant_alpha;
+    record[43] = alpha_format;
+    write_test_le_u32(&mut record, 80, 0);
+    write_test_le_u32(&mut record, 84, 108);
+    write_test_le_u32(&mut record, 88, payload_len as u32);
+    write_test_le_u32(&mut record, 92, 108);
+    write_test_le_u32(&mut record, 96, payload_len as u32);
+    if let (Some(source_width), Some(source_height)) = (
+        read_le_i32(dib, 4),
+        read_le_i32(dib, 8).map(|height| height.unsigned_abs() as i32),
+    ) {
+        write_test_le_i32(&mut record, 100, source_width);
+        write_test_le_i32(&mut record, 104, source_height);
+    }
+    record[108..108 + dib.len()].copy_from_slice(dib);
     record
 }
 
