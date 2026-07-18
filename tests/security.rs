@@ -33371,6 +33371,126 @@ fn emf_setpixelv_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_patcopy_bitblt_records_render_passively_without_payload_leakage() {
+    let payload = b"BITBLT-SOURCE-PAYLOAD";
+    let records = [
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 120,
+                green: 80,
+                blue: 40,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_bitblt_record(10, 20, 80, 40, 0x00f0_0021, payload),
+        emf_bitblt_record(30, 25, 40, 20, 0x00cc_0020, b"UNSUPPORTED-SRCCOPY-PAYLOAD"),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF BITBLT vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("BITBLT-SOURCE-PAYLOAD"));
+    assert!(!text.contains("UNSUPPORTED-SRCCOPY-PAYLOAD"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 20.0,
+            right: 90.0,
+            bottom: 60.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 120,
+                green: 80,
+                blue: 40
+            }),
+            ..
+        }
+    ));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in ["emfblip", "BITBLT", "SRCCOPY", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF BITBLT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "EMF PATCOPY BITBLT should render as a passive PDF rectangle path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*" | "B" | "B*")),
+        "EMF PATCOPY BITBLT should render as a passive PDF fill"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        payload.as_slice(),
+        b"UNSUPPORTED-SRCCOPY-PAYLOAD",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF BITBLT payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_move_to_and_line_to_records_render_passively_without_payload_leakage() {
     let records = [
         emf_point_record(27, 10, 10),
@@ -46076,6 +46196,32 @@ fn emf_setpixelv_record(x: i32, y: i32, color: Color) -> Vec<u8> {
     record[16] = color.red;
     record[17] = color.green;
     record[18] = color.blue;
+    record
+}
+
+fn emf_bitblt_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    raster_op: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let payload_len = payload.len().next_multiple_of(4);
+    let size = 48 + payload_len;
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 76);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, x);
+    write_test_le_i32(&mut record, 12, y);
+    write_test_le_i32(&mut record, 16, x.saturating_add(width));
+    write_test_le_i32(&mut record, 20, y.saturating_add(height));
+    write_test_le_i32(&mut record, 24, x);
+    write_test_le_i32(&mut record, 28, y);
+    write_test_le_i32(&mut record, 32, width);
+    write_test_le_i32(&mut record, 36, height);
+    write_test_le_u32(&mut record, 40, raster_op);
+    record[48..48 + payload.len()].copy_from_slice(payload);
     record
 }
 
