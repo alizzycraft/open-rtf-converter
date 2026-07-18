@@ -34164,6 +34164,108 @@ fn emf_exttextoutw_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_polytextoutw_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_u32_record(24, 0x0033_2211),
+        emf_u32_record(22, 0x0000_0006),
+        emf_polytextoutw_record(&[(40, 20, "One", 0, None), (70, 35, "Two", 0, None)]),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF POLYTEXTOUTW vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("One"));
+    assert!(!text.contains("Two"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::Text {
+            x: 40.0,
+            y: 20.0,
+            text,
+            color: Some(Color { red: 17, green: 34, blue: 51 }),
+            horizontal_align: StaticImageTextHorizontalAlign::Center,
+            ..
+        } if text == "One"
+    ));
+    assert!(matches!(
+        &image.vector_commands[1],
+        StaticImageVectorCommand::Text {
+            x: 70.0,
+            y: 35.0,
+            text,
+            color: Some(Color { red: 17, green: 34, blue: 51 }),
+            horizontal_align: StaticImageTextHorizontalAlign::Center,
+            ..
+        } if text == "Two"
+    ));
+    for forbidden in [
+        "emfblip",
+        "POLYTEXTOUT",
+        "offString",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF POLYTEXTOUTW payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(rendered_text.contains("One"));
+    assert!(rendered_text.contains("Two"));
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF POLYTEXTOUTW payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_exttextoutw_opaque_bounds_render_passive_background_without_payload_leakage() {
     let records = [
         emf_u32_record(25, 0x0078_b4dc),
@@ -48494,6 +48596,69 @@ fn emf_exttextouta_record(
     write_test_le_i32(&mut record, 68, bottom);
     write_test_le_u32(&mut record, 72, 0);
     record[76..76 + text.len()].copy_from_slice(text);
+    record
+}
+
+fn emf_polytextoutw_record(
+    items: &[(i32, i32, &str, u32, Option<(i32, i32, i32, i32)>)],
+) -> Vec<u8> {
+    let encoded: Vec<(i32, i32, Vec<u8>, usize, u32, Option<(i32, i32, i32, i32)>)> = items
+        .iter()
+        .map(|(x, y, text, options, bounds)| {
+            let bytes: Vec<u8> = text
+                .encode_utf16()
+                .flat_map(|unit| unit.to_le_bytes())
+                .collect();
+            (
+                *x,
+                *y,
+                bytes,
+                text.encode_utf16().count(),
+                *options,
+                *bounds,
+            )
+        })
+        .collect();
+    emf_polytextout_record(97, &encoded)
+}
+
+fn emf_polytextout_record(
+    record_type: u32,
+    items: &[(i32, i32, Vec<u8>, usize, u32, Option<(i32, i32, i32, i32)>)],
+) -> Vec<u8> {
+    let text_objects_start = 40usize;
+    let strings_start = text_objects_start + (items.len() * 40);
+    let text_bytes: usize = items.iter().map(|(_, _, bytes, _, _, _)| bytes.len()).sum();
+    let size = (strings_start + text_bytes).next_multiple_of(4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, record_type);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, 0);
+    write_test_le_i32(&mut record, 12, 0);
+    write_test_le_i32(&mut record, 16, 160);
+    write_test_le_i32(&mut record, 20, 80);
+    write_test_le_u32(&mut record, 24, 1);
+    write_test_le_u32(&mut record, 28, 0x3f80_0000);
+    write_test_le_u32(&mut record, 32, 0x3f80_0000);
+    write_test_le_u32(&mut record, 36, items.len() as u32);
+
+    let mut string_offset = strings_start;
+    for (index, (x, y, bytes, char_count, options, bounds)) in items.iter().enumerate() {
+        let object_offset = text_objects_start + (index * 40);
+        write_test_le_i32(&mut record, object_offset, *x);
+        write_test_le_i32(&mut record, object_offset + 4, *y);
+        write_test_le_u32(&mut record, object_offset + 8, *char_count as u32);
+        write_test_le_u32(&mut record, object_offset + 12, string_offset as u32);
+        write_test_le_u32(&mut record, object_offset + 16, *options);
+        let (left, top, right, bottom) = bounds.unwrap_or((0, 0, 0, 0));
+        write_test_le_i32(&mut record, object_offset + 20, left);
+        write_test_le_i32(&mut record, object_offset + 24, top);
+        write_test_le_i32(&mut record, object_offset + 28, right);
+        write_test_le_i32(&mut record, object_offset + 32, bottom);
+        write_test_le_u32(&mut record, object_offset + 36, 0);
+        record[string_offset..string_offset + bytes.len()].copy_from_slice(bytes);
+        string_offset += bytes.len();
+    }
     record
 }
 
