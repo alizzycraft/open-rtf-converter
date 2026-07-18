@@ -20854,7 +20854,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 )?;
             }
             EMR_INVERTRGN => {
-                if commands.is_empty() {
+                if emf_commands_are_unpainted_clip_scope(&commands) {
                     let rects = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)?;
                     push_emf_region_rectangles(
                         &mut commands,
@@ -22440,6 +22440,18 @@ fn scoped_vector_clip_commands(
     }
 
     (!clip_commands.is_empty()).then_some(clip_commands)
+}
+
+fn emf_commands_are_unpainted_clip_scope(commands: &[StaticImageVectorCommand]) -> bool {
+    commands.iter().all(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::ClipRect { .. }
+                | StaticImageVectorCommand::ClipPath { .. }
+                | StaticImageVectorCommand::SaveState
+                | StaticImageVectorCommand::RestoreState
+        )
+    })
 }
 
 fn parse_emf_passive_raster_transfer(
@@ -40365,6 +40377,67 @@ After\par}"#;
                 right: 130.0,
                 bottom: 65.0,
                 stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_clipped_invertrgn_records_become_passive_clipped_black_rectangles() {
+        let records = [
+            emf_rect_record(30, 20, 10, 100, 60),
+            emf_invertrgn_record(&[(15, 12, 70, 40), (80, 20, 130, 65)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 3);
+        assert_eq!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 10.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 12.0,
+                right: 70.0,
+                bottom: 40.0,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle {
+                left: 80.0,
+                top: 20.0,
+                right: 130.0,
+                bottom: 65.0,
                 fill_color: Some(Color {
                     red: 0,
                     green: 0,
