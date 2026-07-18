@@ -21053,7 +21053,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some(command) = parse_emf_alphablend_opaque(data, &header, &coordinates) {
+                if let Some(command) = parse_emf_alphablend_passive(data, &header, &coordinates) {
                     commands.push(command);
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -22781,7 +22781,7 @@ fn parse_emf_setdibitstodevice_srcopy(
     })
 }
 
-fn parse_emf_alphablend_opaque(
+fn parse_emf_alphablend_passive(
     data: &[u8],
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
@@ -22797,11 +22797,7 @@ fn parse_emf_alphablend_opaque(
     let blend_flags = *data.get(33)?;
     let source_constant_alpha = *data.get(34)?;
     let alpha_format = *data.get(35)?;
-    if blend_op != AC_SRC_OVER
-        || blend_flags != 0
-        || source_constant_alpha != u8::MAX
-        || alpha_format != 0
-    {
+    if blend_op != AC_SRC_OVER || blend_flags != 0 || alpha_format != 0 {
         return None;
     }
 
@@ -22825,7 +22821,13 @@ fn parse_emf_alphablend_opaque(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+    let mut image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+    image.alpha_mask = constant_alpha_mask(
+        image.width_px,
+        image.height_px,
+        source_constant_alpha,
+        image.alpha_mask,
+    )?;
 
     let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
@@ -22944,6 +22946,33 @@ fn keyed_rgb_alpha_mask(
     }
     if !has_transparent_pixel {
         return Some(None);
+    }
+    Some(Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&mask, 6),
+    }))
+}
+
+fn constant_alpha_mask(
+    width_px: u32,
+    height_px: u32,
+    alpha: u8,
+    existing_mask: Option<StaticImageAlphaMask>,
+) -> Option<Option<StaticImageAlphaMask>> {
+    if alpha == u8::MAX {
+        return Some(existing_mask);
+    }
+    if existing_mask.is_some() {
+        return None;
+    }
+
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let row_len = width.checked_add(1)?;
+    let mask_len = row_len.checked_mul(height)?;
+    let mut mask = Vec::with_capacity(mask_len);
+    for _ in 0..height {
+        mask.push(0);
+        mask.resize(mask.len().checked_add(width)?, alpha);
     }
     Some(Some(StaticImageAlphaMask {
         bytes: miniz_oxide::deflate::compress_to_vec_zlib(&mask, 6),
@@ -42211,7 +42240,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_opaque_alphablend_dib_record_becomes_passive_raster_image() {
+    fn emf_constant_alpha_alphablend_dib_record_becomes_passive_alpha_mask() {
         let records = [
             emf_alphablend_dib_record(
                 14,
@@ -42244,12 +42273,8 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 1);
-        assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("1 unsupported record(s) skipped")
-        }));
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
         assert!(matches!(
             &image.vector_commands[0],
             StaticImageVectorCommand::RasterImage {
@@ -42262,7 +42287,18 @@ After\par}"#;
                 && image.width_px == 2
                 && image.height_px == 1
                 && image.bytes == vec![255, 0, 0, 0, 255, 0]
+                && image.alpha_mask.is_none()
         ));
+        let alpha_mask = match &image.vector_commands[1] {
+            StaticImageVectorCommand::RasterImage { image, .. } => {
+                image.alpha_mask.as_ref().expect("constant alpha mask")
+            }
+            _ => panic!("expected constant-alpha raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 3).unwrap(),
+            vec![0, 0x80, 0x80]
+        );
     }
 
     #[test]
