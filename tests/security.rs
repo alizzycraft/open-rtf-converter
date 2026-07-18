@@ -37309,9 +37309,20 @@ fn emf_srccopy_bitblt_and_stretchblt_dibs_render_as_passive_images_without_paylo
     let jpeg = minimal_jpeg_with_dimensions(2, 1);
     let mut jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
     jpeg_dib.extend_from_slice(b"TRAILING-EMF-STRETCHBLT-JPEG /JavaScript");
+    let mut png_dib = minimal_compressed_dib_with_payload(
+        3,
+        1,
+        5,
+        &minimal_rgb_png(&[[255, 0, 0], [0, 255, 0], [0, 0, 255]]),
+    );
+    png_dib.extend_from_slice(b"TRAILING-EMF-CROPPED-STRETCHBLT-PNG /EmbeddedFile");
+    let mut cropped_png_record = emf_stretchblt_dib_record(92, 36, 36, 18, 0x00cc_0020, &png_dib);
+    write_test_le_i32(&mut cropped_png_record, 44, 1);
+    write_test_le_i32(&mut cropped_png_record, 100, 2);
     let records = [
         emf_bitblt_dib_record(10, 20, 2, 1, 0x00cc_0020, &rgb_dib),
         emf_stretchblt_dib_record(35, 30, 45, 25, 0x00cc_0020, &jpeg_dib),
+        cropped_png_record,
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
@@ -37332,7 +37343,7 @@ fn emf_srccopy_bitblt_and_stretchblt_dibs_render_as_passive_images_without_paylo
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(image.vector_commands.len(), 3);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37359,10 +37370,30 @@ fn emf_srccopy_bitblt_and_stretchblt_dibs_render_as_passive_images_without_paylo
             && image.height_px == 1
             && image.bytes == jpeg
     ));
+    match &image.vector_commands[2] {
+        StaticImageVectorCommand::RasterImage {
+            left: 92.0,
+            top: 36.0,
+            right: 128.0,
+            bottom: 54.0,
+            image,
+        } => {
+            assert_eq!(image.format, ImageFormat::Png);
+            assert_eq!(image.width_px, 2);
+            assert_eq!(image.height_px, 1);
+            assert_eq!(
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 7).unwrap(),
+                vec![0, 0, 255, 0, 0, 0, 255]
+            );
+            assert!(image.alpha_mask.is_none());
+        }
+        _ => panic!("expected cropped compressed PNG raster image"),
+    }
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
         "TRAILING-EMF-STRETCHBLT-JPEG",
+        "TRAILING-EMF-CROPPED-STRETCHBLT-PNG",
         "JavaScript",
         "EmbeddedFile",
     ] {
@@ -37392,11 +37423,12 @@ fn emf_srccopy_bitblt_and_stretchblt_dibs_render_as_passive_images_without_paylo
 
     assert!(rendered_text.contains("before"));
     assert!(rendered_text.contains("after"));
-    assert!(image_paints >= 2, "both EMF blit DIBs should render");
+    assert!(image_paints >= 3, "all EMF blit DIBs should render");
     for forbidden in [
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
         b"TRAILING-EMF-STRETCHBLT-JPEG",
+        b"TRAILING-EMF-CROPPED-STRETCHBLT-PNG",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

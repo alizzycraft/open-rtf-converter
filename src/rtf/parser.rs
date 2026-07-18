@@ -25055,6 +25055,109 @@ fn crop_parsed_dib_scan_lines(
     )
 }
 
+fn crop_compressed_png_vector_raster_image(
+    image: ParsedCompressedDibImage,
+    source_x: i32,
+    source_y: i32,
+    source_width: i32,
+    source_height: i32,
+) -> Option<ParsedCompressedDibImage> {
+    if source_x < 0 || source_y < 0 || source_width <= 0 || source_height <= 0 {
+        return None;
+    }
+    let source_x = u32::try_from(source_x).ok()?;
+    let source_y = u32::try_from(source_y).ok()?;
+    let source_width = u32::try_from(source_width).ok()?;
+    let source_height = u32::try_from(source_height).ok()?;
+    let source_right = source_x.checked_add(source_width)?;
+    let source_bottom = source_y.checked_add(source_height)?;
+    if source_right > image.width_px || source_bottom > image.height_px {
+        return None;
+    }
+    if source_x == 0
+        && source_y == 0
+        && source_width == image.width_px
+        && source_height == image.height_px
+    {
+        return Some(image);
+    }
+    let crop_pixels = usize::try_from(source_width)
+        .ok()?
+        .checked_mul(usize::try_from(source_height).ok()?)?;
+    if crop_pixels == 0 || crop_pixels > MAX_PASSIVE_VECTOR_RASTER_PIXELS {
+        return None;
+    }
+    let components = match image.format {
+        ImageFormat::Png => 3usize,
+        ImageFormat::PngGrayscale | ImageFormat::PngIndexed => 1usize,
+        _ => return None,
+    };
+    let cropped_bytes = crop_png_scanline_idat(
+        &image.bytes,
+        image.width_px,
+        image.height_px,
+        components,
+        source_x,
+        source_y,
+        source_width,
+        source_height,
+    )?;
+    let alpha_mask = match image.alpha_mask {
+        Some(mask) => Some(StaticImageAlphaMask {
+            bytes: crop_png_scanline_idat(
+                &mask.bytes,
+                image.width_px,
+                image.height_px,
+                1,
+                source_x,
+                source_y,
+                source_width,
+                source_height,
+            )?,
+        }),
+        None => None,
+    };
+    Some(ParsedCompressedDibImage {
+        width_px: source_width,
+        height_px: source_height,
+        format: image.format,
+        bytes: cropped_bytes,
+        palette: image.palette,
+        alpha_mask,
+    })
+}
+
+fn crop_png_scanline_idat(
+    idat: &[u8],
+    width_px: u32,
+    height_px: u32,
+    components: usize,
+    source_x: u32,
+    source_y: u32,
+    source_width: u32,
+    source_height: u32,
+) -> Option<Vec<u8>> {
+    let (width, _height, row_len, scanlines) =
+        unfiltered_png_scanlines(idat, width_px, height_px, components)?;
+    let crop_width = usize::try_from(source_width).ok()?;
+    let crop_height = usize::try_from(source_height).ok()?;
+    let crop_row_pixels_len = crop_width.checked_mul(components)?;
+    let crop_row_len = crop_row_pixels_len.checked_add(1)?;
+    let source_x_bytes = usize::try_from(source_x).ok()?.checked_mul(components)?;
+    let mut output = Vec::with_capacity(crop_row_len.checked_mul(crop_height)?);
+    for y in source_y..source_y.checked_add(source_height)? {
+        let row_start = usize::try_from(y).ok()?.checked_mul(row_len)?;
+        let pixel_start = row_start.checked_add(1)?.checked_add(source_x_bytes)?;
+        let pixel_end = pixel_start.checked_add(crop_row_pixels_len)?;
+        output.push(0);
+        output.extend_from_slice(scanlines.get(pixel_start..pixel_end)?);
+    }
+    if width == 0 || output.len() != crop_row_len.checked_mul(crop_height)? {
+        return None;
+    }
+    Some(miniz_oxide::deflate::compress_to_vec_zlib(&output, 6))
+}
+
 fn parse_vector_raster_dib_image(
     bytes: &[u8],
     source_x: i32,
@@ -25089,13 +25192,13 @@ fn parse_vector_raster_dib_image(
     }
 
     let compressed = parse_compressed_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    if source_x != 0
-        || source_y != 0
-        || u32::try_from(source_width).ok()? != compressed.width_px
-        || source_height.unsigned_abs() != compressed.height_px
-    {
-        return None;
-    }
+    let compressed = crop_compressed_png_vector_raster_image(
+        compressed,
+        source_x,
+        source_y,
+        source_width,
+        source_height,
+    )?;
     Some(ParsedVectorRasterImage {
         width_px: compressed.width_px,
         height_px: compressed.height_px,
@@ -42834,6 +42937,42 @@ After\par}"#;
                 grayscale_image.alpha_mask,
             )
             .is_some()
+        );
+        let cropped_rgb_dib = minimal_compressed_dib_with_payload(
+            3,
+            1,
+            5,
+            &minimal_rgb_png(&[[255, 0, 0], [0, 255, 0], [0, 0, 255]]),
+        );
+        let cropped_rgb = parse_vector_raster_dib_image(&cropped_rgb_dib, 1, 0, 2, 1, false)
+            .expect("cropped RGB compressed DIB should normalize");
+        assert_eq!(cropped_rgb.format, ImageFormat::Png);
+        assert_eq!(cropped_rgb.width_px, 2);
+        assert_eq!(cropped_rgb.height_px, 1);
+        let (_, _, _, cropped_rgb_scanlines) =
+            unfiltered_png_scanlines(&cropped_rgb.bytes, 2, 1, 3).unwrap();
+        assert_eq!(cropped_rgb_scanlines, vec![0, 0, 255, 0, 0, 0, 255]);
+        let cropped_rgba_dib = minimal_compressed_dib_with_payload(
+            3,
+            1,
+            5,
+            &minimal_rgba_png(&[[255, 0, 0, 16], [0, 255, 0, 64], [0, 0, 255, 192]]),
+        );
+        let cropped_rgba = parse_vector_raster_dib_image(&cropped_rgba_dib, 1, 0, 2, 1, false)
+            .expect("cropped RGBA compressed DIB should normalize");
+        assert_eq!(cropped_rgba.format, ImageFormat::Png);
+        assert_eq!(cropped_rgba.width_px, 2);
+        assert_eq!(cropped_rgba.height_px, 1);
+        let (_, _, _, cropped_rgba_scanlines) =
+            unfiltered_png_scanlines(&cropped_rgba.bytes, 2, 1, 3).unwrap();
+        assert_eq!(cropped_rgba_scanlines, vec![0, 0, 255, 0, 0, 0, 255]);
+        let cropped_rgba_alpha = cropped_rgba
+            .alpha_mask
+            .expect("cropped RGBA alpha mask should be preserved");
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&cropped_rgba_alpha.bytes, 3,)
+                .unwrap(),
+            vec![0, 64, 192]
         );
         let records = [
             emf_transparentblt_dib_record(
