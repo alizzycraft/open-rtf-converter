@@ -24402,16 +24402,24 @@ struct DibColorMasks {
     red: u32,
     green: u32,
     blue: u32,
+    alpha: Option<u32>,
 }
 
 impl DibColorMasks {
     fn are_supported(self) -> bool {
-        self.red != 0
-            && self.green != 0
-            && self.blue != 0
-            && self.red & self.green == 0
-            && self.red & self.blue == 0
-            && self.green & self.blue == 0
+        if self.red == 0
+            || self.green == 0
+            || self.blue == 0
+            || self.red & self.green != 0
+            || self.red & self.blue != 0
+            || self.green & self.blue != 0
+        {
+            return false;
+        }
+        let Some(alpha) = self.alpha else {
+            return true;
+        };
+        alpha != 0 && self.red & alpha == 0 && self.green & alpha == 0 && self.blue & alpha == 0
     }
 }
 
@@ -24611,6 +24619,11 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
             red: read_le_u32(bytes, mask_offset)?,
             green: read_le_u32(bytes, mask_offset + 4)?,
             blue: read_le_u32(bytes, mask_offset + 8)?,
+            alpha: if bits_per_pixel == 32 && header_size >= BITMAPINFOHEADER_SIZE + 16 {
+                Some(read_le_u32(bytes, mask_offset + 12)?)
+            } else {
+                None
+            },
         };
         if !masks.are_supported() {
             return None;
@@ -25042,7 +25055,13 @@ fn decode_uncompressed_dib_pixels(
     let pixels = width.checked_mul(height)?;
     let output_len = pixels.checked_mul(3)?;
     let mut rgb = vec![0; output_len];
-    let mut alpha = (bits_per_pixel == 32 && color_masks.is_none()).then(|| vec![0; pixels]);
+    let mut alpha = if bits_per_pixel == 32
+        && (color_masks.is_none() || color_masks.and_then(|masks| masks.alpha).is_some())
+    {
+        Some(vec![0; pixels])
+    } else {
+        None
+    };
 
     for output_y in 0..height {
         let source_y = if top_down {
@@ -25130,6 +25149,10 @@ fn decode_uncompressed_dib_pixels(
                         rgb[output] = expand_masked_color_channel(pixel, masks.red)?;
                         rgb[output + 1] = expand_masked_color_channel(pixel, masks.green)?;
                         rgb[output + 2] = expand_masked_color_channel(pixel, masks.blue)?;
+                        if let (Some(alpha_mask), Some(alpha)) = (alpha.as_mut(), masks.alpha) {
+                            alpha_mask[output_y.checked_mul(width)?.checked_add(x)?] =
+                                expand_masked_color_channel(pixel, alpha)?;
+                        }
                     } else {
                         rgb[output] = bytes[source + 2];
                         rgb[output + 1] = bytes[source + 1];
@@ -42467,6 +42490,19 @@ After\par}"#;
                 &minimal_32bit_dib_with_rgba_pixels(2, 1, &[[255, 0, 0, 64], [0, 255, 0, 192]]),
             ),
             emf_alphablend_dib_record(
+                112,
+                44,
+                44,
+                24,
+                0xff,
+                1,
+                &minimal_32bit_bitfields_dib_with_rgba_pixels(
+                    2,
+                    1,
+                    &[[255, 0, 0, 32], [0, 255, 0, 224]],
+                ),
+            ),
+            emf_alphablend_dib_record(
                 120,
                 50,
                 44,
@@ -42488,7 +42524,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 3);
+        assert_eq!(image.vector_commands.len(), 4);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -42529,6 +42565,18 @@ After\par}"#;
             miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&source_alpha_mask.bytes, 3)
                 .unwrap(),
             vec![0, 64, 192]
+        );
+        let bitfield_alpha_mask = match &image.vector_commands[3] {
+            StaticImageVectorCommand::RasterImage { image, .. } => image
+                .alpha_mask
+                .as_ref()
+                .expect("bitfield source alpha mask"),
+            _ => panic!("expected bitfield alpha raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&bitfield_alpha_mask.bytes, 3)
+                .unwrap(),
+            vec![0, 32, 224]
         );
     }
 
@@ -46232,6 +46280,45 @@ fn minimal_32bit_dib_with_rgba_pixels(width: u32, height: u32, pixels: &[[u8; 4]
         for x in 0..width {
             let [red, green, blue, alpha] = pixels[(y as usize * width as usize) + x as usize];
             dib.extend_from_slice(&[blue, green, red, alpha]);
+        }
+    }
+    dib
+}
+
+#[cfg(test)]
+fn minimal_32bit_bitfields_dib_with_rgba_pixels(
+    width: u32,
+    height: u32,
+    pixels: &[[u8; 4]],
+) -> Vec<u8> {
+    assert_eq!(pixels.len(), (width as usize) * (height as usize));
+    let row_stride = width as usize * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let mut dib = Vec::with_capacity(56 + pixel_bytes);
+    dib.extend_from_slice(&56u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&32u16.to_le_bytes());
+    dib.extend_from_slice(&3u32.to_le_bytes());
+    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0x00ff_0000u32.to_le_bytes());
+    dib.extend_from_slice(&0x0000_ff00u32.to_le_bytes());
+    dib.extend_from_slice(&0x0000_00ffu32.to_le_bytes());
+    dib.extend_from_slice(&0xff00_0000u32.to_le_bytes());
+
+    for y in (0..height).rev() {
+        for x in 0..width {
+            let [red, green, blue, alpha] = pixels[(y as usize * width as usize) + x as usize];
+            let pixel = (u32::from(alpha) << 24)
+                | (u32::from(red) << 16)
+                | (u32::from(green) << 8)
+                | u32::from(blue);
+            dib.extend_from_slice(&pixel.to_le_bytes());
         }
     }
     dib
