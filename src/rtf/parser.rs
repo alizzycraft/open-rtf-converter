@@ -24848,14 +24848,16 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some((left, top, right, bottom)) = parse_wmf_patblt_bounds(
-                    data,
-                    window_origin_x,
-                    window_origin_y,
-                    window_width,
-                    window_height,
-                ) && bounds_is_visible((left, top, right, bottom))
-                    && state.fill_color.is_some()
+                if let Some((left, top, right, bottom, fill_color)) =
+                    parse_wmf_patblt_passive_transfer(
+                        data,
+                        window_origin_x,
+                        window_origin_y,
+                        window_width,
+                        window_height,
+                        state.fill_color,
+                    )
+                    && bounds_is_visible((left, top, right, bottom))
                 {
                     commands.push(StaticImageVectorCommand::Rectangle {
                         left,
@@ -24866,7 +24868,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         stroke_width: 0.0,
                         stroke_style: BorderStyle::Single,
                         fill_pattern: ShadingPattern::None,
-                        fill_color: state.fill_color,
+                        fill_color: Some(fill_color),
                     });
                 }
             }
@@ -24880,15 +24882,15 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     0x0f43 => 14,
                     _ => unreachable!(),
                 };
-                if let Some((left, top, right, bottom)) = parse_wmf_blt_patcopy_bounds(
+                if let Some((left, top, right, bottom, fill_color)) = parse_wmf_blt_passive_transfer(
                     data,
                     destination_offset,
                     window_origin_x,
                     window_origin_y,
                     window_width,
                     window_height,
+                    state.fill_color,
                 ) && bounds_is_visible((left, top, right, bottom))
-                    && state.fill_color.is_some()
                 {
                     commands.push(StaticImageVectorCommand::Rectangle {
                         left,
@@ -24899,7 +24901,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         stroke_width: 0.0,
                         stroke_style: BorderStyle::Single,
                         fill_pattern: ShadingPattern::None,
-                        fill_color: state.fill_color,
+                        fill_color: Some(fill_color),
                     });
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -25274,14 +25276,16 @@ fn normalized_wmf_size(data: &[u8], offset: usize, extent: i32) -> Option<f32> {
     Some(value.clamp(0, extent.max(1)) as f32)
 }
 
-fn parse_wmf_patblt_bounds(
+fn parse_wmf_patblt_passive_transfer(
     data: &[u8],
     window_origin_x: i32,
     window_origin_y: i32,
     window_width: i32,
     window_height: i32,
-) -> Option<(f32, f32, f32, f32)> {
-    if data.len() < 12 || read_le_u32(data, 0)? != WMF_PATCOPY_RASTER_OP {
+    selected_fill_color: Option<Color>,
+) -> Option<(f32, f32, f32, f32, Color)> {
+    let fill_color = passive_wmf_raster_transfer_color(read_le_u32(data, 0)?, selected_fill_color)?;
+    if data.len() < 12 {
         return None;
     }
     let y = i32::from(read_le_i16(data, 4)?);
@@ -25309,20 +25313,21 @@ fn parse_wmf_patblt_bounds(
         left_top.1.min(right_bottom.1),
         left_top.0.max(right_bottom.0),
         left_top.1.max(right_bottom.1),
+        fill_color,
     ))
 }
 
-fn parse_wmf_blt_patcopy_bounds(
+fn parse_wmf_blt_passive_transfer(
     data: &[u8],
     destination_offset: usize,
     window_origin_x: i32,
     window_origin_y: i32,
     window_width: i32,
     window_height: i32,
-) -> Option<(f32, f32, f32, f32)> {
-    if data.len() < destination_offset.checked_add(8)?
-        || read_le_u32(data, 0)? != WMF_PATCOPY_RASTER_OP
-    {
+    selected_fill_color: Option<Color>,
+) -> Option<(f32, f32, f32, f32, Color)> {
+    let fill_color = passive_wmf_raster_transfer_color(read_le_u32(data, 0)?, selected_fill_color)?;
+    if data.len() < destination_offset.checked_add(8)? {
         return None;
     }
     let height = i32::from(read_le_i16(data, destination_offset)?.unsigned_abs().max(1));
@@ -25354,7 +25359,28 @@ fn parse_wmf_blt_patcopy_bounds(
         left_top.1.min(right_bottom.1),
         left_top.0.max(right_bottom.0),
         left_top.1.max(right_bottom.1),
+        fill_color,
     ))
+}
+
+fn passive_wmf_raster_transfer_color(
+    raster_op: u32,
+    selected_fill_color: Option<Color>,
+) -> Option<Color> {
+    match raster_op {
+        WMF_BLACKNESS_RASTER_OP => Some(Color {
+            red: 0,
+            green: 0,
+            blue: 0,
+        }),
+        WMF_WHITENESS_RASTER_OP => Some(Color {
+            red: 255,
+            green: 255,
+            blue: 255,
+        }),
+        WMF_PATCOPY_RASTER_OP => selected_fill_color,
+        _ => None,
+    }
 }
 
 fn parse_wmf_setpixel_rect(
@@ -40880,6 +40906,121 @@ After\par}"#;
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn wmf_blackness_and_whiteness_transfers_become_passive_filled_rectangles() {
+        let cases = [
+            (
+                concat!(
+                    "010009000003250000000100090000000000",
+                    "050000000c026400c800",
+                    "07000000fc020000ff0000000000",
+                    "040000002d010000",
+                    "090000001d0642000000140028001e003200",
+                    "030000000000",
+                ),
+                (40.0, 20.0, 90.0, 50.0),
+                Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0,
+                },
+            ),
+            (
+                concat!(
+                    "0100090000032700000001000b0000000000",
+                    "050000000c026400c800",
+                    "07000000fc0200001e6eb4000000",
+                    "040000002d010000",
+                    "0b00000022096200ff00000000003c00460014000a00",
+                    "030000000000",
+                ),
+                (10.0, 20.0, 80.0, 80.0),
+                Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                },
+            ),
+            (
+                concat!(
+                    "0100090000032900000001000d0000000000",
+                    "050000000c026400c800",
+                    "07000000fc020000285078000000",
+                    "040000002d010000",
+                    "0d000000230b4200000000000000000000002800500019000f00",
+                    "030000000000",
+                ),
+                (15.0, 25.0, 95.0, 65.0),
+                Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0,
+                },
+            ),
+            (
+                concat!(
+                    "0100090000032800000001000c0000000000",
+                    "050000000c026400c800",
+                    "07000000fc020000785028000000",
+                    "040000002d010000",
+                    "0c00000040096200ff00000000003c00460014000a000000",
+                    "030000000000",
+                ),
+                (10.0, 20.0, 80.0, 80.0),
+                Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                },
+            ),
+            (
+                concat!(
+                    "0100090000032900000001000d0000000000",
+                    "050000000c026400c800",
+                    "07000000fc0200002846a0000000",
+                    "040000002d010000",
+                    "0d000000410b4200000000000000000000002800500019000f00",
+                    "030000000000",
+                ),
+                (15.0, 25.0, 95.0, 65.0),
+                Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0,
+                },
+            ),
+        ];
+
+        for (wmf_hex, (left, top, right, bottom), fill_color) in cases {
+            let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+            let image = match &output.document.blocks[0] {
+                Block::Image(image) => image,
+                _ => panic!("expected passive WMF vector image"),
+            };
+
+            assert_eq!(image.format, ImageFormat::WmfVector, "{wmf_hex}");
+            assert!(image.bytes.is_empty());
+            assert_eq!(output.diagnostics.len(), 0);
+            assert_eq!(image.vector_commands.len(), 1);
+            assert!(matches!(
+                image.vector_commands[0],
+                StaticImageVectorCommand::Rectangle {
+                    left: actual_left,
+                    top: actual_top,
+                    right: actual_right,
+                    bottom: actual_bottom,
+                    stroke_color: None,
+                    fill_color: Some(actual_fill_color),
+                    ..
+                } if actual_left == left
+                    && actual_top == top
+                    && actual_right == right
+                    && actual_bottom == bottom
+                    && actual_fill_color == fill_color
+            ));
+        }
     }
 
     #[test]

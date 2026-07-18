@@ -30212,6 +30212,159 @@ fn wmf_patcopy_stretchdib_renders_passive_brush_rectangle_without_payload_leakag
 }
 
 #[test]
+fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "010009000003780000000400190000000000",
+        "050000000c026400c800",
+        "07000000fc020000ff0000000000",
+        "040000002d010000",
+        "160000002209420000000000000019002d001e0023005241572d424c41434b4e4553532d5041594c4f414400",
+        "18000000230b6200ff0000000000000000002800500019000f005241572d57484954454e4553532d5041594c4f414400",
+        "190000004009420000000000000019002d001e00230000005241572d4449422d424c41434b4e4553532d5041594c4f414400",
+        "1500000022092000cc00000000000019002d001e0023005241572d535243434f50592d424954424c5400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF solid raster transfer vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 3);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 35.0,
+            top: 30.0,
+            right: 80.0,
+            bottom: 55.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle {
+            left: 15.0,
+            top: 25.0,
+            right: 95.0,
+            bottom: 65.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[2],
+        StaticImageVectorCommand::Rectangle {
+            left: 35.0,
+            top: 30.0,
+            right: 80.0,
+            bottom: 55.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        "wmetafile",
+        "RAW-BLACKNESS-PAYLOAD",
+        "RAW-WHITENESS-PAYLOAD",
+        "RAW-DIB-BLACKNESS-PAYLOAD",
+        "RAW-SRCCOPY-BITBLT",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF solid raster transfer internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 3,
+        "WMF BLACKNESS/WHITENESS transfers should render passive PDF rectangles"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*" | "B" | "B*")),
+        "WMF BLACKNESS/WHITENESS transfers should render passive PDF fills"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"RAW-BLACKNESS-PAYLOAD",
+        b"RAW-WHITENESS-PAYLOAD",
+        b"RAW-DIB-BLACKNESS-PAYLOAD",
+        b"RAW-SRCCOPY-BITBLT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF solid raster transfer leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003180000000000070000000000",
