@@ -44720,6 +44720,9 @@ After\par}"#;
             [130, 140, 150],
             [160, 170, 180],
         ];
+        let mut top_down_compressed_png_dib =
+            minimal_compressed_dib_with_payload(2, 3, 5, &minimal_rgb_png_with_rows(2, 3, &rows));
+        write_test_le_i32(&mut top_down_compressed_png_dib, 8, -3);
         let records = [
             wmf_setdib_to_dev_record(12, 18, 2, 1, 0, 1, &minimal_24bit_dib_with_dimensions(2, 1)),
             wmf_setdib_to_dev_record(
@@ -44754,6 +44757,7 @@ After\par}"#;
                     &minimal_rgb_png_with_rows(2, 3, &rows),
                 ),
             ),
+            wmf_setdib_to_dev_record(112, 56, 2, 3, 0, 1, &top_down_compressed_png_dib),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
@@ -44767,7 +44771,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 3);
+        assert_eq!(image.vector_commands.len(), 4);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -44814,6 +44818,22 @@ After\par}"#;
                 && image.alpha_mask.is_none()
                 && unfiltered_png_scanlines(&image.bytes, 2, 1, 3).unwrap().3
                     == vec![0, 70, 80, 90, 100, 110, 120]
+        ));
+        assert!(matches!(
+            &image.vector_commands[3],
+            StaticImageVectorCommand::RasterImage {
+                left: 112.0,
+                top: 56.0,
+                right: 114.0,
+                bottom: 57.0,
+                image,
+            } if image.format == ImageFormat::Png
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.palette.is_empty()
+                && image.alpha_mask.is_none()
+                && unfiltered_png_scanlines(&image.bytes, 2, 1, 3).unwrap().3
+                    == vec![0, 10, 20, 30, 40, 50, 60]
         ));
     }
 

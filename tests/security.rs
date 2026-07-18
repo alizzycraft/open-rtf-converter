@@ -30723,9 +30723,23 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
         ],
     );
     partial_dib.extend_from_slice(b"TRAILING-WMF-PARTIAL-SETDIBTODEV /JavaScript");
+    let png_rows = [
+        [10, 20, 30],
+        [40, 50, 60],
+        [70, 80, 90],
+        [100, 110, 120],
+        [130, 140, 150],
+        [160, 170, 180],
+    ];
+    let mut top_down_compressed_png_dib =
+        minimal_compressed_dib_with_payload(2, 3, 5, &minimal_rgb_png_with_rows(2, 3, &png_rows));
+    write_test_le_i32(&mut top_down_compressed_png_dib, 8, -3);
+    top_down_compressed_png_dib
+        .extend_from_slice(b"TRAILING-WMF-TOPDOWN-COMPRESSED-SETDIBTODEV /Launch");
     let records = [
         wmf_setdib_to_dev_record(16, 24, 2, 1, 0, 1, &dib),
         wmf_setdib_to_dev_record(30, 34, 2, 3, 1, 1, &partial_dib),
+        wmf_setdib_to_dev_record(46, 44, 2, 3, 0, 1, &top_down_compressed_png_dib),
     ];
     let wmf = minimal_wmf_with_records(200, 100, &records);
     let wmf_hex = bytes_to_hex(&wmf);
@@ -30749,7 +30763,7 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(image.vector_commands.len(), 3);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -30776,14 +30790,35 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
             && image.height_px == 1
             && image.bytes == vec![70, 80, 90, 100, 110, 120]
     ));
+    match &image.vector_commands[2] {
+        StaticImageVectorCommand::RasterImage {
+            left: 46.0,
+            top: 44.0,
+            right: 48.0,
+            bottom: 45.0,
+            image,
+        } => {
+            assert_eq!(image.format, ImageFormat::Png);
+            assert_eq!(image.width_px, 2);
+            assert_eq!(image.height_px, 1);
+            assert_eq!(
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 7).unwrap(),
+                vec![0, 10, 20, 30, 40, 50, 60]
+            );
+            assert!(image.alpha_mask.is_none());
+        }
+        _ => panic!("expected top-down compressed WMF SETDIBTODEV PNG raster image"),
+    }
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "wmetafile",
         "0d33",
         "TRAILING-WMF-SETDIBTODEV",
         "TRAILING-WMF-PARTIAL-SETDIBTODEV",
+        "TRAILING-WMF-TOPDOWN-COMPRESSED-SETDIBTODEV",
         "JavaScript",
         "EmbeddedFile",
+        "Launch",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -30815,7 +30850,7 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 2,
+            >= 3,
         "WMF SETDIBTODEV should invoke a passive PDF image XObject"
     );
     for forbidden in [
@@ -30823,6 +30858,7 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
         b"0d33",
         b"TRAILING-WMF-SETDIBTODEV",
         b"TRAILING-WMF-PARTIAL-SETDIBTODEV",
+        b"TRAILING-WMF-TOPDOWN-COMPRESSED-SETDIBTODEV",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
