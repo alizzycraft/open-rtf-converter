@@ -23968,6 +23968,7 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     const BITMAPINFOHEADER_SIZE: usize = 40;
     const BI_RGB: u32 = 0;
     const BI_RLE8: u32 = 1;
+    const BI_RLE4: u32 = 2;
     const BI_BITFIELDS: u32 = 3;
 
     if bytes.len() < 4 {
@@ -23992,7 +23993,8 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     }
     let uses_bitfields = compression == BI_BITFIELDS && matches!(bits_per_pixel, 16 | 32);
     let uses_rle8 = compression == BI_RLE8 && bits_per_pixel == 8 && raw_height > 0;
-    if compression != BI_RGB && !uses_bitfields && !uses_rle8 {
+    let uses_rle4 = compression == BI_RLE4 && bits_per_pixel == 4 && raw_height > 0;
+    if compression != BI_RGB && !uses_bitfields && !uses_rle8 && !uses_rle4 {
         return None;
     }
 
@@ -24039,6 +24041,9 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
 
     if uses_rle8 {
         return parse_rle8_dib_pixels(bytes, width_px, height_px, header_size, colors_used);
+    }
+    if uses_rle4 {
+        return parse_rle4_dib_pixels(bytes, width_px, height_px, header_size, colors_used);
     }
 
     let (row_stride, pixel_start, palette_entries) = match bits_per_pixel {
@@ -24346,7 +24351,7 @@ fn parse_rle8_dib_pixels(
                 return None;
             }
             for _ in 0..run {
-                write_rle8_output_pixel(
+                write_rle_output_pixel(
                     bytes,
                     header_size,
                     palette_entries,
@@ -24392,7 +24397,7 @@ fn parse_rle8_dib_pixels(
                 let literal_end = pos.checked_add(literal_count)?;
                 let literals = bytes.get(pos..literal_end)?;
                 for &palette_index in literals {
-                    write_rle8_output_pixel(
+                    write_rle_output_pixel(
                         bytes,
                         header_size,
                         palette_entries,
@@ -24425,8 +24430,136 @@ fn parse_rle8_dib_pixels(
     })
 }
 
+fn parse_rle4_dib_pixels(
+    bytes: &[u8],
+    width_px: u32,
+    height_px: u32,
+    header_size: usize,
+    colors_used: u32,
+) -> Option<ParsedDib> {
+    let palette_entries = if colors_used == 0 {
+        16usize
+    } else {
+        usize::try_from(colors_used).ok()?
+    };
+    if palette_entries == 0 || palette_entries > 16 {
+        return None;
+    }
+    let palette_bytes = palette_entries.checked_mul(4)?;
+    let pixel_start = header_size.checked_add(palette_bytes)?;
+    if pixel_start > bytes.len() {
+        return None;
+    }
+
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let pixels = width.checked_mul(height)?;
+    let output_len = pixels.checked_mul(3)?;
+    let mut rgb = vec![0; output_len];
+    let mut x = 0usize;
+    let mut y_from_bottom = 0usize;
+    let mut pos = pixel_start;
+    let mut reached_eof = false;
+
+    while pos < bytes.len() && !reached_eof {
+        let count = *bytes.get(pos)?;
+        let value = *bytes.get(pos + 1)?;
+        pos = pos.checked_add(2)?;
+        if count > 0 {
+            let run = usize::from(count);
+            if x.checked_add(run)? > width || y_from_bottom >= height {
+                return None;
+            }
+            let indexes = [value >> 4, value & 0x0f];
+            for index in 0..run {
+                write_rle_output_pixel(
+                    bytes,
+                    header_size,
+                    palette_entries,
+                    width,
+                    height,
+                    x,
+                    y_from_bottom,
+                    indexes[index % 2],
+                    &mut rgb,
+                )?;
+                x = x.checked_add(1)?;
+            }
+            continue;
+        }
+
+        match value {
+            0 => {
+                x = 0;
+                y_from_bottom = y_from_bottom.checked_add(1)?;
+                if y_from_bottom > height {
+                    return None;
+                }
+            }
+            1 => reached_eof = true,
+            2 => {
+                let dx = usize::from(*bytes.get(pos)?);
+                let dy = usize::from(*bytes.get(pos + 1)?);
+                pos = pos.checked_add(2)?;
+                x = x.checked_add(dx)?;
+                y_from_bottom = y_from_bottom.checked_add(dy)?;
+                if x > width || y_from_bottom >= height {
+                    return None;
+                }
+            }
+            absolute_count => {
+                let literal_count = usize::from(absolute_count);
+                if literal_count < 3
+                    || x.checked_add(literal_count)? > width
+                    || y_from_bottom >= height
+                {
+                    return None;
+                }
+                let literal_bytes = literal_count.checked_add(1)?.checked_div(2)?;
+                let literal_end = pos.checked_add(literal_bytes)?;
+                let literals = bytes.get(pos..literal_end)?;
+                for index in 0..literal_count {
+                    let byte = *literals.get(index / 2)?;
+                    let palette_index = if index % 2 == 0 {
+                        byte >> 4
+                    } else {
+                        byte & 0x0f
+                    };
+                    write_rle_output_pixel(
+                        bytes,
+                        header_size,
+                        palette_entries,
+                        width,
+                        height,
+                        x,
+                        y_from_bottom,
+                        palette_index,
+                        &mut rgb,
+                    )?;
+                    x = x.checked_add(1)?;
+                }
+                pos = literal_end;
+                if literal_bytes % 2 == 1 {
+                    pos = pos.checked_add(1)?;
+                    bytes.get(pos - 1)?;
+                }
+            }
+        }
+    }
+
+    if !reached_eof {
+        return None;
+    }
+
+    Some(ParsedDib {
+        width_px,
+        height_px,
+        rgb,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
-fn write_rle8_output_pixel(
+fn write_rle_output_pixel(
     bytes: &[u8],
     palette_start: usize,
     palette_entries: usize,
@@ -37890,6 +38023,26 @@ After\par}"#;
     }
 
     #[test]
+    fn normalizes_rle4_dib_picture_as_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_rle4_dib_with_dimensions(3, 1))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Rgb8);
+        assert_eq!(image.width_px, 3);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0, 255, 0, 0]);
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(720));
+    }
+
+    #[test]
     fn normalizes_4bit_paletted_dib_picture_as_safe_static_image() {
         let input = format!(
             "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
@@ -43755,6 +43908,29 @@ fn minimal_rle8_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     dib.extend_from_slice(&1u16.to_le_bytes());
     dib.extend_from_slice(&8u16.to_le_bytes());
     dib.extend_from_slice(&1u32.to_le_bytes());
+    dib.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&2u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&[0, 0, 255, 0]);
+    dib.extend_from_slice(&[0, 255, 0, 0]);
+    dib.extend_from_slice(&compressed);
+    dib
+}
+
+#[cfg(test)]
+fn minimal_rle4_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
+    assert_eq!(width, 3);
+    assert_eq!(height, 1);
+    let compressed = [0, 3, 0x01, 0, 0, 1];
+    let mut dib = Vec::with_capacity(40 + 8 + compressed.len());
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&4u16.to_le_bytes());
+    dib.extend_from_slice(&2u32.to_le_bytes());
     dib.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
     dib.extend_from_slice(&0i32.to_le_bytes());
     dib.extend_from_slice(&0i32.to_le_bytes());
