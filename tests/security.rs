@@ -38555,9 +38555,15 @@ fn emf_srccopy_stretchdibits_dib_renders_as_passive_image_without_payload_leakag
 fn compressed_dibs_inside_metafile_raster_records_render_without_raw_payload_leakage() {
     let jpeg = minimal_jpeg_with_dimensions(2, 1);
     let png = minimal_grayscale_png_with_dimensions(2, 1);
-    let mut jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
+    let mut emf_jpeg_payload = jpeg.clone();
+    emf_jpeg_payload.extend_from_slice(b"TRAILING-EMF-BI-JPEG /JavaScript");
+    let mut emf_jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &emf_jpeg_payload);
+    emf_jpeg_dib.extend_from_slice(b"TRAILING-EMF-BI-JPEG-DIB /Launch");
+    let mut wmf_jpeg_payload = jpeg.clone();
+    wmf_jpeg_payload.extend_from_slice(b"TRAILING-WMF-BI-JPEG /EmbeddedFile");
+    let mut wmf_jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &wmf_jpeg_payload);
+    wmf_jpeg_dib.extend_from_slice(b"TRAILING-WMF-BI-JPEG-DIB /Launch");
     let mut png_dib = minimal_compressed_dib_with_payload(2, 1, 5, &png);
-    jpeg_dib.extend_from_slice(b"TRAILING-EMF-BI-JPEG /JavaScript");
     png_dib.extend_from_slice(b"TRAILING-WMF-BI-PNG /EmbeddedFile");
 
     let emf = minimal_emf_with_records(
@@ -38571,20 +38577,16 @@ fn compressed_dibs_inside_metafile_raster_records_render_without_raw_payload_lea
             60,
             30,
             0x00cc_0020,
-            &jpeg_dib,
+            &emf_jpeg_dib,
         )],
     );
     let wmf = minimal_wmf_with_records(
         200,
         100,
-        &[wmf_stretchdib_dib_record(
-            35,
-            25,
-            80,
-            40,
-            0x00cc_0020,
-            &png_dib,
-        )],
+        &[
+            wmf_stretchdib_dib_record(35, 25, 80, 40, 0x00cc_0020, &png_dib),
+            wmf_dibstretchblt_record(90, 45, 70, 35, 0x00cc_0020, &wmf_jpeg_dib),
+        ],
     );
     let emf_hex = bytes_to_hex(&emf);
     let wmf_hex = bytes_to_hex(&wmf);
@@ -38614,6 +38616,8 @@ fn compressed_dibs_inside_metafile_raster_records_render_without_raw_payload_lea
             .all(|image| image.format == ImageFormat::WmfVector)
     );
     assert!(images.iter().all(|image| image.bytes.is_empty()));
+    assert_eq!(images[0].vector_commands.len(), 1);
+    assert_eq!(images[1].vector_commands.len(), 2);
     assert!(matches!(
         &images[0].vector_commands[0],
         StaticImageVectorCommand::RasterImage { image, .. }
@@ -38630,13 +38634,25 @@ fn compressed_dibs_inside_metafile_raster_records_render_without_raw_payload_lea
                 && image.height_px == 1
                 && image.alpha_mask.is_none()
     ));
+    assert!(matches!(
+        &images[1].vector_commands[1],
+        StaticImageVectorCommand::RasterImage { image, .. }
+            if image.format == ImageFormat::Jpeg
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == jpeg
+    ));
     for forbidden in [
         "emfblip",
         "wmetafile",
         "TRAILING-EMF-BI-JPEG",
+        "TRAILING-EMF-BI-JPEG-DIB",
+        "TRAILING-WMF-BI-JPEG",
+        "TRAILING-WMF-BI-JPEG-DIB",
         "TRAILING-WMF-BI-PNG",
         "JavaScript",
         "EmbeddedFile",
+        "Launch",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -38661,13 +38677,16 @@ fn compressed_dibs_inside_metafile_raster_records_render_without_raw_payload_lea
         .filter(|operation| operation.operator == "Do")
         .count();
     assert!(
-        image_paints >= 2,
+        image_paints >= 3,
         "both metafile compressed DIBs should render"
     );
     for forbidden in [
         b"emfblip".as_slice(),
         b"wmetafile",
         b"TRAILING-EMF-BI-JPEG",
+        b"TRAILING-EMF-BI-JPEG-DIB",
+        b"TRAILING-WMF-BI-JPEG",
+        b"TRAILING-WMF-BI-JPEG-DIB",
         b"TRAILING-WMF-BI-PNG",
         b"89504e470d0a1a0a",
         b"/JavaScript",
