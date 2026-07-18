@@ -27997,6 +27997,116 @@ fn wmf_polybezierto_records_update_current_point_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_polypolygon_records_render_compound_path_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "010009000003360000000100160000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "0400000006010200",
+        "160000003805020004000400",
+        "0a000a008c000a008c0046000a004600",
+        "32001900640019006400370032003700",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF polypolygon vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::Path {
+            start: (10.0, 10.0),
+            segments,
+            fill_rule: StaticImageVectorFillRule::Winding,
+            fill_color: Some(Color { red: 220, green: 220, blue: 220 }),
+            ..
+        } if segments.iter().any(|segment| matches!(
+            segment,
+            StaticImageVectorPathSegment::MoveTo(50.0, 25.0)
+        ))
+    ));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in [
+        "wmetafile",
+        "010009",
+        "0538",
+        "dcdcdc",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF polypolygon internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "m")
+            .count()
+            >= 2,
+        "WMF PolyPolygon should render nested contours as one passive compound path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "B")),
+        "WMF PolyPolygon should use winding fill operations for passive compound paths"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"0538",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF polypolygon preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_cliprect_records_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032a0000000100070000000000",
@@ -28922,7 +29032,7 @@ fn wmf_polyfill_alternate_renders_even_odd_fill_without_record_leakage() {
 }
 
 #[test]
-fn wmf_polypolygon_renders_multiple_passive_polygons_without_payload_leakage() {
+fn wmf_polypolygon_renders_compound_passive_path_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003300000000100140000000000",
         "050000000c026400c800",
@@ -28951,24 +29061,20 @@ fn wmf_polypolygon_renders_multiple_passive_polygons_without_payload_leakage() {
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
     assert!(image.palette.is_empty());
-    let polygons = image
-        .vector_commands
-        .iter()
-        .filter_map(|command| match command {
-            StaticImageVectorCommand::Polygon {
-                points, fill_color, ..
-            } => Some((points, fill_color)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(polygons.len(), 2);
-    assert_eq!(polygons[0].0.len(), 3);
-    assert_eq!(polygons[1].0.len(), 4);
-    assert!(
-        polygons
-            .iter()
-            .all(|(_, fill_color)| matches!(fill_color, Some(color) if color.red == 0 && color.green == 255 && color.blue == 255))
-    );
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::Path {
+            start: (20.0, 20.0),
+            segments,
+            fill_rule: StaticImageVectorFillRule::Alternate,
+            fill_color: Some(Color { red: 0, green: 255, blue: 255 }),
+            ..
+        } if segments.iter().any(|segment| matches!(
+            segment,
+            StaticImageVectorPathSegment::MoveTo(40.0, 70.0)
+        ))
+    ));
     assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "0538", "00ffff", "JavaScript", "EmbeddedFile"] {
         assert!(
@@ -28992,10 +29098,17 @@ fn wmf_polypolygon_renders_multiple_passive_polygons_without_payload_leakage() {
         content
             .operations
             .iter()
-            .filter(|operation| operation.operator == "h")
+            .filter(|operation| operation.operator == "m")
             .count()
             >= 2,
-        "WMF POLYPOLYGON should close each passive polygon path"
+        "WMF POLYPOLYGON should render each contour as a passive compound subpath"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "B" | "B*")),
+        "WMF POLYPOLYGON should fill and stroke the passive compound path"
     );
     for forbidden in [
         b"/Subtype /Image".as_slice(),

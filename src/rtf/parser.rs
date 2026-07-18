@@ -23697,21 +23697,19 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_width,
                     window_height,
                 )?;
-                for points in polygons {
-                    if points.len() >= 3 && point_bounds_are_visible(&points) {
-                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                            return None;
-                        }
-                        commands.push(StaticImageVectorCommand::Polygon {
-                            points,
-                            stroke_color: state.stroke_color,
-                            stroke_width: state.stroke_width,
-                            stroke_style: state.stroke_style,
-                            fill_rule: state.fill_rule,
-                            fill_pattern: state.fill_pattern,
-                            fill_color: state.fill_color,
-                        });
+                if let Some(command) = wmf_polypolygon_command(
+                    polygons,
+                    state.stroke_color,
+                    state.stroke_width,
+                    state.stroke_style,
+                    state.fill_rule,
+                    state.fill_pattern,
+                    state.fill_color,
+                )? {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
                     }
+                    commands.push(command);
                 }
             }
             0x1005 => {
@@ -24746,6 +24744,62 @@ fn parse_wmf_polypolygon_list(
         polygons.push(points);
     }
     Some(polygons)
+}
+
+fn wmf_polypolygon_command(
+    polygons: Vec<Vec<(f32, f32)>>,
+    stroke_color: Option<Color>,
+    stroke_width: f32,
+    stroke_style: BorderStyle,
+    fill_rule: StaticImageVectorFillRule,
+    fill_pattern: ShadingPattern,
+    fill_color: Option<Color>,
+) -> Option<Option<StaticImageVectorCommand>> {
+    if stroke_color.is_none() && fill_color.is_none() {
+        return Some(None);
+    }
+
+    let mut visible_polygons = polygons
+        .into_iter()
+        .filter(|points| points.len() >= 3 && point_bounds_are_visible(points));
+    let Some(first_polygon) = visible_polygons.next() else {
+        return Some(None);
+    };
+    let start = *first_polygon.first()?;
+    let mut segments = Vec::new();
+    append_wmf_polygon_path_segments(&mut segments, &first_polygon)?;
+    for points in visible_polygons {
+        let next_start = *points.first()?;
+        segments.push(StaticImageVectorPathSegment::MoveTo(
+            next_start.0,
+            next_start.1,
+        ));
+        append_wmf_polygon_path_segments(&mut segments, &points)?;
+    }
+
+    Some(Some(StaticImageVectorCommand::Path {
+        start,
+        segments,
+        closed: false,
+        stroke_color,
+        stroke_width,
+        stroke_style,
+        fill_rule,
+        fill_pattern,
+        fill_color,
+    }))
+}
+
+fn append_wmf_polygon_path_segments(
+    segments: &mut Vec<StaticImageVectorPathSegment>,
+    points: &[(f32, f32)],
+) -> Option<()> {
+    let first = *points.first()?;
+    for &(x, y) in points.iter().skip(1) {
+        segments.push(StaticImageVectorPathSegment::LineTo(x, y));
+    }
+    segments.push(StaticImageVectorPathSegment::LineTo(first.0, first.1));
+    Some(())
 }
 
 fn bounds_is_visible((left, top, right, bottom): (f32, f32, f32, f32)) -> bool {
@@ -38517,6 +38571,43 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn wmf_polypolygon_preserves_compound_fill_rule_as_passive_path() {
+        let wmf_hex = concat!(
+            "010009000003360000000100160000000000",
+            "050000000c026400c800",
+            "07000000fc020000dcdcdc000000",
+            "040000002d010000",
+            "0400000006010200",
+            "160000003805020004000400",
+            "0a000a008c000a008c0046000a004600",
+            "32001900640019006400370032003700",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Path {
+                start: (10.0, 10.0),
+                segments,
+                fill_rule: StaticImageVectorFillRule::Winding,
+                fill_color: Some(Color { red: 220, green: 220, blue: 220 }),
+                ..
+            } if segments.iter().any(|segment| matches!(
+                segment,
+                StaticImageVectorPathSegment::MoveTo(50.0, 25.0)
+            ))
         ));
     }
 
