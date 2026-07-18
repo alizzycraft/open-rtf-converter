@@ -38852,6 +38852,152 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
 }
 
 #[test]
+fn emf_blank_destination_source_raster_ops_render_passively_without_payload_leakage() {
+    let srcerase_payload = b"SRCERASE-BLANK-SOURCE-PAYLOAD";
+    let patpaint_payload = b"PATPAINT-BLANK-SOURCE-PAYLOAD";
+    let srcerase_emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[emf_bitblt_record(
+            10,
+            20,
+            30,
+            15,
+            0x0044_0328,
+            srcerase_payload,
+        )],
+    );
+    let patpaint_emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[emf_bitblt_record(
+            50,
+            25,
+            35,
+            20,
+            0x00fb_0a09,
+            patpaint_payload,
+        )],
+    );
+    let srcerase_hex = bytes_to_hex(&srcerase_emf);
+    let patpaint_hex = bytes_to_hex(&patpaint_emf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {srcerase_hex}}} middle {{\\pict\\emfblip {patpaint_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert!(matches!(
+        images[0].vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 20.0,
+            right: 40.0,
+            bottom: 35.0,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        images[1].vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 50.0,
+            top: 25.0,
+            right: 85.0,
+            bottom: 45.0,
+            fill_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255
+            }),
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "SRCERASE-BLANK-SOURCE-PAYLOAD",
+        "PATPAINT-BLANK-SOURCE-PAYLOAD",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "blank-destination EMF raster payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "blank-destination EMF raster ops should render passive PDF rectangles"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        srcerase_hex.as_bytes(),
+        patpaint_hex.as_bytes(),
+        srcerase_payload.as_slice(),
+        patpaint_payload.as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "blank-destination EMF raster payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_move_to_and_line_to_records_render_passively_without_payload_leakage() {
     let records = [
         emf_point_record(27, 10, 10),

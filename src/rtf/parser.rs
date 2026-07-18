@@ -22566,11 +22566,25 @@ fn parse_emf_passive_raster_transfer(
             blue: 255,
         },
         WMF_PATCOPY_RASTER_OP => selected_fill_color?,
+        WMF_SRCERASE_RASTER_OP | WMF_NOTSRCERASE_RASTER_OP if blank_destination => Color {
+            red: 0,
+            green: 0,
+            blue: 0,
+        },
         WMF_DSTINVERT_RASTER_OP if blank_destination => Color {
             red: 0,
             green: 0,
             blue: 0,
         },
+        WMF_MERGEPAINT_RASTER_OP | WMF_SRCPAINT_RASTER_OP | WMF_PATPAINT_RASTER_OP
+            if blank_destination =>
+        {
+            Color {
+                red: 255,
+                green: 255,
+                blue: 255,
+            }
+        }
         WMF_NOTPATCOPY_RASTER_OP => inverted_color(selected_fill_color?),
         WMF_PATINVERT_RASTER_OP if blank_destination => inverted_color(selected_fill_color?),
         _ => return None,
@@ -24746,10 +24760,15 @@ const WMF_TA_VERTICAL_MASK: u16 = 0x0018;
 const WMF_BLACKNESS_RASTER_OP: u32 = 0x0000_0042;
 const WMF_DSTCOPY_RASTER_OP: u32 = 0x00aa_0029;
 const WMF_DSTINVERT_RASTER_OP: u32 = 0x0055_0009;
+const WMF_MERGEPAINT_RASTER_OP: u32 = 0x00bb_0226;
+const WMF_NOTSRCERASE_RASTER_OP: u32 = 0x0011_00a6;
 const WMF_NOTPATCOPY_RASTER_OP: u32 = 0x000f_0001;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
 const WMF_PATINVERT_RASTER_OP: u32 = 0x005a_0049;
+const WMF_PATPAINT_RASTER_OP: u32 = 0x00fb_0a09;
 const WMF_SRCCOPY_RASTER_OP: u32 = 0x00cc_0020;
+const WMF_SRCERASE_RASTER_OP: u32 = 0x0044_0328;
+const WMF_SRCPAINT_RASTER_OP: u32 = 0x00ee_0086;
 const WMF_WHITENESS_RASTER_OP: u32 = 0x00ff_0062;
 const WMF_ESCAPE_MFCOMMENT: u16 = 0x000f;
 const PLACEABLE_WMF_KEY: u32 = 0x9ac6_cdd7;
@@ -27308,11 +27327,25 @@ fn passive_wmf_raster_transfer_color(
             blue: 255,
         }),
         WMF_PATCOPY_RASTER_OP => selected_fill_color,
+        WMF_SRCERASE_RASTER_OP | WMF_NOTSRCERASE_RASTER_OP if blank_destination => Some(Color {
+            red: 0,
+            green: 0,
+            blue: 0,
+        }),
         WMF_DSTINVERT_RASTER_OP if blank_destination => Some(Color {
             red: 0,
             green: 0,
             blue: 0,
         }),
+        WMF_MERGEPAINT_RASTER_OP | WMF_SRCPAINT_RASTER_OP | WMF_PATPAINT_RASTER_OP
+            if blank_destination =>
+        {
+            Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255,
+            })
+        }
         WMF_NOTPATCOPY_RASTER_OP => selected_fill_color.map(inverted_color),
         WMF_PATINVERT_RASTER_OP if blank_destination => selected_fill_color.map(inverted_color),
         _ => None,
@@ -42643,6 +42676,143 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_blank_source_erasing_raster_ops_become_passive_black_rectangles() {
+        let cases = [
+            (
+                WMF_SRCERASE_RASTER_OP,
+                b"SRCERASE-SOURCE-PAYLOAD".as_slice(),
+            ),
+            (
+                WMF_NOTSRCERASE_RASTER_OP,
+                b"NOTSRCERASE-SOURCE-PAYLOAD".as_slice(),
+            ),
+        ];
+
+        for (raster_op, payload) in cases {
+            let records = [emf_bitblt_record(10, 20, 80, 40, raster_op, payload)];
+            let input = format!(
+                r"{{\rtf1{{\pict\emfblip {}}}}}",
+                bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+            );
+            let output = parse_rtf(&input).unwrap();
+
+            let image = match &output.document.blocks[0] {
+                Block::Image(image) => image,
+                _ => panic!("expected passive EMF vector image"),
+            };
+            assert_eq!(image.format, ImageFormat::WmfVector);
+            assert!(image.bytes.is_empty());
+            assert_eq!(image.vector_commands.len(), 1);
+            assert_eq!(output.diagnostics.len(), 0);
+            assert!(matches!(
+                image.vector_commands[0],
+                StaticImageVectorCommand::Rectangle {
+                    left: 10.0,
+                    top: 20.0,
+                    right: 90.0,
+                    bottom: 60.0,
+                    stroke_color: None,
+                    fill_color: Some(Color {
+                        red: 0,
+                        green: 0,
+                        blue: 0
+                    }),
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn emf_blank_source_or_pattern_paint_raster_ops_become_passive_white_rectangles() {
+        let cases = [
+            (
+                WMF_MERGEPAINT_RASTER_OP,
+                b"MERGEPAINT-SOURCE-PAYLOAD".as_slice(),
+            ),
+            (
+                WMF_SRCPAINT_RASTER_OP,
+                b"SRCPAINT-SOURCE-PAYLOAD".as_slice(),
+            ),
+            (
+                WMF_PATPAINT_RASTER_OP,
+                b"PATPAINT-SOURCE-PAYLOAD".as_slice(),
+            ),
+        ];
+
+        for (raster_op, payload) in cases {
+            let records = [emf_bitblt_record(10, 20, 80, 40, raster_op, payload)];
+            let input = format!(
+                r"{{\rtf1{{\pict\emfblip {}}}}}",
+                bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+            );
+            let output = parse_rtf(&input).unwrap();
+
+            let image = match &output.document.blocks[0] {
+                Block::Image(image) => image,
+                _ => panic!("expected passive EMF vector image"),
+            };
+            assert_eq!(image.format, ImageFormat::WmfVector);
+            assert!(image.bytes.is_empty());
+            assert_eq!(image.vector_commands.len(), 1);
+            assert_eq!(output.diagnostics.len(), 0);
+            assert!(matches!(
+                image.vector_commands[0],
+                StaticImageVectorCommand::Rectangle {
+                    left: 10.0,
+                    top: 20.0,
+                    right: 90.0,
+                    bottom: 60.0,
+                    stroke_color: None,
+                    fill_color: Some(Color {
+                        red: 255,
+                        green: 255,
+                        blue: 255
+                    }),
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn emf_srcerase_after_paint_is_skipped_as_backdrop_dependent() {
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_bitblt_record(
+                10,
+                20,
+                80,
+                40,
+                WMF_SRCERASE_RASTER_OP,
+                b"SRCERASE-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected partial passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+    }
+
+    #[test]
     fn emf_dstinvert_bitblt_after_paint_is_skipped_as_backdrop_dependent() {
         let records = [
             emf_rect_record(43, 0, 0, 30, 30),
@@ -44257,6 +44427,81 @@ After\par}"#;
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn wmf_blank_source_raster_ops_become_passive_solid_rectangles() {
+        let cases = [
+            (
+                WMF_SRCERASE_RASTER_OP,
+                b"SRCERASE-SOURCE-PAYLOAD".as_slice(),
+                Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0,
+                },
+            ),
+            (
+                WMF_NOTSRCERASE_RASTER_OP,
+                b"NOTSRCERASE-SOURCE-PAYLOAD".as_slice(),
+                Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0,
+                },
+            ),
+            (
+                WMF_SRCPAINT_RASTER_OP,
+                b"SRCPAINT-SOURCE-PAYLOAD".as_slice(),
+                Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                },
+            ),
+            (
+                WMF_PATPAINT_RASTER_OP,
+                b"PATPAINT-SOURCE-PAYLOAD".as_slice(),
+                Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                },
+            ),
+        ];
+
+        for (raster_op, payload, fill_color) in cases {
+            let records = [
+                wmf_set_window_ext_record(200, 100),
+                wmf_dibbitblt_record(15, 25, 80, 40, raster_op, payload),
+            ];
+            let input = format!(
+                r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+                bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+            );
+            let output = parse_rtf(&input).unwrap();
+
+            let image = match &output.document.blocks[0] {
+                Block::Image(image) => image,
+                _ => panic!("expected passive WMF vector image"),
+            };
+            assert_eq!(image.format, ImageFormat::WmfVector);
+            assert!(image.bytes.is_empty());
+            assert_eq!(image.vector_commands.len(), 1);
+            assert_eq!(output.diagnostics.len(), 0);
+            assert!(matches!(
+                image.vector_commands[0],
+                StaticImageVectorCommand::Rectangle {
+                    left: 15.0,
+                    top: 25.0,
+                    right: 95.0,
+                    bottom: 65.0,
+                    stroke_color: None,
+                    fill_color: Some(actual_fill_color),
+                    ..
+                } if actual_fill_color == fill_color
+            ));
+        }
     }
 
     #[test]
