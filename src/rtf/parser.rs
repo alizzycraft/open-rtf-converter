@@ -22541,16 +22541,14 @@ fn parse_emf_stretchdibits_srcopy(
     let cx_dest = read_le_i32(data, 64)?;
     let cy_dest = read_le_i32(data, 68)?;
 
-    if x_src != 0 || y_src != 0 || cx_src <= 0 || cy_src <= 0 || cx_dest == 0 || cy_dest == 0 {
+    if cx_src <= 0 || cy_src <= 0 || cx_dest == 0 || cy_dest == 0 {
         return None;
     }
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
     let dib = parse_dib_image_data(&dib_bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    if u32::try_from(cx_src).ok()? != dib.width_px || u32::try_from(cy_src).ok()? != dib.height_px {
-        return None;
-    }
+    let dib = crop_parsed_dib(dib, x_src, y_src, cx_src, cy_src)?;
     let pixels = usize::try_from(dib.width_px)
         .ok()?
         .checked_mul(usize::try_from(dib.height_px).ok()?)?;
@@ -24206,6 +24204,60 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         raw_height < 0,
         color_masks,
     )
+}
+
+fn crop_parsed_dib(
+    dib: ParsedDib,
+    source_x: i32,
+    source_y: i32,
+    source_width: i32,
+    source_height: i32,
+) -> Option<ParsedDib> {
+    if source_x < 0 || source_y < 0 || source_width <= 0 || source_height <= 0 {
+        return None;
+    }
+    let source_x = u32::try_from(source_x).ok()?;
+    let source_y = u32::try_from(source_y).ok()?;
+    let source_width = u32::try_from(source_width).ok()?;
+    let source_height = u32::try_from(source_height).ok()?;
+    let source_right = source_x.checked_add(source_width)?;
+    let source_bottom = source_y.checked_add(source_height)?;
+    if source_right > dib.width_px || source_bottom > dib.height_px {
+        return None;
+    }
+    if source_x == 0
+        && source_y == 0
+        && source_width == dib.width_px
+        && source_height == dib.height_px
+    {
+        return Some(dib);
+    }
+
+    let crop_pixels = usize::try_from(source_width)
+        .ok()?
+        .checked_mul(usize::try_from(source_height).ok()?)?;
+    if crop_pixels == 0 || crop_pixels > MAX_PASSIVE_VECTOR_RASTER_PIXELS {
+        return None;
+    }
+    let crop_len = crop_pixels.checked_mul(3)?;
+    let mut rgb = Vec::with_capacity(crop_len);
+    let source_row_stride = usize::try_from(dib.width_px).ok()?.checked_mul(3)?;
+    let crop_row_bytes = usize::try_from(source_width).ok()?.checked_mul(3)?;
+    let source_x_bytes = usize::try_from(source_x).ok()?.checked_mul(3)?;
+    for y in source_y..source_bottom {
+        let row_start = usize::try_from(y)
+            .ok()?
+            .checked_mul(source_row_stride)?
+            .checked_add(source_x_bytes)?;
+        let row_end = row_start.checked_add(crop_row_bytes)?;
+        rgb.extend_from_slice(dib.rgb.get(row_start..row_end)?);
+    }
+
+    Some(ParsedDib {
+        width_px: source_width,
+        height_px: source_height,
+        rgb,
+    })
 }
 
 fn parse_bitmap_core_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
@@ -42136,6 +42188,54 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_srccopy_stretchdibits_source_crop_becomes_passive_raster_image() {
+        let dib = minimal_24bit_dib_with_rgb_pixels(
+            3,
+            2,
+            &[
+                [10, 20, 30],
+                [40, 50, 60],
+                [70, 80, 90],
+                [100, 110, 120],
+                [130, 140, 150],
+                [160, 170, 180],
+            ],
+        );
+        let mut record = emf_stretchdibits_dib_record(20, 15, 60, 30, WMF_SRCCOPY_RASTER_OP, &dib);
+        write_test_le_i32(&mut record, 32, 1);
+        write_test_le_i32(&mut record, 36, 1);
+        write_test_le_i32(&mut record, 40, 2);
+        write_test_le_i32(&mut record, 44, 1);
+        let records = [record];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                width_px: 2,
+                height_px: 1,
+                bytes,
+            } if bytes == &vec![130, 140, 150, 160, 170, 180]
+        ));
+    }
+
+    #[test]
     fn wmf_patcopy_stretchdib_records_become_passive_filled_rectangles() {
         let wmf_hex = concat!(
             "0100090000032a00000001000e0000000000",
@@ -44446,6 +44546,15 @@ fn write_test_le_f32(bytes: &mut [u8], offset: usize, value: f32) {
 
 #[cfg(test)]
 fn minimal_24bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
+    let pixels: Vec<[u8; 3]> = (0..height)
+        .flat_map(|_| (0..width).map(|x| if x % 2 == 0 { [255, 0, 0] } else { [0, 255, 0] }))
+        .collect();
+    minimal_24bit_dib_with_rgb_pixels(width, height, &pixels)
+}
+
+#[cfg(test)]
+fn minimal_24bit_dib_with_rgb_pixels(width: u32, height: u32, pixels: &[[u8; 3]]) -> Vec<u8> {
+    assert_eq!(pixels.len(), (width as usize) * (height as usize));
     let row_stride = ((width as usize * 3) + 3) / 4 * 4;
     let pixel_bytes = row_stride * height as usize;
     let mut dib = Vec::with_capacity(40 + pixel_bytes);
@@ -44461,14 +44570,11 @@ fn minimal_24bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     dib.extend_from_slice(&0u32.to_le_bytes());
     dib.extend_from_slice(&0u32.to_le_bytes());
 
-    for _ in 0..height {
+    for y in (0..height).rev() {
         let mut row = Vec::with_capacity(row_stride);
         for x in 0..width {
-            if x % 2 == 0 {
-                row.extend_from_slice(&[0, 0, 255]);
-            } else {
-                row.extend_from_slice(&[0, 255, 0]);
-            }
+            let [red, green, blue] = pixels[(y as usize * width as usize) + x as usize];
+            row.extend_from_slice(&[blue, green, red]);
         }
         row.resize(row_stride, 0);
         dib.extend_from_slice(&row);

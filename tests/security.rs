@@ -37177,6 +37177,112 @@ fn emf_srccopy_stretchdibits_dib_renders_as_passive_image_without_payload_leakag
 }
 
 #[test]
+fn emf_srccopy_stretchdibits_crop_renders_as_passive_image_without_payload_leakage() {
+    let dib = minimal_24bit_dib_with_rgb_pixels(
+        3,
+        2,
+        &[
+            [10, 20, 30],
+            [40, 50, 60],
+            [70, 80, 90],
+            [100, 110, 120],
+            [130, 140, 150],
+            [160, 170, 180],
+        ],
+    );
+    let mut record = emf_stretchdibits_dib_record(20, 15, 60, 30, 0x00cc_0020, &dib);
+    write_test_le_i32(&mut record, 32, 1);
+    write_test_le_i32(&mut record, 36, 1);
+    write_test_le_i32(&mut record, 40, 2);
+    write_test_le_i32(&mut record, 44, 1);
+    let records = [record];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive cropped EMF SRCCOPY STRETCHDIBITS vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::RasterImage {
+            left: 20.0,
+            top: 15.0,
+            right: 80.0,
+            bottom: 45.0,
+            width_px: 2,
+            height_px: 1,
+            bytes,
+        } if bytes == &vec![130, 140, 150, 160, 170, 180]
+    ));
+    assert!(!text.contains("emfblip"));
+    assert!(!text.contains("STRETCHDIBITS"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "cropped EMF SRCCOPY STRETCHDIBITS should render a passive image XObject"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "cropped EMF SRCCOPY STRETCHDIBITS should invoke a passive PDF image XObject"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"STRETCHDIBITS",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "cropped EMF SRCCOPY STRETCHDIBITS payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload_leakage() {
     let blackness_payload = b"BLACKNESS-SOURCE-PAYLOAD";
     let whiteness_payload = b"WHITENESS-STRETCH-PAYLOAD";
@@ -50745,6 +50851,14 @@ fn push_png_chunk(png: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
 }
 
 fn minimal_24bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
+    let pixels: Vec<[u8; 3]> = (0..height)
+        .flat_map(|_| (0..width).map(|x| if x % 2 == 0 { [255, 0, 0] } else { [0, 255, 0] }))
+        .collect();
+    minimal_24bit_dib_with_rgb_pixels(width, height, &pixels)
+}
+
+fn minimal_24bit_dib_with_rgb_pixels(width: u32, height: u32, pixels: &[[u8; 3]]) -> Vec<u8> {
+    assert_eq!(pixels.len(), (width as usize) * (height as usize));
     let row_stride = ((width as usize * 3) + 3) / 4 * 4;
     let pixel_bytes = row_stride * height as usize;
     let mut dib = Vec::with_capacity(40 + pixel_bytes);
@@ -50760,14 +50874,11 @@ fn minimal_24bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
     dib.extend_from_slice(&0u32.to_le_bytes());
     dib.extend_from_slice(&0u32.to_le_bytes());
 
-    for _ in 0..height {
+    for y in (0..height).rev() {
         let mut row = Vec::with_capacity(row_stride);
         for x in 0..width {
-            if x % 2 == 0 {
-                row.extend_from_slice(&[0, 0, 255]);
-            } else {
-                row.extend_from_slice(&[0, 255, 0]);
-            }
+            let [red, green, blue] = pixels[(y as usize * width as usize) + x as usize];
+            row.extend_from_slice(&[blue, green, red]);
         }
         row.resize(row_stride, 0);
         dib.extend_from_slice(&row);
