@@ -37579,6 +37579,131 @@ fn emf_opaque_alphablend_dib_renders_as_passive_image_without_payload_leakage() 
 }
 
 #[test]
+fn emf_transparentblt_without_key_color_renders_as_passive_image_without_payload_leakage() {
+    let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
+    dib.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT /JavaScript");
+    let records = [
+        emf_transparentblt_dib_record(
+            18,
+            26,
+            48,
+            28,
+            Color {
+                red: 12,
+                green: 34,
+                blue: 56,
+            },
+            &dib,
+        ),
+        emf_transparentblt_dib_record(
+            70,
+            30,
+            48,
+            28,
+            Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            &dib,
+        ),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF TRANSPARENTBLT vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::RasterImage {
+            left: 18.0,
+            top: 26.0,
+            right: 66.0,
+            bottom: 54.0,
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![255, 0, 0, 0, 255, 0]
+    ));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        "emfblip",
+        "TRANSPARENTBLT",
+        "TRAILING-EMF-TRANSPARENTBLT",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF TRANSPARENTBLT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "key-absent EMF TRANSPARENTBLT DIB should render as a passive image XObject"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"TRANSPARENTBLT",
+        b"TRAILING-EMF-TRANSPARENTBLT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF TRANSPARENTBLT DIB payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_patcopy_stretchdibits_records_render_passively_without_payload_leakage() {
     let payload = b"STRETCHDIBITS-SOURCE-PAYLOAD";
     let records = [
@@ -51613,6 +51738,50 @@ fn emf_alphablend_dib_record(
     record[41] = 0;
     record[42] = source_constant_alpha;
     record[43] = alpha_format;
+    write_test_le_u32(&mut record, 80, 0);
+    write_test_le_u32(&mut record, 84, 108);
+    write_test_le_u32(&mut record, 88, payload_len as u32);
+    write_test_le_u32(&mut record, 92, 108);
+    write_test_le_u32(&mut record, 96, payload_len as u32);
+    if dib.len() >= 12 {
+        let source_width = i32::from_le_bytes(dib[4..8].try_into().unwrap());
+        let source_height =
+            i32::from_le_bytes(dib[8..12].try_into().unwrap()).unsigned_abs() as i32;
+        write_test_le_i32(&mut record, 100, source_width);
+        write_test_le_i32(&mut record, 104, source_height);
+    }
+    record[108..108 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+fn emf_transparentblt_dib_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    transparent: Color,
+    dib: &[u8],
+) -> Vec<u8> {
+    let payload_len = dib.len().next_multiple_of(4);
+    let size = 108 + payload_len;
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 116);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, x);
+    write_test_le_i32(&mut record, 12, y);
+    write_test_le_i32(&mut record, 16, x.saturating_add(width));
+    write_test_le_i32(&mut record, 20, y.saturating_add(height));
+    write_test_le_i32(&mut record, 24, x);
+    write_test_le_i32(&mut record, 28, y);
+    write_test_le_i32(&mut record, 32, width);
+    write_test_le_i32(&mut record, 36, height);
+    write_test_le_u32(
+        &mut record,
+        40,
+        u32::from(transparent.red)
+            | (u32::from(transparent.green) << 8)
+            | (u32::from(transparent.blue) << 16),
+    );
     write_test_le_u32(&mut record, 80, 0);
     write_test_le_u32(&mut record, 84, 108);
     write_test_le_u32(&mut record, 88, payload_len as u32);
