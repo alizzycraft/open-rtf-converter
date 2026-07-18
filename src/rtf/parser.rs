@@ -20408,6 +20408,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SELECTCLIPPATH: u32 = 67;
     const EMR_BITBLT: u32 = 76;
     const EMR_STRETCHBLT: u32 = 77;
+    const EMR_STRETCHDIBITS: u32 = 81;
     const EMR_EXTTEXTOUTA: u32 = 83;
     const EMR_EXTTEXTOUTW: u32 = 84;
     const EMR_POLYBEZIER16: u32 = 85;
@@ -20796,17 +20797,22 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     });
                 }
             }
-            EMR_BITBLT | EMR_STRETCHBLT => {
+            EMR_BITBLT | EMR_STRETCHBLT | EMR_STRETCHDIBITS => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
+                let raster_transfer = match record_type {
+                    EMR_BITBLT => (40, 32, 16, 24),
+                    EMR_STRETCHBLT => (100, 32, 16, 24),
+                    EMR_STRETCHDIBITS => (72, 60, 16, 64),
+                    _ => unreachable!(),
+                };
                 if let Some((left, top, right, bottom)) = parse_emf_patcopy_raster_transfer_bounds(
                     data,
-                    if record_type == EMR_STRETCHBLT {
-                        100
-                    } else {
-                        40
-                    },
+                    raster_transfer.0,
+                    raster_transfer.1,
+                    raster_transfer.2,
+                    raster_transfer.3,
                     &header,
                     &coordinates,
                 ) && bounds_is_visible((left, top, right, bottom))
@@ -21727,16 +21733,29 @@ fn parse_emf_setpixelv_rect(
 fn parse_emf_patcopy_raster_transfer_bounds(
     data: &[u8],
     min_data_len: usize,
+    raster_op_offset: usize,
+    destination_position_offset: usize,
+    destination_extent_offset: usize,
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
 ) -> Option<(f32, f32, f32, f32)> {
-    if data.len() < min_data_len || read_le_u32(data, 32)? != WMF_PATCOPY_RASTER_OP {
+    if data.len() < min_data_len || read_le_u32(data, raster_op_offset)? != WMF_PATCOPY_RASTER_OP {
         return None;
     }
-    let x = read_le_i32(data, 16)?;
-    let y = read_le_i32(data, 20)?;
-    let width = i32::try_from(read_le_i32(data, 24)?.unsigned_abs().max(1)).unwrap_or(i32::MAX);
-    let height = i32::try_from(read_le_i32(data, 28)?.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let x = read_le_i32(data, destination_position_offset)?;
+    let y = read_le_i32(data, destination_position_offset + 4)?;
+    let width = i32::try_from(
+        read_le_i32(data, destination_extent_offset)?
+            .unsigned_abs()
+            .max(1),
+    )
+    .unwrap_or(i32::MAX);
+    let height = i32::try_from(
+        read_le_i32(data, destination_extent_offset + 4)?
+            .unsigned_abs()
+            .max(1),
+    )
+    .unwrap_or(i32::MAX);
     let left_top = normalized_emf_point(x, y, header, coordinates);
     let right_bottom = normalized_emf_point(
         x.saturating_add(width),
@@ -39015,6 +39034,61 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_patcopy_stretchdibits_records_become_passive_filled_rectangles() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 180,
+                    green: 90,
+                    blue: 30,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_stretchdibits_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_PATCOPY_RASTER_OP,
+                b"STRETCHDIBITS-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 180,
+                    green: 90,
+                    blue: 30
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn wmf_patcopy_stretchdib_records_become_passive_filled_rectangles() {
         let wmf_hex = concat!(
             "0100090000032a00000001000e0000000000",
@@ -40339,6 +40413,41 @@ fn emf_stretchblt_record(
     write_test_le_i32(&mut record, 100, width);
     write_test_le_i32(&mut record, 104, height);
     record[108..108 + payload.len()].copy_from_slice(payload);
+    record
+}
+
+#[cfg(test)]
+fn emf_stretchdibits_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    raster_op: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let payload_len = payload.len().next_multiple_of(4);
+    let size = 80 + payload_len;
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 81);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, x);
+    write_test_le_i32(&mut record, 12, y);
+    write_test_le_i32(&mut record, 16, x.saturating_add(width));
+    write_test_le_i32(&mut record, 20, y.saturating_add(height));
+    write_test_le_i32(&mut record, 24, x);
+    write_test_le_i32(&mut record, 28, y);
+    write_test_le_i32(&mut record, 32, x);
+    write_test_le_i32(&mut record, 36, y);
+    write_test_le_i32(&mut record, 40, width);
+    write_test_le_i32(&mut record, 44, height);
+    write_test_le_u32(&mut record, 48, 80);
+    write_test_le_u32(&mut record, 52, payload_len as u32);
+    write_test_le_u32(&mut record, 56, 80);
+    write_test_le_u32(&mut record, 60, payload_len as u32);
+    write_test_le_u32(&mut record, 68, raster_op);
+    write_test_le_i32(&mut record, 72, width);
+    write_test_le_i32(&mut record, 76, height);
+    record[80..80 + payload.len()].copy_from_slice(payload);
     record
 }
 
