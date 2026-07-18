@@ -36873,6 +36873,103 @@ fn emf_patcopy_stretchdibits_records_render_passively_without_payload_leakage() 
 }
 
 #[test]
+fn emf_srccopy_stretchdibits_dib_renders_as_passive_image_without_payload_leakage() {
+    let dib = minimal_24bit_dib_with_dimensions(2, 1);
+    let records = [emf_stretchdibits_dib_record(
+        20,
+        15,
+        60,
+        30,
+        0x00cc_0020,
+        &dib,
+    )];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF SRCCOPY STRETCHDIBITS vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::RasterImage {
+            left: 20.0,
+            top: 15.0,
+            right: 80.0,
+            bottom: 45.0,
+            width_px: 2,
+            height_px: 1,
+            bytes,
+        } if bytes == &vec![255, 0, 0, 0, 255, 0]
+    ));
+    assert!(!text.contains("emfblip"));
+    assert!(!text.contains("STRETCHDIBITS"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "EMF SRCCOPY STRETCHDIBITS should render a passive image XObject"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "EMF SRCCOPY STRETCHDIBITS should invoke a passive PDF image XObject"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"STRETCHDIBITS",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF SRCCOPY STRETCHDIBITS payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload_leakage() {
     let blackness_payload = b"BLACKNESS-SOURCE-PAYLOAD";
     let whiteness_payload = b"WHITENESS-STRETCH-PAYLOAD";
@@ -50072,8 +50169,8 @@ fn emf_stretchdibits_record(
     write_test_le_i32(&mut record, 20, y.saturating_add(height));
     write_test_le_i32(&mut record, 24, x);
     write_test_le_i32(&mut record, 28, y);
-    write_test_le_i32(&mut record, 32, x);
-    write_test_le_i32(&mut record, 36, y);
+    write_test_le_i32(&mut record, 32, 0);
+    write_test_le_i32(&mut record, 36, 0);
     write_test_le_i32(&mut record, 40, width);
     write_test_le_i32(&mut record, 44, height);
     write_test_le_u32(&mut record, 48, 80);
@@ -50084,6 +50181,25 @@ fn emf_stretchdibits_record(
     write_test_le_i32(&mut record, 72, width);
     write_test_le_i32(&mut record, 76, height);
     record[80..80 + payload.len()].copy_from_slice(payload);
+    record
+}
+
+fn emf_stretchdibits_dib_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    raster_op: u32,
+    dib: &[u8],
+) -> Vec<u8> {
+    let mut record = emf_stretchdibits_record(x, y, width, height, raster_op, dib);
+    if dib.len() >= 12 {
+        let source_width = i32::from_le_bytes(dib[4..8].try_into().unwrap());
+        let source_height =
+            i32::from_le_bytes(dib[8..12].try_into().unwrap()).unsigned_abs() as i32;
+        write_test_le_i32(&mut record, 40, source_width);
+        write_test_le_i32(&mut record, 44, source_height);
+    }
     record
 }
 

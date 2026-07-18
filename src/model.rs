@@ -549,6 +549,15 @@ pub enum StaticImageVectorCommand {
         fill_pattern: ShadingPattern,
         fill_color: Option<Color>,
     },
+    RasterImage {
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+        width_px: u32,
+        height_px: u32,
+        bytes: Vec<u8>,
+    },
     Text {
         x: f32,
         y: f32,

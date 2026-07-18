@@ -707,6 +707,31 @@ pub fn render_pdf_with_font_provider(
         let mut image_ref_cursor = 0usize;
         for_each_layout_image_fragment_on_page(page, &mut |fragment| {
             if !image_format_uses_xobject(fragment.image.format) {
+                if fragment.image.format == ImageFormat::WmfVector {
+                    for command in &fragment.image.vector_commands {
+                        let StaticImageVectorCommand::RasterImage {
+                            width_px,
+                            height_px,
+                            bytes,
+                            ..
+                        } = command
+                        else {
+                            continue;
+                        };
+                        let Some(image_ref) = page_images.get(image_ref_cursor) else {
+                            return;
+                        };
+                        image_ref_cursor = image_ref_cursor.saturating_add(1);
+                        write_rgb8_image_xobject(
+                            &mut pdf,
+                            image_ref.id,
+                            *width_px,
+                            *height_px,
+                            bytes,
+                            None,
+                        );
+                    }
+                }
                 return;
             }
             let Some(image_ref) = page_images.get(image_ref_cursor) else {
@@ -786,14 +811,14 @@ pub fn render_pdf_with_font_provider(
                     }
                 }
                 ImageFormat::Rgb8 => {
-                    let mut image = pdf.image_xobject(image_ref.id, &fragment.image.bytes);
-                    image.width(fragment.image.width_px as i32);
-                    image.height(fragment.image.height_px as i32);
-                    image.color_space().device_rgb();
-                    image.bits_per_component(8);
-                    if let Some(alpha_mask_id) = image_ref.alpha_mask_id {
-                        image.s_mask(alpha_mask_id);
-                    }
+                    write_rgb8_image_xobject(
+                        &mut pdf,
+                        image_ref.id,
+                        fragment.image.width_px,
+                        fragment.image.height_px,
+                        &fragment.image.bytes,
+                        image_ref.alpha_mask_id,
+                    );
                 }
                 ImageFormat::WmfVector | ImageFormat::Placeholder => {}
             }
@@ -832,6 +857,24 @@ fn write_image_alpha_mask(
         .colors(1)
         .bits_per_component(8)
         .columns(width_px as i32);
+}
+
+fn write_rgb8_image_xobject(
+    pdf: &mut Pdf,
+    image_id: Ref,
+    width_px: u32,
+    height_px: u32,
+    bytes: &[u8],
+    alpha_mask_id: Option<Ref>,
+) {
+    let mut image = pdf.image_xobject(image_id, bytes);
+    image.width(width_px as i32);
+    image.height(height_px as i32);
+    image.color_space().device_rgb();
+    image.bits_per_component(8);
+    if let Some(alpha_mask_id) = alpha_mask_id {
+        image.s_mask(alpha_mask_id);
+    }
 }
 
 fn draw_layout_item(
@@ -1071,7 +1114,7 @@ fn draw_image_layout_item(
         return;
     }
     if fragment.image.format == ImageFormat::WmfVector {
-        draw_passive_wmf_vector_image(content, fragment);
+        draw_passive_wmf_vector_image(content, fragment, page_images, image_ref_cursor);
         return;
     }
     if !image_format_uses_xobject(fragment.image.format) {
@@ -1646,6 +1689,20 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
                         alpha_mask_id,
                     });
                 }
+                if fragment.image.format == ImageFormat::WmfVector {
+                    for command in &fragment.image.vector_commands {
+                        if matches!(command, StaticImageVectorCommand::RasterImage { .. }) {
+                            let id = Ref::new(next_id);
+                            let name = format!("Im{}", next_id - first_image_id + 1).into_bytes();
+                            next_id += 1;
+                            refs.push(PdfImageRef {
+                                name,
+                                id,
+                                alpha_mask_id: None,
+                            });
+                        }
+                    }
+                }
             });
             refs
         })
@@ -1699,13 +1756,30 @@ fn count_image_xobjects(layout: &LayoutDocument) -> usize {
                         .saturating_add(1)
                         .saturating_add(usize::from(fragment.image.alpha_mask.is_some()));
                 }
+                if fragment.image.format == ImageFormat::WmfVector {
+                    count = count.saturating_add(
+                        fragment
+                            .image
+                            .vector_commands
+                            .iter()
+                            .filter(|command| {
+                                matches!(command, StaticImageVectorCommand::RasterImage { .. })
+                            })
+                            .count(),
+                    );
+                }
             });
             count
         })
         .sum()
 }
 
-fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout::ImageFragment) {
+fn draw_passive_wmf_vector_image(
+    content: &mut Content,
+    fragment: &crate::layout::ImageFragment,
+    page_images: &[PdfImageRef],
+    image_ref_cursor: &mut usize,
+) {
     let draw = image_draw_rect(fragment);
     let source_width = fragment.image.width_px.max(1) as f32;
     let source_height = fragment.image.height_px.max(1) as f32;
@@ -1983,6 +2057,31 @@ fn draw_passive_wmf_vector_image(content: &mut Content, fragment: &crate::layout
                     *fill_pattern,
                     *fill_color,
                 );
+            }
+            StaticImageVectorCommand::RasterImage {
+                left,
+                top,
+                right,
+                bottom,
+                ..
+            } => {
+                let Some(image_ref) = page_images.get(*image_ref_cursor) else {
+                    continue;
+                };
+                *image_ref_cursor = (*image_ref_cursor).saturating_add(1);
+                let rect = vector_command_rect(
+                    draw,
+                    source_width,
+                    source_height,
+                    *left,
+                    *top,
+                    *right,
+                    *bottom,
+                );
+                content.save_state();
+                content.transform([rect.width, 0.0, 0.0, rect.height, rect.x, rect.y]);
+                content.x_object(Name(&image_ref.name));
+                content.restore_state();
             }
             StaticImageVectorCommand::Text {
                 x,
