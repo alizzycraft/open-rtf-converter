@@ -25990,9 +25990,9 @@ fn parse_wmf_stretchdib_srcopy(
 
     let source_height = i32::from(read_le_i16(data, 6)?);
     let source_width = i32::from(read_le_i16(data, 8)?);
-    let source_y = read_le_i16(data, 10)?;
-    let source_x = read_le_i16(data, 12)?;
-    if source_x != 0 || source_y != 0 || source_width <= 0 || source_height == 0 {
+    let source_y = i32::from(read_le_i16(data, 10)?);
+    let source_x = i32::from(read_le_i16(data, 12)?);
+    if source_width <= 0 || source_height == 0 {
         return None;
     }
 
@@ -26001,45 +26001,25 @@ fn parse_wmf_stretchdib_srcopy(
     let destination_y = i32::from(read_le_i16(data, 18)?);
     let destination_x = i32::from(read_le_i16(data, 20)?);
     let dib = parse_dib_image_data(&data[DIB_HEADER_OFFSET..], MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    if u32::try_from(source_width).ok()? != dib.width_px
-        || source_height.unsigned_abs() != dib.height_px
-    {
-        return None;
-    }
+    let dib = crop_parsed_dib(
+        dib,
+        source_x,
+        source_y,
+        source_width,
+        i32::try_from(source_height.unsigned_abs()).ok()?,
+    )?;
 
-    let left_top = normalize_wmf_point(
+    wmf_raster_image_command(
         destination_x,
         destination_y,
+        destination_width,
+        destination_height,
         window_origin_x,
         window_origin_y,
         window_width,
         window_height,
-    );
-    let right_bottom = normalize_wmf_point(
-        destination_x.saturating_add(destination_width),
-        destination_y.saturating_add(destination_height),
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
-    let left = left_top.0.min(right_bottom.0);
-    let top = left_top.1.min(right_bottom.1);
-    let right = left_top.0.max(right_bottom.0);
-    let bottom = left_top.1.max(right_bottom.1);
-    if !bounds_is_visible((left, top, right, bottom)) {
-        return None;
-    }
-
-    Some(StaticImageVectorCommand::RasterImage {
-        left,
-        top,
-        right,
-        bottom,
-        width_px: dib.width_px,
-        height_px: dib.height_px,
-        bytes: dib.rgb,
-    })
+        dib,
+    )
 }
 
 fn parse_wmf_dibbitblt_srcopy(
@@ -26054,22 +26034,21 @@ fn parse_wmf_dibbitblt_srcopy(
     if data.len() < DIB_HEADER_OFFSET || read_le_u32(data, 0)? != WMF_SRCCOPY_RASTER_OP {
         return None;
     }
-    let source_y = read_le_i16(data, 4)?;
-    let source_x = read_le_i16(data, 6)?;
-    if source_x != 0 || source_y != 0 {
-        return None;
-    }
+    let source_y = i32::from(read_le_i16(data, 4)?);
+    let source_x = i32::from(read_le_i16(data, 6)?);
 
     let destination_height = i32::from(read_le_i16(data, 8)?.unsigned_abs().max(1));
     let destination_width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 12)?);
     let destination_x = i32::from(read_le_i16(data, 14)?);
     let dib = parse_dib_image_data(&data[DIB_HEADER_OFFSET..], MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    if u32::try_from(destination_width).ok()? != dib.width_px
-        || u32::try_from(destination_height).ok()? != dib.height_px
-    {
-        return None;
-    }
+    let dib = crop_parsed_dib(
+        dib,
+        source_x,
+        source_y,
+        destination_width,
+        destination_height,
+    )?;
 
     wmf_raster_image_command(
         destination_x,
@@ -26098,9 +26077,9 @@ fn parse_wmf_dibstretchblt_srcopy(
     }
     let source_height = i32::from(read_le_i16(data, 4)?);
     let source_width = i32::from(read_le_i16(data, 6)?);
-    let source_y = read_le_i16(data, 8)?;
-    let source_x = read_le_i16(data, 10)?;
-    if source_x != 0 || source_y != 0 || source_width <= 0 || source_height == 0 {
+    let source_y = i32::from(read_le_i16(data, 8)?);
+    let source_x = i32::from(read_le_i16(data, 10)?);
+    if source_width <= 0 || source_height == 0 {
         return None;
     }
 
@@ -26109,11 +26088,13 @@ fn parse_wmf_dibstretchblt_srcopy(
     let destination_y = i32::from(read_le_i16(data, 16)?);
     let destination_x = i32::from(read_le_i16(data, 18)?);
     let dib = parse_dib_image_data(&data[DIB_HEADER_OFFSET..], MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    if u32::try_from(source_width).ok()? != dib.width_px
-        || source_height.unsigned_abs() != dib.height_px
-    {
-        return None;
-    }
+    let dib = crop_parsed_dib(
+        dib,
+        source_x,
+        source_y,
+        source_width,
+        i32::try_from(source_height.unsigned_abs()).ok()?,
+    )?;
 
     wmf_raster_image_command(
         destination_x,
@@ -42388,6 +42369,82 @@ After\par}"#;
     }
 
     #[test]
+    fn wmf_srccopy_cropped_embedded_dib_records_become_passive_raster_images() {
+        let dib = minimal_24bit_dib_with_rgb_pixels(
+            3,
+            2,
+            &[
+                [10, 20, 30],
+                [40, 50, 60],
+                [70, 80, 90],
+                [100, 110, 120],
+                [130, 140, 150],
+                [160, 170, 180],
+            ],
+        );
+        let records = [
+            wmf_stretchdib_dib_record_with_source(15, 25, 80, 40, 1, 1, 2, 1, &dib),
+            wmf_dibbitblt_record_with_source(25, 35, 2, 1, 1, 1, &dib),
+            wmf_dibstretchblt_record_with_source(35, 45, 60, 30, 1, 1, 2, 1, &dib),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 3);
+        for command in &image.vector_commands {
+            assert!(matches!(
+                command,
+                StaticImageVectorCommand::RasterImage {
+                    width_px: 2,
+                    height_px: 1,
+                    bytes,
+                    ..
+                } if bytes == &vec![130, 140, 150, 160, 170, 180]
+            ));
+        }
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::RasterImage {
+                left: 25.0,
+                top: 35.0,
+                right: 27.0,
+                bottom: 36.0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::RasterImage {
+                left: 35.0,
+                top: 45.0,
+                right: 95.0,
+                bottom: 75.0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn wmf_offsetcliprgn_offsets_unpainted_clip_rect() {
         let wmf_hex = concat!(
             "0100090000032f0000000100070000000000",
@@ -43555,6 +43612,27 @@ fn wmf_stretchdib_dib_record(
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn wmf_stretchdib_dib_record_with_source(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    source_x: i16,
+    source_y: i16,
+    source_width: i16,
+    source_height: i16,
+    dib: &[u8],
+) -> Vec<u8> {
+    let mut record = wmf_stretchdib_dib_record(x, y, width, height, WMF_SRCCOPY_RASTER_OP, dib);
+    write_test_le_i16(&mut record, 12, source_height);
+    write_test_le_i16(&mut record, 14, source_width);
+    write_test_le_i16(&mut record, 16, source_y);
+    write_test_le_i16(&mut record, 18, source_x);
+    record
+}
+
+#[cfg(test)]
 fn wmf_dibbitblt_record(
     x: i16,
     y: i16,
@@ -43575,6 +43653,22 @@ fn wmf_dibbitblt_record(
     write_test_le_i16(&mut record, 18, y);
     write_test_le_i16(&mut record, 20, x);
     record[22..22 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+#[cfg(test)]
+fn wmf_dibbitblt_record_with_source(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    source_x: i16,
+    source_y: i16,
+    dib: &[u8],
+) -> Vec<u8> {
+    let mut record = wmf_dibbitblt_record(x, y, width, height, WMF_SRCCOPY_RASTER_OP, dib);
+    write_test_le_i16(&mut record, 10, source_y);
+    write_test_le_i16(&mut record, 12, source_x);
     record
 }
 
@@ -43613,6 +43707,27 @@ fn wmf_dibstretchblt_record(
     write_test_le_i16(&mut record, 22, y);
     write_test_le_i16(&mut record, 24, x);
     record[26..26 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn wmf_dibstretchblt_record_with_source(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    source_x: i16,
+    source_y: i16,
+    source_width: i16,
+    source_height: i16,
+    dib: &[u8],
+) -> Vec<u8> {
+    let mut record = wmf_dibstretchblt_record(x, y, width, height, WMF_SRCCOPY_RASTER_OP, dib);
+    write_test_le_i16(&mut record, 10, source_height);
+    write_test_le_i16(&mut record, 12, source_width);
+    write_test_le_i16(&mut record, 14, source_y);
+    write_test_le_i16(&mut record, 16, source_x);
     record
 }
 

@@ -30723,6 +30723,126 @@ fn wmf_srccopy_dib_blt_records_render_passive_images_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_srccopy_cropped_embedded_dibs_render_passive_images_without_payload_leakage() {
+    let dib = minimal_24bit_dib_with_rgb_pixels(
+        3,
+        2,
+        &[
+            [10, 20, 30],
+            [40, 50, 60],
+            [70, 80, 90],
+            [100, 110, 120],
+            [130, 140, 150],
+            [160, 170, 180],
+        ],
+    );
+    let records = [
+        wmf_stretchdib_dib_record_with_source(15, 25, 80, 40, 1, 1, 2, 1, &dib),
+        wmf_dibbitblt_record_with_source(25, 35, 2, 1, 1, 1, &dib),
+        wmf_dibstretchblt_record_with_source(35, 45, 60, 30, 1, 1, 2, 1, &dib),
+    ];
+    let wmf = minimal_wmf_with_records(200, 100, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("cropped WMF SRCCOPY embedded-DIB vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 3);
+    for command in &image.vector_commands {
+        assert!(matches!(
+            command,
+            StaticImageVectorCommand::RasterImage {
+                width_px: 2,
+                height_px: 1,
+                bytes,
+                ..
+            } if bytes == &vec![130, 140, 150, 160, 170, 180]
+        ));
+    }
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "0f43",
+        "0940",
+        "0b41",
+        "cc0020",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "cropped WMF SRCCOPY internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "cropped WMF SRCCOPY records should render passive image XObjects"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "Do")
+            .count()
+            >= 3,
+        "cropped WMF SRCCOPY records should invoke passive PDF image XObjects"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"0f43",
+        b"0940",
+        b"0b41",
+        b"cc0020",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "cropped WMF SRCCOPY payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003900000000400190000000000",
@@ -49887,6 +50007,26 @@ fn wmf_stretchdib_dib_record(
     record
 }
 
+#[allow(clippy::too_many_arguments)]
+fn wmf_stretchdib_dib_record_with_source(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    source_x: i16,
+    source_y: i16,
+    source_width: i16,
+    source_height: i16,
+    dib: &[u8],
+) -> Vec<u8> {
+    let mut record = wmf_stretchdib_dib_record(x, y, width, height, 0x00cc_0020, dib);
+    write_test_le_i16(&mut record, 12, source_height);
+    write_test_le_i16(&mut record, 14, source_width);
+    write_test_le_i16(&mut record, 16, source_y);
+    write_test_le_i16(&mut record, 18, source_x);
+    record
+}
+
 fn wmf_dibbitblt_record(
     x: i16,
     y: i16,
@@ -49907,6 +50047,21 @@ fn wmf_dibbitblt_record(
     write_test_le_i16(&mut record, 18, y);
     write_test_le_i16(&mut record, 20, x);
     record[22..22 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+fn wmf_dibbitblt_record_with_source(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    source_x: i16,
+    source_y: i16,
+    dib: &[u8],
+) -> Vec<u8> {
+    let mut record = wmf_dibbitblt_record(x, y, width, height, 0x00cc_0020, dib);
+    write_test_le_i16(&mut record, 10, source_y);
+    write_test_le_i16(&mut record, 12, source_x);
     record
 }
 
@@ -49944,6 +50099,26 @@ fn wmf_dibstretchblt_record(
     write_test_le_i16(&mut record, 22, y);
     write_test_le_i16(&mut record, 24, x);
     record[26..26 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+#[allow(clippy::too_many_arguments)]
+fn wmf_dibstretchblt_record_with_source(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    source_x: i16,
+    source_y: i16,
+    source_width: i16,
+    source_height: i16,
+    dib: &[u8],
+) -> Vec<u8> {
+    let mut record = wmf_dibstretchblt_record(x, y, width, height, 0x00cc_0020, dib);
+    write_test_le_i16(&mut record, 10, source_height);
+    write_test_le_i16(&mut record, 12, source_width);
+    write_test_le_i16(&mut record, 14, source_y);
+    write_test_le_i16(&mut record, 16, source_x);
     record
 }
 
