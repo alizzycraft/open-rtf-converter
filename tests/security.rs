@@ -37475,10 +37475,16 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
         minimal_compressed_dib_with_payload(2, 3, 5, &minimal_rgb_png_with_rows(2, 3, &png_rows));
     compressed_png_dib
         .extend_from_slice(b"TRAILING-EMF-COMPRESSED-PARTIAL-SETDIBITS /EmbeddedFile");
+    let mut top_down_compressed_png_dib =
+        minimal_compressed_dib_with_payload(2, 3, 5, &minimal_rgb_png_with_rows(2, 3, &png_rows));
+    write_test_le_i32(&mut top_down_compressed_png_dib, 8, -3);
+    top_down_compressed_png_dib
+        .extend_from_slice(b"TRAILING-EMF-TOPDOWN-COMPRESSED-PARTIAL-SETDIBITS /Launch");
     let records = [
         emf_setdibitstodevice_dib_record(18, 22, 2, 1, 0, 1, &dib),
         emf_setdibitstodevice_dib_record(42, 34, 2, 3, 1, 1, &partial_dib),
         emf_setdibitstodevice_dib_record(68, 42, 2, 3, 1, 1, &compressed_png_dib),
+        emf_setdibitstodevice_dib_record(94, 50, 2, 3, 0, 1, &top_down_compressed_png_dib),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
@@ -37499,7 +37505,7 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 3);
+    assert_eq!(image.vector_commands.len(), 4);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37545,14 +37551,35 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
         }
         _ => panic!("expected compressed partial SETDIB PNG raster image"),
     }
+    match &image.vector_commands[3] {
+        StaticImageVectorCommand::RasterImage {
+            left: 94.0,
+            top: 50.0,
+            right: 96.0,
+            bottom: 51.0,
+            image,
+        } => {
+            assert_eq!(image.format, ImageFormat::Png);
+            assert_eq!(image.width_px, 2);
+            assert_eq!(image.height_px, 1);
+            assert_eq!(
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 7).unwrap(),
+                vec![0, 10, 20, 30, 40, 50, 60]
+            );
+            assert!(image.alpha_mask.is_none());
+        }
+        _ => panic!("expected top-down compressed partial SETDIB PNG raster image"),
+    }
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
         "TRAILING-EMF-SETDIBITS",
         "TRAILING-EMF-PARTIAL-SETDIBITS",
         "TRAILING-EMF-COMPRESSED-PARTIAL-SETDIBITS",
+        "TRAILING-EMF-TOPDOWN-COMPRESSED-PARTIAL-SETDIBITS",
         "JavaScript",
         "EmbeddedFile",
+        "Launch",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -37581,7 +37608,7 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 3,
+            >= 4,
         "EMF SETDIBITSTODEVICE DIB should render as a passive image XObject"
     );
     for forbidden in [
@@ -37590,6 +37617,7 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
         b"TRAILING-EMF-SETDIBITS",
         b"TRAILING-EMF-PARTIAL-SETDIBITS",
         b"TRAILING-EMF-COMPRESSED-PARTIAL-SETDIBITS",
+        b"TRAILING-EMF-TOPDOWN-COMPRESSED-PARTIAL-SETDIBITS",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

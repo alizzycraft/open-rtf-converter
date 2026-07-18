@@ -24574,6 +24574,7 @@ struct ParsedCompressedDibImage {
     bytes: Vec<u8>,
     palette: Vec<u8>,
     alpha_mask: Option<StaticImageAlphaMask>,
+    top_down: bool,
 }
 
 #[derive(Debug)]
@@ -24958,6 +24959,7 @@ fn parse_compressed_dib_image_data(
                 bytes: payload.to_vec(),
                 palette: Vec::new(),
                 alpha_mask: None,
+                top_down: raw_height < 0,
             })
         }
         BI_PNG => {
@@ -24972,6 +24974,7 @@ fn parse_compressed_dib_image_data(
                 bytes: png.idat,
                 palette: png.palette,
                 alpha_mask: png.alpha_mask,
+                top_down: raw_height < 0,
             })
         }
         _ => None,
@@ -25140,6 +25143,7 @@ fn crop_compressed_png_vector_raster_image(
         bytes: cropped_bytes,
         palette: image.palette,
         alpha_mask,
+        top_down: image.top_down,
     })
 }
 
@@ -25263,7 +25267,12 @@ fn parse_vector_raster_dib_scan_lines(
     if scan_count == 0 || scan_bottom > compressed.height_px {
         return None;
     }
-    let source_y = i32::try_from(start_scan).ok()?.checked_add(source_y)?;
+    let scan_top_y = if compressed.top_down {
+        start_scan
+    } else {
+        compressed.height_px.checked_sub(scan_bottom)?
+    };
+    let source_y = i32::try_from(scan_top_y).ok()?.checked_add(source_y)?;
     let compressed = crop_compressed_png_vector_raster_image(
         compressed,
         source_x,
@@ -43007,6 +43016,9 @@ After\par}"#;
             [130, 140, 150],
             [160, 170, 180],
         ];
+        let mut top_down_compressed_png_dib =
+            minimal_compressed_dib_with_payload(2, 3, 5, &minimal_rgb_png_with_rows(2, 3, &rows));
+        write_test_le_i32(&mut top_down_compressed_png_dib, 8, -3);
         let records = [
             emf_setdibitstodevice_dib_record(
                 12,
@@ -43049,6 +43061,7 @@ After\par}"#;
                     &minimal_rgb_png_with_rows(2, 3, &rows),
                 ),
             ),
+            emf_setdibitstodevice_dib_record(112, 56, 2, 3, 0, 1, &top_down_compressed_png_dib),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
@@ -43062,7 +43075,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 3);
+        assert_eq!(image.vector_commands.len(), 4);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -43109,6 +43122,22 @@ After\par}"#;
                 && image.alpha_mask.is_none()
                 && unfiltered_png_scanlines(&image.bytes, 2, 1, 3).unwrap().3
                     == vec![0, 70, 80, 90, 100, 110, 120]
+        ));
+        assert!(matches!(
+            &image.vector_commands[3],
+            StaticImageVectorCommand::RasterImage {
+                left: 112.0,
+                top: 56.0,
+                right: 114.0,
+                bottom: 57.0,
+                image,
+            } if image.format == ImageFormat::Png
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.palette.is_empty()
+                && image.alpha_mask.is_none()
+                && unfiltered_png_scanlines(&image.bytes, 2, 1, 3).unwrap().3
+                    == vec![0, 10, 20, 30, 40, 50, 60]
         ));
     }
 
