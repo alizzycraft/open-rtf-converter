@@ -25154,7 +25154,7 @@ fn crop_parsed_dib_scan_lines(
     )
 }
 
-fn crop_compressed_png_vector_raster_image(
+fn crop_compressed_vector_raster_image(
     image: ParsedCompressedDibImage,
     source_x: i32,
     source_y: i32,
@@ -25292,7 +25292,7 @@ fn parse_vector_raster_dib_image(
     }
 
     let compressed = parse_compressed_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    let compressed = crop_compressed_png_vector_raster_image(
+    let compressed = crop_compressed_vector_raster_image(
         compressed,
         source_x,
         source_y,
@@ -25353,7 +25353,7 @@ fn parse_vector_raster_dib_scan_lines(
         compressed.height_px.checked_sub(scan_bottom)?
     };
     let source_y = i32::try_from(scan_top_y).ok()?.checked_add(source_y)?;
-    let compressed = crop_compressed_png_vector_raster_image(
+    let compressed = crop_compressed_vector_raster_image(
         compressed,
         source_x,
         source_y,
@@ -44907,6 +44907,40 @@ After\par}"#;
                 top: 15.0,
                 right: 80.0,
                 bottom: 45.0,
+                image,
+            } if image.format == ImageFormat::Jpeg
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == jpeg
+        ));
+    }
+
+    #[test]
+    fn emf_setdibits_full_frame_bi_jpeg_record_becomes_passive_raster_image() {
+        let jpeg = minimal_jpeg_with_dimensions(2, 1);
+        let dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
+        let records = [emf_setdibitstodevice_dib_record(20, 15, 2, 1, 0, 1, &dib)];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 20.0,
+                top: 15.0,
+                right: 22.0,
+                bottom: 16.0,
                 image,
             } if image.format == ImageFormat::Jpeg
                 && image.width_px == 2
