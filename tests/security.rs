@@ -33032,6 +33032,106 @@ fn emf_selectclippath_copy_records_render_first_clip_without_payload_leakage() {
 }
 
 #[test]
+fn emf_selectclippath_copy_replaces_unpainted_clip_without_payload_leakage() {
+    let records = [
+        emf_rect_record(30, 10, 10, 90, 70),
+        emf_unknown_record(59),
+        emf_point_record(27, 20, 20),
+        emf_poly_record(6, &[(80, 20), (50, 60)]),
+        emf_unknown_record(60),
+        emf_u32_record(67, 5),
+        emf_rect_record(43, 0, 0, 160, 80),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF replaced clip path vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::ClipPath {
+            start: (20.0, 20.0),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in ["emfblip", " EMF", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF replaced clip path payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W*"),
+        "EMF SELECTCLIPPATH RGN_COPY replacement should render a passive PDF clip path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "f" | "B")),
+        "painting after replaced EMF clip should still render passively"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF replaced clip path payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_exttextoutw_records_render_passively_without_payload_leakage() {
     let records = [
         emf_u32_record(24, 0x0033_2211),

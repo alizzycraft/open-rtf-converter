@@ -20440,6 +20440,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     let mut saved_states: Vec<EmfSavedState> = Vec::new();
     let mut active_path: Option<EmfPathBuilder> = None;
     let mut clip_active = false;
+    let mut replaceable_clip_command_start: Option<usize> = None;
 
     while pos + 8 <= header.declared_size {
         if header
@@ -20507,6 +20508,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 commands.push(emf_exclude_clip_rect_command(
                     &header, left, top, right, bottom,
                 )?);
+                if replaceable_clip_command_start.is_none() {
+                    replaceable_clip_command_start = commands.len().checked_sub(1);
+                }
                 clip_active = true;
             }
             EMR_INTERSECTCLIPRECT => {
@@ -20527,6 +20531,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     right,
                     bottom,
                 });
+                if replaceable_clip_command_start.is_none() {
+                    replaceable_clip_command_start = commands.len().checked_sub(1);
+                }
                 clip_active = true;
             }
             EMR_MOVETOEX => {
@@ -20595,6 +20602,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 coordinates = restored.state.coordinates;
                 current_position = restored.state.current_position;
                 clip_active = restored.state.clip_active;
+                replaceable_clip_command_start = None;
                 for _ in 0..restored.restore_count {
                     commands.push(StaticImageVectorCommand::RestoreState);
                 }
@@ -20712,12 +20720,22 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 let region_mode = read_le_u32(data, 0)?;
-                if region_mode != RGN_AND && !(region_mode == RGN_COPY && !clip_active) {
+                if region_mode == RGN_COPY && clip_active {
+                    let clip_start = replaceable_clip_command_start?;
+                    if !emf_commands_are_only_clip_updates(&commands[clip_start..]) {
+                        return None;
+                    }
+                    commands.truncate(clip_start);
+                    replaceable_clip_command_start = None;
+                } else if region_mode != RGN_AND && !(region_mode == RGN_COPY && !clip_active) {
                     return None;
                 }
                 let path = active_path.take()?;
                 let command = path.clip_command(state.fill_rule)?;
                 commands.push(command);
+                if replaceable_clip_command_start.is_none() {
+                    replaceable_clip_command_start = commands.len().checked_sub(1);
+                }
                 clip_active = true;
             }
             EMR_EXTTEXTOUTA | EMR_EXTTEXTOUTW => {
@@ -21728,6 +21746,17 @@ fn parse_emf_setpixelv_rect(
         pixel_rect_end(y, max_y),
         color,
     ))
+}
+
+fn emf_commands_are_only_clip_updates(commands: &[StaticImageVectorCommand]) -> bool {
+    !commands.is_empty()
+        && commands.iter().all(|command| {
+            matches!(
+                command,
+                StaticImageVectorCommand::ClipRect { .. }
+                    | StaticImageVectorCommand::ClipPath { .. }
+            )
+        })
 }
 
 fn parse_emf_patcopy_raster_transfer_bounds(
@@ -37656,9 +37685,55 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_selectclippath_copy_over_existing_clip_becomes_passive_placeholder() {
+    fn emf_selectclippath_copy_over_unpainted_clip_replaces_prior_clip() {
         let records = [
             emf_rect_record(30, 10, 10, 90, 70),
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_poly_record(6, &[(80, 20), (50, 60)]),
+            emf_unknown_record(60),
+            emf_u32_record(67, 5),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::ClipPath {
+                start: (20.0, 20.0),
+                segments,
+                closed: false,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+            } if matches!(
+                &segments[..],
+                [
+                    StaticImageVectorPathSegment::LineTo(80.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(50.0, 60.0),
+                ]
+            )
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_selectclippath_copy_after_painted_clip_becomes_passive_placeholder() {
+        let records = [
+            emf_rect_record(30, 10, 10, 90, 70),
+            emf_rect_record(43, 0, 0, 30, 30),
             emf_unknown_record(59),
             emf_point_record(27, 20, 20),
             emf_poly_record(6, &[(80, 20), (50, 60)]),
