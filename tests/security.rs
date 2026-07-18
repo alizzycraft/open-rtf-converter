@@ -38571,6 +38571,7 @@ fn emf_srccopy_stretchdibits_crop_renders_as_passive_image_without_payload_leaka
 #[test]
 fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload_leakage() {
     let patinvert_payload = b"PATINVERT-SOURCE-PAYLOAD";
+    let notpatcopy_payload = b"NOTPATCOPY-SOURCE-PAYLOAD";
     let blackness_payload = b"BLACKNESS-SOURCE-PAYLOAD";
     let whiteness_payload = b"WHITENESS-STRETCH-PAYLOAD";
     let dib_payload = b"BLACKNESS-DIB-PAYLOAD";
@@ -38592,6 +38593,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
         emf_bitblt_record(4, 8, 24, 12, 0x005a_0049, patinvert_payload),
         emf_bitblt_record(10, 20, 30, 15, 0x0000_0042, blackness_payload),
         emf_stretchblt_record(50, 25, 35, 20, 0x00ff_0062, whiteness_payload),
+        emf_bitblt_record(62, 10, 24, 12, 0x000f_0001, notpatcopy_payload),
         emf_stretchdibits_record(90, 30, 40, 25, 0x0000_0042, dib_payload),
         emf_bitblt_record(110, 12, 20, 10, 0x0055_0009, backdrop_dstinvert_payload),
         emf_bitblt_record(112, 24, 20, 10, 0x005a_0049, backdrop_patinvert_payload),
@@ -38616,7 +38618,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 4);
+    assert_eq!(image.vector_commands.len(), 5);
     assert!(matches!(
         image.vector_commands[0],
         StaticImageVectorCommand::Rectangle {
@@ -38668,6 +38670,22 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     assert!(matches!(
         image.vector_commands[3],
         StaticImageVectorCommand::Rectangle {
+            left: 62.0,
+            top: 10.0,
+            right: 86.0,
+            bottom: 22.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 235,
+                green: 175,
+                blue: 115
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[4],
+        StaticImageVectorCommand::Rectangle {
             left: 90.0,
             top: 30.0,
             right: 130.0,
@@ -38689,6 +38707,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     for forbidden in [
         "emfblip",
         "PATINVERT-SOURCE-PAYLOAD",
+        "NOTPATCOPY-SOURCE-PAYLOAD",
         "BLACKNESS-SOURCE-PAYLOAD",
         "WHITENESS-STRETCH-PAYLOAD",
         "BLACKNESS-DIB-PAYLOAD",
@@ -38725,7 +38744,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
             .iter()
             .filter(|operation| operation.operator == "re")
             .count()
-            >= 4,
+            >= 5,
         "EMF solid and blank invert transfers should render passive PDF rectangles"
     );
     assert!(
@@ -38739,6 +38758,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
         patinvert_payload.as_slice(),
+        notpatcopy_payload.as_slice(),
         blackness_payload.as_slice(),
         whiteness_payload.as_slice(),
         dib_payload.as_slice(),
