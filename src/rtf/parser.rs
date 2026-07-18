@@ -22639,7 +22639,7 @@ fn parse_emf_bitmap_blt_srcopy(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?;
 
     let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
@@ -22693,7 +22693,7 @@ fn parse_emf_stretchdibits_srcopy(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?;
 
     let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
@@ -22754,7 +22754,7 @@ fn parse_emf_setdibitstodevice_srcopy(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?;
 
     let width = i32::try_from(cx_src.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_src.unsigned_abs().max(1)).unwrap_or(i32::MAX);
@@ -22787,6 +22787,7 @@ fn parse_emf_alphablend_passive(
     coordinates: &EmfCoordinateState,
 ) -> Option<StaticImageVectorCommand> {
     const AC_SRC_OVER: u8 = 0;
+    const AC_SRC_ALPHA: u8 = 1;
     const DIB_RGB_COLORS: u32 = 0;
 
     if data.len() < 100 {
@@ -22797,7 +22798,7 @@ fn parse_emf_alphablend_passive(
     let blend_flags = *data.get(33)?;
     let source_constant_alpha = *data.get(34)?;
     let alpha_format = *data.get(35)?;
-    if blend_op != AC_SRC_OVER || blend_flags != 0 || alpha_format != 0 {
+    if blend_op != AC_SRC_OVER || blend_flags != 0 || !matches!(alpha_format, 0 | AC_SRC_ALPHA) {
         return None;
     }
 
@@ -22821,11 +22822,19 @@ fn parse_emf_alphablend_passive(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let mut image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
-    image.alpha_mask = constant_alpha_mask(
+    let mut image = parse_vector_raster_dib_image(
+        &dib_bytes,
+        x_src,
+        y_src,
+        cx_src,
+        cy_src,
+        alpha_format == AC_SRC_ALPHA,
+    )?;
+    image.alpha_mask = alphablend_alpha_mask(
         image.width_px,
         image.height_px,
         source_constant_alpha,
+        alpha_format == AC_SRC_ALPHA,
         image.alpha_mask,
     )?;
 
@@ -22886,7 +22895,7 @@ fn parse_emf_transparentblt_keyed(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let mut image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+    let mut image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?;
     if image.format != ImageFormat::Rgb8 {
         return None;
     }
@@ -22952,19 +22961,28 @@ fn keyed_rgb_alpha_mask(
     }))
 }
 
-fn constant_alpha_mask(
+fn alphablend_alpha_mask(
     width_px: u32,
     height_px: u32,
-    alpha: u8,
+    constant_alpha: u8,
+    uses_source_alpha: bool,
     existing_mask: Option<StaticImageAlphaMask>,
 ) -> Option<Option<StaticImageAlphaMask>> {
-    if alpha == u8::MAX {
-        return Some(existing_mask);
-    }
-    if existing_mask.is_some() {
-        return None;
+    if uses_source_alpha {
+        let mask = existing_mask?;
+        if constant_alpha == u8::MAX {
+            return Some(Some(mask));
+        }
+        return multiply_alpha_mask(width_px, height_px, constant_alpha, mask).map(Some);
     }
 
+    if constant_alpha == u8::MAX {
+        return Some(None);
+    }
+    constant_alpha_mask(width_px, height_px, constant_alpha).map(Some)
+}
+
+fn constant_alpha_mask(width_px: u32, height_px: u32, alpha: u8) -> Option<StaticImageAlphaMask> {
     let width = usize::try_from(width_px).ok()?;
     let height = usize::try_from(height_px).ok()?;
     let row_len = width.checked_add(1)?;
@@ -22974,9 +22992,60 @@ fn constant_alpha_mask(
         mask.push(0);
         mask.resize(mask.len().checked_add(width)?, alpha);
     }
-    Some(Some(StaticImageAlphaMask {
+    Some(StaticImageAlphaMask {
         bytes: miniz_oxide::deflate::compress_to_vec_zlib(&mask, 6),
-    }))
+    })
+}
+
+fn alpha_samples_to_mask(
+    alpha: &[u8],
+    width_px: u32,
+    height_px: u32,
+) -> Option<StaticImageAlphaMask> {
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    if alpha.len() != width.checked_mul(height)? {
+        return None;
+    }
+
+    let row_len = width.checked_add(1)?;
+    let mut mask = Vec::with_capacity(row_len.checked_mul(height)?);
+    for row in alpha.chunks_exact(width) {
+        mask.push(0);
+        mask.extend_from_slice(row);
+    }
+    Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&mask, 6),
+    })
+}
+
+fn multiply_alpha_mask(
+    width_px: u32,
+    height_px: u32,
+    constant_alpha: u8,
+    mask: StaticImageAlphaMask,
+) -> Option<StaticImageAlphaMask> {
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let row_len = width.checked_add(1)?;
+    let expected_len = row_len.checked_mul(height)?;
+    let mut bytes =
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&mask.bytes, expected_len).ok()?;
+    if bytes.len() != expected_len {
+        return None;
+    }
+    for row in bytes.chunks_exact_mut(row_len) {
+        if row[0] != 0 {
+            return None;
+        }
+        for alpha in &mut row[1..] {
+            let multiplied = (u16::from(*alpha) * u16::from(constant_alpha) + 127) / 255;
+            *alpha = u8::try_from(multiplied).ok()?;
+        }
+    }
+    Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&bytes, 6),
+    })
 }
 
 fn emf_record_offset_to_data_offset(offset: u32) -> Option<usize> {
@@ -24302,6 +24371,7 @@ struct ParsedDib {
     width_px: u32,
     height_px: u32,
     rgb: Vec<u8>,
+    alpha: Option<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -24734,7 +24804,9 @@ fn crop_parsed_dib(
     }
     let crop_len = crop_pixels.checked_mul(3)?;
     let mut rgb = Vec::with_capacity(crop_len);
+    let mut alpha = dib.alpha.as_ref().map(|_| Vec::with_capacity(crop_pixels));
     let source_row_stride = usize::try_from(dib.width_px).ok()?.checked_mul(3)?;
+    let source_alpha_row_stride = usize::try_from(dib.width_px).ok()?;
     let crop_row_bytes = usize::try_from(source_width).ok()?.checked_mul(3)?;
     let source_x_bytes = usize::try_from(source_x).ok()?.checked_mul(3)?;
     for y in source_y..source_bottom {
@@ -24744,12 +24816,21 @@ fn crop_parsed_dib(
             .checked_add(source_x_bytes)?;
         let row_end = row_start.checked_add(crop_row_bytes)?;
         rgb.extend_from_slice(dib.rgb.get(row_start..row_end)?);
+        if let (Some(source_alpha), Some(cropped_alpha)) = (dib.alpha.as_ref(), alpha.as_mut()) {
+            let alpha_row_start = usize::try_from(y)
+                .ok()?
+                .checked_mul(source_alpha_row_stride)?
+                .checked_add(usize::try_from(source_x).ok()?)?;
+            let alpha_row_end = alpha_row_start.checked_add(usize::try_from(source_width).ok()?)?;
+            cropped_alpha.extend_from_slice(source_alpha.get(alpha_row_start..alpha_row_end)?);
+        }
     }
 
     Some(ParsedDib {
         width_px: source_width,
         height_px: source_height,
         rgb,
+        alpha,
     })
 }
 
@@ -24759,6 +24840,7 @@ fn parse_vector_raster_dib_image(
     source_y: i32,
     source_width: i32,
     source_height: i32,
+    preserve_uncompressed_alpha: bool,
 ) -> Option<ParsedVectorRasterImage> {
     if let Some(dib) = parse_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS) {
         let dib = crop_parsed_dib(dib, source_x, source_y, source_width, source_height)?;
@@ -24774,7 +24856,14 @@ fn parse_vector_raster_dib_image(
             format: ImageFormat::Rgb8,
             bytes: dib.rgb,
             palette: Vec::new(),
-            alpha_mask: None,
+            alpha_mask: if preserve_uncompressed_alpha {
+                match dib.alpha.as_ref() {
+                    Some(alpha) => Some(alpha_samples_to_mask(alpha, dib.width_px, dib.height_px)?),
+                    None => None,
+                }
+            } else {
+                None
+            },
         });
     }
 
@@ -24889,6 +24978,7 @@ fn decode_uncompressed_dib_pixels(
     let pixels = width.checked_mul(height)?;
     let output_len = pixels.checked_mul(3)?;
     let mut rgb = vec![0; output_len];
+    let mut alpha = (bits_per_pixel == 32 && color_masks.is_none()).then(|| vec![0; pixels]);
 
     for output_y in 0..height {
         let source_y = if top_down {
@@ -24980,6 +25070,9 @@ fn decode_uncompressed_dib_pixels(
                         rgb[output] = bytes[source + 2];
                         rgb[output + 1] = bytes[source + 1];
                         rgb[output + 2] = bytes[source];
+                        if let Some(alpha) = alpha.as_mut() {
+                            alpha[output_y.checked_mul(width)?.checked_add(x)?] = bytes[source + 3];
+                        }
                     }
                 }
                 _ => return None,
@@ -24991,6 +25084,7 @@ fn decode_uncompressed_dib_pixels(
         width_px,
         height_px,
         rgb,
+        alpha,
     })
 }
 
@@ -25111,6 +25205,7 @@ fn parse_rle8_dib_pixels(
         width_px,
         height_px,
         rgb,
+        alpha: None,
     })
 }
 
@@ -25239,6 +25334,7 @@ fn parse_rle4_dib_pixels(
         width_px,
         height_px,
         rgb,
+        alpha: None,
     })
 }
 
@@ -26558,6 +26654,7 @@ fn parse_wmf_stretchdib_srcopy(
         source_y,
         source_width,
         i32::try_from(source_height.unsigned_abs()).ok()?,
+        false,
     )?;
 
     wmf_raster_image_command(
@@ -26598,6 +26695,7 @@ fn parse_wmf_dibbitblt_srcopy(
         source_y,
         destination_width,
         destination_height,
+        false,
     )?;
 
     wmf_raster_image_command(
@@ -26643,6 +26741,7 @@ fn parse_wmf_dibstretchblt_srcopy(
         source_y,
         source_width,
         i32::try_from(source_height.unsigned_abs()).ok()?,
+        false,
     )?;
 
     wmf_raster_image_command(
@@ -26694,6 +26793,7 @@ fn parse_wmf_setdibits_to_device(
         source_y,
         source_width,
         source_height,
+        false,
     )?;
 
     wmf_raster_image_command(
@@ -42260,6 +42360,24 @@ After\par}"#;
                 0,
                 &minimal_24bit_dib_with_dimensions(2, 1),
             ),
+            emf_alphablend_dib_record(
+                96,
+                38,
+                44,
+                24,
+                0xff,
+                1,
+                &minimal_32bit_dib_with_rgba_pixels(2, 1, &[[255, 0, 0, 64], [0, 255, 0, 192]]),
+            ),
+            emf_alphablend_dib_record(
+                120,
+                50,
+                44,
+                24,
+                0xff,
+                1,
+                &minimal_24bit_dib_with_dimensions(2, 1),
+            ),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
@@ -42273,8 +42391,12 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 2);
-        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 3);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
         assert!(matches!(
             &image.vector_commands[0],
             StaticImageVectorCommand::RasterImage {
@@ -42298,6 +42420,18 @@ After\par}"#;
         assert_eq!(
             miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 3).unwrap(),
             vec![0, 0x80, 0x80]
+        );
+        let source_alpha_mask = match &image.vector_commands[2] {
+            StaticImageVectorCommand::RasterImage { image, .. } => image
+                .alpha_mask
+                .as_ref()
+                .expect("per-pixel source alpha mask"),
+            _ => panic!("expected per-pixel alpha raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&source_alpha_mask.bytes, 3)
+                .unwrap(),
+            vec![0, 64, 192]
         );
     }
 
@@ -45937,6 +46071,33 @@ fn minimal_24bit_dib_with_rgb_pixels(width: u32, height: u32, pixels: &[[u8; 3]]
         }
         row.resize(row_stride, 0);
         dib.extend_from_slice(&row);
+    }
+    dib
+}
+
+#[cfg(test)]
+fn minimal_32bit_dib_with_rgba_pixels(width: u32, height: u32, pixels: &[[u8; 4]]) -> Vec<u8> {
+    assert_eq!(pixels.len(), (width as usize) * (height as usize));
+    let row_stride = width as usize * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let mut dib = Vec::with_capacity(40 + pixel_bytes);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&32u16.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+
+    for y in (0..height).rev() {
+        for x in 0..width {
+            let [red, green, blue, alpha] = pixels[(y as usize * width as usize) + x as usize];
+            dib.extend_from_slice(&[blue, green, red, alpha]);
+        }
     }
     dib
 }

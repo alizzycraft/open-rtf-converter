@@ -37482,6 +37482,16 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
     let records = [
         emf_alphablend_dib_record(18, 24, 48, 28, 0xff, 0, &dib),
         emf_alphablend_dib_record(70, 30, 48, 28, 0x80, 0, &dib),
+        emf_alphablend_dib_record(
+            100,
+            36,
+            48,
+            28,
+            0xff,
+            1,
+            &minimal_32bit_dib_with_rgba_pixels(2, 1, &[[255, 0, 0, 64], [0, 255, 0, 192]]),
+        ),
+        emf_alphablend_dib_record(130, 46, 48, 28, 0xff, 1, &dib),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
@@ -37502,7 +37512,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(image.vector_commands.len(), 3);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37528,7 +37538,23 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
         miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 3).unwrap(),
         vec![0, 0x80, 0x80]
     );
-    assert_eq!(parsed.diagnostics.len(), 0);
+    let source_alpha_mask = match &image.vector_commands[2] {
+        StaticImageVectorCommand::RasterImage { image, .. } => image
+            .alpha_mask
+            .as_ref()
+            .expect("per-pixel EMF ALPHABLEND should render as a passive alpha mask"),
+        _ => panic!("expected per-pixel alpha raster image"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&source_alpha_mask.bytes, 3)
+            .unwrap(),
+        vec![0, 64, 192]
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
     for forbidden in [
         "emfblip",
         "ALPHABLEND",
@@ -37563,7 +37589,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 2,
+            >= 3,
         "EMF ALPHABLEND DIBs should render as passive image XObjects"
     );
     assert!(
@@ -52059,6 +52085,32 @@ fn minimal_24bit_dib_with_rgb_pixels(width: u32, height: u32, pixels: &[[u8; 3]]
         }
         row.resize(row_stride, 0);
         dib.extend_from_slice(&row);
+    }
+    dib
+}
+
+fn minimal_32bit_dib_with_rgba_pixels(width: u32, height: u32, pixels: &[[u8; 4]]) -> Vec<u8> {
+    assert_eq!(pixels.len(), (width as usize) * (height as usize));
+    let row_stride = width as usize * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let mut dib = Vec::with_capacity(40 + pixel_bytes);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&32u16.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+
+    for y in (0..height).rev() {
+        for x in 0..width {
+            let [red, green, blue, alpha] = pixels[(y as usize * width as usize) + x as usize];
+            dib.extend_from_slice(&[blue, green, red, alpha]);
+        }
     }
     dib
 }
