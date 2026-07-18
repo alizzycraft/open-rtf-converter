@@ -29416,6 +29416,117 @@ fn wmf_patcopy_stretchblt_renders_passive_brush_rectangle_without_payload_leakag
 }
 
 #[test]
+fn wmf_patcopy_bitblt_renders_passive_brush_rectangle_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000033c0000000200150000000000",
+        "050000000c026400c800",
+        "07000000fc0200001e6eb4000000",
+        "040000002d010000",
+        "0b00000022092100f000000000003c00460014000a00",
+        "1500000022092000cc00000000000019002d001e0023005241572d535243434f50592d424954424c5400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF BITBLT vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 20.0,
+            right: 80.0,
+            bottom: 80.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 30,
+                green: 110,
+                blue: 180
+            }),
+            ..
+        }
+    ));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        "wmetafile",
+        "0922",
+        "RAW-SRCCOPY-BITBLT",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF BITBLT internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "WMF PATCOPY BITBLT should render as passive PDF rectangle path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*" | "B" | "B*")),
+        "WMF PATCOPY BITBLT should render as a passive PDF fill"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0922",
+        b"RAW-SRCCOPY-BITBLT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF BITBLT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003180000000000070000000000",

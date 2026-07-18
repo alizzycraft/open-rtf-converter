@@ -24077,12 +24077,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
-            0x0b23 => {
+            0x0922 | 0x0b23 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some((left, top, right, bottom)) = parse_wmf_stretchblt_patcopy_bounds(
+                if let Some((left, top, right, bottom)) = parse_wmf_blt_patcopy_bounds(
                     data,
+                    function == 0x0b23,
                     window_origin_x,
                     window_origin_y,
                     window_width,
@@ -24447,20 +24448,28 @@ fn parse_wmf_patblt_bounds(
     ))
 }
 
-fn parse_wmf_stretchblt_patcopy_bounds(
+fn parse_wmf_blt_patcopy_bounds(
     data: &[u8],
+    has_source_size: bool,
     window_origin_x: i32,
     window_origin_y: i32,
     window_width: i32,
     window_height: i32,
 ) -> Option<(f32, f32, f32, f32)> {
-    if data.len() < 20 || read_le_u32(data, 0)? != WMF_PATCOPY_RASTER_OP {
+    let destination_offset = if has_source_size { 12usize } else { 8usize };
+    if data.len() < destination_offset.checked_add(8)?
+        || read_le_u32(data, 0)? != WMF_PATCOPY_RASTER_OP
+    {
         return None;
     }
-    let y = i32::from(read_le_i16(data, 16)?);
-    let x = i32::from(read_le_i16(data, 18)?);
-    let height = i32::from(read_le_i16(data, 12)?.unsigned_abs().max(1));
-    let width = i32::from(read_le_i16(data, 14)?.unsigned_abs().max(1));
+    let height = i32::from(read_le_i16(data, destination_offset)?.unsigned_abs().max(1));
+    let width = i32::from(
+        read_le_i16(data, destination_offset + 2)?
+            .unsigned_abs()
+            .max(1),
+    );
+    let y = i32::from(read_le_i16(data, destination_offset + 4)?);
+    let x = i32::from(read_le_i16(data, destination_offset + 6)?);
     let left_top = normalize_wmf_point(
         x,
         y,
@@ -38880,6 +38889,44 @@ After\par}"#;
                     red: 40,
                     green: 80,
                     blue: 120
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_patcopy_bitblt_records_become_passive_filled_rectangles() {
+        let wmf_hex = concat!(
+            "0100090000032700000001000b0000000000",
+            "050000000c026400c800",
+            "07000000fc0200001e6eb4000000",
+            "040000002d010000",
+            "0b00000022092100f000000000003c00460014000a00",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 10.0,
+                top: 20.0,
+                right: 80.0,
+                bottom: 80.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 30,
+                    green: 110,
+                    blue: 180
                 }),
                 ..
             }
