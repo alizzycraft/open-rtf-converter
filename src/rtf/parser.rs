@@ -23983,6 +23983,26 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     clip_scope_command_start = commands.len().checked_sub(1);
                     replaceable_clip_command_start = Some(commands.len());
                     commands.extend(clip_commands);
+                } else if let Some(clip_start) = replaceable_clip_command_start {
+                    let mut clip_commands =
+                        initial_vector_clip_commands_then_paint_only(&commands[clip_start..])?;
+                    if commands
+                        .len()
+                        .checked_add(3)?
+                        .checked_add(clip_commands.len())?
+                        > MAX_PASSIVE_WMF_COMMANDS
+                    {
+                        return None;
+                    }
+                    for command in &mut clip_commands {
+                        offset_vector_clip_command(command, offset_x, offset_y)?;
+                    }
+                    commands.insert(clip_start, StaticImageVectorCommand::SaveState);
+                    commands.push(StaticImageVectorCommand::RestoreState);
+                    commands.push(StaticImageVectorCommand::SaveState);
+                    clip_scope_command_start = commands.len().checked_sub(1);
+                    replaceable_clip_command_start = Some(commands.len());
+                    commands.extend(clip_commands);
                 } else {
                     return None;
                 }
@@ -39855,7 +39875,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_offsetcliprgn_after_painted_clip_becomes_passive_placeholder() {
+    fn wmf_offsetcliprgn_after_painted_clip_offsets_unscoped_clip() {
         let wmf_hex = concat!(
             "010009000003360000000100070000000000",
             "050000000c026400c800",
@@ -39863,6 +39883,70 @@ After\par}"#;
             "040000002d010000",
             "0700000016043c00640014001400",
             "070000001b042800280000000000",
+            "05000000200205000a00",
+            "070000001b045000b4000a001400",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 7);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(matches!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[6],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn wmf_offsetcliprgn_after_painted_unscoped_clip_mutation_becomes_passive_placeholder() {
+        let wmf_hex = concat!(
+            "0100090000033d0000000100070000000000",
+            "050000000c026400c800",
+            "07000000fc020000dcdcdc000000",
+            "040000002d010000",
+            "0700000016043c00640014001400",
+            "070000001b042800280000000000",
+            "0700000016044600780028001e00",
             "05000000200205000a00",
             "070000001b045000b4000a001400",
             "030000000000",

@@ -28426,6 +28426,137 @@ fn wmf_offsetcliprgn_offsets_saved_painted_clip_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_offsetcliprgn_offsets_unscoped_painted_clip_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "010009000003360000000100070000000000",
+        "050000000c026400c800",
+        "07000000fc020000dcdcdc000000",
+        "040000002d010000",
+        "0700000016043c00640014001400",
+        "070000001b042800280000000000",
+        "05000000200205000a00",
+        "070000001b045000b4000a001400",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF unscoped offset-clipped vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(
+        image
+            .vector_commands
+            .iter()
+            .filter(|command| matches!(command, StaticImageVectorCommand::SaveState))
+            .count(),
+        2
+    );
+    assert_eq!(
+        image
+            .vector_commands
+            .iter()
+            .filter(|command| matches!(command, StaticImageVectorCommand::RestoreState))
+            .count(),
+        1
+    );
+    assert!(
+        image.vector_commands.iter().any(|command| matches!(
+            command,
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        )),
+        "unscoped WMF OffsetClipRgn should replay an offset passive clip"
+    );
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in ["wmetafile", "010009", "2002", "dcdcdc", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF unscoped offset clip internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "q")
+            .count()
+            >= 2,
+        "WMF unscoped OffsetClipRgn should use passive PDF graphics-state scopes"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Q"),
+        "WMF unscoped OffsetClipRgn should restore the prior passive PDF clipping scope"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "WMF unscoped OffsetClipRgn should preserve passive PDF clipping"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "B")),
+        "painting after unscoped WMF OffsetClipRgn should still render passively"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"010009",
+        b"2002",
+        b"dcdcdc",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF unscoped offset clip preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_excludecliprect_records_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032a0000000100070000000000",
