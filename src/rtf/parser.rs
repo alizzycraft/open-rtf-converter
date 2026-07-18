@@ -13,14 +13,14 @@ use crate::model::{
     ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImageAlphaMask, StaticImagePlacement, StaticImageTextHorizontalAlign,
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageVectorPathSegment, StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape,
-    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapePoint,
-    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
-    TableCellPadding, TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief,
-    UnderlineStyle,
+    StaticImageVectorPathSegment, StaticImageVectorRaster, StaticImageVectorTextBounds,
+    StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
+    StaticShapeKind, StaticShapePoint, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
+    TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
+    TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
+    TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -22582,14 +22582,7 @@ fn parse_emf_stretchdibits_srcopy(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let dib = parse_dib_image_data(&dib_bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    let dib = crop_parsed_dib(dib, x_src, y_src, cx_src, cy_src)?;
-    let pixels = usize::try_from(dib.width_px)
-        .ok()?
-        .checked_mul(usize::try_from(dib.height_px).ok()?)?;
-    if pixels > MAX_PASSIVE_VECTOR_RASTER_PIXELS {
-        return None;
-    }
+    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
 
     let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
@@ -22605,9 +22598,14 @@ fn parse_emf_stretchdibits_srcopy(
         top: left_top.1.min(right_bottom.1),
         right: left_top.0.max(right_bottom.0),
         bottom: left_top.1.max(right_bottom.1),
-        width_px: dib.width_px,
-        height_px: dib.height_px,
-        bytes: dib.rgb,
+        image: StaticImageVectorRaster {
+            format: image.format,
+            width_px: image.width_px,
+            height_px: image.height_px,
+            bytes: image.bytes,
+            palette: image.palette,
+            alpha_mask: image.alpha_mask,
+        },
     })
 }
 
@@ -23946,6 +23944,16 @@ struct ParsedCompressedDibImage {
     alpha_mask: Option<StaticImageAlphaMask>,
 }
 
+#[derive(Debug)]
+struct ParsedVectorRasterImage {
+    width_px: u32,
+    height_px: u32,
+    format: ImageFormat,
+    bytes: Vec<u8>,
+    palette: Vec<u8>,
+    alpha_mask: Option<StaticImageAlphaMask>,
+}
+
 #[derive(Debug, Copy, Clone)]
 struct DibColorMasks {
     red: u32,
@@ -24372,6 +24380,49 @@ fn crop_parsed_dib(
         width_px: source_width,
         height_px: source_height,
         rgb,
+    })
+}
+
+fn parse_vector_raster_dib_image(
+    bytes: &[u8],
+    source_x: i32,
+    source_y: i32,
+    source_width: i32,
+    source_height: i32,
+) -> Option<ParsedVectorRasterImage> {
+    if let Some(dib) = parse_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS) {
+        let dib = crop_parsed_dib(dib, source_x, source_y, source_width, source_height)?;
+        let pixels = usize::try_from(dib.width_px)
+            .ok()?
+            .checked_mul(usize::try_from(dib.height_px).ok()?)?;
+        if pixels > MAX_PASSIVE_VECTOR_RASTER_PIXELS {
+            return None;
+        }
+        return Some(ParsedVectorRasterImage {
+            width_px: dib.width_px,
+            height_px: dib.height_px,
+            format: ImageFormat::Rgb8,
+            bytes: dib.rgb,
+            palette: Vec::new(),
+            alpha_mask: None,
+        });
+    }
+
+    let compressed = parse_compressed_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
+    if source_x != 0
+        || source_y != 0
+        || u32::try_from(source_width).ok()? != compressed.width_px
+        || source_height.unsigned_abs() != compressed.height_px
+    {
+        return None;
+    }
+    Some(ParsedVectorRasterImage {
+        width_px: compressed.width_px,
+        height_px: compressed.height_px,
+        format: compressed.format,
+        bytes: compressed.bytes,
+        palette: compressed.palette,
+        alpha_mask: compressed.alpha_mask,
     })
 }
 
@@ -26115,9 +26166,8 @@ fn parse_wmf_stretchdib_srcopy(
     let destination_width = i32::from(read_le_i16(data, 16)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 18)?);
     let destination_x = i32::from(read_le_i16(data, 20)?);
-    let dib = parse_dib_image_data(&data[DIB_HEADER_OFFSET..], MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    let dib = crop_parsed_dib(
-        dib,
+    let image = parse_vector_raster_dib_image(
+        &data[DIB_HEADER_OFFSET..],
         source_x,
         source_y,
         source_width,
@@ -26133,7 +26183,7 @@ fn parse_wmf_stretchdib_srcopy(
         window_origin_y,
         window_width,
         window_height,
-        dib,
+        image,
     )
 }
 
@@ -26156,9 +26206,8 @@ fn parse_wmf_dibbitblt_srcopy(
     let destination_width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 12)?);
     let destination_x = i32::from(read_le_i16(data, 14)?);
-    let dib = parse_dib_image_data(&data[DIB_HEADER_OFFSET..], MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    let dib = crop_parsed_dib(
-        dib,
+    let image = parse_vector_raster_dib_image(
+        &data[DIB_HEADER_OFFSET..],
         source_x,
         source_y,
         destination_width,
@@ -26174,7 +26223,7 @@ fn parse_wmf_dibbitblt_srcopy(
         window_origin_y,
         window_width,
         window_height,
-        dib,
+        image,
     )
 }
 
@@ -26202,9 +26251,8 @@ fn parse_wmf_dibstretchblt_srcopy(
     let destination_width = i32::from(read_le_i16(data, 14)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 16)?);
     let destination_x = i32::from(read_le_i16(data, 18)?);
-    let dib = parse_dib_image_data(&data[DIB_HEADER_OFFSET..], MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    let dib = crop_parsed_dib(
-        dib,
+    let image = parse_vector_raster_dib_image(
+        &data[DIB_HEADER_OFFSET..],
         source_x,
         source_y,
         source_width,
@@ -26220,7 +26268,7 @@ fn parse_wmf_dibstretchblt_srcopy(
         window_origin_y,
         window_width,
         window_height,
-        dib,
+        image,
     )
 }
 
@@ -26233,7 +26281,7 @@ fn wmf_raster_image_command(
     window_origin_y: i32,
     window_width: i32,
     window_height: i32,
-    dib: ParsedDib,
+    image: ParsedVectorRasterImage,
 ) -> Option<StaticImageVectorCommand> {
     let left_top = normalize_wmf_point(
         destination_x,
@@ -26264,9 +26312,14 @@ fn wmf_raster_image_command(
         top,
         right,
         bottom,
-        width_px: dib.width_px,
-        height_px: dib.height_px,
-        bytes: dib.rgb,
+        image: StaticImageVectorRaster {
+            format: image.format,
+            width_px: image.width_px,
+            height_px: image.height_px,
+            bytes: image.bytes,
+            palette: image.palette,
+            alpha_mask: image.alpha_mask,
+        },
     })
 }
 
@@ -42321,10 +42374,52 @@ After\par}"#;
                 top: 15.0,
                 right: 80.0,
                 bottom: 45.0,
-                width_px: 2,
-                height_px: 1,
-                bytes,
-            } if bytes == &vec![255, 0, 0, 0, 255, 0]
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![255, 0, 0, 0, 255, 0]
+        ));
+    }
+
+    #[test]
+    fn emf_srccopy_stretchdibits_bi_jpeg_record_becomes_passive_raster_image() {
+        let jpeg = minimal_jpeg_with_dimensions(2, 1);
+        let dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
+        let records = [emf_stretchdibits_dib_record(
+            20,
+            15,
+            60,
+            30,
+            WMF_SRCCOPY_RASTER_OP,
+            &dib,
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                image,
+            } if image.format == ImageFormat::Jpeg
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == jpeg
         ));
     }
 
@@ -42369,10 +42464,11 @@ After\par}"#;
                 top: 15.0,
                 right: 80.0,
                 bottom: 45.0,
-                width_px: 2,
-                height_px: 1,
-                bytes,
-            } if bytes == &vec![130, 140, 150, 160, 170, 180]
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![130, 140, 150, 160, 170, 180]
         ));
     }
 
@@ -42445,10 +42541,52 @@ After\par}"#;
                 top: 25.0,
                 right: 95.0,
                 bottom: 65.0,
-                width_px: 2,
-                height_px: 1,
-                bytes,
-            } if bytes == &vec![255, 0, 0, 0, 255, 0]
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![255, 0, 0, 0, 255, 0]
+        ));
+    }
+
+    #[test]
+    fn wmf_srccopy_stretchdib_bi_png_record_becomes_passive_raster_image() {
+        let png = minimal_rgb_png_with_dimensions(2, 1);
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_SRCCOPY_RASTER_OP,
+            &minimal_compressed_dib_with_payload(2, 1, 5, &png),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &[record]))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                image,
+            } if image.format == ImageFormat::Png
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.palette.is_empty()
+                && image.alpha_mask.is_none()
         ));
     }
 
@@ -42483,10 +42621,11 @@ After\par}"#;
                 top: 25.0,
                 right: 17.0,
                 bottom: 26.0,
-                width_px: 2,
-                height_px: 1,
-                bytes,
-            } if bytes == &vec![255, 0, 0, 0, 255, 0]
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![255, 0, 0, 0, 255, 0]
         ));
     }
 
@@ -42521,10 +42660,11 @@ After\par}"#;
                 top: 25.0,
                 right: 95.0,
                 bottom: 65.0,
-                width_px: 2,
-                height_px: 1,
-                bytes,
-            } if bytes == &vec![255, 0, 0, 0, 255, 0]
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![255, 0, 0, 0, 255, 0]
         ));
     }
 
@@ -42565,11 +42705,12 @@ After\par}"#;
             assert!(matches!(
                 command,
                 StaticImageVectorCommand::RasterImage {
-                    width_px: 2,
-                    height_px: 1,
-                    bytes,
+                    image,
                     ..
-                } if bytes == &vec![130, 140, 150, 160, 170, 180]
+                } if image.format == ImageFormat::Rgb8
+                    && image.width_px == 2
+                    && image.height_px == 1
+                    && image.bytes == vec![130, 140, 150, 160, 170, 180]
             ));
         }
         assert!(matches!(

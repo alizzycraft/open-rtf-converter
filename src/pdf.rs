@@ -709,27 +709,34 @@ pub fn render_pdf_with_font_provider(
             if !image_format_uses_xobject(fragment.image.format) {
                 if fragment.image.format == ImageFormat::WmfVector {
                     for command in &fragment.image.vector_commands {
-                        let StaticImageVectorCommand::RasterImage {
-                            width_px,
-                            height_px,
-                            bytes,
-                            ..
-                        } = command
-                        else {
+                        let StaticImageVectorCommand::RasterImage { image, .. } = command else {
                             continue;
                         };
                         let Some(image_ref) = page_images.get(image_ref_cursor) else {
                             return;
                         };
                         image_ref_cursor = image_ref_cursor.saturating_add(1);
-                        write_rgb8_image_xobject(
+                        write_passive_image_xobject(
                             &mut pdf,
                             image_ref.id,
-                            *width_px,
-                            *height_px,
-                            bytes,
-                            None,
+                            image.format,
+                            image.width_px,
+                            image.height_px,
+                            &image.bytes,
+                            &image.palette,
+                            image_ref.alpha_mask_id,
                         );
+                        if let (Some(alpha_mask), Some(alpha_mask_id)) =
+                            (image.alpha_mask.as_ref(), image_ref.alpha_mask_id)
+                        {
+                            write_image_alpha_mask(
+                                &mut pdf,
+                                alpha_mask_id,
+                                alpha_mask,
+                                image.width_px,
+                                image.height_px,
+                            );
+                        }
                     }
                 }
                 return;
@@ -745,81 +752,20 @@ pub fn render_pdf_with_font_provider(
                 | ImageFormat::JpegGrayscale
                 | ImageFormat::JpegCmyk
                 | ImageFormat::JpegCmykPassiveGrayscale
-                | ImageFormat::JpegCmykPassiveBilevel => {
-                    let mut image = pdf.image_xobject(image_ref.id, &fragment.image.bytes);
-                    image.width(fragment.image.width_px as i32);
-                    image.height(fragment.image.height_px as i32);
-                    match fragment.image.format {
-                        ImageFormat::Jpeg
-                        | ImageFormat::JpegPassiveGrayscale
-                        | ImageFormat::JpegPassiveBilevel => image.color_space().device_rgb(),
-                        ImageFormat::JpegGrayscale => image.color_space().device_gray(),
-                        ImageFormat::JpegCmyk
-                        | ImageFormat::JpegCmykPassiveGrayscale
-                        | ImageFormat::JpegCmykPassiveBilevel => image.color_space().device_cmyk(),
-                        _ => image.color_space().device_rgb(),
-                    }
-                    image.bits_per_component(8);
-                    image.filter(Filter::DctDecode);
-                    if let Some(alpha_mask_id) = image_ref.alpha_mask_id {
-                        image.s_mask(alpha_mask_id);
-                    }
-                }
-                ImageFormat::Png | ImageFormat::PngGrayscale | ImageFormat::PngIndexed => {
-                    let mut image = pdf.image_xobject(image_ref.id, &fragment.image.bytes);
-                    image.width(fragment.image.width_px as i32);
-                    image.height(fragment.image.height_px as i32);
-                    let color_components = match fragment.image.format {
-                        ImageFormat::Png => {
-                            image.color_space().device_rgb();
-                            3
-                        }
-                        ImageFormat::PngGrayscale => {
-                            image.color_space().device_gray();
-                            1
-                        }
-                        ImageFormat::PngIndexed => {
-                            let hival = fragment
-                                .image
-                                .palette
-                                .len()
-                                .checked_div(3)
-                                .and_then(|entries| entries.checked_sub(1))
-                                .unwrap_or(0) as i32;
-                            image.color_space().indexed(
-                                Name(b"DeviceRGB"),
-                                hival,
-                                &fragment.image.palette,
-                            );
-                            1
-                        }
-                        _ => {
-                            image.color_space().device_rgb();
-                            3
-                        }
-                    };
-                    image.bits_per_component(8);
-                    image.filter(Filter::FlateDecode);
-                    image
-                        .decode_parms()
-                        .predictor(Predictor::PngOptimum)
-                        .colors(color_components)
-                        .bits_per_component(8)
-                        .columns(fragment.image.width_px as i32);
-                    if let Some(alpha_mask_id) = image_ref.alpha_mask_id {
-                        image.s_mask(alpha_mask_id);
-                    }
-                }
-                ImageFormat::Rgb8 => {
-                    write_rgb8_image_xobject(
-                        &mut pdf,
-                        image_ref.id,
-                        fragment.image.width_px,
-                        fragment.image.height_px,
-                        &fragment.image.bytes,
-                        image_ref.alpha_mask_id,
-                    );
-                }
+                | ImageFormat::JpegCmykPassiveBilevel
+                | ImageFormat::Png
+                | ImageFormat::PngGrayscale
+                | ImageFormat::PngIndexed
+                | ImageFormat::Rgb8 => write_passive_image_xobject(
+                    &mut pdf,
+                    image_ref.id,
+                    fragment.image.format,
+                    fragment.image.width_px,
+                    fragment.image.height_px,
+                    &fragment.image.bytes,
+                    &fragment.image.palette,
+                    image_ref.alpha_mask_id,
+                ),
                 ImageFormat::WmfVector | ImageFormat::Placeholder => {}
             }
             if let (Some(alpha_mask), Some(alpha_mask_id)) =
@@ -857,6 +803,91 @@ fn write_image_alpha_mask(
         .colors(1)
         .bits_per_component(8)
         .columns(width_px as i32);
+}
+
+fn write_passive_image_xobject(
+    pdf: &mut Pdf,
+    image_id: Ref,
+    format: ImageFormat,
+    width_px: u32,
+    height_px: u32,
+    bytes: &[u8],
+    palette: &[u8],
+    alpha_mask_id: Option<Ref>,
+) {
+    match format {
+        ImageFormat::Jpeg
+        | ImageFormat::JpegPassiveGrayscale
+        | ImageFormat::JpegPassiveBilevel
+        | ImageFormat::JpegGrayscale
+        | ImageFormat::JpegCmyk
+        | ImageFormat::JpegCmykPassiveGrayscale
+        | ImageFormat::JpegCmykPassiveBilevel => {
+            let mut image = pdf.image_xobject(image_id, bytes);
+            image.width(width_px as i32);
+            image.height(height_px as i32);
+            match format {
+                ImageFormat::Jpeg
+                | ImageFormat::JpegPassiveGrayscale
+                | ImageFormat::JpegPassiveBilevel => image.color_space().device_rgb(),
+                ImageFormat::JpegGrayscale => image.color_space().device_gray(),
+                ImageFormat::JpegCmyk
+                | ImageFormat::JpegCmykPassiveGrayscale
+                | ImageFormat::JpegCmykPassiveBilevel => image.color_space().device_cmyk(),
+                _ => image.color_space().device_rgb(),
+            }
+            image.bits_per_component(8);
+            image.filter(Filter::DctDecode);
+            if let Some(alpha_mask_id) = alpha_mask_id {
+                image.s_mask(alpha_mask_id);
+            }
+        }
+        ImageFormat::Png | ImageFormat::PngGrayscale | ImageFormat::PngIndexed => {
+            let mut image = pdf.image_xobject(image_id, bytes);
+            image.width(width_px as i32);
+            image.height(height_px as i32);
+            let color_components = match format {
+                ImageFormat::Png => {
+                    image.color_space().device_rgb();
+                    3
+                }
+                ImageFormat::PngGrayscale => {
+                    image.color_space().device_gray();
+                    1
+                }
+                ImageFormat::PngIndexed => {
+                    let hival = palette
+                        .len()
+                        .checked_div(3)
+                        .and_then(|entries| entries.checked_sub(1))
+                        .unwrap_or(0) as i32;
+                    image
+                        .color_space()
+                        .indexed(Name(b"DeviceRGB"), hival, palette);
+                    1
+                }
+                _ => {
+                    image.color_space().device_rgb();
+                    3
+                }
+            };
+            image.bits_per_component(8);
+            image.filter(Filter::FlateDecode);
+            image
+                .decode_parms()
+                .predictor(Predictor::PngOptimum)
+                .colors(color_components)
+                .bits_per_component(8)
+                .columns(width_px as i32);
+            if let Some(alpha_mask_id) = alpha_mask_id {
+                image.s_mask(alpha_mask_id);
+            }
+        }
+        ImageFormat::Rgb8 => {
+            write_rgb8_image_xobject(pdf, image_id, width_px, height_px, bytes, alpha_mask_id);
+        }
+        ImageFormat::WmfVector | ImageFormat::Placeholder => {}
+    }
 }
 
 fn write_rgb8_image_xobject(
@@ -1691,14 +1722,19 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
                 }
                 if fragment.image.format == ImageFormat::WmfVector {
                     for command in &fragment.image.vector_commands {
-                        if matches!(command, StaticImageVectorCommand::RasterImage { .. }) {
+                        if let StaticImageVectorCommand::RasterImage { image, .. } = command {
                             let id = Ref::new(next_id);
                             let name = format!("Im{}", next_id - first_image_id + 1).into_bytes();
                             next_id += 1;
+                            let alpha_mask_id = image.alpha_mask.as_ref().map(|_| {
+                                let id = Ref::new(next_id);
+                                next_id += 1;
+                                id
+                            });
                             refs.push(PdfImageRef {
                                 name,
                                 id,
-                                alpha_mask_id: None,
+                                alpha_mask_id,
                             });
                         }
                     }
@@ -1757,16 +1793,13 @@ fn count_image_xobjects(layout: &LayoutDocument) -> usize {
                         .saturating_add(usize::from(fragment.image.alpha_mask.is_some()));
                 }
                 if fragment.image.format == ImageFormat::WmfVector {
-                    count = count.saturating_add(
-                        fragment
-                            .image
-                            .vector_commands
-                            .iter()
-                            .filter(|command| {
-                                matches!(command, StaticImageVectorCommand::RasterImage { .. })
-                            })
-                            .count(),
-                    );
+                    for command in &fragment.image.vector_commands {
+                        if let StaticImageVectorCommand::RasterImage { image, .. } = command {
+                            count = count
+                                .saturating_add(1)
+                                .saturating_add(usize::from(image.alpha_mask.is_some()));
+                        }
+                    }
                 }
             });
             count

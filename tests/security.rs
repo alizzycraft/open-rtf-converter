@@ -30648,10 +30648,11 @@ fn wmf_srccopy_stretchdib_renders_passive_image_without_payload_leakage() {
             top: 25.0,
             right: 95.0,
             bottom: 65.0,
-            width_px: 2,
-            height_px: 1,
-            bytes,
-        } if bytes == &vec![255, 0, 0, 0, 255, 0]
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![255, 0, 0, 0, 255, 0]
     ));
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in ["wmetafile", "0f43", "cc0020", "JavaScript", "EmbeddedFile"] {
@@ -30742,10 +30743,11 @@ fn wmf_srccopy_dib_blt_records_render_passive_images_without_payload_leakage() {
             top: 25.0,
             right: 17.0,
             bottom: 26.0,
-            width_px: 2,
-            height_px: 1,
-            bytes,
-        } if bytes == &vec![255, 0, 0, 0, 255, 0]
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![255, 0, 0, 0, 255, 0]
     ));
     assert!(matches!(
         &image.vector_commands[1],
@@ -30754,10 +30756,11 @@ fn wmf_srccopy_dib_blt_records_render_passive_images_without_payload_leakage() {
             top: 45.0,
             right: 115.0,
             bottom: 85.0,
-            width_px: 2,
-            height_px: 1,
-            bytes,
-        } if bytes == &vec![255, 0, 0, 0, 255, 0]
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![255, 0, 0, 0, 255, 0]
     ));
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
@@ -30867,11 +30870,12 @@ fn wmf_srccopy_cropped_embedded_dibs_render_passive_images_without_payload_leaka
         assert!(matches!(
             command,
             StaticImageVectorCommand::RasterImage {
-                width_px: 2,
-                height_px: 1,
-                bytes,
+                image,
                 ..
-            } if bytes == &vec![130, 140, 150, 160, 170, 180]
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![130, 140, 150, 160, 170, 180]
         ));
     }
     assert_eq!(parsed.diagnostics.len(), 0);
@@ -37336,10 +37340,11 @@ fn emf_srccopy_stretchdibits_dib_renders_as_passive_image_without_payload_leakag
             top: 15.0,
             right: 80.0,
             bottom: 45.0,
-            width_px: 2,
-            height_px: 1,
-            bytes,
-        } if bytes == &vec![255, 0, 0, 0, 255, 0]
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![255, 0, 0, 0, 255, 0]
     ));
     assert!(!text.contains("emfblip"));
     assert!(!text.contains("STRETCHDIBITS"));
@@ -37396,6 +37401,142 @@ fn emf_srccopy_stretchdibits_dib_renders_as_passive_image_without_payload_leakag
 }
 
 #[test]
+fn compressed_dibs_inside_metafile_raster_records_render_without_raw_payload_leakage() {
+    let jpeg = minimal_jpeg_with_dimensions(2, 1);
+    let png = minimal_grayscale_png_with_dimensions(2, 1);
+    let mut jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
+    let mut png_dib = minimal_compressed_dib_with_payload(2, 1, 5, &png);
+    jpeg_dib.extend_from_slice(b"TRAILING-EMF-BI-JPEG /JavaScript");
+    png_dib.extend_from_slice(b"TRAILING-WMF-BI-PNG /EmbeddedFile");
+
+    let emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[emf_stretchdibits_dib_record(
+            20,
+            15,
+            60,
+            30,
+            0x00cc_0020,
+            &jpeg_dib,
+        )],
+    );
+    let wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[wmf_stretchdib_dib_record(
+            35,
+            25,
+            80,
+            40,
+            0x00cc_0020,
+            &png_dib,
+        )],
+    );
+    let emf_hex = bytes_to_hex(&emf);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert!(
+        images
+            .iter()
+            .all(|image| image.format == ImageFormat::WmfVector)
+    );
+    assert!(images.iter().all(|image| image.bytes.is_empty()));
+    assert!(matches!(
+        &images[0].vector_commands[0],
+        StaticImageVectorCommand::RasterImage { image, .. }
+            if image.format == ImageFormat::Jpeg
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == jpeg
+    ));
+    assert!(matches!(
+        &images[1].vector_commands[0],
+        StaticImageVectorCommand::RasterImage { image, .. }
+            if image.format == ImageFormat::PngGrayscale
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.alpha_mask.is_none()
+    ));
+    for forbidden in [
+        "emfblip",
+        "wmetafile",
+        "TRAILING-EMF-BI-JPEG",
+        "TRAILING-WMF-BI-PNG",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "compressed metafile DIB payload/control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let image_paints = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "Do")
+        .count();
+    assert!(
+        image_paints >= 2,
+        "both metafile compressed DIBs should render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        b"wmetafile",
+        b"TRAILING-EMF-BI-JPEG",
+        b"TRAILING-WMF-BI-PNG",
+        b"89504e470d0a1a0a",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "compressed metafile DIB payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_srccopy_stretchdibits_crop_renders_as_passive_image_without_payload_leakage() {
     let dib = minimal_24bit_dib_with_rgb_pixels(
         3,
@@ -37442,10 +37583,11 @@ fn emf_srccopy_stretchdibits_crop_renders_as_passive_image_without_payload_leaka
             top: 15.0,
             right: 80.0,
             bottom: 45.0,
-            width_px: 2,
-            height_px: 1,
-            bytes,
-        } if bytes == &vec![130, 140, 150, 160, 170, 180]
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![130, 140, 150, 160, 170, 180]
     ));
     assert!(!text.contains("emfblip"));
     assert!(!text.contains("STRETCHDIBITS"));

@@ -392,6 +392,16 @@ pub struct StaticImageAlphaMask {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticImageVectorRaster {
+    pub format: ImageFormat,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub bytes: Vec<u8>,
+    pub palette: Vec<u8>,
+    pub alpha_mask: Option<StaticImageAlphaMask>,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct ImageCrop {
     pub left_twips: i32,
@@ -554,9 +564,7 @@ pub enum StaticImageVectorCommand {
         top: f32,
         right: f32,
         bottom: f32,
-        width_px: u32,
-        height_px: u32,
-        bytes: Vec<u8>,
+        image: StaticImageVectorRaster,
     },
     Text {
         x: f32,
