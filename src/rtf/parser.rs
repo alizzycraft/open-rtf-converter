@@ -24002,6 +24002,11 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
             let row_stride = row_bits.checked_add(31)?.checked_div(32)?.checked_mul(4)?;
             (row_stride, palette_end, Some(palette_entries))
         }
+        16 => {
+            let row_bits = width.checked_mul(16)?;
+            let row_stride = row_bits.checked_add(31)?.checked_div(32)?.checked_mul(4)?;
+            (row_stride, header_size, None)
+        }
         24 => {
             let unpadded_row_bytes = width.checked_mul(3)?;
             let row_stride = unpadded_row_bytes
@@ -24182,6 +24187,16 @@ fn decode_uncompressed_dib_pixels(
                         &mut rgb[output..output + 3],
                     )?;
                 }
+                16 => {
+                    let source = source_row.checked_add(x.checked_mul(2)?)?;
+                    let pixel = read_le_u16(bytes, source)?;
+                    let red = ((pixel >> 10) & 0x1f) as u8;
+                    let green = ((pixel >> 5) & 0x1f) as u8;
+                    let blue = (pixel & 0x1f) as u8;
+                    rgb[output] = expand_5bit_color_channel(red);
+                    rgb[output + 1] = expand_5bit_color_channel(green);
+                    rgb[output + 2] = expand_5bit_color_channel(blue);
+                }
                 24 | 32 => {
                     let bytes_per_pixel = usize::from(bits_per_pixel / 8);
                     let source = source_row.checked_add(x.checked_mul(bytes_per_pixel)?)?;
@@ -24220,6 +24235,10 @@ fn copy_dib_palette_color(
     output[1] = *bytes.get(palette + 1)?;
     output[2] = *bytes.get(palette)?;
     Some(())
+}
+
+fn expand_5bit_color_channel(value: u8) -> u8 {
+    (value << 3) | (value >> 2)
 }
 
 fn read_le_u16(bytes: &[u8], offset: usize) -> Option<u16> {
@@ -37538,6 +37557,26 @@ After\par}"#;
     }
 
     #[test]
+    fn normalizes_16bit_dib_picture_as_safe_static_image() {
+        let input = format!(
+            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_16bit_dib_with_dimensions(2, 1))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Rgb8);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0]);
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(720));
+    }
+
+    #[test]
     fn normalizes_8bit_paletted_dib_picture_as_safe_static_image() {
         let input = format!(
             "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
@@ -43338,6 +43377,35 @@ fn minimal_24bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
             } else {
                 row.extend_from_slice(&[0, 255, 0]);
             }
+        }
+        row.resize(row_stride, 0);
+        dib.extend_from_slice(&row);
+    }
+    dib
+}
+
+#[cfg(test)]
+fn minimal_16bit_dib_with_dimensions(width: u32, height: u32) -> Vec<u8> {
+    let row_stride = ((width as usize * 16).div_ceil(32)) * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let mut dib = Vec::with_capacity(40 + pixel_bytes);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&16u16.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+
+    for _ in 0..height {
+        let mut row = Vec::with_capacity(row_stride);
+        for x in 0..width {
+            let pixel = if x % 2 == 0 { 0x7c00u16 } else { 0x03e0u16 };
+            row.extend_from_slice(&pixel.to_le_bytes());
         }
         row.resize(row_stride, 0);
         dib.extend_from_slice(&row);
