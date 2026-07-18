@@ -35076,6 +35076,123 @@ fn emf_fillrgn_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_framergn_records_render_passively_without_payload_leakage() {
+    let records = [
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 80,
+                green: 20,
+                blue: 210,
+            },
+            0,
+        ),
+        emf_framergn_record(3, 6, 4, &[(20, 10, 90, 50)]),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF FRAMERGN vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 4);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 20.0,
+            top: 10.0,
+            right: 90.0,
+            bottom: 14.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 80,
+                green: 20,
+                blue: 210
+            }),
+            ..
+        }
+    ));
+    for forbidden in [
+        "emfblip",
+        "FRAMERGN",
+        "RGNDATA",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF FRAMERGN payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 4,
+        "EMF FRAMERGN should render passive PDF border rectangles"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "B")),
+        "EMF FRAMERGN should render passive PDF fills"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF FRAMERGN payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_paintrgn_records_render_passively_without_payload_leakage() {
     let records = [
         emf_create_brush_record(
@@ -48056,6 +48173,44 @@ fn emf_fillrgn_record(brush_handle: u32, rects: &[(i32, i32, i32, i32)]) -> Vec<
     write_test_le_i32(&mut record, 60, bottom);
     for (index, (left, top, right, bottom)) in rects.iter().copied().enumerate() {
         let offset = 64 + (index * 16);
+        write_test_le_i32(&mut record, offset, left);
+        write_test_le_i32(&mut record, offset + 4, top);
+        write_test_le_i32(&mut record, offset + 8, right);
+        write_test_le_i32(&mut record, offset + 12, bottom);
+    }
+    record
+}
+
+fn emf_framergn_record(
+    brush_handle: u32,
+    stroke_width: i32,
+    stroke_height: i32,
+    rects: &[(i32, i32, i32, i32)],
+) -> Vec<u8> {
+    let region_size = 32 + (rects.len() * 16);
+    let size = 40 + region_size;
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 72);
+    write_test_le_u32(&mut record, 4, size as u32);
+    let (left, top, right, bottom) = rects.first().copied().unwrap_or((0, 0, 0, 0));
+    write_test_le_i32(&mut record, 8, left);
+    write_test_le_i32(&mut record, 12, top);
+    write_test_le_i32(&mut record, 16, right);
+    write_test_le_i32(&mut record, 20, bottom);
+    write_test_le_u32(&mut record, 24, region_size as u32);
+    write_test_le_u32(&mut record, 28, brush_handle);
+    write_test_le_i32(&mut record, 32, stroke_width);
+    write_test_le_i32(&mut record, 36, stroke_height);
+    write_test_le_u32(&mut record, 40, 32);
+    write_test_le_u32(&mut record, 44, 1);
+    write_test_le_u32(&mut record, 48, rects.len() as u32);
+    write_test_le_u32(&mut record, 52, (rects.len() * 16) as u32);
+    write_test_le_i32(&mut record, 56, left);
+    write_test_le_i32(&mut record, 60, top);
+    write_test_le_i32(&mut record, 64, right);
+    write_test_le_i32(&mut record, 68, bottom);
+    for (index, (left, top, right, bottom)) in rects.iter().copied().enumerate() {
+        let offset = 72 + (index * 16);
         write_test_le_i32(&mut record, offset, left);
         write_test_le_i32(&mut record, offset + 4, top);
         write_test_le_i32(&mut record, offset + 8, right);
