@@ -38575,6 +38575,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     let blackness_payload = b"BLACKNESS-SOURCE-PAYLOAD";
     let whiteness_payload = b"WHITENESS-STRETCH-PAYLOAD";
     let dib_payload = b"BLACKNESS-DIB-PAYLOAD";
+    let dstcopy_payload = b"DSTCOPY-NOOP-SOURCE-PAYLOAD";
     let backdrop_dstinvert_payload = b"BACKDROP-DSTINVERT-PAYLOAD";
     let backdrop_patinvert_payload = b"BACKDROP-PATINVERT-PAYLOAD";
     let unsupported_payload = b"UNSUPPORTED-SRCCOPY-PAYLOAD";
@@ -38595,6 +38596,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
         emf_stretchblt_record(50, 25, 35, 20, 0x00ff_0062, whiteness_payload),
         emf_bitblt_record(62, 10, 24, 12, 0x000f_0001, notpatcopy_payload),
         emf_stretchdibits_record(90, 30, 40, 25, 0x0000_0042, dib_payload),
+        emf_bitblt_record(96, 8, 18, 10, 0x00aa_0029, dstcopy_payload),
         emf_bitblt_record(110, 12, 20, 10, 0x0055_0009, backdrop_dstinvert_payload),
         emf_bitblt_record(112, 24, 20, 10, 0x005a_0049, backdrop_patinvert_payload),
         emf_bitblt_record(15, 35, 20, 10, 0x00cc_0020, unsupported_payload),
@@ -38711,6 +38713,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
         "BLACKNESS-SOURCE-PAYLOAD",
         "WHITENESS-STRETCH-PAYLOAD",
         "BLACKNESS-DIB-PAYLOAD",
+        "DSTCOPY-NOOP-SOURCE-PAYLOAD",
         "BACKDROP-DSTINVERT-PAYLOAD",
         "BACKDROP-PATINVERT-PAYLOAD",
         "UNSUPPORTED-SRCCOPY-PAYLOAD",
@@ -38762,6 +38765,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
         blackness_payload.as_slice(),
         whiteness_payload.as_slice(),
         dib_payload.as_slice(),
+        dstcopy_payload.as_slice(),
         backdrop_dstinvert_payload.as_slice(),
         backdrop_patinvert_payload.as_slice(),
         unsupported_payload.as_slice(),
