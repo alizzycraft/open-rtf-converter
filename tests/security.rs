@@ -38570,18 +38570,31 @@ fn emf_srccopy_stretchdibits_crop_renders_as_passive_image_without_payload_leaka
 
 #[test]
 fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload_leakage() {
-    let dstinvert_payload = b"DSTINVERT-SOURCE-PAYLOAD";
+    let patinvert_payload = b"PATINVERT-SOURCE-PAYLOAD";
     let blackness_payload = b"BLACKNESS-SOURCE-PAYLOAD";
     let whiteness_payload = b"WHITENESS-STRETCH-PAYLOAD";
     let dib_payload = b"BLACKNESS-DIB-PAYLOAD";
     let backdrop_dstinvert_payload = b"BACKDROP-DSTINVERT-PAYLOAD";
+    let backdrop_patinvert_payload = b"BACKDROP-PATINVERT-PAYLOAD";
     let unsupported_payload = b"UNSUPPORTED-SRCCOPY-PAYLOAD";
     let records = [
-        emf_bitblt_record(4, 8, 24, 12, 0x0055_0009, dstinvert_payload),
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 20,
+                green: 80,
+                blue: 140,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_bitblt_record(4, 8, 24, 12, 0x005a_0049, patinvert_payload),
         emf_bitblt_record(10, 20, 30, 15, 0x0000_0042, blackness_payload),
         emf_stretchblt_record(50, 25, 35, 20, 0x00ff_0062, whiteness_payload),
         emf_stretchdibits_record(90, 30, 40, 25, 0x0000_0042, dib_payload),
         emf_bitblt_record(110, 12, 20, 10, 0x0055_0009, backdrop_dstinvert_payload),
+        emf_bitblt_record(112, 24, 20, 10, 0x005a_0049, backdrop_patinvert_payload),
         emf_bitblt_record(15, 35, 20, 10, 0x00cc_0020, unsupported_payload),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
@@ -38613,9 +38626,9 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
             bottom: 20.0,
             stroke_color: None,
             fill_color: Some(Color {
-                red: 0,
-                green: 0,
-                blue: 0
+                red: 235,
+                green: 175,
+                blue: 115
             }),
             ..
         }
@@ -38671,15 +38684,16 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("2 unsupported record(s) skipped")
+            .contains("3 unsupported record(s) skipped")
     }));
     for forbidden in [
         "emfblip",
-        "DSTINVERT-SOURCE-PAYLOAD",
+        "PATINVERT-SOURCE-PAYLOAD",
         "BLACKNESS-SOURCE-PAYLOAD",
         "WHITENESS-STRETCH-PAYLOAD",
         "BLACKNESS-DIB-PAYLOAD",
         "BACKDROP-DSTINVERT-PAYLOAD",
+        "BACKDROP-PATINVERT-PAYLOAD",
         "UNSUPPORTED-SRCCOPY-PAYLOAD",
         "JavaScript",
         "EmbeddedFile",
@@ -38712,7 +38726,7 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
             .filter(|operation| operation.operator == "re")
             .count()
             >= 4,
-        "EMF solid and blank DSTINVERT transfers should render passive PDF rectangles"
+        "EMF solid and blank invert transfers should render passive PDF rectangles"
     );
     assert!(
         content
@@ -38724,11 +38738,12 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
     for forbidden in [
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
-        dstinvert_payload.as_slice(),
+        patinvert_payload.as_slice(),
         blackness_payload.as_slice(),
         whiteness_payload.as_slice(),
         dib_payload.as_slice(),
         backdrop_dstinvert_payload.as_slice(),
+        backdrop_patinvert_payload.as_slice(),
         unsupported_payload.as_slice(),
         b"/JavaScript",
         b"/EmbeddedFile",

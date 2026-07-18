@@ -22568,6 +22568,7 @@ fn parse_emf_passive_raster_transfer(
             green: 0,
             blue: 0,
         },
+        WMF_PATINVERT_RASTER_OP if blank_destination => inverted_color(selected_fill_color?),
         _ => return None,
     };
     if data.len() < min_data_len {
@@ -24740,6 +24741,7 @@ const WMF_TA_VERTICAL_MASK: u16 = 0x0018;
 const WMF_BLACKNESS_RASTER_OP: u32 = 0x0000_0042;
 const WMF_DSTINVERT_RASTER_OP: u32 = 0x0055_0009;
 const WMF_PATCOPY_RASTER_OP: u32 = 0x00f0_0021;
+const WMF_PATINVERT_RASTER_OP: u32 = 0x005a_0049;
 const WMF_SRCCOPY_RASTER_OP: u32 = 0x00cc_0020;
 const WMF_WHITENESS_RASTER_OP: u32 = 0x00ff_0062;
 const WMF_ESCAPE_MFCOMMENT: u16 = 0x000f;
@@ -27295,7 +27297,16 @@ fn passive_wmf_raster_transfer_color(
             green: 0,
             blue: 0,
         }),
+        WMF_PATINVERT_RASTER_OP if blank_destination => selected_fill_color.map(inverted_color),
         _ => None,
+    }
+}
+
+fn inverted_color(color: Color) -> Color {
+    Color {
+        red: u8::MAX.saturating_sub(color.red),
+        green: u8::MAX.saturating_sub(color.green),
+        blue: u8::MAX.saturating_sub(color.blue),
     }
 }
 
@@ -42648,6 +42659,109 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_initial_patinvert_bitblt_record_becomes_passive_inverted_brush_rectangle() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 20,
+                    green: 80,
+                    blue: 140,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_bitblt_record(
+                10,
+                20,
+                80,
+                40,
+                WMF_PATINVERT_RASTER_OP,
+                b"PATINVERT-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 10.0,
+                top: 20.0,
+                right: 90.0,
+                bottom: 60.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 235,
+                    green: 175,
+                    blue: 115
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_patinvert_bitblt_after_paint_is_skipped_as_backdrop_dependent() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 20,
+                    green: 80,
+                    blue: 140,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_bitblt_record(
+                10,
+                20,
+                80,
+                40,
+                WMF_PATINVERT_RASTER_OP,
+                b"PATINVERT-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected partial passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+    }
+
+    #[test]
     fn emf_patcopy_stretchblt_records_become_passive_filled_rectangles() {
         let records = [
             emf_create_brush_record(
@@ -44009,6 +44123,57 @@ After\par}"#;
                     red: 0,
                     green: 0,
                     blue: 0
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_initial_patinvert_bitblt_record_becomes_passive_inverted_brush_rectangle() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color {
+                red: 20,
+                green: 80,
+                blue: 140,
+            }),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_PATINVERT_RASTER_OP,
+                b"PATINVERT-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 235,
+                    green: 175,
+                    blue: 115
                 }),
                 ..
             }
@@ -45704,6 +45869,28 @@ fn wmf_set_window_ext_record(width: i16, height: i16) -> Vec<u8> {
     write_test_le_u16(&mut record, 4, 0x020c);
     write_test_le_i16(&mut record, 6, height);
     write_test_le_i16(&mut record, 8, width);
+    record
+}
+
+#[cfg(test)]
+fn wmf_create_brush_record(color: Color) -> Vec<u8> {
+    let mut record = vec![0; 14];
+    write_test_le_u32(&mut record, 0, 7);
+    write_test_le_u16(&mut record, 4, 0x02fc);
+    write_test_le_u16(&mut record, 6, 0);
+    record[8] = color.red;
+    record[9] = color.green;
+    record[10] = color.blue;
+    write_test_le_u16(&mut record, 12, 0);
+    record
+}
+
+#[cfg(test)]
+fn wmf_select_object_record(handle: u16) -> Vec<u8> {
+    let mut record = vec![0; 8];
+    write_test_le_u32(&mut record, 0, 4);
+    write_test_le_u16(&mut record, 4, 0x012d);
+    write_test_le_u16(&mut record, 6, handle);
     record
 }
 
