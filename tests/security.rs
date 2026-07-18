@@ -29527,6 +29527,117 @@ fn wmf_patcopy_bitblt_renders_passive_brush_rectangle_without_payload_leakage() 
 }
 
 #[test]
+fn wmf_patcopy_dibbitblt_renders_passive_brush_rectangle_without_payload_leakage() {
+    let wmf_hex = concat!(
+        "0100090000033f0000000200170000000000",
+        "050000000c026400c800",
+        "07000000fc020000785028000000",
+        "040000002d010000",
+        "0c00000040092100f000000000003c00460014000a000000",
+        "1700000040092000cc0000000019002d001e00230000005241572d444942424954424c542d5041594c4f41440000",
+        "030000000000",
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF DIBBITBLT vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 20.0,
+            right: 80.0,
+            bottom: 80.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 120,
+                green: 80,
+                blue: 40
+            }),
+            ..
+        }
+    ));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        "wmetafile",
+        "0940",
+        "RAW-DIBBITBLT-PAYLOAD",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF DIBBITBLT internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "WMF PATCOPY DIBBITBLT should render as passive PDF rectangle path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*" | "B" | "B*")),
+        "WMF PATCOPY DIBBITBLT should render as a passive PDF fill"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        b"0940",
+        b"RAW-DIBBITBLT-PAYLOAD",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF DIBBITBLT leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003180000000000070000000000",

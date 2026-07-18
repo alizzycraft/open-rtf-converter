@@ -24077,7 +24077,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     });
                 }
             }
-            0x0922 | 0x0b23 => {
+            0x0922 | 0x0940 | 0x0b23 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
@@ -38927,6 +38927,44 @@ After\par}"#;
                     red: 30,
                     green: 110,
                     blue: 180
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_patcopy_dibbitblt_records_become_passive_filled_rectangles() {
+        let wmf_hex = concat!(
+            "0100090000032800000001000c0000000000",
+            "050000000c026400c800",
+            "07000000fc020000785028000000",
+            "040000002d010000",
+            "0c00000040092100f000000000003c00460014000a000000",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 10.0,
+                top: 20.0,
+                right: 80.0,
+                bottom: 80.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 120,
+                    green: 80,
+                    blue: 40
                 }),
                 ..
             }
