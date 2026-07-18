@@ -30710,8 +30710,24 @@ fn wmf_srccopy_stretchdib_renders_passive_image_without_payload_leakage() {
 fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
     let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
     dib.extend_from_slice(b"TRAILING-WMF-SETDIBTODEV /JavaScript");
-    let record = wmf_setdib_to_dev_record(16, 24, 2, 1, 0, 1, &dib);
-    let wmf = minimal_wmf_with_records(200, 100, &[record]);
+    let mut partial_dib = minimal_24bit_dib_with_rgb_pixels(
+        2,
+        3,
+        &[
+            [10, 20, 30],
+            [40, 50, 60],
+            [70, 80, 90],
+            [100, 110, 120],
+            [130, 140, 150],
+            [160, 170, 180],
+        ],
+    );
+    partial_dib.extend_from_slice(b"TRAILING-WMF-PARTIAL-SETDIBTODEV /JavaScript");
+    let records = [
+        wmf_setdib_to_dev_record(16, 24, 2, 1, 0, 1, &dib),
+        wmf_setdib_to_dev_record(30, 34, 2, 3, 1, 1, &partial_dib),
+    ];
+    let wmf = minimal_wmf_with_records(200, 100, &records);
     let wmf_hex = bytes_to_hex(&wmf);
     let input = format!(
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
@@ -30733,7 +30749,7 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(image.vector_commands.len(), 2);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -30747,11 +30763,25 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
             && image.height_px == 1
             && image.bytes == vec![255, 0, 0, 0, 255, 0]
     ));
+    assert!(matches!(
+        &image.vector_commands[1],
+        StaticImageVectorCommand::RasterImage {
+            left: 30.0,
+            top: 34.0,
+            right: 32.0,
+            bottom: 35.0,
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![70, 80, 90, 100, 110, 120]
+    ));
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "wmetafile",
         "0d33",
         "TRAILING-WMF-SETDIBTODEV",
+        "TRAILING-WMF-PARTIAL-SETDIBTODEV",
         "JavaScript",
         "EmbeddedFile",
     ] {
@@ -30783,13 +30813,16 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
         content
             .operations
             .iter()
-            .any(|operation| operation.operator == "Do"),
+            .filter(|operation| operation.operator == "Do")
+            .count()
+            >= 2,
         "WMF SETDIBTODEV should invoke a passive PDF image XObject"
     );
     for forbidden in [
         b"wmetafile".as_slice(),
         b"0d33",
         b"TRAILING-WMF-SETDIBTODEV",
+        b"TRAILING-WMF-PARTIAL-SETDIBTODEV",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -37385,7 +37418,23 @@ fn emf_srccopy_bitblt_and_stretchblt_dibs_render_as_passive_images_without_paylo
 fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() {
     let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
     dib.extend_from_slice(b"TRAILING-EMF-SETDIBITS /JavaScript");
-    let records = [emf_setdibitstodevice_dib_record(18, 22, 2, 1, 0, 1, &dib)];
+    let mut partial_dib = minimal_24bit_dib_with_rgb_pixels(
+        2,
+        3,
+        &[
+            [10, 20, 30],
+            [40, 50, 60],
+            [70, 80, 90],
+            [100, 110, 120],
+            [130, 140, 150],
+            [160, 170, 180],
+        ],
+    );
+    partial_dib.extend_from_slice(b"TRAILING-EMF-PARTIAL-SETDIBITS /JavaScript");
+    let records = [
+        emf_setdibitstodevice_dib_record(18, 22, 2, 1, 0, 1, &dib),
+        emf_setdibitstodevice_dib_record(42, 34, 2, 3, 1, 1, &partial_dib),
+    ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
     let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
@@ -37405,7 +37454,7 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(image.vector_commands.len(), 2);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37419,10 +37468,24 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
             && image.height_px == 1
             && image.bytes == vec![255, 0, 0, 0, 255, 0]
     ));
+    assert!(matches!(
+        &image.vector_commands[1],
+        StaticImageVectorCommand::RasterImage {
+            left: 42.0,
+            top: 34.0,
+            right: 44.0,
+            bottom: 35.0,
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![70, 80, 90, 100, 110, 120]
+    ));
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
         "TRAILING-EMF-SETDIBITS",
+        "TRAILING-EMF-PARTIAL-SETDIBITS",
         "JavaScript",
         "EmbeddedFile",
     ] {
@@ -37451,13 +37514,16 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
         content
             .operations
             .iter()
-            .any(|operation| operation.operator == "Do"),
+            .filter(|operation| operation.operator == "Do")
+            .count()
+            >= 2,
         "EMF SETDIBITSTODEVICE DIB should render as a passive image XObject"
     );
     for forbidden in [
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
         b"TRAILING-EMF-SETDIBITS",
+        b"TRAILING-EMF-PARTIAL-SETDIBITS",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

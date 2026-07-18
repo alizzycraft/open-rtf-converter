@@ -22745,19 +22745,21 @@ fn parse_emf_setdibitstodevice_srcopy(
     let start_scan = read_le_u32(data, 60)?;
     let scan_count = read_le_u32(data, 64)?;
 
-    if cx_src <= 0 || cy_src <= 0 || usage_src != DIB_RGB_COLORS || start_scan != 0 {
+    if cx_src <= 0 || cy_src <= 0 || usage_src != DIB_RGB_COLORS {
         return None;
     }
-    if scan_count != cy_src.unsigned_abs() {
+    if scan_count > cy_src.unsigned_abs() {
         return None;
     }
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?;
+    let image = parse_vector_raster_dib_scan_lines(
+        &dib_bytes, x_src, y_src, cx_src, start_scan, scan_count,
+    )?;
 
     let width = i32::try_from(cx_src.unsigned_abs().max(1)).unwrap_or(i32::MAX);
-    let height = i32::try_from(cy_src.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let height = i32::try_from(scan_count.max(1)).unwrap_or(i32::MAX);
     let left_top = normalized_emf_point(x_dest, y_dest, header, coordinates);
     let right_bottom = normalized_emf_point(
         x_dest.saturating_add(width),
@@ -24372,6 +24374,7 @@ struct ParsedDib {
     height_px: u32,
     rgb: Vec<u8>,
     alpha: Option<Vec<u8>>,
+    top_down: bool,
 }
 
 #[derive(Debug)]
@@ -24831,7 +24834,35 @@ fn crop_parsed_dib(
         height_px: source_height,
         rgb,
         alpha,
+        top_down: dib.top_down,
     })
+}
+
+fn crop_parsed_dib_scan_lines(
+    dib: ParsedDib,
+    source_x: i32,
+    source_y: i32,
+    source_width: i32,
+    start_scan: u32,
+    scan_count: u32,
+) -> Option<ParsedDib> {
+    let scan_bottom = start_scan.checked_add(scan_count)?;
+    if scan_count == 0 || scan_bottom > dib.height_px {
+        return None;
+    }
+    let scan_top_y = if dib.top_down {
+        start_scan
+    } else {
+        dib.height_px.checked_sub(scan_bottom)?
+    };
+    let crop_y = i32::try_from(scan_top_y).ok()?.checked_add(source_y)?;
+    crop_parsed_dib(
+        dib,
+        source_x,
+        crop_y,
+        source_width,
+        i32::try_from(scan_count).ok()?,
+    )
 }
 
 fn parse_vector_raster_dib_image(
@@ -24882,6 +24913,39 @@ fn parse_vector_raster_dib_image(
         bytes: compressed.bytes,
         palette: compressed.palette,
         alpha_mask: compressed.alpha_mask,
+    })
+}
+
+fn parse_vector_raster_dib_scan_lines(
+    bytes: &[u8],
+    source_x: i32,
+    source_y: i32,
+    source_width: i32,
+    start_scan: u32,
+    scan_count: u32,
+) -> Option<ParsedVectorRasterImage> {
+    let dib = parse_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
+    let dib = crop_parsed_dib_scan_lines(
+        dib,
+        source_x,
+        source_y,
+        source_width,
+        start_scan,
+        scan_count,
+    )?;
+    let pixels = usize::try_from(dib.width_px)
+        .ok()?
+        .checked_mul(usize::try_from(dib.height_px).ok()?)?;
+    if pixels > MAX_PASSIVE_VECTOR_RASTER_PIXELS {
+        return None;
+    }
+    Some(ParsedVectorRasterImage {
+        width_px: dib.width_px,
+        height_px: dib.height_px,
+        format: ImageFormat::Rgb8,
+        bytes: dib.rgb,
+        palette: Vec::new(),
+        alpha_mask: None,
     })
 }
 
@@ -25085,6 +25149,7 @@ fn decode_uncompressed_dib_pixels(
         height_px,
         rgb,
         alpha,
+        top_down,
     })
 }
 
@@ -25206,6 +25271,7 @@ fn parse_rle8_dib_pixels(
         height_px,
         rgb,
         alpha: None,
+        top_down: false,
     })
 }
 
@@ -25335,6 +25401,7 @@ fn parse_rle4_dib_pixels(
         height_px,
         rgb,
         alpha: None,
+        top_down: false,
     })
 }
 
@@ -26780,27 +26847,27 @@ fn parse_wmf_setdibits_to_device(
     let destination_y = i32::from(read_le_i16(data, 14)?);
     let destination_x = i32::from(read_le_i16(data, 16)?);
 
-    if source_width == 0 || source_height == 0 || start_scan != 0 {
+    if source_width == 0 || source_height == 0 {
         return None;
     }
-    if scan_count != u16::try_from(source_height).ok()? {
+    if u32::from(scan_count) > u32::try_from(source_height).ok()? {
         return None;
     }
 
-    let image = parse_vector_raster_dib_image(
+    let image = parse_vector_raster_dib_scan_lines(
         &data[DIB_HEADER_OFFSET..],
         source_x,
         source_y,
         source_width,
-        source_height,
-        false,
+        u32::from(start_scan),
+        u32::from(scan_count),
     )?;
 
     wmf_raster_image_command(
         destination_x,
         destination_y,
         source_width,
-        source_height,
+        i32::from(scan_count.max(1)),
         window_origin_x,
         window_origin_y,
         window_width,
@@ -42286,6 +42353,14 @@ After\par}"#;
 
     #[test]
     fn emf_setdibitstodevice_dib_record_becomes_passive_raster_image() {
+        let rows = [
+            [10, 20, 30],
+            [40, 50, 60],
+            [70, 80, 90],
+            [100, 110, 120],
+            [130, 140, 150],
+            [160, 170, 180],
+        ];
         let records = [
             emf_setdibitstodevice_dib_record(
                 12,
@@ -42300,10 +42375,19 @@ After\par}"#;
                 50,
                 30,
                 2,
+                3,
                 1,
                 1,
+                &minimal_24bit_dib_with_rgb_pixels(2, 3, &rows),
+            ),
+            emf_setdibitstodevice_dib_record(
+                80,
+                44,
+                2,
+                3,
+                3,
                 1,
-                &minimal_24bit_dib_with_dimensions(2, 1),
+                &minimal_24bit_dib_with_rgb_pixels(2, 3, &rows),
             ),
         ];
         let input = format!(
@@ -42318,7 +42402,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(image.vector_commands.len(), 2);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -42336,6 +42420,19 @@ After\par}"#;
                 && image.width_px == 2
                 && image.height_px == 1
                 && image.bytes == vec![255, 0, 0, 0, 255, 0]
+        ));
+        assert!(matches!(
+            &image.vector_commands[1],
+            StaticImageVectorCommand::RasterImage {
+                left: 50.0,
+                top: 30.0,
+                right: 52.0,
+                bottom: 31.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![70, 80, 90, 100, 110, 120]
         ));
     }
 
@@ -43429,9 +43526,34 @@ After\par}"#;
 
     #[test]
     fn wmf_setdib_to_dev_record_becomes_passive_raster_image() {
+        let rows = [
+            [10, 20, 30],
+            [40, 50, 60],
+            [70, 80, 90],
+            [100, 110, 120],
+            [130, 140, 150],
+            [160, 170, 180],
+        ];
         let records = [
             wmf_setdib_to_dev_record(12, 18, 2, 1, 0, 1, &minimal_24bit_dib_with_dimensions(2, 1)),
-            wmf_setdib_to_dev_record(50, 30, 2, 1, 1, 1, &minimal_24bit_dib_with_dimensions(2, 1)),
+            wmf_setdib_to_dev_record(
+                50,
+                30,
+                2,
+                3,
+                1,
+                1,
+                &minimal_24bit_dib_with_rgb_pixels(2, 3, &rows),
+            ),
+            wmf_setdib_to_dev_record(
+                80,
+                44,
+                2,
+                3,
+                3,
+                1,
+                &minimal_24bit_dib_with_rgb_pixels(2, 3, &rows),
+            ),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
@@ -43445,7 +43567,7 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(image.vector_commands.len(), 2);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -43463,6 +43585,19 @@ After\par}"#;
                 && image.width_px == 2
                 && image.height_px == 1
                 && image.bytes == vec![255, 0, 0, 0, 255, 0]
+        ));
+        assert!(matches!(
+            &image.vector_commands[1],
+            StaticImageVectorCommand::RasterImage {
+                left: 50.0,
+                top: 30.0,
+                right: 52.0,
+                bottom: 31.0,
+                image,
+            } if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![70, 80, 90, 100, 110, 120]
         ));
     }
 
