@@ -37579,7 +37579,7 @@ fn emf_opaque_alphablend_dib_renders_as_passive_image_without_payload_leakage() 
 }
 
 #[test]
-fn emf_transparentblt_without_key_color_renders_as_passive_image_without_payload_leakage() {
+fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payload_leakage() {
     let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
     dib.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT /JavaScript");
     let records = [
@@ -37627,7 +37627,7 @@ fn emf_transparentblt_without_key_color_renders_as_passive_image_without_payload
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(image.vector_commands.len(), 2);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37640,12 +37640,20 @@ fn emf_transparentblt_without_key_color_renders_as_passive_image_without_payload
             && image.width_px == 2
             && image.height_px == 1
             && image.bytes == vec![255, 0, 0, 0, 255, 0]
+            && image.alpha_mask.is_none()
     ));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    let alpha_mask = match &image.vector_commands[1] {
+        StaticImageVectorCommand::RasterImage { image, .. } => image
+            .alpha_mask
+            .as_ref()
+            .expect("transparent color key alpha mask"),
+        _ => panic!("expected keyed transparent raster image"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 3).unwrap(),
+        vec![0, 0, 255]
+    );
+    assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
         "TRANSPARENTBLT",
@@ -37678,8 +37686,17 @@ fn emf_transparentblt_without_key_color_renders_as_passive_image_without_payload
         content
             .operations
             .iter()
-            .any(|operation| operation.operator == "Do"),
-        "key-absent EMF TRANSPARENTBLT DIB should render as a passive image XObject"
+            .filter(|operation| operation.operator == "Do")
+            .count()
+            >= 2,
+        "keyed EMF TRANSPARENTBLT DIBs should render as passive image XObjects"
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/SMask".len())
+            .any(|window| window == b"/SMask"),
+        "keyed EMF TRANSPARENTBLT should render transparency as a passive PDF soft mask"
     );
     for forbidden in [
         b"emfblip".as_slice(),

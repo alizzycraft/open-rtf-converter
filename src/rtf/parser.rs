@@ -21063,9 +21063,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some(command) =
-                    parse_emf_transparentblt_without_key(data, &header, &coordinates)
-                {
+                if let Some(command) = parse_emf_transparentblt_keyed(data, &header, &coordinates) {
                     commands.push(command);
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -22854,7 +22852,7 @@ fn parse_emf_alphablend_opaque(
     })
 }
 
-fn parse_emf_transparentblt_without_key(
+fn parse_emf_transparentblt_keyed(
     data: &[u8],
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
@@ -22886,16 +22884,12 @@ fn parse_emf_transparentblt_without_key(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
-    if image.format != ImageFormat::Rgb8
-        || image.bytes.chunks_exact(3).any(|pixel| {
-            pixel[0] == transparent.red
-                && pixel[1] == transparent.green
-                && pixel[2] == transparent.blue
-        })
-    {
+    let mut image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src)?;
+    if image.format != ImageFormat::Rgb8 {
         return None;
     }
+    image.alpha_mask =
+        keyed_rgb_alpha_mask(&image.bytes, image.width_px, image.height_px, transparent)?;
 
     let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
@@ -22920,6 +22914,40 @@ fn parse_emf_transparentblt_without_key(
             alpha_mask: image.alpha_mask,
         },
     })
+}
+
+fn keyed_rgb_alpha_mask(
+    rgb: &[u8],
+    width_px: u32,
+    height_px: u32,
+    transparent: Color,
+) -> Option<Option<StaticImageAlphaMask>> {
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let pixels = width.checked_mul(height)?;
+    if rgb.len() != pixels.checked_mul(3)? {
+        return None;
+    }
+
+    let row_len = width.checked_add(1)?;
+    let mut mask = Vec::with_capacity(row_len.checked_mul(height)?);
+    let mut has_transparent_pixel = false;
+    for row in rgb.chunks_exact(width.checked_mul(3)?) {
+        mask.push(0);
+        for pixel in row.chunks_exact(3) {
+            let is_transparent = pixel[0] == transparent.red
+                && pixel[1] == transparent.green
+                && pixel[2] == transparent.blue;
+            has_transparent_pixel |= is_transparent;
+            mask.push(if is_transparent { 0 } else { u8::MAX });
+        }
+    }
+    if !has_transparent_pixel {
+        return Some(None);
+    }
+    Some(Some(StaticImageAlphaMask {
+        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&mask, 6),
+    }))
 }
 
 fn emf_record_offset_to_data_offset(offset: u32) -> Option<usize> {
@@ -42238,7 +42266,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_transparentblt_without_key_color_becomes_passive_raster_image() {
+    fn emf_transparentblt_keyed_color_becomes_passive_alpha_mask() {
         let records = [
             emf_transparentblt_dib_record(
                 18,
@@ -42277,12 +42305,8 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 1);
-        assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("1 unsupported record(s) skipped")
-        }));
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
         assert!(matches!(
             &image.vector_commands[0],
             StaticImageVectorCommand::RasterImage {
@@ -42295,7 +42319,19 @@ After\par}"#;
                 && image.width_px == 2
                 && image.height_px == 1
                 && image.bytes == vec![255, 0, 0, 0, 255, 0]
+                && image.alpha_mask.is_none()
         ));
+        let alpha_mask = match &image.vector_commands[1] {
+            StaticImageVectorCommand::RasterImage { image, .. } => image
+                .alpha_mask
+                .as_ref()
+                .expect("transparent color key alpha mask"),
+            _ => panic!("expected keyed transparent raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 3).unwrap(),
+            vec![0, 0, 255]
+        );
     }
 
     #[test]
