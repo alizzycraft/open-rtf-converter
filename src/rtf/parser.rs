@@ -22944,15 +22944,24 @@ fn keyed_vector_raster_alpha_mask(
 ) -> Option<Option<StaticImageAlphaMask>> {
     match format {
         ImageFormat::Rgb8 => keyed_rgb_alpha_mask(bytes, width_px, height_px, transparent),
-        ImageFormat::Png if existing_mask.is_none() => {
-            keyed_png_rgb_alpha_mask(bytes, width_px, height_px, transparent)
-        }
-        ImageFormat::PngIndexed if existing_mask.is_none() => {
-            keyed_png_indexed_alpha_mask(bytes, width_px, height_px, transparent, palette)
-        }
-        ImageFormat::PngGrayscale if existing_mask.is_none() => {
-            keyed_png_grayscale_alpha_mask(bytes, width_px, height_px, transparent)
-        }
+        ImageFormat::Png => combine_keyed_alpha_mask(
+            width_px,
+            height_px,
+            existing_mask,
+            keyed_png_rgb_alpha_mask(bytes, width_px, height_px, transparent)?,
+        ),
+        ImageFormat::PngIndexed => combine_keyed_alpha_mask(
+            width_px,
+            height_px,
+            existing_mask,
+            keyed_png_indexed_alpha_mask(bytes, width_px, height_px, transparent, palette)?,
+        ),
+        ImageFormat::PngGrayscale => combine_keyed_alpha_mask(
+            width_px,
+            height_px,
+            existing_mask,
+            keyed_png_grayscale_alpha_mask(bytes, width_px, height_px, transparent)?,
+        ),
         _ => None,
     }
 }
@@ -23080,6 +23089,55 @@ fn keyed_png_grayscale_alpha_mask(
     Some(Some(StaticImageAlphaMask {
         bytes: miniz_oxide::deflate::compress_to_vec_zlib(&mask, 6),
     }))
+}
+
+fn combine_keyed_alpha_mask(
+    width_px: u32,
+    height_px: u32,
+    existing_mask: Option<StaticImageAlphaMask>,
+    keyed_mask: Option<StaticImageAlphaMask>,
+) -> Option<Option<StaticImageAlphaMask>> {
+    match (existing_mask, keyed_mask) {
+        (None, keyed) => Some(keyed),
+        (Some(existing), None) => Some(Some(existing)),
+        (Some(existing), Some(keyed)) => {
+            let width = usize::try_from(width_px).ok()?;
+            let height = usize::try_from(height_px).ok()?;
+            let row_len = width.checked_add(1)?;
+            let expected_len = row_len.checked_mul(height)?;
+            let mut existing_bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+                &existing.bytes,
+                expected_len,
+            )
+            .ok()?;
+            let keyed_bytes =
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&keyed.bytes, expected_len)
+                    .ok()?;
+            if existing_bytes.len() != expected_len || keyed_bytes.len() != expected_len {
+                return None;
+            }
+            for (existing_row, keyed_row) in existing_bytes
+                .chunks_exact_mut(row_len)
+                .zip(keyed_bytes.chunks_exact(row_len))
+            {
+                if existing_row[0] != 0 || keyed_row[0] != 0 {
+                    return None;
+                }
+                for (existing_alpha, keyed_alpha) in
+                    existing_row[1..].iter_mut().zip(&keyed_row[1..])
+                {
+                    match *keyed_alpha {
+                        0 => *existing_alpha = 0,
+                        u8::MAX => {}
+                        _ => return None,
+                    }
+                }
+            }
+            Some(Some(StaticImageAlphaMask {
+                bytes: miniz_oxide::deflate::compress_to_vec_zlib(&existing_bytes, 6),
+            }))
+        }
+    }
 }
 
 fn alphablend_alpha_mask(
@@ -42842,8 +42900,8 @@ After\par}"#;
                 42,
                 20,
                 Color {
-                    red: 255,
-                    green: 0,
+                    red: 0,
+                    green: 255,
                     blue: 0,
                 },
                 &minimal_compressed_dib_with_payload(
@@ -42895,12 +42953,8 @@ After\par}"#;
         };
         assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert_eq!(image.vector_commands.len(), 6);
-        assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("1 unsupported record(s) skipped")
-        }));
+        assert_eq!(image.vector_commands.len(), 7);
+        assert_eq!(output.diagnostics.len(), 0);
         assert!(matches!(
             &image.vector_commands[0],
             StaticImageVectorCommand::RasterImage {
@@ -42954,7 +43008,19 @@ After\par}"#;
             .unwrap(),
             vec![0, 0, 255]
         );
-        let indexed_png_alpha_mask = match &image.vector_commands[4] {
+        let rgba_png_alpha_mask = match &image.vector_commands[4] {
+            StaticImageVectorCommand::RasterImage { image, .. } => image
+                .alpha_mask
+                .as_ref()
+                .expect("RGBA PNG transparent color key alpha mask"),
+            _ => panic!("expected RGBA PNG keyed transparent raster image"),
+        };
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&rgba_png_alpha_mask.bytes, 3)
+                .unwrap(),
+            vec![0, 128, 0]
+        );
+        let indexed_png_alpha_mask = match &image.vector_commands[5] {
             StaticImageVectorCommand::RasterImage { image, .. } => image
                 .alpha_mask
                 .as_ref()
@@ -42969,7 +43035,7 @@ After\par}"#;
             .unwrap(),
             vec![0, 0, 255]
         );
-        let grayscale_png_alpha_mask = match &image.vector_commands[5] {
+        let grayscale_png_alpha_mask = match &image.vector_commands[6] {
             StaticImageVectorCommand::RasterImage { image, .. } => image
                 .alpha_mask
                 .as_ref()

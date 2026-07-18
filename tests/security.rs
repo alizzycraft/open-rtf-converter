@@ -37810,8 +37810,8 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             48,
             28,
             Color {
-                red: 255,
-                green: 0,
+                red: 0,
+                green: 255,
                 blue: 0,
             },
             &minimal_compressed_dib_with_payload(
@@ -37870,7 +37870,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 6);
+    assert_eq!(image.vector_commands.len(), 7);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -37924,7 +37924,19 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
         .unwrap(),
         vec![0, 0, 255]
     );
-    let indexed_png_alpha_mask = match &image.vector_commands[4] {
+    let rgba_png_alpha_mask = match &image.vector_commands[4] {
+        StaticImageVectorCommand::RasterImage { image, .. } => image
+            .alpha_mask
+            .as_ref()
+            .expect("RGBA PNG transparent color key alpha mask"),
+        _ => panic!("expected RGBA PNG keyed transparent raster image"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&rgba_png_alpha_mask.bytes, 3)
+            .unwrap(),
+        vec![0, 128, 0]
+    );
+    let indexed_png_alpha_mask = match &image.vector_commands[5] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -37936,7 +37948,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             .unwrap(),
         vec![0, 0, 255]
     );
-    let grayscale_png_alpha_mask = match &image.vector_commands[5] {
+    let grayscale_png_alpha_mask = match &image.vector_commands[6] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -37951,11 +37963,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
         .unwrap(),
         vec![0, 0, 255]
     );
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
         "TRANSPARENTBLT",
@@ -37990,7 +37998,7 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 6,
+            >= 7,
         "keyed EMF TRANSPARENTBLT DIBs should render as passive image XObjects"
     );
     assert!(
