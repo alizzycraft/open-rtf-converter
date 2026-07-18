@@ -37283,6 +37283,100 @@ fn emf_srccopy_bitblt_and_stretchblt_dibs_render_as_passive_images_without_paylo
 }
 
 #[test]
+fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() {
+    let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
+    dib.extend_from_slice(b"TRAILING-EMF-SETDIBITS /JavaScript");
+    let records = [emf_setdibitstodevice_dib_record(18, 22, 2, 1, 0, 1, &dib)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF SETDIBITSTODEVICE vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::RasterImage {
+            left: 18.0,
+            top: 22.0,
+            right: 20.0,
+            bottom: 23.0,
+            image,
+        } if image.format == ImageFormat::Rgb8
+            && image.width_px == 2
+            && image.height_px == 1
+            && image.bytes == vec![255, 0, 0, 0, 255, 0]
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "TRAILING-EMF-SETDIBITS",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF SETDIBITSTODEVICE payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "EMF SETDIBITSTODEVICE DIB should render as a passive image XObject"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"TRAILING-EMF-SETDIBITS",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF SETDIBITSTODEVICE DIB payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_patcopy_stretchdibits_records_render_passively_without_payload_leakage() {
     let payload = b"STRETCHDIBITS-SOURCE-PAYLOAD";
     let records = [
@@ -51227,6 +51321,40 @@ fn emf_stretchdibits_dib_record(
         write_test_le_i32(&mut record, 40, source_width);
         write_test_le_i32(&mut record, 44, source_height);
     }
+    record
+}
+
+fn emf_setdibitstodevice_dib_record(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    start_scan: u32,
+    scan_count: u32,
+    dib: &[u8],
+) -> Vec<u8> {
+    let payload_len = dib.len().next_multiple_of(4);
+    let size = 76 + payload_len;
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 80);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_i32(&mut record, 8, x);
+    write_test_le_i32(&mut record, 12, y);
+    write_test_le_i32(&mut record, 16, x.saturating_add(width));
+    write_test_le_i32(&mut record, 20, y.saturating_add(height));
+    write_test_le_i32(&mut record, 24, x);
+    write_test_le_i32(&mut record, 28, y);
+    write_test_le_i32(&mut record, 32, 0);
+    write_test_le_i32(&mut record, 36, 0);
+    write_test_le_i32(&mut record, 40, width);
+    write_test_le_i32(&mut record, 44, height);
+    write_test_le_u32(&mut record, 48, 76);
+    write_test_le_u32(&mut record, 52, payload_len as u32);
+    write_test_le_u32(&mut record, 56, 76);
+    write_test_le_u32(&mut record, 60, payload_len as u32);
+    write_test_le_u32(&mut record, 68, start_scan);
+    write_test_le_u32(&mut record, 72, scan_count);
+    record[76..76 + dib.len()].copy_from_slice(dib);
     record
 }
 
