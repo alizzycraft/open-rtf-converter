@@ -23284,6 +23284,7 @@ struct WmfSavedDrawingState {
     window_origin_y: i32,
     window_width: i32,
     window_height: i32,
+    clip_scope_command_start: Option<usize>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -23660,6 +23661,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut skipped_record_count = 0usize;
     let mut current_point = (0.0f32, 0.0f32);
     let mut replaceable_clip_command_start: Option<usize> = None;
+    let mut clip_scope_command_start: Option<usize> = None;
 
     while pos + 6 <= header.file_end {
         record_count = record_count.checked_add(1)?;
@@ -23694,8 +23696,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_origin_y,
                     window_width,
                     window_height,
+                    clip_scope_command_start,
                 });
                 commands.push(StaticImageVectorCommand::SaveState);
+                clip_scope_command_start = commands.len().checked_sub(1);
             }
             0x0127 => {
                 let restore_index = read_le_i16(data, 0)?;
@@ -23711,6 +23715,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_origin_y = restored.state.window_origin_y;
                     window_width = restored.state.window_width;
                     window_height = restored.state.window_height;
+                    clip_scope_command_start = restored.state.clip_scope_command_start;
                     for _ in 0..restored.restore_count {
                         commands.push(StaticImageVectorCommand::RestoreState);
                     }
@@ -23879,14 +23884,34 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0220 => {
-                let clip_start = replaceable_clip_command_start?;
-                if !vector_commands_are_only_clip_updates(&commands[clip_start..]) {
-                    return None;
-                }
                 let (offset_x, offset_y) =
                     parse_wmf_offset_clip_region(data, window_width, window_height)?;
-                for command in &mut commands[clip_start..] {
-                    offset_vector_clip_command(command, offset_x, offset_y)?;
+                if let Some(clip_start) = replaceable_clip_command_start
+                    && vector_commands_are_only_clip_updates(&commands[clip_start..])
+                {
+                    for command in &mut commands[clip_start..] {
+                        offset_vector_clip_command(command, offset_x, offset_y)?;
+                    }
+                } else if let Some(scope_start) = clip_scope_command_start {
+                    let mut clip_commands = scoped_vector_clip_commands(&commands, scope_start)?;
+                    if commands
+                        .len()
+                        .checked_add(2)?
+                        .checked_add(clip_commands.len())?
+                        > MAX_PASSIVE_WMF_COMMANDS
+                    {
+                        return None;
+                    }
+                    for command in &mut clip_commands {
+                        offset_vector_clip_command(command, offset_x, offset_y)?;
+                    }
+                    commands.push(StaticImageVectorCommand::RestoreState);
+                    commands.push(StaticImageVectorCommand::SaveState);
+                    clip_scope_command_start = commands.len().checked_sub(1);
+                    replaceable_clip_command_start = Some(commands.len());
+                    commands.extend(clip_commands);
+                } else {
+                    return None;
                 }
             }
             0x0324 | 0x0325 => {
@@ -39647,6 +39672,100 @@ After\par}"#;
             "040000002d010000",
             "0700000016043c00640014001400",
             "070000001b042800280000000000",
+            "05000000200205000a00",
+            "070000001b045000b4000a001400",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+            && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn wmf_offsetcliprgn_after_painted_saved_clip_offsets_scoped_clip() {
+        let wmf_hex = concat!(
+            "010009000003390000000100070000000000",
+            "050000000c026400c800",
+            "07000000fc020000dcdcdc000000",
+            "040000002d010000",
+            "030000001e00",
+            "0700000016043c00640014001400",
+            "070000001b042800280000000000",
+            "05000000200205000a00",
+            "070000001b045000b4000a001400",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 8);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(matches!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[6],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(matches!(
+            image.vector_commands[7],
+            StaticImageVectorCommand::RestoreState
+        ));
+    }
+
+    #[test]
+    fn wmf_offsetcliprgn_after_painted_clip_mutation_becomes_passive_placeholder() {
+        let wmf_hex = concat!(
+            "010009000003400000000100070000000000",
+            "050000000c026400c800",
+            "07000000fc020000dcdcdc000000",
+            "040000002d010000",
+            "030000001e00",
+            "0700000016043c00640014001400",
+            "070000001b042800280000000000",
+            "0700000016044600780028001e00",
             "05000000200205000a00",
             "070000001b045000b4000a001400",
             "030000000000",
