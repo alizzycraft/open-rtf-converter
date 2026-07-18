@@ -35864,6 +35864,125 @@ fn emf_paintrgn_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_initial_invertrgn_records_render_passively_without_payload_leakage() {
+    let records = [emf_invertrgn_record(&[(15, 12, 70, 40), (80, 20, 130, 65)])];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF INVERTRGN vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 15.0,
+            top: 12.0,
+            right: 70.0,
+            bottom: 40.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle {
+            left: 80.0,
+            top: 20.0,
+            right: 130.0,
+            bottom: 65.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    for forbidden in [
+        "emfblip",
+        "INVERTRGN",
+        "RGNDATA",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF INVERTRGN payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "initial EMF INVERTRGN should render passive PDF rectangle paths"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "B")),
+        "initial EMF INVERTRGN should render passive PDF fills"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF INVERTRGN payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_patcopy_bitblt_records_render_passively_without_payload_leakage() {
     let payload = b"BITBLT-SOURCE-PAYLOAD";
     let records = [
@@ -48958,10 +49077,18 @@ fn emf_extselectcliprgn_record(region_mode: u32, rects: &[(i32, i32, i32, i32)])
 }
 
 fn emf_paintrgn_record(rects: &[(i32, i32, i32, i32)]) -> Vec<u8> {
+    emf_region_only_record(74, rects)
+}
+
+fn emf_invertrgn_record(rects: &[(i32, i32, i32, i32)]) -> Vec<u8> {
+    emf_region_only_record(73, rects)
+}
+
+fn emf_region_only_record(record_type: u32, rects: &[(i32, i32, i32, i32)]) -> Vec<u8> {
     let region_size = 32 + (rects.len() * 16);
     let size = 28 + region_size;
     let mut record = vec![0; size];
-    write_test_le_u32(&mut record, 0, 74);
+    write_test_le_u32(&mut record, 0, record_type);
     write_test_le_u32(&mut record, 4, size as u32);
     let (left, top, right, bottom) = rects.first().copied().unwrap_or((0, 0, 0, 0));
     write_test_le_i32(&mut record, 8, left);

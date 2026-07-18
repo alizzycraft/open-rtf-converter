@@ -20411,6 +20411,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SELECTCLIPPATH: u32 = 67;
     const EMR_FILLRGN: u32 = 71;
     const EMR_FRAMERGN: u32 = 72;
+    const EMR_INVERTRGN: u32 = 73;
     const EMR_PAINTRGN: u32 = 74;
     const EMR_BITBLT: u32 = 76;
     const EMR_STRETCHBLT: u32 = 77;
@@ -20851,6 +20852,23 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     fill_color,
                     pattern,
                 )?;
+            }
+            EMR_INVERTRGN => {
+                if commands.is_empty() {
+                    let rects = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)?;
+                    push_emf_region_rectangles(
+                        &mut commands,
+                        rects,
+                        Color {
+                            red: 0,
+                            green: 0,
+                            blue: 0,
+                        },
+                        ShadingPattern::None,
+                    )?;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_PAINTRGN => {
                 let Some(fill_color) = state.fill_color else {
@@ -40307,6 +40325,87 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_initial_invertrgn_records_become_passive_black_rectangles() {
+        let records = [emf_invertrgn_record(&[(15, 12, 70, 40), (80, 20, 130, 65)])];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 12.0,
+                right: 70.0,
+                bottom: 40.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 80.0,
+                top: 20.0,
+                right: 130.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_invertrgn_after_paint_is_skipped_as_backdrop_dependent() {
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_invertrgn_record(&[(15, 12, 70, 40)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected partial passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+    }
+
+    #[test]
     fn emf_paintrgn_with_malformed_region_data_becomes_passive_placeholder() {
         let mut record = emf_paintrgn_record(&[(20, 10, 90, 50)]);
         write_test_le_u32(&mut record, 24, 31);
@@ -42448,10 +42547,20 @@ fn emf_extselectcliprgn_record(region_mode: u32, rects: &[(i32, i32, i32, i32)])
 
 #[cfg(test)]
 fn emf_paintrgn_record(rects: &[(i32, i32, i32, i32)]) -> Vec<u8> {
+    emf_region_only_record(74, rects)
+}
+
+#[cfg(test)]
+fn emf_invertrgn_record(rects: &[(i32, i32, i32, i32)]) -> Vec<u8> {
+    emf_region_only_record(73, rects)
+}
+
+#[cfg(test)]
+fn emf_region_only_record(record_type: u32, rects: &[(i32, i32, i32, i32)]) -> Vec<u8> {
     let region_size = 32 + (rects.len() * 16);
     let size = 28 + region_size;
     let mut record = vec![0; size];
-    write_test_le_u32(&mut record, 0, 74);
+    write_test_le_u32(&mut record, 0, record_type);
     write_test_le_u32(&mut record, 4, size as u32);
     let (left, top, right, bottom) = rects.first().copied().unwrap_or((0, 0, 0, 0));
     write_test_le_i32(&mut record, 8, left);
