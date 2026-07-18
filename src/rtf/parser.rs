@@ -20378,6 +20378,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETTEXTALIGN: u32 = 22;
     const EMR_SETTEXTCOLOR: u32 = 24;
     const EMR_SETBKCOLOR: u32 = 25;
+    const EMR_OFFSETCLIPRGN: u32 = 26;
     const EMR_SCALEVIEWPORTEXTEX: u32 = 31;
     const EMR_SCALEWINDOWEXTEX: u32 = 32;
     const EMR_EXCLUDECLIPRECT: u32 = 29;
@@ -20494,6 +20495,17 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_SCALEWINDOWEXTEX => {
                 let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
                 coordinates.scale_window_extent(x_num, x_denom, y_num, y_denom)?;
+            }
+            EMR_OFFSETCLIPRGN => {
+                let clip_start = replaceable_clip_command_start?;
+                if !vector_commands_are_only_clip_updates(&commands[clip_start..]) {
+                    return None;
+                }
+                let (offset_x, offset_y) =
+                    parse_emf_offset_clip_region(data, &header, &coordinates)?;
+                for command in &mut commands[clip_start..] {
+                    offset_vector_clip_command(command, offset_x, offset_y)?;
+                }
             }
             EMR_EXCLUDECLIPRECT => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -21760,6 +21772,32 @@ fn parse_emf_setpixelv_rect(
         pixel_rect_end(x, max_x),
         pixel_rect_end(y, max_y),
         color,
+    ))
+}
+
+fn parse_emf_offset_clip_region(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<(f32, f32)> {
+    if data.len() < 8 {
+        return None;
+    }
+    let x = read_le_i32(data, 0)?;
+    let y = read_le_i32(data, 4)?;
+    Some((
+        map_emf_length_axis(
+            x,
+            coordinates.window_extent_x,
+            coordinates.viewport_extent_x,
+            header.width_px,
+        ),
+        map_emf_length_axis(
+            y,
+            coordinates.window_extent_y,
+            coordinates.viewport_extent_y,
+            header.height_px,
+        ),
     ))
 }
 
@@ -23791,7 +23829,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 let (offset_x, offset_y) =
                     parse_wmf_offset_clip_region(data, window_width, window_height)?;
                 for command in &mut commands[clip_start..] {
-                    offset_wmf_clip_command(command, offset_x, offset_y)?;
+                    offset_vector_clip_command(command, offset_x, offset_y)?;
                 }
             }
             0x0324 | 0x0325 => {
@@ -24327,7 +24365,7 @@ fn parse_wmf_offset_clip_region(
     ))
 }
 
-fn offset_wmf_clip_command(
+fn offset_vector_clip_command(
     command: &mut StaticImageVectorCommand,
     offset_x: f32,
     offset_y: f32,
@@ -37639,6 +37677,64 @@ After\par}"#;
                 bottom: 80.0,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn emf_offsetcliprgn_offsets_unpainted_clip_rect() {
+        let records = [
+            emf_rect_record(30, 20, 20, 100, 60),
+            emf_point_record(26, 10, 5),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_offsetcliprgn_after_painted_clip_becomes_passive_placeholder() {
+        let records = [
+            emf_rect_record(30, 20, 20, 100, 60),
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_point_record(26, 10, 5),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
         ));
     }
 
