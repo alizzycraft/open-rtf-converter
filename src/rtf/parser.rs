@@ -20523,6 +20523,26 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     clip_scope_command_start = commands.len().checked_sub(1);
                     replaceable_clip_command_start = Some(commands.len());
                     commands.extend(clip_commands);
+                } else if let Some(clip_start) = replaceable_clip_command_start {
+                    let mut clip_commands =
+                        initial_vector_clip_commands_then_paint_only(&commands[clip_start..])?;
+                    if commands
+                        .len()
+                        .checked_add(3)?
+                        .checked_add(clip_commands.len())?
+                        > MAX_PASSIVE_WMF_COMMANDS
+                    {
+                        return None;
+                    }
+                    for command in &mut clip_commands {
+                        offset_vector_clip_command(command, offset_x, offset_y)?;
+                    }
+                    commands.insert(clip_start, StaticImageVectorCommand::SaveState);
+                    commands.push(StaticImageVectorCommand::RestoreState);
+                    commands.push(StaticImageVectorCommand::SaveState);
+                    clip_scope_command_start = commands.len().checked_sub(1);
+                    replaceable_clip_command_start = Some(commands.len());
+                    commands.extend(clip_commands);
                 } else {
                     return None;
                 }
@@ -21848,8 +21868,15 @@ fn vector_commands_are_only_clip_updates(commands: &[StaticImageVectorCommand]) 
 fn vector_commands_have_initial_clip_then_paint_only(
     commands: &[StaticImageVectorCommand],
 ) -> bool {
+    initial_vector_clip_commands_then_paint_only(commands).is_some()
+}
+
+fn initial_vector_clip_commands_then_paint_only(
+    commands: &[StaticImageVectorCommand],
+) -> Option<Vec<StaticImageVectorCommand>> {
     let mut saw_clip = false;
     let mut saw_paint = false;
+    let mut clip_commands = Vec::new();
     for command in commands {
         match command {
             StaticImageVectorCommand::ClipRect { .. }
@@ -21857,24 +21884,25 @@ fn vector_commands_have_initial_clip_then_paint_only(
                 if !saw_paint =>
             {
                 saw_clip = true;
+                clip_commands.push(command.clone());
             }
             StaticImageVectorCommand::ClipRect { .. }
             | StaticImageVectorCommand::ClipPath { .. } => {
-                return false;
+                return None;
             }
             StaticImageVectorCommand::SaveState | StaticImageVectorCommand::RestoreState => {
-                return false;
+                return None;
             }
             _ => {
                 if !saw_clip {
-                    return false;
+                    return None;
                 }
                 saw_paint = true;
             }
         }
     }
 
-    saw_clip && saw_paint
+    (saw_clip && saw_paint).then_some(clip_commands)
 }
 
 fn scoped_vector_clip_commands(
@@ -37843,10 +37871,72 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_offsetcliprgn_after_painted_clip_becomes_passive_placeholder() {
+    fn emf_offsetcliprgn_after_painted_clip_offsets_unscoped_clip() {
         let records = [
             emf_rect_record(30, 20, 20, 100, 60),
             emf_rect_record(43, 0, 0, 30, 30),
+            emf_point_record(26, 10, 5),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 7);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(matches!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[6],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_offsetcliprgn_after_painted_unscoped_clip_mutation_becomes_passive_placeholder() {
+        let records = [
+            emf_rect_record(30, 20, 20, 100, 60),
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_rect_record(30, 40, 30, 120, 70),
             emf_point_record(26, 10, 5),
             emf_rect_record(43, 0, 0, 160, 80),
         ];
