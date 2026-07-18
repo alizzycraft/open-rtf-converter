@@ -20727,7 +20727,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 let region_mode = read_le_u32(data, 0)?;
                 if region_mode == RGN_COPY && clip_active {
                     if let Some(clip_start) = replaceable_clip_command_start
-                        && emf_commands_are_only_clip_updates(&commands[clip_start..])
+                        && vector_commands_are_only_clip_updates(&commands[clip_start..])
                     {
                         commands.truncate(clip_start);
                         replaceable_clip_command_start = None;
@@ -21763,7 +21763,7 @@ fn parse_emf_setpixelv_rect(
     ))
 }
 
-fn emf_commands_are_only_clip_updates(commands: &[StaticImageVectorCommand]) -> bool {
+fn vector_commands_are_only_clip_updates(commands: &[StaticImageVectorCommand]) -> bool {
     !commands.is_empty()
         && commands.iter().all(|command| {
             matches!(
@@ -23564,6 +23564,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut commands = Vec::new();
     let mut skipped_record_count = 0usize;
     let mut current_point = (0.0f32, 0.0f32);
+    let mut replaceable_clip_command_start: Option<usize> = None;
 
     while pos + 6 <= header.file_end {
         record_count = record_count.checked_add(1)?;
@@ -23618,6 +23619,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     for _ in 0..restored.restore_count {
                         commands.push(StaticImageVectorCommand::RestoreState);
                     }
+                    replaceable_clip_command_start = None;
                 }
             }
             0x020b => {
@@ -23776,6 +23778,20 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         right,
                         bottom,
                     )?);
+                }
+                if replaceable_clip_command_start.is_none() {
+                    replaceable_clip_command_start = commands.len().checked_sub(1);
+                }
+            }
+            0x0220 => {
+                let clip_start = replaceable_clip_command_start?;
+                if !vector_commands_are_only_clip_updates(&commands[clip_start..]) {
+                    return None;
+                }
+                let (offset_x, offset_y) =
+                    parse_wmf_offset_clip_region(data, window_width, window_height)?;
+                for command in &mut commands[clip_start..] {
+                    offset_wmf_clip_command(command, offset_x, offset_y)?;
                 }
             }
             0x0324 | 0x0325 => {
@@ -24293,6 +24309,71 @@ fn wmf_exclude_clip_rect_command(
         closed: false,
         fill_rule: StaticImageVectorFillRule::Alternate,
     })
+}
+
+fn parse_wmf_offset_clip_region(
+    data: &[u8],
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32)> {
+    if data.len() < 4 {
+        return None;
+    }
+    let y = i32::from(read_le_i16(data, 0)?);
+    let x = i32::from(read_le_i16(data, 2)?);
+    Some((
+        x.clamp(-window_width.max(1), window_width.max(1)) as f32,
+        y.clamp(-window_height.max(1), window_height.max(1)) as f32,
+    ))
+}
+
+fn offset_wmf_clip_command(
+    command: &mut StaticImageVectorCommand,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<()> {
+    match command {
+        StaticImageVectorCommand::ClipRect {
+            left,
+            top,
+            right,
+            bottom,
+        } => {
+            *left += offset_x;
+            *right += offset_x;
+            *top += offset_y;
+            *bottom += offset_y;
+        }
+        StaticImageVectorCommand::ClipPath {
+            start, segments, ..
+        } => {
+            start.0 += offset_x;
+            start.1 += offset_y;
+            for segment in segments {
+                match segment {
+                    StaticImageVectorPathSegment::MoveTo(x, y)
+                    | StaticImageVectorPathSegment::LineTo(x, y) => {
+                        *x += offset_x;
+                        *y += offset_y;
+                    }
+                    StaticImageVectorPathSegment::CubicTo {
+                        control1,
+                        control2,
+                        end,
+                    } => {
+                        control1.0 += offset_x;
+                        control1.1 += offset_y;
+                        control2.0 += offset_x;
+                        control2.1 += offset_y;
+                        end.0 += offset_x;
+                        end.1 += offset_y;
+                    }
+                }
+            }
+        }
+        _ => return None,
+    }
+    Some(())
 }
 
 fn parse_wmf_header_info(bytes: &[u8]) -> Option<WmfHeaderInfo> {
@@ -39273,6 +39354,67 @@ After\par}"#;
                 }),
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn wmf_offsetcliprgn_offsets_unpainted_clip_rect() {
+        let wmf_hex = concat!(
+            "0100090000032f0000000100070000000000",
+            "050000000c026400c800",
+            "07000000fc020000dcdcdc000000",
+            "040000002d010000",
+            "0700000016043c00640014001400",
+            "05000000200205000a00",
+            "070000001b045000b4000a001400",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn wmf_offsetcliprgn_after_painted_clip_becomes_passive_placeholder() {
+        let wmf_hex = concat!(
+            "010009000003360000000100070000000000",
+            "050000000c026400c800",
+            "07000000fc020000dcdcdc000000",
+            "040000002d010000",
+            "0700000016043c00640014001400",
+            "070000001b042800280000000000",
+            "05000000200205000a00",
+            "070000001b045000b4000a001400",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
         ));
     }
 
