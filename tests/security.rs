@@ -30516,6 +30516,97 @@ fn wmf_patcopy_stretchdib_renders_passive_brush_rectangle_without_payload_leakag
 }
 
 #[test]
+fn wmf_srccopy_stretchdib_renders_passive_image_without_payload_leakage() {
+    let dib = minimal_24bit_dib_with_dimensions(2, 1);
+    let record = wmf_stretchdib_dib_record(15, 25, 80, 40, 0x00cc_0020, &dib);
+    let wmf = minimal_wmf_with_records(200, 100, &[record]);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF SRCCOPY STRETCHDIB vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::RasterImage {
+            left: 15.0,
+            top: 25.0,
+            right: 95.0,
+            bottom: 65.0,
+            width_px: 2,
+            height_px: 1,
+            bytes,
+        } if bytes == &vec![255, 0, 0, 0, 255, 0]
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in ["wmetafile", "0f43", "cc0020", "JavaScript", "EmbeddedFile"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SRCCOPY STRETCHDIB internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "WMF SRCCOPY STRETCHDIB should render a passive image XObject"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "WMF SRCCOPY STRETCHDIB should invoke a passive PDF image XObject"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        b"0f43",
+        b"cc0020",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SRCCOPY STRETCHDIB leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003900000000400190000000000",
@@ -49502,6 +49593,85 @@ fn minimal_emf_with_records(
     emf
 }
 
+fn minimal_wmf_with_records(width: i16, height: i16, records: &[Vec<u8>]) -> Vec<u8> {
+    let mut wmf = vec![0; 18];
+    write_test_le_u16(&mut wmf, 0, 1);
+    write_test_le_u16(&mut wmf, 2, 9);
+    write_test_le_u16(&mut wmf, 4, 0x0300);
+
+    let set_window_ext = wmf_set_window_ext_record(width, height);
+    let eof = wmf_eof_record();
+    let mut max_record_words = set_window_ext.len() / 2;
+    wmf.extend_from_slice(&set_window_ext);
+    for record in records {
+        max_record_words = max_record_words.max(record.len() / 2);
+        wmf.extend_from_slice(record);
+    }
+    max_record_words = max_record_words.max(eof.len() / 2);
+    wmf.extend_from_slice(&eof);
+
+    let file_size_words = (wmf.len() / 2) as u32;
+    write_test_le_u32(&mut wmf, 6, file_size_words);
+    write_test_le_u16(&mut wmf, 10, 0);
+    write_test_le_u32(&mut wmf, 12, max_record_words as u32);
+    write_test_le_u16(&mut wmf, 16, 0);
+    wmf
+}
+
+fn wmf_set_window_ext_record(width: i16, height: i16) -> Vec<u8> {
+    let mut record = vec![0; 10];
+    write_test_le_u32(&mut record, 0, 5);
+    write_test_le_u16(&mut record, 4, 0x020c);
+    write_test_le_i16(&mut record, 6, height);
+    write_test_le_i16(&mut record, 8, width);
+    record
+}
+
+fn wmf_stretchdib_dib_record(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    raster_op: u32,
+    dib: &[u8],
+) -> Vec<u8> {
+    let source_width = if dib.len() >= 12 {
+        i32::from_le_bytes(dib[4..8].try_into().unwrap()).clamp(1, i32::from(i16::MAX)) as i16
+    } else {
+        width
+    };
+    let source_height = if dib.len() >= 12 {
+        i32::from_le_bytes(dib[8..12].try_into().unwrap())
+            .unsigned_abs()
+            .clamp(1, i16::MAX as u32) as i16
+    } else {
+        height
+    };
+    let size = (6 + 22 + dib.len()).next_multiple_of(2);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, (size / 2) as u32);
+    write_test_le_u16(&mut record, 4, 0x0f43);
+    write_test_le_u32(&mut record, 6, raster_op);
+    write_test_le_u16(&mut record, 10, 0);
+    write_test_le_i16(&mut record, 12, source_height);
+    write_test_le_i16(&mut record, 14, source_width);
+    write_test_le_i16(&mut record, 16, 0);
+    write_test_le_i16(&mut record, 18, 0);
+    write_test_le_i16(&mut record, 20, height);
+    write_test_le_i16(&mut record, 22, width);
+    write_test_le_i16(&mut record, 24, y);
+    write_test_le_i16(&mut record, 26, x);
+    record[28..28 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+fn wmf_eof_record() -> Vec<u8> {
+    let mut record = vec![0; 6];
+    write_test_le_u32(&mut record, 0, 3);
+    write_test_le_u16(&mut record, 4, 0);
+    record
+}
+
 fn emf_rect_record(record_type: u32, left: i32, top: i32, right: i32, bottom: i32) -> Vec<u8> {
     let mut record = vec![0; 24];
     write_test_le_u32(&mut record, 0, record_type);
@@ -50336,6 +50506,10 @@ fn emf_eof_record() -> Vec<u8> {
 
 fn write_test_le_u32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+fn write_test_le_u16(bytes: &mut [u8], offset: usize, value: u16) {
+    bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
 }
 
 fn write_test_le_i32(bytes: &mut [u8], offset: usize, value: i32) {

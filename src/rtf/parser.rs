@@ -25434,6 +25434,18 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         fill_pattern: ShadingPattern::None,
                         fill_color: Some(fill_color),
                     });
+                } else if function == 0x0f43 {
+                    if let Some(command) = parse_wmf_stretchdib_srcopy(
+                        data,
+                        window_origin_x,
+                        window_origin_y,
+                        window_width,
+                        window_height,
+                    ) {
+                        commands.push(command);
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -25892,6 +25904,77 @@ fn parse_wmf_blt_passive_transfer(
         left_top.1.max(right_bottom.1),
         fill_color,
     ))
+}
+
+fn parse_wmf_stretchdib_srcopy(
+    data: &[u8],
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<StaticImageVectorCommand> {
+    const DIB_RGB_COLORS: u16 = 0;
+    const DIB_HEADER_OFFSET: usize = 22;
+
+    if data.len() < DIB_HEADER_OFFSET || read_le_u32(data, 0)? != WMF_SRCCOPY_RASTER_OP {
+        return None;
+    }
+    if read_le_u16(data, 4)? != DIB_RGB_COLORS {
+        return None;
+    }
+
+    let source_height = i32::from(read_le_i16(data, 6)?);
+    let source_width = i32::from(read_le_i16(data, 8)?);
+    let source_y = read_le_i16(data, 10)?;
+    let source_x = read_le_i16(data, 12)?;
+    if source_x != 0 || source_y != 0 || source_width <= 0 || source_height == 0 {
+        return None;
+    }
+
+    let destination_height = i32::from(read_le_i16(data, 14)?.unsigned_abs().max(1));
+    let destination_width = i32::from(read_le_i16(data, 16)?.unsigned_abs().max(1));
+    let destination_y = i32::from(read_le_i16(data, 18)?);
+    let destination_x = i32::from(read_le_i16(data, 20)?);
+    let dib = parse_dib_image_data(&data[DIB_HEADER_OFFSET..], MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
+    if u32::try_from(source_width).ok()? != dib.width_px
+        || source_height.unsigned_abs() != dib.height_px
+    {
+        return None;
+    }
+
+    let left_top = normalize_wmf_point(
+        destination_x,
+        destination_y,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    let right_bottom = normalize_wmf_point(
+        destination_x.saturating_add(destination_width),
+        destination_y.saturating_add(destination_height),
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    );
+    let left = left_top.0.min(right_bottom.0);
+    let top = left_top.1.min(right_bottom.1);
+    let right = left_top.0.max(right_bottom.0);
+    let bottom = left_top.1.max(right_bottom.1);
+    if !bounds_is_visible((left, top, right, bottom)) {
+        return None;
+    }
+
+    Some(StaticImageVectorCommand::RasterImage {
+        left,
+        top,
+        right,
+        bottom,
+        width_px: dib.width_px,
+        height_px: dib.height_px,
+        bytes: dib.rgb,
+    })
 }
 
 fn passive_wmf_raster_transfer_color(
@@ -41946,6 +42029,44 @@ After\par}"#;
     }
 
     #[test]
+    fn wmf_srccopy_stretchdib_record_becomes_passive_raster_image() {
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_SRCCOPY_RASTER_OP,
+            &minimal_24bit_dib_with_dimensions(2, 1),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &[record]))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                width_px: 2,
+                height_px: 1,
+                bytes,
+            } if bytes == &vec![255, 0, 0, 0, 255, 0]
+        ));
+    }
+
+    #[test]
     fn wmf_offsetcliprgn_offsets_unpainted_clip_rect() {
         let wmf_hex = concat!(
             "0100090000032f0000000100070000000000",
@@ -43038,6 +43159,89 @@ fn minimal_emf_with_records(
 }
 
 #[cfg(test)]
+fn minimal_wmf_with_records(width: i16, height: i16, records: &[Vec<u8>]) -> Vec<u8> {
+    let mut wmf = vec![0; 18];
+    write_test_le_u16(&mut wmf, 0, 1);
+    write_test_le_u16(&mut wmf, 2, 9);
+    write_test_le_u16(&mut wmf, 4, 0x0300);
+
+    let set_window_ext = wmf_set_window_ext_record(width, height);
+    let eof = wmf_eof_record();
+    let mut max_record_words = set_window_ext.len() / 2;
+    wmf.extend_from_slice(&set_window_ext);
+    for record in records {
+        max_record_words = max_record_words.max(record.len() / 2);
+        wmf.extend_from_slice(record);
+    }
+    max_record_words = max_record_words.max(eof.len() / 2);
+    wmf.extend_from_slice(&eof);
+
+    let file_size_words = (wmf.len() / 2) as u32;
+    write_test_le_u32(&mut wmf, 6, file_size_words);
+    write_test_le_u16(&mut wmf, 10, 0);
+    write_test_le_u32(&mut wmf, 12, max_record_words as u32);
+    write_test_le_u16(&mut wmf, 16, 0);
+    wmf
+}
+
+#[cfg(test)]
+fn wmf_set_window_ext_record(width: i16, height: i16) -> Vec<u8> {
+    let mut record = vec![0; 10];
+    write_test_le_u32(&mut record, 0, 5);
+    write_test_le_u16(&mut record, 4, 0x020c);
+    write_test_le_i16(&mut record, 6, height);
+    write_test_le_i16(&mut record, 8, width);
+    record
+}
+
+#[cfg(test)]
+fn wmf_stretchdib_dib_record(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    raster_op: u32,
+    dib: &[u8],
+) -> Vec<u8> {
+    let source_width = if dib.len() >= 12 {
+        i32::from_le_bytes(dib[4..8].try_into().unwrap()).clamp(1, i32::from(i16::MAX)) as i16
+    } else {
+        width
+    };
+    let source_height = if dib.len() >= 12 {
+        i32::from_le_bytes(dib[8..12].try_into().unwrap())
+            .unsigned_abs()
+            .clamp(1, u32::from(i16::MAX as u16)) as i16
+    } else {
+        height
+    };
+    let size = (6 + 22 + dib.len()).next_multiple_of(2);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, (size / 2) as u32);
+    write_test_le_u16(&mut record, 4, 0x0f43);
+    write_test_le_u32(&mut record, 6, raster_op);
+    write_test_le_u16(&mut record, 10, 0);
+    write_test_le_i16(&mut record, 12, source_height);
+    write_test_le_i16(&mut record, 14, source_width);
+    write_test_le_i16(&mut record, 16, 0);
+    write_test_le_i16(&mut record, 18, 0);
+    write_test_le_i16(&mut record, 20, height);
+    write_test_le_i16(&mut record, 22, width);
+    write_test_le_i16(&mut record, 24, y);
+    write_test_le_i16(&mut record, 26, x);
+    record[28..28 + dib.len()].copy_from_slice(dib);
+    record
+}
+
+#[cfg(test)]
+fn wmf_eof_record() -> Vec<u8> {
+    let mut record = vec![0; 6];
+    write_test_le_u32(&mut record, 0, 3);
+    write_test_le_u16(&mut record, 4, 0);
+    record
+}
+
+#[cfg(test)]
 fn emf_rect_record(record_type: u32, left: i32, top: i32, right: i32, bottom: i32) -> Vec<u8> {
     let mut record = vec![0; 24];
     write_test_le_u32(&mut record, 0, record_type);
@@ -43935,6 +44139,11 @@ fn emf_eof_record() -> Vec<u8> {
 #[cfg(test)]
 fn write_test_le_u32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+#[cfg(test)]
+fn write_test_le_u16(bytes: &mut [u8], offset: usize, value: u16) {
+    bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
 }
 
 #[cfg(test)]
