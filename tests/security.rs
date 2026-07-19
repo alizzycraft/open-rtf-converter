@@ -38932,6 +38932,112 @@ fn emf_empty_extselectcliprgn_combine_noops_without_payload_leakage() {
 }
 
 #[test]
+fn emf_empty_extselectcliprgn_and_copy_clip_without_payload_leakage() {
+    let mut and = emf_extselectcliprgn_record(1, &[]);
+    and.extend_from_slice(b"EMPTY-EMF-EXTSELECTCLIPRGN-AND /JavaScript");
+    and.resize(and.len().next_multiple_of(4), 0);
+    let and_len = and.len() as u32;
+    write_test_le_u32(&mut and, 4, and_len);
+
+    let mut copy = emf_extselectcliprgn_record(5, &[]);
+    copy.extend_from_slice(b"EMPTY-EMF-EXTSELECTCLIPRGN-COPY /EmbeddedFile");
+    copy.resize(copy.len().next_multiple_of(4), 0);
+    let copy_len = copy.len() as u32;
+    write_test_le_u32(&mut copy, 4, copy_len);
+
+    let records = [and, copy, emf_rect_record(43, 0, 0, 160, 80)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF empty AND/COPY EXTSELECTCLIPRGN vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert_eq!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::ClipRect {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        }
+    );
+    for forbidden in [
+        "emfblip",
+        "EXTSELECTCLIPRGN",
+        "RGNDATA",
+        "EMPTY-EMF-EXTSELECTCLIPRGN-AND",
+        "EMPTY-EMF-EXTSELECTCLIPRGN-COPY",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "empty EMF EXTSELECTCLIPRGN AND/COPY payload leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "empty EMF EXTSELECTCLIPRGN AND/COPY should emit a passive clip"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMPTY-EMF-EXTSELECTCLIPRGN-AND",
+        b"EMPTY-EMF-EXTSELECTCLIPRGN-COPY",
+        b"EXTSELECTCLIPRGN",
+        b"RGNDATA",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "empty EMF EXTSELECTCLIPRGN AND/COPY payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_contained_rgn_or_clips_are_passive_noops_without_payload_leakage() {
     let records = [
         emf_rect_record(30, 10, 10, 120, 70),
