@@ -21269,6 +21269,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 };
                 if let Some(text) = text {
                     push_emf_text_command(&mut commands, text, &state, &header)?;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             EMR_POLYTEXTOUTA | EMR_POLYTEXTOUTW => {
@@ -21281,6 +21283,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     for text in texts {
                         push_emf_text_command(&mut commands, text, &state, &header)?;
                     }
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             EMR_SETPIXELV => {
@@ -21985,7 +21989,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
         }
     }
 
-    if commands.is_empty() {
+    if commands.is_empty() && skipped_record_count > 0 {
         return None;
     }
 
@@ -28031,7 +28035,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
         }
     }
 
-    if commands.is_empty() {
+    if commands.is_empty() && skipped_record_count > 0 {
         return None;
     }
 
@@ -42730,7 +42734,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_unstroked_open_path_becomes_passive_placeholder() {
+    fn emf_unstroked_open_path_becomes_blank_passive_vector() {
         let records = [
             emf_unknown_record(59),
             emf_point_record(27, 10, 10),
@@ -42745,7 +42749,7 @@ After\par}"#;
         assert!(matches!(
             &output.document.blocks[0],
             Block::Image(image)
-                if image.format == ImageFormat::Placeholder
+                if image.format == ImageFormat::WmfVector
                     && image.bytes.is_empty()
             && image.vector_commands.is_empty()
         ));
@@ -49587,7 +49591,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_polybezier_with_partial_segments_becomes_passive_placeholder() {
+    fn emf_polybezier_with_partial_segments_becomes_blank_passive_vector() {
         let records = [emf_poly_record(
             2,
             &[(10, 10), (30, 5), (50, 35), (70, 30), (80, 40)],
@@ -49601,7 +49605,7 @@ After\par}"#;
         assert!(matches!(
             &output.document.blocks[0],
             Block::Image(image)
-                if image.format == ImageFormat::Placeholder
+                if image.format == ImageFormat::WmfVector
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
         ));
@@ -49638,7 +49642,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_polybezier_with_partial_segments_becomes_passive_placeholder() {
+    fn wmf_polybezier_with_partial_segments_becomes_blank_passive_vector() {
         let wmf_hex = concat!(
             "0100090000031b00000001000a0000000000",
             "050000000c026400c800",
@@ -49650,7 +49654,7 @@ After\par}"#;
         assert!(matches!(
             &output.document.blocks[0],
             Block::Image(image)
-                if image.format == ImageFormat::Placeholder
+                if image.format == ImageFormat::WmfVector
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
         ));
@@ -53605,7 +53609,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_polybezierto_with_partial_segments_becomes_passive_placeholder() {
+    fn wmf_polybezierto_with_partial_segments_becomes_blank_passive_vector() {
         let wmf_hex = concat!(
             "0100090000031e0000000100080000000000",
             "050000000c026400c800",
@@ -53618,7 +53622,7 @@ After\par}"#;
         assert!(matches!(
             &output.document.blocks[0],
             Block::Image(image)
-                if image.format == ImageFormat::Placeholder
+                if image.format == ImageFormat::WmfVector
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
         ));
@@ -53978,7 +53982,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_polydraw_records_with_partial_bezier_become_passive_placeholders() {
+    fn emf_polydraw_records_with_partial_bezier_become_blank_passive_vectors() {
         let records = [emf_polydraw_record(
             56,
             &[(10, 10), (30, 20), (40, 30)],
@@ -53993,7 +53997,7 @@ After\par}"#;
         assert!(matches!(
             &output.document.blocks[0],
             Block::Image(image)
-                if image.format == ImageFormat::Placeholder
+                if image.format == ImageFormat::WmfVector
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
         ));

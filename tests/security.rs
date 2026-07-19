@@ -28586,6 +28586,98 @@ fn wmf_incomplete_bezier_records_are_noops_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_incomplete_bezier_only_renders_blank_vector_without_payload_leakage() {
+    let mut polybezier = wmf_point_list_record(0x1005, &[(10, 10), (30, 5), (70, 50)]);
+    polybezier.extend_from_slice(b"BLANK-WMF-POLYBEZIER /JavaScript /EmbeddedFile /Launch");
+    polybezier.resize(polybezier.len().next_multiple_of(2), 0);
+    let polybezier_len_words = (polybezier.len() / 2) as u32;
+    write_test_le_u32(&mut polybezier, 0, polybezier_len_words);
+
+    let records = [polybezier];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal2160\\pichgoal1080 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("blank passive WMF vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in [
+        "wmetafile",
+        "BLANK-WMF-POLYBEZIER",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "Image skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "blank WMF vector payload/control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(!rendered_text.contains("Image skipped"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "blank WMF vector should preserve the passive image box clip"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"BLANK-WMF-POLYBEZIER",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"Image skipped",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "blank WMF vector payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_polypolygon_records_render_compound_path_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003360000000100160000000000",
@@ -34788,6 +34880,95 @@ fn emf_stroked_path_records_render_passively_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "EMF stroked path payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emf_unpainted_path_renders_blank_vector_without_payload_leakage() {
+    let mut line = emf_point_record(54, 50, 10);
+    line.extend_from_slice(b"BLANK-EMF-UNPAINTED-PATH /JavaScript /EmbeddedFile /Launch");
+    line.resize(line.len().next_multiple_of(4), 0);
+    let line_len = line.len() as u32;
+    write_test_le_u32(&mut line, 4, line_len);
+
+    let records = [emf_unknown_record(59), emf_point_record(27, 10, 10), line];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("blank passive EMF vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "BLANK-EMF-UNPAINTED-PATH",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "Image skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "blank EMF vector payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(!rendered_text.contains("Image skipped"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "blank EMF vector should preserve the passive image box clip"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"BLANK-EMF-UNPAINTED-PATH",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"Image skipped",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "blank EMF vector payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
