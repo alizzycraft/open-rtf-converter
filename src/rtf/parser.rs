@@ -24649,6 +24649,12 @@ fn parse_emf_polydraw(
     stroke_style: BorderStyle,
 ) -> Option<ParsedEmfPolyDraw> {
     let (points, types) = parse_emf_raw_polydraw(data, false)?;
+    if emf_polydraw_has_incomplete_bezier_run(&types) {
+        return Some(ParsedEmfPolyDraw {
+            commands: Vec::new(),
+            end_position: current_position,
+        });
+    }
     build_emf_polydraw_commands(
         &points,
         &types,
@@ -24671,6 +24677,12 @@ fn parse_emf_polydraw16(
     stroke_style: BorderStyle,
 ) -> Option<ParsedEmfPolyDraw> {
     let (points, types) = parse_emf_raw_polydraw(data, true)?;
+    if emf_polydraw_has_incomplete_bezier_run(&types) {
+        return Some(ParsedEmfPolyDraw {
+            commands: Vec::new(),
+            end_position: current_position,
+        });
+    }
     build_emf_polydraw_commands(
         &points,
         &types,
@@ -24714,6 +24726,30 @@ fn parse_emf_raw_polydraw(data: &[u8], compact_points: bool) -> Option<(Vec<(i32
         points.push(point);
     }
     Some((points, data[types_start..types_end].to_vec()))
+}
+
+fn emf_polydraw_has_incomplete_bezier_run(types: &[u8]) -> bool {
+    const PT_CLOSEFIGURE: u8 = 0x01;
+    const PT_BEZIERTO: u8 = 0x04;
+
+    let mut idx = 0usize;
+    while idx < types.len() {
+        let base = types[idx] & !PT_CLOSEFIGURE;
+        if base != PT_BEZIERTO {
+            idx += 1;
+            continue;
+        }
+        if idx + 2 >= types.len() {
+            return true;
+        }
+        if (types[idx + 1] & !PT_CLOSEFIGURE) != PT_BEZIERTO
+            || (types[idx + 2] & !PT_CLOSEFIGURE) != PT_BEZIERTO
+        {
+            return true;
+        }
+        idx += 3;
+    }
+    false
 }
 
 fn build_emf_polydraw_commands(
@@ -53553,6 +53589,32 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn incomplete_polydraw_bezier_runs_are_passive_noops_before_later_drawing() {
+        let records = [
+            emf_polydraw_record(56, &[(10, 10), (30, 20), (40, 30)], &[0x06, 0x04, 0x04]),
+            emf_polydraw16_record(92, &[(20, 20), (60, 20)], &[0x06, 0x04]),
+            emf_rect_record(43, 0, 0, 60, 30),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
