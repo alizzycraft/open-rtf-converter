@@ -41360,6 +41360,156 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
 }
 
 #[test]
+fn same_bounds_backdrop_raster_transfers_reduce_to_passive_solid_rectangles_without_payload_leakage()
+ {
+    let emf_payload = b"EMF-SAME-BOUNDS-DSTINVERT /JavaScript";
+    let wmf_payload = b"WMF-SAME-BOUNDS-PATINVERT /EmbeddedFile";
+    let fill_color = Color {
+        red: 100,
+        green: 30,
+        blue: 200,
+    };
+    let xor_color = Color {
+        red: 20,
+        green: 80,
+        blue: 140,
+    };
+    let emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[
+            emf_create_brush_record(3, 0, fill_color, 0),
+            emf_select_object_record(3),
+            emf_bitblt_record(10, 20, 80, 40, 0x00f0_0021, b"EMF-PATCOPY-FILL"),
+            emf_bitblt_record(10, 20, 80, 40, 0x0055_0009, emf_payload),
+        ],
+    );
+    let wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(fill_color),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(15, 25, 80, 40, 0x00f0_0021, b"WMF-PATCOPY-FILL"),
+            wmf_create_brush_record(xor_color),
+            wmf_select_object_record(1),
+            wmf_dibbitblt_record(15, 25, 80, 40, 0x005a_0049, wmf_payload),
+        ],
+    );
+    let emf_hex = bytes_to_hex(&emf);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].vector_commands.len(), 1);
+    assert_eq!(images[1].vector_commands.len(), 1);
+    assert!(matches!(
+        images[0].vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            fill_color: Some(Color {
+                red: 155,
+                green: 225,
+                blue: 55
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        images[1].vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            fill_color: Some(Color {
+                red: 112,
+                green: 78,
+                blue: 68
+            }),
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "wmetafile",
+        "EMF-SAME-BOUNDS-DSTINVERT",
+        "WMF-SAME-BOUNDS-PATINVERT",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "same-bounds backdrop raster payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "same-bounds backdrop raster reductions should render passive PDF rectangles"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        b"wmetafile",
+        emf_hex.as_bytes(),
+        wmf_hex.as_bytes(),
+        emf_payload.as_slice(),
+        wmf_payload.as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "same-bounds backdrop raster payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn black_brush_patinvert_raster_transfers_are_noops_without_payload_leakage() {
     let emf_payload = b"EMF-BLACK-PATINVERT-NOOP-PAYLOAD /JavaScript";
     let wmf_payload = b"WMF-BLACK-PATINVERT-NOOP-PAYLOAD /EmbeddedFile";
