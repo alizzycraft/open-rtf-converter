@@ -22642,18 +22642,22 @@ fn sample_emf_anglearc_points(
         return None;
     }
     let sweep_angle = sweep_angle.clamp(-360.0, 360.0);
-    if sweep_angle.abs() < f32::EPSILON {
-        return None;
-    }
-    let segments = ((f64::from(sweep_angle.abs()) / 360.0) * MAX_PASSIVE_WMF_ARC_SEGMENTS as f64)
-        .ceil()
-        .clamp(4.0, MAX_PASSIVE_WMF_ARC_SEGMENTS as f64) as usize;
-    let mut points = Vec::with_capacity(segments.checked_add(1)?);
     let center_x = f64::from(center.0);
     let center_y = f64::from(center.1);
     let radius = f64::from(radius);
     let start = f64::from(start_angle).to_radians();
     let sweep = f64::from(sweep_angle).to_radians();
+    let start_point = (
+        f64_to_i32_rounded(center_x + (radius * start.cos()))?,
+        f64_to_i32_rounded(center_y - (radius * start.sin()))?,
+    );
+    if sweep_angle.abs() < f32::EPSILON {
+        return Some(vec![start_point]);
+    }
+    let segments = ((f64::from(sweep_angle.abs()) / 360.0) * MAX_PASSIVE_WMF_ARC_SEGMENTS as f64)
+        .ceil()
+        .clamp(4.0, MAX_PASSIVE_WMF_ARC_SEGMENTS as f64) as usize;
+    let mut points = Vec::with_capacity(segments.checked_add(1)?);
     for idx in 0..=segments {
         let ratio = idx as f64 / segments as f64;
         let angle = start + (sweep * ratio);
@@ -53326,6 +53330,43 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_anglearc_records_with_zero_sweep_draw_line_to_arc_start() {
+        let records = [
+            emf_point_record(27, 10, 40),
+            emf_anglearc_record(60, 40, 40, 0.0, 0.0),
+            emf_point_record(54, 60, 70),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Polyline { points, .. }
+                if points == &vec![(10.0, 40.0), (100.0, 40.0)]
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Line {
+                x1: 100.0,
+                y1: 40.0,
+                x2: 60.0,
+                y2: 70.0,
+                ..
+            }
         ));
     }
 
