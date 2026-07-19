@@ -41837,6 +41837,145 @@ fn same_bounds_srcand_solid_source_reduces_to_passive_solid_rectangles_without_p
 }
 
 #[test]
+fn same_bounds_srcerase_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage() {
+    let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
+    emf_dib.extend_from_slice(b"TRAILING-EMF-SAME-BOUNDS-SRCERASE-SOLID-DIB /JavaScript");
+    let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
+    wmf_dib.extend_from_slice(b"TRAILING-WMF-SAME-BOUNDS-SRCERASE-SOLID-DIB /EmbeddedFile");
+    let fill_color = Color {
+        red: 100,
+        green: 30,
+        blue: 200,
+    };
+    let emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[
+            emf_create_brush_record(3, 0, fill_color, 0),
+            emf_select_object_record(3),
+            emf_bitblt_record(20, 15, 60, 30, 0x00f0_0021, b"EMF-PATCOPY-FILL"),
+            emf_stretchdibits_dib_record(20, 15, 60, 30, 0x0044_0328, &emf_dib),
+        ],
+    );
+    let wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(fill_color),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(15, 25, 80, 40, 0x00f0_0021, b"WMF-PATCOPY-FILL"),
+            wmf_stretchdib_dib_record(15, 25, 80, 40, 0x0044_0328, &wmf_dib),
+        ],
+    );
+    let emf_hex = bytes_to_hex(&emf);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].vector_commands.len(), 1);
+    assert_eq!(images[1].vector_commands.len(), 1);
+    for image in &images {
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                fill_color: Some(Color {
+                    red: 138,
+                    green: 160,
+                    blue: 34
+                }),
+                ..
+            }
+        ));
+    }
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "wmetafile",
+        "TRAILING-EMF-SAME-BOUNDS-SRCERASE-SOLID-DIB",
+        "TRAILING-WMF-SAME-BOUNDS-SRCERASE-SOLID-DIB",
+        "EMF-PATCOPY-FILL",
+        "WMF-PATCOPY-FILL",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "same-bounds solid SRCERASE payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "same-bounds solid SRCERASE reductions should render passive PDF rectangles"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        b"wmetafile",
+        emf_hex.as_bytes(),
+        wmf_hex.as_bytes(),
+        b"TRAILING-EMF-SAME-BOUNDS-SRCERASE-SOLID-DIB",
+        b"TRAILING-WMF-SAME-BOUNDS-SRCERASE-SOLID-DIB",
+        b"EMF-PATCOPY-FILL",
+        b"WMF-PATCOPY-FILL",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "same-bounds solid SRCERASE payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn same_bounds_notsrcerase_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
  {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
@@ -42527,16 +42666,10 @@ fn white_brush_patpaint_raster_transfers_render_without_payload_leakage() {
 fn solid_source_raster_reductions_render_without_payload_leakage() {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[0, 0, 0], [0, 0, 0]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SRCAND-BLACK-DIB /JavaScript");
-    let mut emf_srcerase_dib =
-        minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]);
-    emf_srcerase_dib.extend_from_slice(b"TRAILING-EMF-SRCERASE-WHITE-DIB /JavaScript");
     let mut wmf_png = minimal_grayscale_png(&[255, 255]);
     wmf_png.extend_from_slice(b"TRAILING-WMF-SRCPAINT-WHITE-PNG /EmbeddedFile");
     let mut wmf_dib = minimal_compressed_dib_with_payload(2, 1, 5, &wmf_png);
     wmf_dib.extend_from_slice(b"TRAILING-WMF-SRCPAINT-WHITE-DIB /OpenAction");
-    let mut wmf_srcerase_dib =
-        minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]);
-    wmf_srcerase_dib.extend_from_slice(b"TRAILING-WMF-SRCERASE-WHITE-DIB /RichMedia");
     let emf = minimal_emf_with_records(
         160,
         80,
@@ -42545,7 +42678,6 @@ fn solid_source_raster_reductions_render_without_payload_leakage() {
         &[
             emf_rect_record(43, 0, 0, 30, 30),
             emf_stretchdibits_dib_record(20, 15, 60, 30, 0x0088_00c6, &emf_dib),
-            emf_stretchdibits_dib_record(70, 15, 40, 20, 0x0044_0328, &emf_srcerase_dib),
         ],
     );
     let wmf = minimal_wmf_with_records(
@@ -42555,7 +42687,6 @@ fn solid_source_raster_reductions_render_without_payload_leakage() {
             wmf_set_window_ext_record(200, 100),
             wmf_dibbitblt_record(15, 25, 80, 40, 0x00ff_0062, b"WMF-WHITENESS-PAINT"),
             wmf_stretchdib_dib_record(35, 25, 80, 40, 0x00ee_0086, &wmf_dib),
-            wmf_stretchdib_dib_record(75, 35, 60, 30, 0x0044_0328, &wmf_srcerase_dib),
         ],
     );
     let emf_hex = bytes_to_hex(&emf);
@@ -42580,22 +42711,10 @@ fn solid_source_raster_reductions_render_without_payload_leakage() {
     assert!(text.contains("middle"));
     assert!(text.contains("after"));
     assert_eq!(images.len(), 2);
-    assert_eq!(images[0].vector_commands.len(), 3);
-    assert_eq!(images[1].vector_commands.len(), 3);
+    assert_eq!(images[0].vector_commands.len(), 2);
+    assert_eq!(images[1].vector_commands.len(), 2);
     assert!(matches!(
         images[0].vector_commands[1],
-        StaticImageVectorCommand::Rectangle {
-            stroke_color: None,
-            fill_color: Some(Color {
-                red: 0,
-                green: 0,
-                blue: 0
-            }),
-            ..
-        }
-    ));
-    assert!(matches!(
-        images[0].vector_commands[2],
         StaticImageVectorCommand::Rectangle {
             stroke_color: None,
             fill_color: Some(Color {
@@ -42618,32 +42737,17 @@ fn solid_source_raster_reductions_render_without_payload_leakage() {
             ..
         }
     ));
-    assert!(matches!(
-        images[1].vector_commands[2],
-        StaticImageVectorCommand::Rectangle {
-            stroke_color: None,
-            fill_color: Some(Color {
-                red: 0,
-                green: 0,
-                blue: 0
-            }),
-            ..
-        }
-    ));
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
         "wmetafile",
         "TRAILING-EMF-SRCAND-BLACK-DIB",
-        "TRAILING-EMF-SRCERASE-WHITE-DIB",
         "TRAILING-WMF-SRCPAINT-WHITE-PNG",
         "TRAILING-WMF-SRCPAINT-WHITE-DIB",
-        "TRAILING-WMF-SRCERASE-WHITE-DIB",
         "WMF-WHITENESS-PAINT",
         "JavaScript",
         "EmbeddedFile",
         "OpenAction",
-        "RichMedia",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -42673,7 +42777,7 @@ fn solid_source_raster_reductions_render_without_payload_leakage() {
             .iter()
             .filter(|operation| operation.operator == "re")
             .count()
-            >= 6,
+            >= 4,
         "solid source raster reductions should render passive rectangles"
     );
     for forbidden in [
@@ -42682,10 +42786,8 @@ fn solid_source_raster_reductions_render_without_payload_leakage() {
         emf_hex.as_bytes(),
         wmf_hex.as_bytes(),
         b"TRAILING-EMF-SRCAND-BLACK-DIB",
-        b"TRAILING-EMF-SRCERASE-WHITE-DIB",
         b"TRAILING-WMF-SRCPAINT-WHITE-PNG",
         b"TRAILING-WMF-SRCPAINT-WHITE-DIB",
-        b"TRAILING-WMF-SRCERASE-WHITE-DIB",
         b"WMF-WHITENESS-PAINT",
         b"/JavaScript",
         b"/EmbeddedFile",
