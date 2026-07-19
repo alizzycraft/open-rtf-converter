@@ -28335,6 +28335,8 @@ fn passive_source_raster_transfer_mode(
                 PassiveSourceRasterTransferMode::Mask(color)
             }
         }),
+        WMF_NOTPATCOPY_RASTER_OP => selected_fill_color
+            .map(|color| PassiveSourceRasterTransferMode::Solid(inverted_color(color))),
         WMF_SRCAND_RASTER_OP if blank_destination => Some(PassiveSourceRasterTransferMode::Copy),
         WMF_SRCAND_RASTER_OP => {
             Some(PassiveSourceRasterTransferMode::SameBoundsBackdropAndIfSolidSource)
@@ -45147,6 +45149,62 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_notpatcopy_stretchdibits_ignores_source_and_paints_inverted_brush() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 20,
+                    green: 80,
+                    blue: 140,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_NOTPATCOPY_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 63, 170], [15, 240, 85]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 235,
+                    green: 175,
+                    blue: 115
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn emf_black_brush_mergecopy_stretchdibits_jpeg_becomes_passive_black_rectangle() {
         let records = [
             emf_create_brush_record(3, 0, Color::default(), 0),
@@ -48987,6 +49045,58 @@ After\par}"#;
         assert_eq!(output.diagnostics.len(), 0);
         assert!(matches!(
             image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 235,
+                    green: 175,
+                    blue: 115
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_notpatcopy_stretchdib_ignores_source_and_paints_inverted_brush() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color {
+                red: 20,
+                green: 80,
+                blue: 140,
+            }),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(15, 25, 80, 40, WMF_PATCOPY_RASTER_OP, b"PATCOPY-FILL"),
+            wmf_stretchdib_dib_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_NOTPATCOPY_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 63, 170], [15, 240, 85]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[1],
             StaticImageVectorCommand::Rectangle {
                 left: 15.0,
                 top: 25.0,
