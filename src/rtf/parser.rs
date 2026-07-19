@@ -22917,7 +22917,7 @@ fn parse_emf_exttextout(
     } else {
         MAX_PASSIVE_WMF_TEXT_BYTES
     };
-    if char_count == 0 || char_count > max_char_count {
+    if char_count > max_char_count {
         return None;
     }
     let record_string_offset = usize::try_from(read_le_u32(data, 40)?).ok()?;
@@ -22937,6 +22937,24 @@ fn parse_emf_exttextout(
     } else {
         None
     };
+    if char_count == 0 {
+        let (x, y) = normalized_emf_point(x, y, header, coordinates);
+        return Some(ParsedEmfExtTextOut {
+            x,
+            y,
+            text: String::new(),
+            opaque_bounds: if options & EMF_ETO_OPAQUE != 0 {
+                bounds
+            } else {
+                None
+            },
+            clip_bounds: if options & EMF_ETO_CLIPPED != 0 {
+                bounds
+            } else {
+                None
+            },
+        });
+    }
     let byte_count = if unicode {
         char_count.checked_mul(2)?
     } else {
@@ -22980,7 +22998,7 @@ fn parse_emf_polytextout(
         return None;
     }
     let text_count = usize::try_from(read_le_u32(data, 28)?).ok()?;
-    if text_count == 0 || text_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+    if text_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
         return None;
     }
     let text_objects_start = 32usize;
@@ -23032,7 +23050,7 @@ fn parse_emf_text_objects(
     } else {
         MAX_PASSIVE_WMF_TEXT_BYTES
     };
-    if char_count == 0 || char_count > max_char_count {
+    if char_count > max_char_count {
         return None;
     }
     let record_string_offset = usize::try_from(read_le_u32(data, offset.checked_add(12)?)?).ok()?;
@@ -23052,6 +23070,24 @@ fn parse_emf_text_objects(
     } else {
         None
     };
+    if char_count == 0 {
+        let (x, y) = normalized_emf_point(x, y, header, coordinates);
+        return Some(vec![ParsedEmfExtTextOut {
+            x,
+            y,
+            text: String::new(),
+            opaque_bounds: if options & EMF_ETO_OPAQUE != 0 {
+                bounds
+            } else {
+                None
+            },
+            clip_bounds: if options & EMF_ETO_CLIPPED != 0 {
+                bounds
+            } else {
+                None
+            },
+        }]);
+    }
     let byte_count = if unicode {
         char_count.checked_mul(2)?
     } else {
@@ -23146,7 +23182,8 @@ fn push_emf_text_command(
     if let (Some((left, top, right, bottom)), Some(fill_color)) =
         (text.opaque_bounds, state.background_color)
     {
-        if commands.len().checked_add(2)? > MAX_PASSIVE_WMF_COMMANDS {
+        let required_commands = if text.text.is_empty() { 1usize } else { 2usize };
+        if commands.len().checked_add(required_commands)? > MAX_PASSIVE_WMF_COMMANDS {
             return None;
         }
         commands.push(StaticImageVectorCommand::Rectangle {
@@ -23162,6 +23199,9 @@ fn push_emf_text_command(
         });
     } else if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
         return None;
+    }
+    if text.text.is_empty() {
+        return Some(());
     }
     commands.push(StaticImageVectorCommand::Text {
         x: text.x,
