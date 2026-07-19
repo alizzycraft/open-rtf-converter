@@ -20475,6 +20475,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYPOLYLINE: u32 = 7;
     const EMR_POLYPOLYGON: u32 = 8;
     const EMR_SETPIXELV: u32 = 15;
+    const EMR_SETMAPMODE: u32 = 17;
     const EMR_SETBKMODE: u32 = 18;
     const EMR_SETPOLYFILLMODE: u32 = 19;
     const EMR_SETSTRETCHBLTMODE: u32 = 21;
@@ -20853,6 +20854,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = parse_emf_raw_point_record(data)?;
                 if let Some(path) = active_path.as_mut() {
                     path.move_to(current_position, &header, &coordinates)?;
+                }
+            }
+            EMR_SETMAPMODE => {
+                if read_le_u32(data, 0)? != 1 {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             EMR_SETBKMODE => {
