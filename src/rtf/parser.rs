@@ -27500,16 +27500,58 @@ fn apply_passive_source_raster_transfer_mode(
 ) -> Option<ParsedVectorRasterImage> {
     match mode {
         PassiveSourceRasterTransferMode::Copy => Some(image),
-        PassiveSourceRasterTransferMode::Invert => {
-            if image.format != ImageFormat::Rgb8 || !image.palette.is_empty() {
-                return None;
+        PassiveSourceRasterTransferMode::Invert => match image.format {
+            ImageFormat::Rgb8 => {
+                if !image.palette.is_empty() {
+                    return None;
+                }
+                for byte in &mut image.bytes {
+                    *byte = u8::MAX.saturating_sub(*byte);
+                }
+                Some(image)
             }
-            for byte in &mut image.bytes {
-                *byte = u8::MAX.saturating_sub(*byte);
+            ImageFormat::Png => {
+                invert_png_scanline_bytes(&mut image.bytes, image.width_px, image.height_px, 3)?;
+                Some(image)
             }
-            Some(image)
+            ImageFormat::PngGrayscale => {
+                invert_png_scanline_bytes(&mut image.bytes, image.width_px, image.height_px, 1)?;
+                Some(image)
+            }
+            ImageFormat::PngIndexed => {
+                invert_indexed_palette(&mut image.palette)?;
+                Some(image)
+            }
+            _ => None,
+        },
+    }
+}
+
+fn invert_png_scanline_bytes(
+    bytes: &mut Vec<u8>,
+    width_px: u32,
+    height_px: u32,
+    components: usize,
+) -> Option<()> {
+    let (_, _, row_len, mut scanlines) =
+        unfiltered_png_scanlines(bytes, width_px, height_px, components)?;
+    for row in scanlines.chunks_exact_mut(row_len) {
+        for sample in &mut row[1..] {
+            *sample = u8::MAX.saturating_sub(*sample);
         }
     }
+    *bytes = miniz_oxide::deflate::compress_to_vec_zlib(&scanlines, 6);
+    Some(())
+}
+
+fn invert_indexed_palette(palette: &mut [u8]) -> Option<()> {
+    if palette.is_empty() || palette.len() % 3 != 0 {
+        return None;
+    }
+    for sample in palette {
+        *sample = u8::MAX.saturating_sub(*sample);
+    }
+    Some(())
 }
 
 fn inverted_color(color: Color) -> Color {
@@ -45221,6 +45263,43 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_notsrccopy_stretchdibits_bi_png_record_becomes_passive_inverted_raster_image() {
+        let png = minimal_rgb_png(&[[10, 20, 30], [200, 210, 220]]);
+        let dib = minimal_compressed_dib_with_payload(2, 1, 5, &png);
+        let records = [emf_stretchdibits_dib_record(
+            20,
+            15,
+            60,
+            30,
+            WMF_NOTSRCCOPY_RASTER_OP,
+            &dib,
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        let StaticImageVectorCommand::RasterImage { image, .. } = &image.vector_commands[0] else {
+            panic!("expected passive raster command");
+        };
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 7)
+            .expect("inverted PNG scanlines");
+        assert_eq!(scanlines, vec![0, 245, 235, 225, 55, 45, 35]);
+    }
+
+    #[test]
     fn emf_srcand_stretchdibits_after_paint_is_skipped_as_backdrop_dependent() {
         let records = [
             emf_rect_record(43, 0, 0, 30, 30),
@@ -45610,6 +45689,41 @@ After\par}"#;
                 && image.height_px == 1
                 && image.bytes == vec![0, 255, 255, 255, 0, 255]
         ));
+    }
+
+    #[test]
+    fn wmf_notsrccopy_stretchdib_indexed_bi_png_record_inverts_palette() {
+        let png = minimal_indexed_png_with_dimensions(2, 1);
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_NOTSRCCOPY_RASTER_OP,
+            &minimal_compressed_dib_with_payload(2, 1, 5, &png),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &[record]))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        let StaticImageVectorCommand::RasterImage { image, .. } = &image.vector_commands[0] else {
+            panic!("expected passive raster command");
+        };
+        assert_eq!(image.format, ImageFormat::PngIndexed);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.palette, vec![0, 255, 255, 255, 0, 255]);
+        assert!(!image.bytes.is_empty());
     }
 
     #[test]
