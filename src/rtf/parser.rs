@@ -20655,7 +20655,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     commands.extend(clip_commands);
                 } else if let Some(clip_start) = replaceable_clip_command_start {
                     let mut clip_commands =
-                        initial_vector_clip_commands_then_paint_only(&commands[clip_start..])?;
+                        offsettable_clip_commands_after_paint(&commands[clip_start..])?;
                     if commands
                         .len()
                         .checked_add(3)?
@@ -23395,6 +23395,50 @@ fn initial_vector_clip_commands_then_paint_only(
     (saw_clip && saw_paint).then_some(clip_commands)
 }
 
+fn offsettable_clip_commands_after_paint(
+    commands: &[StaticImageVectorCommand],
+) -> Option<Vec<StaticImageVectorCommand>> {
+    initial_vector_clip_commands_then_paint_only(commands)
+        .or_else(|| initial_vector_clip_commands_then_paint_then_clip_updates(commands))
+}
+
+fn initial_vector_clip_commands_then_paint_then_clip_updates(
+    commands: &[StaticImageVectorCommand],
+) -> Option<Vec<StaticImageVectorCommand>> {
+    let mut saw_initial_clip = false;
+    let mut saw_paint = false;
+    let mut saw_trailing_clip = false;
+    let mut clip_commands = Vec::new();
+    for command in commands {
+        match command {
+            StaticImageVectorCommand::ClipRect { .. }
+            | StaticImageVectorCommand::ClipPath { .. }
+                if !saw_paint =>
+            {
+                saw_initial_clip = true;
+                clip_commands.push(command.clone());
+            }
+            StaticImageVectorCommand::ClipRect { .. }
+            | StaticImageVectorCommand::ClipPath { .. } => {
+                saw_trailing_clip = true;
+                clip_commands.push(command.clone());
+            }
+            StaticImageVectorCommand::SaveState | StaticImageVectorCommand::RestoreState => {
+                return None;
+            }
+            _ if saw_trailing_clip => return None,
+            _ => {
+                if !saw_initial_clip {
+                    return None;
+                }
+                saw_paint = true;
+            }
+        }
+    }
+
+    (saw_initial_clip && saw_paint && saw_trailing_clip).then_some(clip_commands)
+}
+
 fn scoped_vector_clip_commands(
     commands: &[StaticImageVectorCommand],
     scope_start: usize,
@@ -23406,30 +23450,11 @@ fn scoped_vector_clip_commands(
         return None;
     }
 
-    let mut clip_commands = Vec::new();
-    let mut saw_painted_or_state_command = false;
-    for command in commands.get(scope_start.checked_add(1)?..)? {
-        match command {
-            StaticImageVectorCommand::ClipRect { .. }
-            | StaticImageVectorCommand::ClipPath { .. }
-                if !saw_painted_or_state_command =>
-            {
-                clip_commands.push(command.clone());
-            }
-            StaticImageVectorCommand::ClipRect { .. }
-            | StaticImageVectorCommand::ClipPath { .. } => {
-                return None;
-            }
-            StaticImageVectorCommand::SaveState | StaticImageVectorCommand::RestoreState => {
-                return None;
-            }
-            _ => {
-                saw_painted_or_state_command = true;
-            }
-        }
+    let scoped_commands = commands.get(scope_start.checked_add(1)?..)?;
+    if vector_commands_are_only_clip_updates(scoped_commands) {
+        return Some(scoped_commands.to_vec());
     }
-
-    (!clip_commands.is_empty()).then_some(clip_commands)
+    offsettable_clip_commands_after_paint(scoped_commands)
 }
 
 fn emf_commands_are_unpainted_clip_scope(commands: &[StaticImageVectorCommand]) -> bool {
@@ -27468,7 +27493,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     commands.extend(clip_commands);
                 } else if let Some(clip_start) = replaceable_clip_command_start {
                     let mut clip_commands =
-                        initial_vector_clip_commands_then_paint_only(&commands[clip_start..])?;
+                        offsettable_clip_commands_after_paint(&commands[clip_start..])?;
                     if commands
                         .len()
                         .checked_add(3)?
@@ -43196,7 +43221,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_offsetcliprgn_after_painted_unscoped_clip_mutation_becomes_passive_placeholder() {
+    fn emf_offsetcliprgn_after_painted_unscoped_clip_mutation_offsets_combined_clip() {
         let records = [
             emf_rect_record(30, 20, 20, 100, 60),
             emf_rect_record(43, 0, 0, 30, 30),
@@ -43210,12 +43235,68 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 9);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-            && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert_eq!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::ClipRect {
+                left: 40.0,
+                top: 30.0,
+                right: 120.0,
+                bottom: 70.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[6],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert_eq!(
+            image.vector_commands[7],
+            StaticImageVectorCommand::ClipRect {
+                left: 50.0,
+                top: 35.0,
+                right: 130.0,
+                bottom: 75.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[8],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
@@ -43286,7 +43367,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_offsetcliprgn_after_painted_clip_mutation_becomes_passive_placeholder() {
+    fn emf_offsetcliprgn_after_painted_saved_clip_mutation_offsets_combined_clip() {
         let records = [
             emf_unknown_record(33),
             emf_rect_record(30, 20, 20, 100, 60),
@@ -43301,12 +43382,72 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 10);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert_eq!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::ClipRect {
+                left: 40.0,
+                top: 30.0,
+                right: 120.0,
+                bottom: 70.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[6],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert_eq!(
+            image.vector_commands[7],
+            StaticImageVectorCommand::ClipRect {
+                left: 50.0,
+                top: 35.0,
+                right: 130.0,
+                bottom: 75.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[8],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(matches!(
+            image.vector_commands[9],
+            StaticImageVectorCommand::RestoreState
         ));
     }
 
@@ -53176,7 +53317,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_offsetcliprgn_after_painted_unscoped_clip_mutation_becomes_passive_placeholder() {
+    fn wmf_offsetcliprgn_after_painted_unscoped_clip_mutation_offsets_combined_clip() {
         let wmf_hex = concat!(
             "0100090000033d0000000100070000000000",
             "050000000c026400c800",
@@ -53191,12 +53332,68 @@ After\par}"#;
         );
         let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 9);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-            && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert_eq!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 40.0,
+                right: 120.0,
+                bottom: 70.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[6],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert_eq!(
+            image.vector_commands[7],
+            StaticImageVectorCommand::ClipRect {
+                left: 40.0,
+                top: 45.0,
+                right: 130.0,
+                bottom: 75.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[8],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
@@ -53269,7 +53466,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_offsetcliprgn_after_painted_clip_mutation_becomes_passive_placeholder() {
+    fn wmf_offsetcliprgn_after_painted_saved_clip_mutation_offsets_combined_clip() {
         let wmf_hex = concat!(
             "010009000003400000000100070000000000",
             "050000000c026400c800",
@@ -53285,12 +53482,72 @@ After\par}"#;
         );
         let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 10);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert_eq!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 40.0,
+                right: 120.0,
+                bottom: 70.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[6],
+            StaticImageVectorCommand::ClipRect {
+                left: 30.0,
+                top: 25.0,
+                right: 110.0,
+                bottom: 65.0,
+            }
+        );
+        assert_eq!(
+            image.vector_commands[7],
+            StaticImageVectorCommand::ClipRect {
+                left: 40.0,
+                top: 45.0,
+                right: 130.0,
+                bottom: 75.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[8],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert!(matches!(
+            image.vector_commands[9],
+            StaticImageVectorCommand::RestoreState
         ));
     }
 
