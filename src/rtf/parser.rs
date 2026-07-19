@@ -21219,11 +21219,15 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     _ => unreachable!(),
                 };
                 let blank_destination = emf_commands_are_unpainted_clip_scope(&commands);
-                if record_type == EMR_SETDIBITSTODEVICE {
+                if raster_transfer.is_some_and(|raster_transfer| {
+                    is_passive_invisible_emf_raster_transfer(data, raster_transfer.3)
+                }) {
+                } else if record_type == EMR_SETDIBITSTODEVICE {
                     if let Some(command) =
                         parse_emf_setdibitstodevice_srcopy(data, &header, &coordinates)
                     {
                         push_passive_source_raster_command(&mut commands, command)?;
+                    } else if is_passive_noop_emf_setdibitstodevice(data) {
                     } else {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
@@ -23734,9 +23738,27 @@ fn is_passive_noop_emf_alphablend(data: &[u8]) -> bool {
 }
 
 fn is_passive_invisible_emf_bitmap_transfer(data: &[u8]) -> bool {
-    data.len() >= 32
+    is_passive_invisible_emf_raster_transfer(data, 24)
+}
+
+fn is_passive_invisible_emf_raster_transfer(data: &[u8], destination_extent_offset: usize) -> bool {
+    let Some(width_offset) = destination_extent_offset.checked_add(4) else {
+        return false;
+    };
+    data.len() >= width_offset.checked_add(4).unwrap_or(usize::MAX)
         && matches!(
-            (read_le_i32(data, 24), read_le_i32(data, 28)),
+            (
+                read_le_i32(data, destination_extent_offset),
+                read_le_i32(data, width_offset)
+            ),
+            (Some(0), _) | (_, Some(0))
+        )
+}
+
+fn is_passive_noop_emf_setdibitstodevice(data: &[u8]) -> bool {
+    data.len() >= 68
+        && matches!(
+            (read_le_i32(data, 32), read_le_u32(data, 64)),
             (Some(0), _) | (_, Some(0))
         )
 }
@@ -47868,6 +47890,38 @@ After\par}"#;
                 },
                 &hidden_dib,
             ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_zero_extent_and_zero_scan_rasters_are_passive_noops_without_parsing_payloads() {
+        let mut hidden_dib =
+            b"INVISIBLE-EMF-RASTER-PAYLOAD /JavaScript /EmbeddedFile /Launch".to_vec();
+        hidden_dib.resize(64, 0x41);
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_bitblt_record(10, 20, 0, 24, WMF_PATCOPY_RASTER_OP, &hidden_dib),
+            emf_stretchblt_record(40, 20, 44, 0, WMF_PATCOPY_RASTER_OP, &hidden_dib),
+            emf_stretchdibits_record(70, 20, 0, 24, WMF_PATCOPY_RASTER_OP, &hidden_dib),
+            emf_setdibitstodevice_dib_record(100, 20, 44, 24, 0, 0, &hidden_dib),
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
