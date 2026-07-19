@@ -35995,6 +35995,131 @@ fn emf_selectclippath_copy_replaces_saved_painted_clip_without_payload_leakage()
 }
 
 #[test]
+fn emf_empty_ended_path_paint_records_are_noops_without_payload_leakage() {
+    let mut stroke = emf_unknown_record(64);
+    stroke.extend_from_slice(b"EMPTY-EMF-STROKEPATH /JavaScript");
+    stroke.resize(stroke.len().next_multiple_of(4), 0);
+    let stroke_len = stroke.len() as u32;
+    write_test_le_u32(&mut stroke, 4, stroke_len);
+
+    let mut fill = emf_unknown_record(62);
+    fill.extend_from_slice(b"EMPTY-EMF-FILLPATH /EmbeddedFile");
+    fill.resize(fill.len().next_multiple_of(4), 0);
+    let fill_len = fill.len() as u32;
+    write_test_le_u32(&mut fill, 4, fill_len);
+
+    let mut stroke_and_fill = emf_unknown_record(63);
+    stroke_and_fill.extend_from_slice(b"EMPTY-EMF-STROKEANDFILLPATH /Launch");
+    stroke_and_fill.resize(stroke_and_fill.len().next_multiple_of(4), 0);
+    let stroke_and_fill_len = stroke_and_fill.len() as u32;
+    write_test_le_u32(&mut stroke_and_fill, 4, stroke_and_fill_len);
+
+    let records = [
+        emf_unknown_record(59),
+        emf_point_record(27, 20, 20),
+        emf_point_record(54, 20, 20),
+        emf_unknown_record(60),
+        stroke,
+        emf_unknown_record(59),
+        emf_point_record(27, 30, 30),
+        emf_point_record(54, 30, 30),
+        emf_unknown_record(60),
+        fill,
+        emf_unknown_record(59),
+        emf_point_record(27, 40, 40),
+        emf_point_record(54, 40, 40),
+        emf_unknown_record(60),
+        stroke_and_fill,
+        emf_rect_record(43, 0, 0, 80, 40),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF empty path vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "STROKEPATH",
+        "FILLPATH",
+        "STROKEANDFILLPATH",
+        "EMPTY-EMF-STROKEPATH",
+        "EMPTY-EMF-FILLPATH",
+        "EMPTY-EMF-STROKEANDFILLPATH",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "empty EMF path payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "painting after empty EMF path no-ops should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMPTY-EMF-STROKEPATH",
+        b"EMPTY-EMF-FILLPATH",
+        b"EMPTY-EMF-STROKEANDFILLPATH",
+        b"STROKEPATH",
+        b"FILLPATH",
+        b"STROKEANDFILLPATH",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "empty EMF path payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_exttextoutw_records_render_passively_without_payload_leakage() {
     let records = [
         emf_u32_record(24, 0x0033_2211),

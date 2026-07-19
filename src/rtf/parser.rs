@@ -20178,6 +20178,10 @@ impl EmfPathBuilder {
         })
     }
 
+    fn is_passive_empty(&self) -> bool {
+        !self.collecting && self.segments.is_empty()
+    }
+
     fn line_only_points(&self) -> Option<Vec<(f32, f32)>> {
         let mut points = Vec::new();
         for segment in &self.segments {
@@ -20957,6 +20961,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_STROKEPATH => {
                 let path = active_path.take()?;
+                if path.is_passive_empty() {
+                    pos = record_end;
+                    continue;
+                }
                 let path_commands = path.stroke_commands(
                     state.stroke_color,
                     state.stroke_width,
@@ -20972,6 +20980,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 let path = active_path.take()?;
+                if path.is_passive_empty() {
+                    pos = record_end;
+                    continue;
+                }
                 let (stroke_color, stroke_width) = if record_type == EMR_STROKEANDFILLPATH {
                     (state.stroke_color, state.stroke_width)
                 } else {
@@ -42549,7 +42561,71 @@ After\par}"#;
             Block::Image(image)
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_empty_ended_path_paint_records_are_passive_noops() {
+        let mut stroke = emf_unknown_record(64);
+        stroke.extend_from_slice(b"EMPTY-EMF-STROKEPATH /JavaScript");
+        stroke.resize(stroke.len().next_multiple_of(4), 0);
+        let stroke_len = stroke.len() as u32;
+        write_test_le_u32(&mut stroke, 4, stroke_len);
+
+        let mut fill = emf_unknown_record(62);
+        fill.extend_from_slice(b"EMPTY-EMF-FILLPATH /EmbeddedFile");
+        fill.resize(fill.len().next_multiple_of(4), 0);
+        let fill_len = fill.len() as u32;
+        write_test_le_u32(&mut fill, 4, fill_len);
+
+        let mut stroke_and_fill = emf_unknown_record(63);
+        stroke_and_fill.extend_from_slice(b"EMPTY-EMF-STROKEANDFILLPATH /Launch");
+        stroke_and_fill.resize(stroke_and_fill.len().next_multiple_of(4), 0);
+        let stroke_and_fill_len = stroke_and_fill.len() as u32;
+        write_test_le_u32(&mut stroke_and_fill, 4, stroke_and_fill_len);
+
+        let records = [
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_point_record(54, 20, 20),
+            emf_unknown_record(60),
+            stroke,
+            emf_unknown_record(59),
+            emf_point_record(27, 30, 30),
+            emf_point_record(54, 30, 30),
+            emf_unknown_record(60),
+            fill,
+            emf_unknown_record(59),
+            emf_point_record(27, 40, 40),
+            emf_point_record(54, 40, 40),
+            emf_unknown_record(60),
+            stroke_and_fill,
+            emf_rect_record(43, 0, 0, 60, 30),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 0.0,
+                top: 0.0,
+                right: 60.0,
+                bottom: 30.0,
+                ..
+            }
         ));
     }
 
