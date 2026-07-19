@@ -28785,6 +28785,102 @@ fn wmf_offsetcliprgn_offsets_unpainted_clip_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_zero_offsetcliprgn_is_noop_without_payload_leakage() {
+    let mut offset = wmf_yx_record(0x0220, 0, 0);
+    offset.extend_from_slice(b"ZERO-OFFSET-WMF-OFFSETCLIPRGN /JavaScript /EmbeddedFile /Launch");
+    offset.resize(offset.len().next_multiple_of(2), 0);
+    let offset_len_words = (offset.len() / 2) as u32;
+    write_test_le_u32(&mut offset, 0, offset_len_words);
+    let records = [
+        wmf_bounds_record(0x041b, 0, 0, 80, 40),
+        offset,
+        wmf_bounds_record(0x041b, 90, 10, 130, 50),
+    ];
+    let wmf = minimal_wmf_with_records(200, 100, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF zero-offset clip vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in [
+        "wmetafile",
+        "OFFSETCLIPRGN",
+        "ZERO-OFFSET-WMF-OFFSETCLIPRGN",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "zero-offset WMF OffsetClipRgn payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "painting before and after zero-offset WMF OffsetClipRgn should render"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"ZERO-OFFSET-WMF-OFFSETCLIPRGN",
+        b"OFFSETCLIPRGN",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero-offset WMF OffsetClipRgn payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_offsetcliprgn_offsets_saved_painted_clip_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003390000000100070000000000",
@@ -58515,6 +58611,15 @@ fn wmf_bounds_record(function: u16, left: i16, top: i16, right: i16, bottom: i16
     write_test_le_i16(&mut record, 8, right);
     write_test_le_i16(&mut record, 10, top);
     write_test_le_i16(&mut record, 12, left);
+    record
+}
+
+fn wmf_yx_record(function: u16, y: i16, x: i16) -> Vec<u8> {
+    let mut record = vec![0; 10];
+    write_test_le_u32(&mut record, 0, 5);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_i16(&mut record, 6, y);
+    write_test_le_i16(&mut record, 8, x);
     record
 }
 

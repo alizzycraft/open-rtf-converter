@@ -27268,6 +27268,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0220 => {
+                if is_passive_zero_wmf_offset_clip_region(data) {
+                    pos = record_end;
+                    continue;
+                }
                 let (offset_x, offset_y) =
                     parse_wmf_offset_clip_region(data, window_width, window_height)?;
                 if let Some(clip_start) = replaceable_clip_command_start
@@ -27923,6 +27927,14 @@ fn parse_wmf_offset_clip_region(
         x.clamp(-window_width.max(1), window_width.max(1)) as f32,
         y.clamp(-window_height.max(1), window_height.max(1)) as f32,
     ))
+}
+
+fn is_passive_zero_wmf_offset_clip_region(data: &[u8]) -> bool {
+    data.len() >= 4
+        && matches!(
+            (read_le_i16(data, 0), read_le_i16(data, 2)),
+            (Some(0), Some(0))
+        )
 }
 
 fn offset_vector_clip_command(
@@ -52344,6 +52356,54 @@ After\par}"#;
     }
 
     #[test]
+    fn wmf_zero_offsetcliprgn_is_passive_noop_without_clip_state() {
+        let mut offset = wmf_yx_record(0x0220, 0, 0);
+        offset.extend_from_slice(b"ZERO-OFFSET-WMF-OFFSETCLIPRGN /JavaScript");
+        offset.resize(offset.len().next_multiple_of(2), 0);
+        let offset_len_words = (offset.len() / 2) as u32;
+        write_test_le_u32(&mut offset, 0, offset_len_words);
+        let records = [
+            wmf_bounds_record(0x041b, 0, 0, 30, 30),
+            offset,
+            wmf_bounds_record(0x041b, 40, 10, 80, 40),
+        ];
+        let output = parse_rtf(&format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        ))
+        .unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 0.0,
+                top: 0.0,
+                right: 30.0,
+                bottom: 30.0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 40.0,
+                top: 10.0,
+                right: 80.0,
+                bottom: 40.0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn wmf_excludecliprect_after_unpainted_clip_rect_becomes_passive_exclude_clip_path() {
         let records = [
             wmf_bounds_record(0x0416, 10, 10, 120, 70),
@@ -53521,6 +53581,16 @@ fn wmf_bounds_record(function: u16, left: i16, top: i16, right: i16, bottom: i16
     write_test_le_i16(&mut record, 8, right);
     write_test_le_i16(&mut record, 10, top);
     write_test_le_i16(&mut record, 12, left);
+    record
+}
+
+#[cfg(test)]
+fn wmf_yx_record(function: u16, y: i16, x: i16) -> Vec<u8> {
+    let mut record = vec![0; 10];
+    write_test_le_u32(&mut record, 0, 5);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_i16(&mut record, 6, y);
+    write_test_le_i16(&mut record, 8, x);
     record
 }
 
