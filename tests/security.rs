@@ -29137,6 +29137,109 @@ fn wmf_excludecliprect_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_excludecliprect_after_unpainted_clip_rect_renders_passively_without_payload_leakage() {
+    let records = [
+        wmf_bounds_record(0x0416, 10, 10, 120, 70),
+        wmf_bounds_record(0x0415, 40, 20, 80, 50),
+        wmf_bounds_record(0x041b, 0, 0, 160, 80),
+    ];
+    let wmf = minimal_wmf_with_records(200, 100, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex} 2f4a617661536372697074 2f456d62656464656446696c65}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF exclude-clipped vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::ClipPath {
+            start: (10.0, 10.0),
+            fill_rule: StaticImageVectorFillRule::Alternate,
+            segments,
+            ..
+        } if segments.iter().any(|segment| matches!(
+            segment,
+            StaticImageVectorPathSegment::MoveTo(40.0, 20.0)
+        ))
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in ["wmetafile", "JavaScript", "EmbeddedFile", "1504", "1604"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF active ExcludeClipRect internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W*"),
+        "WMF active ExcludeClipRect should render a passive even-odd clipping path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after WMF active ExcludeClipRect should still render"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF active ExcludeClipRect preview leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_non_rectangular_hatched_brushes_render_with_passive_clipping() {
     let wmf_hex = concat!(
         "0100090000032d00000001000a0000000000",
@@ -54129,6 +54232,17 @@ fn wmf_set_window_ext_record(width: i16, height: i16) -> Vec<u8> {
     write_test_le_u16(&mut record, 4, 0x020c);
     write_test_le_i16(&mut record, 6, height);
     write_test_le_i16(&mut record, 8, width);
+    record
+}
+
+fn wmf_bounds_record(function: u16, left: i16, top: i16, right: i16, bottom: i16) -> Vec<u8> {
+    let mut record = vec![0; 14];
+    write_test_le_u32(&mut record, 0, 7);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_i16(&mut record, 6, bottom);
+    write_test_le_i16(&mut record, 8, right);
+    write_test_le_i16(&mut record, 10, top);
+    write_test_le_i16(&mut record, 12, left);
     record
 }
 

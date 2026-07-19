@@ -20719,9 +20719,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if region_mode == EMF_RGN_DIFF && clip_active {
                     let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
                     if let Some(clip_start) = replaceable_clip_command_start {
-                        if let Some(command) =
-                            emf_diff_from_unpainted_clip_rect_command(&commands, clip_start, rects)?
-                        {
+                        if let Some(command) = vector_diff_from_unpainted_clip_rect_command(
+                            &commands, clip_start, rects,
+                        )? {
                             commands.truncate(clip_start);
                             commands.push(command);
                         }
@@ -21826,7 +21826,7 @@ fn emf_exclude_clip_region_command(
     })
 }
 
-fn emf_diff_from_unpainted_clip_rect_command(
+fn vector_diff_from_unpainted_clip_rect_command(
     commands: &[StaticImageVectorCommand],
     clip_start: usize,
     rects: Vec<(f32, f32, f32, f32)>,
@@ -26418,14 +26418,25 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         bottom,
                     });
                 } else {
-                    commands.push(wmf_exclude_clip_rect_command(
-                        window_width,
-                        window_height,
-                        left,
-                        top,
-                        right,
-                        bottom,
-                    )?);
+                    if let Some(clip_start) = replaceable_clip_command_start {
+                        if let Some(command) = vector_diff_from_unpainted_clip_rect_command(
+                            &commands,
+                            clip_start,
+                            vec![(left, top, right, bottom)],
+                        )? {
+                            commands.truncate(clip_start);
+                            commands.push(command);
+                        }
+                    } else {
+                        commands.push(wmf_exclude_clip_rect_command(
+                            window_width,
+                            window_height,
+                            left,
+                            top,
+                            right,
+                            bottom,
+                        )?);
+                    }
                 }
                 if replaceable_clip_command_start.is_none() {
                     replaceable_clip_command_start = commands.len().checked_sub(1);
@@ -47860,6 +47871,84 @@ After\par}"#;
     }
 
     #[test]
+    fn wmf_excludecliprect_after_unpainted_clip_rect_becomes_passive_exclude_clip_path() {
+        let records = [
+            wmf_bounds_record(0x0416, 10, 10, 120, 70),
+            wmf_bounds_record(0x0415, 40, 20, 80, 50),
+            wmf_bounds_record(0x041b, 0, 0, 160, 80),
+        ];
+        let output = parse_rtf(&format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        ))
+        .unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipPath {
+                start: (10.0, 10.0),
+                ref segments,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                ..
+            } if segments.starts_with(&[
+                StaticImageVectorPathSegment::LineTo(120.0, 10.0),
+                StaticImageVectorPathSegment::LineTo(120.0, 70.0),
+                StaticImageVectorPathSegment::LineTo(10.0, 70.0),
+                StaticImageVectorPathSegment::LineTo(10.0, 10.0),
+                StaticImageVectorPathSegment::MoveTo(40.0, 20.0),
+            ]) && segments.len() == 9
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn wmf_excludecliprect_disjoint_from_unpainted_clip_rect_is_passive_noop() {
+        let records = [
+            wmf_bounds_record(0x0416, 10, 10, 120, 70),
+            wmf_bounds_record(0x0415, 130, 20, 150, 50),
+            wmf_bounds_record(0x041b, 0, 0, 160, 80),
+        ];
+        let output = parse_rtf(&format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        ))
+        .unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 10.0,
+                top: 10.0,
+                right: 120.0,
+                bottom: 70.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
     fn wmf_offsetcliprgn_after_painted_clip_offsets_unscoped_clip() {
         let wmf_hex = concat!(
             "010009000003360000000100070000000000",
@@ -48947,6 +49036,18 @@ fn wmf_set_window_ext_record(width: i16, height: i16) -> Vec<u8> {
     write_test_le_u16(&mut record, 4, 0x020c);
     write_test_le_i16(&mut record, 6, height);
     write_test_le_i16(&mut record, 8, width);
+    record
+}
+
+#[cfg(test)]
+fn wmf_bounds_record(function: u16, left: i16, top: i16, right: i16, bottom: i16) -> Vec<u8> {
+    let mut record = vec![0; 14];
+    write_test_le_u32(&mut record, 0, 7);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_i16(&mut record, 6, bottom);
+    write_test_le_i16(&mut record, 8, right);
+    write_test_le_i16(&mut record, 10, top);
+    write_test_le_i16(&mut record, 12, left);
     record
 }
 
