@@ -43492,6 +43492,139 @@ fn black_brush_mergecopy_raster_transfers_render_passively_without_payload_leaka
 }
 
 #[test]
+fn mergecopy_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage() {
+    let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 85, 204], [170, 85, 204]]);
+    emf_dib.extend_from_slice(b"TRAILING-EMF-SOLID-MERGECOPY-DIB /JavaScript");
+    let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 85, 204], [170, 85, 204]]);
+    wmf_dib.extend_from_slice(b"TRAILING-WMF-SOLID-MERGECOPY-DIB /EmbeddedFile");
+    let brush_color = Color {
+        red: 240,
+        green: 15,
+        blue: 170,
+    };
+    let emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[
+            emf_create_brush_record(3, 0, brush_color, 0),
+            emf_select_object_record(3),
+            emf_stretchdibits_dib_record(20, 15, 60, 30, 0x00c0_00ca, &emf_dib),
+        ],
+    );
+    let wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(brush_color),
+            wmf_select_object_record(0),
+            wmf_stretchdib_dib_record(15, 25, 80, 40, 0x00c0_00ca, &wmf_dib),
+        ],
+    );
+    let emf_hex = bytes_to_hex(&emf);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].vector_commands.len(), 1);
+    assert_eq!(images[1].vector_commands.len(), 1);
+    for image in &images {
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                fill_color: Some(Color {
+                    red: 160,
+                    green: 5,
+                    blue: 136
+                }),
+                ..
+            }
+        ));
+    }
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "wmetafile",
+        "TRAILING-EMF-SOLID-MERGECOPY-DIB",
+        "TRAILING-WMF-SOLID-MERGECOPY-DIB",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "solid MERGECOPY payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "solid MERGECOPY reductions should render passive PDF rectangles"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        b"wmetafile",
+        emf_hex.as_bytes(),
+        wmf_hex.as_bytes(),
+        b"TRAILING-EMF-SOLID-MERGECOPY-DIB",
+        b"TRAILING-WMF-SOLID-MERGECOPY-DIB",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "solid MERGECOPY source payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn nonblack_mergecopy_embedded_rasters_render_without_payload_leakage() {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 63, 170], [15, 240, 85]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-MERGECOPY-DIB /JavaScript");

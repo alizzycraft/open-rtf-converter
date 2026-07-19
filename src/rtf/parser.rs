@@ -28419,6 +28419,9 @@ fn apply_passive_source_raster_transfer_mode(
     match mode {
         PassiveSourceRasterTransferMode::Copy => Some(PassiveSourceRasterTransfer::Image(image)),
         PassiveSourceRasterTransferMode::Mask(color) => {
+            if let Some(source) = vector_raster_solid_color(&image) {
+                return Some(PassiveSourceRasterTransfer::Solid(and_color(source, color)));
+            }
             mask_vector_raster_image(&mut image, color)?;
             Some(PassiveSourceRasterTransfer::Image(image))
         }
@@ -45120,6 +45123,61 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_mergecopy_solid_source_paints_source_and_brush_rectangle() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 240,
+                    green: 15,
+                    blue: 170,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_MERGECOPY_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 85, 204], [170, 85, 204]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 160,
+                    green: 5,
+                    blue: 136
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn emf_notpatcopy_stretchdibits_ignores_source_and_paints_inverted_brush() {
         let records = [
             emf_create_brush_record(
@@ -48932,6 +48990,57 @@ After\par}"#;
                     red: 0,
                     green: 0,
                     blue: 0
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_mergecopy_solid_source_paints_source_and_brush_rectangle() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color {
+                red: 240,
+                green: 15,
+                blue: 170,
+            }),
+            wmf_select_object_record(0),
+            wmf_stretchdib_dib_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_MERGECOPY_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 85, 204], [170, 85, 204]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 160,
+                    green: 5,
+                    blue: 136
                 }),
                 ..
             }
