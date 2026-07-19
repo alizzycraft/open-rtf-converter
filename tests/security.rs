@@ -40026,6 +40026,124 @@ fn emf_invisible_alpha_and_transparent_bitmap_transfers_are_noops_without_payloa
 }
 
 #[test]
+fn emf_zero_source_alpha_and_transparent_bitmap_transfers_are_noops_without_payload_leakage() {
+    let mut hidden_dib =
+        b"ZERO-SOURCE-EMF-BITMAP-TRANSFER-DIB /JavaScript /EmbeddedFile /Launch".to_vec();
+    hidden_dib.resize(96, 0x41);
+    let mut alphablend = emf_alphablend_dib_record(18, 24, 48, 28, 0xff, 0, &hidden_dib);
+    write_test_le_i32(&mut alphablend, 100, 0);
+    let mut transparentblt = emf_transparentblt_dib_record(
+        70,
+        24,
+        48,
+        28,
+        Color {
+            red: 255,
+            green: 0,
+            blue: 0,
+        },
+        &hidden_dib,
+    );
+    write_test_le_i32(&mut transparentblt, 104, 0);
+    let records = [
+        emf_rect_record(43, 0, 0, 80, 40),
+        alphablend,
+        transparentblt,
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF zero-source bitmap transfer vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in [
+        "emfblip",
+        "ZERO-SOURCE-EMF-BITMAP-TRANSFER-DIB",
+        "ALPHABLEND",
+        "TRANSPARENTBLT",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "zero-source EMF bitmap-transfer payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("unsupported EMF record") })
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 1,
+        "preexisting paint before zero-source bitmap transfers should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"ZERO-SOURCE-EMF-BITMAP-TRANSFER-DIB",
+        b"ALPHABLEND",
+        b"TRANSPARENTBLT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero-source EMF bitmap-transfer payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_zero_extent_and_zero_scan_rasters_are_noops_without_payload_leakage() {
     let mut hidden_dib = b"INVISIBLE-EMF-RASTER-PAYLOAD /JavaScript /EmbeddedFile /Launch".to_vec();
     hidden_dib.resize(96, 0x41);

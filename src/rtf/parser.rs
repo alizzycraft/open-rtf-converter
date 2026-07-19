@@ -21362,6 +21362,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     commands.push(command);
                 } else if is_passive_noop_emf_alphablend(data)
                     || is_passive_invisible_emf_bitmap_transfer(data)
+                    || is_passive_noop_emf_bitmap_transfer_source_extent(data)
                 {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -21373,7 +21374,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 if let Some(command) = parse_emf_transparentblt_keyed(data, &header, &coordinates) {
                     commands.push(command);
-                } else if is_passive_invisible_emf_bitmap_transfer(data) {
+                } else if is_passive_invisible_emf_bitmap_transfer(data)
+                    || is_passive_noop_emf_bitmap_transfer_source_extent(data)
+                {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -23743,6 +23746,14 @@ fn is_passive_noop_emf_alphablend(data: &[u8]) -> bool {
 
 fn is_passive_invisible_emf_bitmap_transfer(data: &[u8]) -> bool {
     is_passive_invisible_emf_raster_transfer(data, 24)
+}
+
+fn is_passive_noop_emf_bitmap_transfer_source_extent(data: &[u8]) -> bool {
+    data.len() >= 100
+        && matches!(
+            (read_le_i32(data, 92), read_le_i32(data, 96)),
+            (Some(0), _) | (_, Some(0))
+        )
 }
 
 fn is_passive_invisible_emf_raster_transfer(data: &[u8], destination_extent_offset: usize) -> bool {
@@ -47961,6 +47972,51 @@ After\par}"#;
                 },
                 &hidden_dib,
             ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_zero_source_alpha_and_transparent_bitmap_transfers_are_passive_noops() {
+        let mut hidden_dib =
+            b"ZERO-SOURCE-EMF-BITMAP-TRANSFER-DIB /JavaScript /EmbeddedFile".to_vec();
+        hidden_dib.resize(64, 0x41);
+        let mut alphablend = emf_alphablend_dib_record(10, 20, 44, 24, 0xff, 0, &hidden_dib);
+        write_test_le_i32(&mut alphablend, 100, 0);
+        let mut transparentblt = emf_transparentblt_dib_record(
+            40,
+            20,
+            44,
+            24,
+            Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            &hidden_dib,
+        );
+        write_test_le_i32(&mut transparentblt, 104, 0);
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            alphablend,
+            transparentblt,
         ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
