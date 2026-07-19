@@ -19981,8 +19981,11 @@ impl EmfPathBuilder {
         header: &ParsedEmfHeader,
         coordinates: &EmfCoordinateState,
     ) -> Option<()> {
-        if !self.collecting || raw_points.is_empty() {
+        if !self.collecting {
             return None;
+        }
+        if raw_points.is_empty() {
+            return Some(());
         }
         let mut points = Vec::with_capacity(raw_points.len().checked_add(1)?);
         points.push(normalized_emf_point(
@@ -24634,7 +24637,7 @@ fn parse_emf_raw_poly_points(data: &[u8]) -> Option<Vec<(i32, i32)>> {
         return None;
     }
     let count = usize::try_from(read_le_u32(data, 16)?).ok()?;
-    if count == 0 || count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+    if count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
         return None;
     }
     let points_start = 20usize;
@@ -24672,7 +24675,7 @@ fn parse_emf_raw_poly16_points(data: &[u8]) -> Option<Vec<(i32, i32)>> {
         return None;
     }
     let count = usize::try_from(read_le_u32(data, 16)?).ok()?;
-    if count == 0 || count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+    if count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
         return None;
     }
     let points_start = 20usize;
@@ -24753,7 +24756,7 @@ fn parse_emf_raw_polydraw(data: &[u8], compact_points: bool) -> Option<(Vec<(i32
         return None;
     }
     let count = usize::try_from(read_le_u32(data, 16)?).ok()?;
-    if count == 0 || count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+    if count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
         return None;
     }
     let point_size = if compact_points { 4usize } else { 8usize };
@@ -25092,9 +25095,10 @@ fn parse_emf_poly_poly_points(
     }
     let polygon_count = usize::try_from(read_le_u32(data, 16)?).ok()?;
     let point_count = usize::try_from(read_le_u32(data, 20)?).ok()?;
-    if polygon_count == 0
-        || polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD
-        || point_count == 0
+    if polygon_count == 0 && point_count != 0 {
+        return None;
+    }
+    if polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD
         || point_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD
     {
         return None;
@@ -25112,9 +25116,6 @@ fn parse_emf_poly_poly_points(
     let mut total_count = 0usize;
     for idx in 0..polygon_count {
         let count = usize::try_from(read_le_u32(data, counts_start + (idx * 4))?).ok()?;
-        if count == 0 {
-            return None;
-        }
         total_count = total_count.checked_add(count)?;
         if total_count > point_count {
             return None;
@@ -25151,9 +25152,10 @@ fn parse_emf_poly_poly16_points(
     }
     let polygon_count = usize::try_from(read_le_u32(data, 16)?).ok()?;
     let point_count = usize::try_from(read_le_u32(data, 20)?).ok()?;
-    if polygon_count == 0
-        || polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD
-        || point_count == 0
+    if polygon_count == 0 && point_count != 0 {
+        return None;
+    }
+    if polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD
         || point_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD
     {
         return None;
@@ -25171,9 +25173,6 @@ fn parse_emf_poly_poly16_points(
     let mut total_count = 0usize;
     for idx in 0..polygon_count {
         let count = usize::try_from(read_le_u32(data, counts_start + (idx * 4))?).ok()?;
-        if count == 0 {
-            return None;
-        }
         total_count = total_count.checked_add(count)?;
         if total_count > point_count {
             return None;
@@ -30051,7 +30050,7 @@ fn parse_wmf_point_list(
     window_height: i32,
 ) -> Option<Vec<(f32, f32)>> {
     let count = usize::from(read_le_u16(data, 0)?);
-    if count == 0 || count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+    if count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
         return None;
     }
     let points_bytes = count.checked_mul(4)?;
@@ -30082,7 +30081,7 @@ fn parse_wmf_polypolygon_list(
     window_height: i32,
 ) -> Option<Vec<Vec<(f32, f32)>>> {
     let polygon_count = usize::from(read_le_u16(data, 0)?);
-    if polygon_count == 0 || polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+    if polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
         return None;
     }
     let counts_bytes = polygon_count.checked_mul(2)?;
@@ -30091,9 +30090,6 @@ fn parse_wmf_polypolygon_list(
     for index in 0..polygon_count {
         let offset = 2usize.checked_add(index.checked_mul(2)?)?;
         let count = usize::from(read_le_u16(data, offset)?);
-        if count == 0 {
-            return None;
-        }
         total_points = total_points.checked_add(count)?;
         if total_points > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
             return None;

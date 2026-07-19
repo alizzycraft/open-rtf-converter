@@ -28678,6 +28678,122 @@ fn wmf_incomplete_bezier_only_renders_blank_vector_without_payload_leakage() {
 }
 
 #[test]
+fn zero_count_wmf_poly_records_are_noops_without_payload_leakage() {
+    let mut polygon = wmf_point_list_record(0x0324, &[]);
+    polygon.extend_from_slice(b"ZERO-WMF-POLYGON /JavaScript /EmbeddedFile");
+    polygon.resize(polygon.len().next_multiple_of(2), 0);
+    let polygon_len_words = (polygon.len() / 2) as u32;
+    write_test_le_u32(&mut polygon, 0, polygon_len_words);
+
+    let mut polyline = wmf_point_list_record(0x0325, &[]);
+    polyline.extend_from_slice(b"ZERO-WMF-POLYLINE /Launch /OpenAction");
+    polyline.resize(polyline.len().next_multiple_of(2), 0);
+    let polyline_len_words = (polyline.len() / 2) as u32;
+    write_test_le_u32(&mut polyline, 0, polyline_len_words);
+
+    let mut polybezier = wmf_point_list_record(0x1005, &[]);
+    polybezier.extend_from_slice(b"ZERO-WMF-POLYBEZIER /RichMedia");
+    polybezier.resize(polybezier.len().next_multiple_of(2), 0);
+    let polybezier_len_words = (polybezier.len() / 2) as u32;
+    write_test_le_u32(&mut polybezier, 0, polybezier_len_words);
+
+    let records = [
+        polygon,
+        polyline,
+        polybezier,
+        wmf_bounds_record(0x041b, 0, 0, 80, 40),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal2160\\pichgoal1080 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive zero-count WMF vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in [
+        "wmetafile",
+        "ZERO-WMF-POLYGON",
+        "ZERO-WMF-POLYLINE",
+        "ZERO-WMF-POLYBEZIER",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "OpenAction",
+        "RichMedia",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "zero-count WMF payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "painting after zero-count WMF poly no-ops should still render"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"ZERO-WMF-POLYGON",
+        b"ZERO-WMF-POLYLINE",
+        b"ZERO-WMF-POLYBEZIER",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero-count WMF payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_polypolygon_records_render_compound_path_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003360000000100160000000000",
@@ -48376,6 +48492,140 @@ fn emf_incomplete_bezier_records_are_noops_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "incomplete EMF Bezier payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn zero_count_emf_poly_records_are_noops_without_payload_leakage() {
+    let mut polygon = emf_poly_record(3, &[]);
+    polygon.extend_from_slice(b"ZERO-EMF-POLYGON /JavaScript /EmbeddedFile");
+    polygon.resize(polygon.len().next_multiple_of(4), 0);
+    let polygon_len = polygon.len() as u32;
+    write_test_le_u32(&mut polygon, 4, polygon_len);
+
+    let mut polyline = emf_poly_record(4, &[]);
+    polyline.extend_from_slice(b"ZERO-EMF-POLYLINE /Launch");
+    polyline.resize(polyline.len().next_multiple_of(4), 0);
+    let polyline_len = polyline.len() as u32;
+    write_test_le_u32(&mut polyline, 4, polyline_len);
+
+    let mut polybezier = emf_poly_record(2, &[]);
+    polybezier.extend_from_slice(b"ZERO-EMF-POLYBEZIER /OpenAction");
+    polybezier.resize(polybezier.len().next_multiple_of(4), 0);
+    let polybezier_len = polybezier.len() as u32;
+    write_test_le_u32(&mut polybezier, 4, polybezier_len);
+
+    let mut polyline16 = emf_poly16_record(87, &[]);
+    polyline16.extend_from_slice(b"ZERO-EMF-POLYLINE16 /RichMedia");
+    polyline16.resize(polyline16.len().next_multiple_of(4), 0);
+    let polyline16_len = polyline16.len() as u32;
+    write_test_le_u32(&mut polyline16, 4, polyline16_len);
+
+    let mut polydraw = emf_polydraw_record(56, &[], &[]);
+    polydraw.extend_from_slice(b"ZERO-EMF-POLYDRAW /Subtype /Image");
+    polydraw.resize(polydraw.len().next_multiple_of(4), 0);
+    let polydraw_len = polydraw.len() as u32;
+    write_test_le_u32(&mut polydraw, 4, polydraw_len);
+
+    let records = [
+        polygon,
+        polyline,
+        polybezier,
+        polyline16,
+        polydraw,
+        emf_rect_record(43, 0, 0, 80, 40),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive zero-count EMF vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "ZERO-EMF-POLYGON",
+        "ZERO-EMF-POLYLINE",
+        "ZERO-EMF-POLYBEZIER",
+        "ZERO-EMF-POLYLINE16",
+        "ZERO-EMF-POLYDRAW",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "OpenAction",
+        "RichMedia",
+        "Subtype",
+        "Image",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "zero-count EMF payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "painting after zero-count EMF poly no-ops should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"ZERO-EMF-POLYGON",
+        b"ZERO-EMF-POLYLINE",
+        b"ZERO-EMF-POLYBEZIER",
+        b"ZERO-EMF-POLYLINE16",
+        b"ZERO-EMF-POLYDRAW",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/Subtype /Image",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero-count EMF payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
