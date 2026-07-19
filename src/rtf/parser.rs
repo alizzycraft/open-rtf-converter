@@ -21286,6 +21286,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             raster_transfer.1,
                             state.fill_color,
                         ) {
+                        } else if is_passive_noop_emf_stretchdibits_source_extent(data) {
                         } else {
                             skipped_record_count = skipped_record_count.checked_add(1)?;
                         }
@@ -21345,6 +21346,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 {
                 } else if let Some(raster_transfer) = raster_transfer
                     && is_passive_noop_raster_transfer(data, raster_transfer.1, state.fill_color)
+                {
+                } else if record_type == EMR_STRETCHBLT
+                    && is_passive_noop_emf_stretchblt_source_extent(data)
                 {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -23759,6 +23763,22 @@ fn is_passive_noop_emf_setdibitstodevice(data: &[u8]) -> bool {
     data.len() >= 68
         && matches!(
             (read_le_i32(data, 32), read_le_u32(data, 64)),
+            (Some(0), _) | (_, Some(0))
+        )
+}
+
+fn is_passive_noop_emf_stretchblt_source_extent(data: &[u8]) -> bool {
+    data.len() >= 100
+        && matches!(
+            (read_le_i32(data, 92), read_le_i32(data, 96)),
+            (Some(0), _) | (_, Some(0))
+        )
+}
+
+fn is_passive_noop_emf_stretchdibits_source_extent(data: &[u8]) -> bool {
+    data.len() >= 40
+        && matches!(
+            (read_le_i32(data, 32), read_le_i32(data, 36)),
             (Some(0), _) | (_, Some(0))
         )
 }
@@ -27681,6 +27701,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     state.fill_color,
                 ) {
                 } else if is_passive_noop_raster_transfer(data, 0, state.fill_color) {
+                } else if matches!(function, 0x0b23 | 0x0b41 | 0x0f43)
+                    && is_passive_noop_wmf_stretch_source_extent(data, destination_offset)
+                {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -28183,6 +28206,20 @@ fn is_passive_invisible_wmf_blt(data: &[u8], destination_offset: usize) -> bool 
             (
                 read_le_i16(data, destination_offset),
                 read_le_i16(data, destination_offset + 2)
+            ),
+            (Some(0), _) | (_, Some(0))
+        )
+}
+
+fn is_passive_noop_wmf_stretch_source_extent(data: &[u8], destination_offset: usize) -> bool {
+    let Some(source_extent_offset) = destination_offset.checked_sub(8) else {
+        return false;
+    };
+    data.len() >= source_extent_offset.saturating_add(4)
+        && matches!(
+            (
+                read_le_i16(data, source_extent_offset),
+                read_le_i16(data, source_extent_offset + 2)
             ),
             (Some(0), _) | (_, Some(0))
         )
@@ -47978,6 +48015,38 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_zero_source_extent_stretch_rasters_are_passive_noops_without_parsing_payloads() {
+        let mut hidden_dib =
+            b"ZERO-SOURCE-EMF-RASTER-PAYLOAD /JavaScript /EmbeddedFile /Launch".to_vec();
+        hidden_dib.resize(64, 0x41);
+        let mut stretchblt =
+            emf_stretchblt_dib_record(40, 20, 44, 24, WMF_SRCCOPY_RASTER_OP, &hidden_dib);
+        write_test_le_i32(&mut stretchblt, 100, 0);
+        let mut stretchdibits =
+            emf_stretchdibits_dib_record(70, 20, 44, 24, WMF_SRCCOPY_RASTER_OP, &hidden_dib);
+        write_test_le_i32(&mut stretchdibits, 44, 0);
+        let records = [emf_rect_record(43, 0, 0, 30, 30), stretchblt, stretchdibits];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
     fn emf_transparentblt_keyed_color_becomes_passive_alpha_mask() {
         let indexed_dib = minimal_compressed_dib_with_payload(
             2,
@@ -48818,6 +48887,43 @@ After\par}"#;
         let input = format!(
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(160, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn wmf_zero_source_extent_stretch_rasters_are_passive_noops_without_parsing_payloads() {
+        let mut hidden_dib =
+            b"ZERO-SOURCE-WMF-RASTER-PAYLOAD /JavaScript /EmbeddedFile /Launch".to_vec();
+        hidden_dib.resize(64, 0x41);
+        let records = [
+            wmf_create_brush_record(Color {
+                red: 30,
+                green: 90,
+                blue: 150,
+            }),
+            wmf_select_object_record(0),
+            wmf_bounds_record(0x041b, 0, 0, 30, 30),
+            wmf_stretchblt_record(40, 20, 44, 24, WMF_SRCCOPY_RASTER_OP, &hidden_dib),
+            wmf_dibstretchblt_record_with_source(70, 20, 44, 24, 0, 0, 0, 24, &hidden_dib),
+            wmf_stretchdib_dib_record_with_source(100, 20, 44, 24, 0, 0, 44, 0, &hidden_dib),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
         );
         let output = parse_rtf(&input).unwrap();
 

@@ -30291,11 +30291,7 @@ fn wmf_patcopy_stretchblt_renders_passive_brush_rectangle_without_payload_leakag
             ..
         }
     ));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in [
         "wmetafile",
         "0b23",
@@ -30624,11 +30620,7 @@ fn wmf_patcopy_dibstretchblt_renders_passive_brush_rectangle_without_payload_lea
             ..
         }
     ));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in [
         "wmetafile",
         "0b41",
@@ -30735,11 +30727,7 @@ fn wmf_patcopy_stretchdib_renders_passive_brush_rectangle_without_payload_leakag
             ..
         }
     ));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in [
         "wmetafile",
         "0f43",
@@ -31193,6 +31181,112 @@ fn wmf_zero_extent_and_zero_scan_rasters_are_noops_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "zero-size WMF raster payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn wmf_zero_source_extent_stretch_rasters_are_noops_without_payload_leakage() {
+    let mut hidden_dib =
+        b"ZERO-SOURCE-WMF-RASTER-PAYLOAD /JavaScript /EmbeddedFile /Launch".to_vec();
+    hidden_dib.resize(96, 0x41);
+    let records = [
+        wmf_create_brush_record(Color {
+            red: 30,
+            green: 90,
+            blue: 150,
+        }),
+        wmf_select_object_record(0),
+        wmf_bounds_record(0x041b, 0, 0, 80, 40),
+        wmf_stretchblt_record(18, 54, 48, 28, 0x00cc_0020, &hidden_dib),
+        wmf_dibstretchblt_record_with_source(70, 54, 48, 28, 0, 0, 0, 28, &hidden_dib),
+        wmf_stretchdib_dib_record_with_source(18, 84, 48, 28, 0, 0, 48, 0, &hidden_dib),
+    ];
+    let wmf = minimal_wmf_with_records(160, 120, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich120\\picwgoal2160\\pichgoal864 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF zero-source raster vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in [
+        "wmetafile",
+        "ZERO-SOURCE-WMF-RASTER-PAYLOAD",
+        "0b23",
+        "0b41",
+        "0f43",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "zero-source WMF raster payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert_no_wmf_preview_warning(&output.diagnostics);
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 1,
+        "preexisting paint before zero-source WMF raster records should still render"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"ZERO-SOURCE-WMF-RASTER-PAYLOAD",
+        b"0b23",
+        b"0b41",
+        b"0f43",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero-source WMF raster payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -40034,6 +40128,105 @@ fn emf_zero_extent_and_zero_scan_rasters_are_noops_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "zero-size EMF raster payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn emf_zero_source_extent_stretch_rasters_are_noops_without_payload_leakage() {
+    let mut hidden_dib =
+        b"ZERO-SOURCE-EMF-RASTER-PAYLOAD /JavaScript /EmbeddedFile /Launch".to_vec();
+    hidden_dib.resize(96, 0x41);
+    let mut stretchblt = emf_stretchblt_dib_record(70, 24, 48, 28, 0x00cc_0020, &hidden_dib);
+    write_test_le_i32(&mut stretchblt, 100, 0);
+    let mut stretchdibits = emf_stretchdibits_dib_record(18, 54, 48, 28, 0x00cc_0020, &hidden_dib);
+    write_test_le_i32(&mut stretchdibits, 44, 0);
+    let records = [emf_rect_record(43, 0, 0, 80, 40), stretchblt, stretchdibits];
+    let emf = minimal_emf_with_records(160, 100, 2540, 1588, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF zero-source raster vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "ZERO-SOURCE-EMF-RASTER-PAYLOAD",
+        "STRETCHBLT",
+        "STRETCHDIBITS",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "zero-source EMF raster payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("unsupported EMF record") })
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 1,
+        "preexisting paint before zero-source EMF raster records should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"ZERO-SOURCE-EMF-RASTER-PAYLOAD",
+        b"STRETCHBLT",
+        b"STRETCHDIBITS",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero-source EMF raster payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
