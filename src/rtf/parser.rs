@@ -25277,18 +25277,24 @@ enum PassiveSourceRasterTransferMode {
         fill: Color,
         noop_source: Color,
     },
-    NoopIfSource(Color),
+    SameBoundsBackdropInvertIfSource(Color),
 }
 
 enum PassiveSourceRasterTransfer {
     Image(ParsedVectorRasterImage),
     Solid(Color),
+    SameBoundsBackdropInvert,
     Noop,
 }
 
 enum PassiveSourceRasterCommand {
     Draw(StaticImageVectorCommand),
     DrawMany(Vec<StaticImageVectorCommand>),
+    ReduceSameBoundsBackdrop {
+        bounds: (f32, f32, f32, f32),
+        raster_op: u32,
+        selected_fill_color: Option<Color>,
+    },
     Noop,
 }
 
@@ -28329,9 +28335,9 @@ fn passive_source_raster_transfer_mode(
         WMF_SRCINVERT_RASTER_OP if blank_destination => {
             Some(PassiveSourceRasterTransferMode::Invert)
         }
-        WMF_SRCINVERT_RASTER_OP => Some(PassiveSourceRasterTransferMode::NoopIfSource(
-            Color::default(),
-        )),
+        WMF_SRCINVERT_RASTER_OP => {
+            Some(PassiveSourceRasterTransferMode::SameBoundsBackdropInvertIfSource(white_color()))
+        }
         WMF_SRCERASE_RASTER_OP => Some(PassiveSourceRasterTransferMode::SolidOrNoopBySource {
             solid_source: white_color(),
             fill: Color::default(),
@@ -28396,9 +28402,14 @@ fn apply_passive_source_raster_transfer_mode(
                 None
             }
         }
-        PassiveSourceRasterTransferMode::NoopIfSource(source) => {
-            vector_raster_pixels_all_color(&image, source)?
-                .then_some(PassiveSourceRasterTransfer::Noop)
+        PassiveSourceRasterTransferMode::SameBoundsBackdropInvertIfSource(source) => {
+            if vector_raster_pixels_all_color(&image, Color::default())? {
+                Some(PassiveSourceRasterTransfer::Noop)
+            } else if vector_raster_pixels_all_color(&image, source)? {
+                Some(PassiveSourceRasterTransfer::SameBoundsBackdropInvert)
+            } else {
+                None
+            }
         }
         PassiveSourceRasterTransferMode::Invert => match image.format {
             ImageFormat::Jpeg => {
@@ -28476,6 +28487,13 @@ fn passive_source_raster_command(
                 fill_color: Some(color),
             })
         }
+        PassiveSourceRasterTransfer::SameBoundsBackdropInvert => {
+            PassiveSourceRasterCommand::ReduceSameBoundsBackdrop {
+                bounds: (left, top, right, bottom),
+                raster_op: WMF_DSTINVERT_RASTER_OP,
+                selected_fill_color: None,
+            }
+        }
         PassiveSourceRasterTransfer::Noop => PassiveSourceRasterCommand::Noop,
     }
 }
@@ -28497,6 +28515,20 @@ fn push_passive_source_raster_command(
                 return None;
             }
             commands.append(&mut new_commands);
+        }
+        PassiveSourceRasterCommand::ReduceSameBoundsBackdrop {
+            bounds,
+            raster_op,
+            selected_fill_color,
+        } => {
+            if !apply_passive_solid_backdrop_raster_transfer(
+                commands,
+                bounds,
+                raster_op,
+                selected_fill_color,
+            ) {
+                return None;
+            }
         }
         PassiveSourceRasterCommand::Noop => {}
     }
@@ -45391,6 +45423,62 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_same_bounds_srcinvert_white_source_after_solid_fill_inverts_rectangle() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 100,
+                    green: 30,
+                    blue: 200,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_bitblt_record(20, 15, 60, 30, WMF_PATCOPY_RASTER_OP, b"PATCOPY-FILL"),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_SRCINVERT_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 155,
+                    green: 225,
+                    blue: 55
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn emf_same_bounds_dstinvert_bitblt_after_solid_fill_inverts_rectangle() {
         let records = [
             emf_create_brush_record(
@@ -47446,6 +47534,58 @@ After\par}"#;
                 40,
                 WMF_DSTINVERT_RASTER_OP,
                 b"DSTINVERT-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 155,
+                    green: 225,
+                    blue: 55
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_same_bounds_srcinvert_white_source_after_solid_fill_inverts_rectangle() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color {
+                red: 100,
+                green: 30,
+                blue: 200,
+            }),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(15, 25, 80, 40, WMF_PATCOPY_RASTER_OP, b"PATCOPY-FILL"),
+            wmf_stretchdib_dib_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_SRCINVERT_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]),
             ),
         ];
         let input = format!(
