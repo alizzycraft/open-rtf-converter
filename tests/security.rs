@@ -38819,12 +38819,18 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
     jpeg_payload.extend_from_slice(b"TRAILING-EMF-SETDIBITS-JPEG /EmbeddedFile");
     let mut jpeg_dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg_payload);
     jpeg_dib.extend_from_slice(b"TRAILING-EMF-SETDIBITS-JPEG-DIB /Launch");
+    let partial_jpeg = minimal_jpeg_with_dimensions(3, 2);
+    let mut partial_jpeg_payload = partial_jpeg.clone();
+    partial_jpeg_payload.extend_from_slice(b"TRAILING-EMF-PARTIAL-SETDIBITS-JPEG /JavaScript");
+    let mut partial_jpeg_dib = minimal_compressed_dib_with_payload(3, 2, 4, &partial_jpeg_payload);
+    partial_jpeg_dib.extend_from_slice(b"TRAILING-EMF-PARTIAL-SETDIBITS-JPEG-DIB /Launch");
     let records = [
         emf_setdibitstodevice_dib_record(18, 22, 2, 1, 0, 1, &dib),
         emf_setdibitstodevice_dib_record(42, 34, 2, 3, 1, 1, &partial_dib),
         emf_setdibitstodevice_dib_record(68, 42, 2, 3, 1, 1, &compressed_png_dib),
         emf_setdibitstodevice_dib_record(94, 50, 2, 3, 0, 1, &top_down_compressed_png_dib),
         emf_setdibitstodevice_dib_record(120, 58, 2, 1, 0, 1, &jpeg_dib),
+        emf_setdibitstodevice_dib_record(132, 62, 3, 2, 0, 1, &partial_jpeg_dib),
     ];
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
@@ -38845,7 +38851,7 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 5);
+    assert_eq!(image.vector_commands.len(), 9);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -38923,6 +38929,37 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
             && image.height_px == 1
             && image.bytes == jpeg
     ));
+    assert!(matches!(
+        image.vector_commands[5],
+        StaticImageVectorCommand::SaveState
+    ));
+    assert_eq!(
+        image.vector_commands[6],
+        StaticImageVectorCommand::ClipRect {
+            left: 132.0,
+            top: 62.0,
+            right: 135.0,
+            bottom: 63.0,
+        }
+    );
+    assert!(matches!(
+        &image.vector_commands[7],
+        StaticImageVectorCommand::RasterImage {
+            left: 132.0,
+            top: 61.0,
+            right: 135.0,
+            bottom: 63.0,
+            image,
+        } if image.format == ImageFormat::Jpeg
+            && image.width_px == 3
+            && image.height_px == 2
+            && image.bytes == partial_jpeg
+            && image.alpha_mask.is_none()
+    ));
+    assert!(matches!(
+        image.vector_commands[8],
+        StaticImageVectorCommand::RestoreState
+    ));
     assert_eq!(parsed.diagnostics.len(), 0);
     for forbidden in [
         "emfblip",
@@ -38932,6 +38969,8 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
         "TRAILING-EMF-TOPDOWN-COMPRESSED-PARTIAL-SETDIBITS",
         "TRAILING-EMF-SETDIBITS-JPEG",
         "TRAILING-EMF-SETDIBITS-JPEG-DIB",
+        "TRAILING-EMF-PARTIAL-SETDIBITS-JPEG",
+        "TRAILING-EMF-PARTIAL-SETDIBITS-JPEG-DIB",
         "JavaScript",
         "EmbeddedFile",
         "Launch",
@@ -38963,8 +39002,15 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
             .iter()
             .filter(|operation| operation.operator == "Do")
             .count()
-            >= 5,
+            >= 6,
         "EMF SETDIBITSTODEVICE DIB should render as a passive image XObject"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "partial JPEG EMF SETDIBITSTODEVICE should clip the full JPEG draw"
     );
     for forbidden in [
         b"emfblip".as_slice(),
@@ -38975,6 +39021,8 @@ fn emf_setdibitstodevice_dib_renders_as_passive_image_without_payload_leakage() 
         b"TRAILING-EMF-TOPDOWN-COMPRESSED-PARTIAL-SETDIBITS",
         b"TRAILING-EMF-SETDIBITS-JPEG",
         b"TRAILING-EMF-SETDIBITS-JPEG-DIB",
+        b"TRAILING-EMF-PARTIAL-SETDIBITS-JPEG",
+        b"TRAILING-EMF-PARTIAL-SETDIBITS-JPEG-DIB",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

@@ -21207,7 +21207,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     if let Some(command) =
                         parse_emf_setdibitstodevice_srcopy(data, &header, &coordinates)
                     {
-                        commands.push(command);
+                        push_passive_source_raster_command(&mut commands, command)?;
                     } else {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
@@ -23377,7 +23377,7 @@ fn parse_emf_setdibitstodevice_srcopy(
     data: &[u8],
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
-) -> Option<StaticImageVectorCommand> {
+) -> Option<PassiveSourceRasterCommand> {
     const DIB_RGB_COLORS: u32 = 0;
 
     if data.len() < 68 {
@@ -23407,10 +23407,6 @@ fn parse_emf_setdibitstodevice_srcopy(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let image = parse_vector_raster_dib_scan_lines(
-        &dib_bytes, x_src, y_src, cx_src, start_scan, scan_count,
-    )?;
-
     let width = i32::try_from(cx_src.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let height = i32::try_from(scan_count.max(1)).unwrap_or(i32::MAX);
     let left_top = normalized_emf_point(x_dest, y_dest, header, coordinates);
@@ -23420,20 +23416,57 @@ fn parse_emf_setdibitstodevice_srcopy(
         header,
         coordinates,
     );
-    Some(StaticImageVectorCommand::RasterImage {
-        left: left_top.0.min(right_bottom.0),
-        top: left_top.1.min(right_bottom.1),
-        right: left_top.0.max(right_bottom.0),
-        bottom: left_top.1.max(right_bottom.1),
-        image: StaticImageVectorRaster {
-            format: image.format,
-            width_px: image.width_px,
-            height_px: image.height_px,
-            bytes: image.bytes,
-            palette: image.palette,
-            alpha_mask: image.alpha_mask,
-        },
-    })
+    let left = left_top.0.min(right_bottom.0);
+    let top = left_top.1.min(right_bottom.1);
+    let right = left_top.0.max(right_bottom.0);
+    let bottom = left_top.1.max(right_bottom.1);
+    if let Some(image) =
+        parse_vector_raster_dib_scan_lines(&dib_bytes, x_src, y_src, cx_src, start_scan, scan_count)
+    {
+        return Some(PassiveSourceRasterCommand::Draw(
+            StaticImageVectorCommand::RasterImage {
+                left,
+                top,
+                right,
+                bottom,
+                image: StaticImageVectorRaster {
+                    format: image.format,
+                    width_px: image.width_px,
+                    height_px: image.height_px,
+                    bytes: image.bytes,
+                    palette: image.palette,
+                    alpha_mask: image.alpha_mask,
+                },
+            },
+        ));
+    }
+
+    let compressed = parse_compressed_dib_image_data(&dib_bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
+    let scan_bottom = start_scan.checked_add(scan_count)?;
+    if compressed.format != ImageFormat::Jpeg
+        || scan_count == 0
+        || scan_bottom > compressed.height_px
+    {
+        return None;
+    }
+    let scan_top_y = if compressed.top_down {
+        start_scan
+    } else {
+        compressed.height_px.checked_sub(scan_bottom)?
+    };
+    let source_y = i32::try_from(scan_top_y).ok()?.checked_add(y_src)?;
+    clipped_compressed_jpeg_source_raster_command(
+        &dib_bytes,
+        x_src,
+        source_y,
+        cx_src,
+        i32::try_from(scan_count).ok()?,
+        left,
+        top,
+        right,
+        bottom,
+        PassiveSourceRasterTransferMode::Copy,
+    )
 }
 
 fn parse_emf_alphablend_passive(
@@ -48299,6 +48332,58 @@ After\par}"#;
                 && image.width_px == 2
                 && image.height_px == 1
                 && image.bytes == jpeg
+        ));
+    }
+
+    #[test]
+    fn emf_setdibits_partial_scan_bi_jpeg_record_becomes_passive_clipped_raster_image() {
+        let jpeg = minimal_jpeg_with_dimensions(3, 2);
+        let dib = minimal_compressed_dib_with_payload(3, 2, 4, &jpeg);
+        let records = [emf_setdibitstodevice_dib_record(20, 15, 3, 2, 0, 1, &dib)];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 4);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 15.0,
+                right: 23.0,
+                bottom: 16.0,
+            }
+        );
+        assert!(matches!(
+            &image.vector_commands[2],
+            StaticImageVectorCommand::RasterImage {
+                left: 20.0,
+                top: 14.0,
+                right: 23.0,
+                bottom: 16.0,
+                image,
+            } if image.format == ImageFormat::Jpeg
+                && image.width_px == 3
+                && image.height_px == 2
+                && image.bytes == jpeg
+                && image.alpha_mask.is_none()
+        ));
+        assert!(matches!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::RestoreState
         ));
     }
 
