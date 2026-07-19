@@ -453,10 +453,13 @@ pub struct StaticImagePlacement {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ImageFormat {
     Jpeg,
+    JpegInverted,
     JpegPassiveGrayscale,
     JpegPassiveBilevel,
     JpegGrayscale,
+    JpegGrayscaleInverted,
     JpegCmyk,
+    JpegCmykInverted,
     JpegCmykPassiveGrayscale,
     JpegCmykPassiveBilevel,
     Png,

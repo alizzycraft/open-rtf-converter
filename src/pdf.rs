@@ -747,10 +747,13 @@ pub fn render_pdf_with_font_provider(
             image_ref_cursor = image_ref_cursor.saturating_add(1);
             match fragment.image.format {
                 ImageFormat::Jpeg
+                | ImageFormat::JpegInverted
                 | ImageFormat::JpegPassiveGrayscale
                 | ImageFormat::JpegPassiveBilevel
                 | ImageFormat::JpegGrayscale
+                | ImageFormat::JpegGrayscaleInverted
                 | ImageFormat::JpegCmyk
+                | ImageFormat::JpegCmykInverted
                 | ImageFormat::JpegCmykPassiveGrayscale
                 | ImageFormat::JpegCmykPassiveBilevel
                 | ImageFormat::Png
@@ -817,10 +820,13 @@ fn write_passive_image_xobject(
 ) {
     match format {
         ImageFormat::Jpeg
+        | ImageFormat::JpegInverted
         | ImageFormat::JpegPassiveGrayscale
         | ImageFormat::JpegPassiveBilevel
         | ImageFormat::JpegGrayscale
+        | ImageFormat::JpegGrayscaleInverted
         | ImageFormat::JpegCmyk
+        | ImageFormat::JpegCmykInverted
         | ImageFormat::JpegCmykPassiveGrayscale
         | ImageFormat::JpegCmykPassiveBilevel => {
             let mut image = pdf.image_xobject(image_id, bytes);
@@ -828,16 +834,32 @@ fn write_passive_image_xobject(
             image.height(height_px as i32);
             match format {
                 ImageFormat::Jpeg
+                | ImageFormat::JpegInverted
                 | ImageFormat::JpegPassiveGrayscale
                 | ImageFormat::JpegPassiveBilevel => image.color_space().device_rgb(),
-                ImageFormat::JpegGrayscale => image.color_space().device_gray(),
+                ImageFormat::JpegGrayscale | ImageFormat::JpegGrayscaleInverted => {
+                    image.color_space().device_gray()
+                }
                 ImageFormat::JpegCmyk
+                | ImageFormat::JpegCmykInverted
                 | ImageFormat::JpegCmykPassiveGrayscale
                 | ImageFormat::JpegCmykPassiveBilevel => image.color_space().device_cmyk(),
                 _ => image.color_space().device_rgb(),
             }
             image.bits_per_component(8);
             image.filter(Filter::DctDecode);
+            match format {
+                ImageFormat::JpegInverted => {
+                    image.decode([1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+                }
+                ImageFormat::JpegGrayscaleInverted => {
+                    image.decode([1.0, 0.0]);
+                }
+                ImageFormat::JpegCmykInverted => {
+                    image.decode([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+                }
+                _ => {}
+            }
             if let Some(alpha_mask_id) = alpha_mask_id {
                 image.s_mask(alpha_mask_id);
             }
@@ -1749,10 +1771,13 @@ fn image_format_uses_xobject(format: ImageFormat) -> bool {
     matches!(
         format,
         ImageFormat::Jpeg
+            | ImageFormat::JpegInverted
             | ImageFormat::JpegPassiveGrayscale
             | ImageFormat::JpegPassiveBilevel
             | ImageFormat::JpegGrayscale
+            | ImageFormat::JpegGrayscaleInverted
             | ImageFormat::JpegCmyk
+            | ImageFormat::JpegCmykInverted
             | ImageFormat::JpegCmykPassiveGrayscale
             | ImageFormat::JpegCmykPassiveBilevel
             | ImageFormat::Png
@@ -6764,6 +6789,50 @@ endstream
         assert!(
             !pdf.windows(b"/EmbeddedFile".len())
                 .any(|window| window == b"/EmbeddedFile")
+        );
+        assert!(
+            !pdf.windows(b"/JavaScript".len())
+                .any(|window| window == b"/JavaScript")
+        );
+    }
+
+    #[test]
+    fn writes_passive_inverted_jpeg_image_xobject_with_decode_array() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::JpegInverted,
+            bytes: minimal_jpeg_with_dimensions(1, 1),
+            palette: Vec::new(),
+            alpha_mask: None,
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        assert!(
+            pdf.windows(b"/ColorSpace /DeviceRGB".len())
+                .any(|window| window == b"/ColorSpace /DeviceRGB")
+        );
+        assert!(
+            pdf.windows(b"/DCTDecode".len())
+                .any(|window| window == b"/DCTDecode")
+        );
+        assert!(
+            pdf.windows(b"/Decode [1 0 1 0 1 0]".len())
+                .any(|window| window == b"/Decode [1 0 1 0 1 0]")
         );
         assert!(
             !pdf.windows(b"/JavaScript".len())

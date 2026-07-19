@@ -40310,6 +40310,150 @@ fn notsrccopy_compressed_png_rasters_render_as_passive_inverted_images_without_p
 }
 
 #[test]
+fn notsrccopy_compressed_jpeg_rasters_use_passive_decode_without_payload_leakage() {
+    let jpeg = minimal_jpeg_with_dimensions(2, 1);
+    let mut emf_jpeg = jpeg.clone();
+    emf_jpeg.extend_from_slice(b"TRAILING-EMF-NOTSRCCOPY-JPEG /JavaScript");
+    let mut emf_dib = minimal_compressed_dib_with_payload(2, 1, 4, &emf_jpeg);
+    emf_dib.extend_from_slice(b"TRAILING-EMF-NOTSRCCOPY-JPEG-DIB /Launch");
+    let mut wmf_jpeg = jpeg.clone();
+    wmf_jpeg.extend_from_slice(b"TRAILING-WMF-NOTSRCCOPY-JPEG /EmbeddedFile");
+    let mut wmf_dib = minimal_compressed_dib_with_payload(2, 1, 4, &wmf_jpeg);
+    wmf_dib.extend_from_slice(b"TRAILING-WMF-NOTSRCCOPY-JPEG-DIB /OpenAction");
+    let emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[emf_stretchdibits_dib_record(
+            20,
+            15,
+            60,
+            30,
+            0x0033_0008,
+            &emf_dib,
+        )],
+    );
+    let wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[
+            wmf_set_window_ext_record(200, 100),
+            wmf_stretchdib_dib_record(35, 25, 80, 40, 0x0033_0008, &wmf_dib),
+        ],
+    );
+    let emf_hex = bytes_to_hex(&emf);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].vector_commands.len(), 1);
+    assert_eq!(images[1].vector_commands.len(), 1);
+    for image in &images {
+        let StaticImageVectorCommand::RasterImage { image, .. } = &image.vector_commands[0] else {
+            panic!("expected passive inverted JPEG raster command");
+        };
+        assert_eq!(image.format, ImageFormat::JpegInverted);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.bytes, jpeg);
+        assert!(image.palette.is_empty());
+        assert!(image.alpha_mask.is_none());
+    }
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "wmetafile",
+        "TRAILING-EMF-NOTSRCCOPY-JPEG",
+        "TRAILING-EMF-NOTSRCCOPY-JPEG-DIB",
+        "TRAILING-WMF-NOTSRCCOPY-JPEG",
+        "TRAILING-WMF-NOTSRCCOPY-JPEG-DIB",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "OpenAction",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "compressed JPEG NOTSRCCOPY payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("after"));
+    assert!([b"/Decode [1 0 1 0 1 0]".as_slice()].iter().all(|needle| {
+        output
+            .pdf
+            .windows(needle.len())
+            .any(|window| window == *needle)
+    }));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "Do")
+            .count()
+            >= 2,
+        "compressed JPEG NOTSRCCOPY DIBs should render passive image XObjects"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        b"wmetafile",
+        emf_hex.as_bytes(),
+        wmf_hex.as_bytes(),
+        b"TRAILING-EMF-NOTSRCCOPY-JPEG",
+        b"TRAILING-EMF-NOTSRCCOPY-JPEG-DIB",
+        b"TRAILING-WMF-NOTSRCCOPY-JPEG",
+        b"TRAILING-WMF-NOTSRCCOPY-JPEG-DIB",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "compressed JPEG NOTSRCCOPY payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn blank_srcinvert_compressed_png_rasters_render_without_payload_leakage() {
     let mut emf_png = minimal_rgb_png(&[[10, 20, 30], [200, 210, 220]]);
     emf_png.extend_from_slice(b"TRAILING-EMF-SRCINVERT-PNG /JavaScript");
