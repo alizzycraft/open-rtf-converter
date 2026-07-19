@@ -22670,8 +22670,11 @@ fn sample_emf_anglearc_points(
     start_angle: f32,
     sweep_angle: f32,
 ) -> Option<Vec<(i32, i32)>> {
-    if radius == 0 || !start_angle.is_finite() || !sweep_angle.is_finite() {
+    if !start_angle.is_finite() || !sweep_angle.is_finite() {
         return None;
+    }
+    if radius == 0 {
+        return Some(vec![center]);
     }
     let sweep_angle = sweep_angle.clamp(-360.0, 360.0);
     let center_x = f64::from(center.0);
@@ -53474,20 +53477,39 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_anglearc_records_with_zero_radius_become_passive_placeholders() {
-        let records = [emf_anglearc_record(60, 40, 0, 0.0, 90.0)];
+    fn emf_anglearc_records_with_zero_radius_draw_line_to_center() {
+        let records = [
+            emf_point_record(27, 10, 40),
+            emf_anglearc_record(60, 40, 0, 0.0, 90.0),
+            emf_point_record(54, 60, 70),
+        ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
             bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            &image.vector_commands[0],
+            StaticImageVectorCommand::Polyline { points, .. }
+                if points == &vec![(10.0, 40.0), (60.0, 40.0)]
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Line {
+                x1: 60.0,
+                y1: 40.0,
+                x2: 60.0,
+                y2: 70.0,
+                ..
+            }
         ));
     }
 
