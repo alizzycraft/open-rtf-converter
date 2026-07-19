@@ -48132,6 +48132,95 @@ fn emf_restoredc_restores_passive_clip_scope_without_payload_leakage() {
 }
 
 #[test]
+fn emf_restoredc_without_saved_state_is_noop_without_payload_leakage() {
+    let mut restore = emf_i32_record(34, -1);
+    restore.extend_from_slice(b"UNSAVED-EMF-RESTOREDC /JavaScript /EmbeddedFile");
+    restore.resize(restore.len().next_multiple_of(4), 0);
+    let restore_len = restore.len() as u32;
+    write_test_le_u32(&mut restore, 4, restore_len);
+
+    let records = [restore, emf_rect_record(43, 10, 20, 170, 100)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF unsaved RESTOREDC no-op image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in [
+        "emfblip",
+        "UNSAVED-EMF-RESTOREDC",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "unsaved EMF RESTOREDC payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "painting after unsaved EMF RESTOREDC no-op should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"UNSAVED-EMF-RESTOREDC",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsaved EMF RESTOREDC payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn extreme_character_spacing_is_bounded_before_pdf_rendering() {
     let input = rtf(&[
         "{",

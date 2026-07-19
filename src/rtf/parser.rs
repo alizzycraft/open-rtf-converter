@@ -20871,6 +20871,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 clip_scope_command_start = commands.len().checked_sub(1);
             }
             EMR_RESTOREDC => {
+                if saved_states.is_empty() {
+                    if data.len() < 4 {
+                        return None;
+                    }
+                    pos = record_end;
+                    continue;
+                }
                 let restored = restore_emf_saved_state(data, &mut saved_states)?;
                 if commands.len().checked_add(restored.restore_count)? > MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -53529,7 +53536,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_restoredc_without_saved_state_becomes_passive_placeholder() {
+    fn emf_restoredc_without_saved_state_is_passive_noop() {
         let records = [
             emf_i32_record(34, -1),
             emf_rect_record(43, 10, 20, 170, 100),
@@ -53540,12 +53547,16 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
