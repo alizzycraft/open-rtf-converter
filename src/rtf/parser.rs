@@ -20711,14 +20711,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let Some((left, top, right, bottom)) =
-                    parse_emf_record_rect(data, &header, &coordinates)
-                else {
-                    return None;
-                };
-                if !bounds_is_visible((left, top, right, bottom)) {
-                    return None;
-                }
+                let (left, top, right, bottom) =
+                    parse_emf_record_rect_including_degenerate(data, &header, &coordinates)?;
                 commands.push(StaticImageVectorCommand::ClipRect {
                     left,
                     top,
@@ -21990,6 +21984,23 @@ fn parse_emf_record_rect(
     let right = read_le_i32(data, 8)?;
     let bottom = read_le_i32(data, 12)?;
     normalized_emf_rect(left, top, right, bottom, header, coordinates)
+}
+
+fn parse_emf_record_rect_including_degenerate(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<(f32, f32, f32, f32)> {
+    if data.len() < 16 {
+        return None;
+    }
+    let left = read_le_i32(data, 0)?;
+    let top = read_le_i32(data, 4)?;
+    let right = read_le_i32(data, 8)?;
+    let bottom = read_le_i32(data, 12)?;
+    let (x1, y1) = normalized_emf_point(left, top, header, coordinates);
+    let (x2, y2) = normalized_emf_point(right, bottom, header, coordinates);
+    Some((x1.min(x2), y1.min(y2), x1.max(x2), y1.max(y2)))
 }
 
 fn parse_emf_region_data_rects(
@@ -43172,7 +43183,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_empty_intersectcliprect_becomes_passive_placeholder() {
+    fn emf_empty_intersectcliprect_becomes_passive_empty_clip() {
         let records = [
             emf_rect_record(30, 20, 20, 20, 60),
             emf_rect_record(43, 0, 0, 160, 80),
@@ -43183,12 +43194,25 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 20.0,
+                bottom: 60.0
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
