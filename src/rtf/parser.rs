@@ -20979,6 +20979,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_FILLRGN => {
                 // `data` starts after the EMF record Type and Size fields.
+                if is_passive_empty_emf_region(data, 16, 24) {
+                    pos = record_end;
+                    continue;
+                }
                 let handle = read_le_u32(data, 20)?;
                 let Some(EmfObject::Brush { color, pattern }) =
                     emf_stock_object(handle).or_else(|| {
@@ -20999,7 +21003,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 push_emf_region_rectangles(&mut commands, rects, fill_color, pattern)?;
             }
             EMR_FRAMERGN => {
-                if is_passive_noop_emf_framergn(data) {
+                if is_passive_noop_emf_framergn(data) || is_passive_empty_emf_region(data, 16, 32) {
                     pos = record_end;
                     continue;
                 }
@@ -21034,6 +21038,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 )?;
             }
             EMR_INVERTRGN => {
+                if is_passive_empty_emf_region(data, 16, 20) {
+                    pos = record_end;
+                    continue;
+                }
                 let rects = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)?;
                 if emf_commands_are_unpainted_clip_scope(&commands) {
                     push_emf_region_rectangles(
@@ -21056,6 +21064,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_PAINTRGN => {
+                if is_passive_empty_emf_region(data, 16, 20) {
+                    pos = record_end;
+                    continue;
+                }
                 let Some(fill_color) = state.fill_color else {
                     pos = record_end;
                     continue;
@@ -21965,6 +21977,36 @@ fn parse_emf_region_data_rects(
         )?);
     }
     Some(rects)
+}
+
+fn is_passive_empty_emf_region(
+    data: &[u8],
+    byte_count_offset: usize,
+    region_offset: usize,
+) -> bool {
+    let Some(byte_count) =
+        read_le_u32(data, byte_count_offset).and_then(|value| usize::try_from(value).ok())
+    else {
+        return false;
+    };
+    if byte_count < 32 {
+        return false;
+    }
+    let Some(region_end) = region_offset.checked_add(byte_count) else {
+        return false;
+    };
+    let Some(region) = data.get(region_offset..region_end) else {
+        return false;
+    };
+    matches!(
+        (
+            read_le_u32(region, 0),
+            read_le_u32(region, 4),
+            read_le_u32(region, 8),
+            read_le_u32(region, 12),
+        ),
+        (Some(32), Some(1), Some(0), Some(0))
+    )
 }
 
 fn is_passive_noop_emf_framergn(data: &[u8]) -> bool {
@@ -45246,6 +45288,59 @@ After\par}"#;
         write_test_le_u32(&mut frame, 4, frame_len);
         write_test_le_u32(&mut frame, 24, 31);
         let records = [emf_rect_record(43, 0, 0, 30, 30), frame];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_empty_paint_regions_are_passive_noops_without_parsing_payload() {
+        let mut fill = emf_fillrgn_record(0xFFFF_FFFE, &[]);
+        fill.extend_from_slice(b"EMPTY-EMF-FILLRGN /JavaScript");
+        fill.resize(fill.len().next_multiple_of(4), 0);
+        let fill_len = fill.len() as u32;
+        write_test_le_u32(&mut fill, 4, fill_len);
+
+        let mut frame = emf_framergn_record(0xFFFF_FFFE, 6, 4, &[]);
+        frame.extend_from_slice(b"EMPTY-EMF-FRAMERGN /EmbeddedFile");
+        frame.resize(frame.len().next_multiple_of(4), 0);
+        let frame_len = frame.len() as u32;
+        write_test_le_u32(&mut frame, 4, frame_len);
+
+        let mut paint = emf_paintrgn_record(&[]);
+        paint.extend_from_slice(b"EMPTY-EMF-PAINTRGN /Launch");
+        paint.resize(paint.len().next_multiple_of(4), 0);
+        let paint_len = paint.len() as u32;
+        write_test_le_u32(&mut paint, 4, paint_len);
+
+        let mut invert = emf_invertrgn_record(&[]);
+        invert.extend_from_slice(b"EMPTY-EMF-INVERTRGN /OpenAction");
+        invert.resize(invert.len().next_multiple_of(4), 0);
+        let invert_len = invert.len() as u32;
+        write_test_le_u32(&mut invert, 4, invert_len);
+
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            fill,
+            frame,
+            paint,
+            invert,
+        ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
             bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
