@@ -28098,9 +28098,10 @@ fn passive_source_raster_transfer_mode(
         WMF_SRCINVERT_RASTER_OP => Some(PassiveSourceRasterTransferMode::NoopIfSource(
             Color::default(),
         )),
-        WMF_SRCERASE_RASTER_OP => Some(PassiveSourceRasterTransferMode::SolidIfSource {
-            source: Color::default(),
+        WMF_SRCERASE_RASTER_OP => Some(PassiveSourceRasterTransferMode::SolidOrNoopBySource {
+            solid_source: white_color(),
             fill: Color::default(),
+            noop_source: Color::default(),
         }),
         WMF_NOTSRCERASE_RASTER_OP => Some(PassiveSourceRasterTransferMode::SolidIfSource {
             source: white_color(),
@@ -44930,6 +44931,84 @@ After\par}"#;
                 }),
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn emf_after_paint_srcerase_white_source_becomes_passive_black_rectangle() {
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_SRCERASE_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_after_paint_srcerase_black_source_is_passive_noop_without_skipped_diagnostic() {
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_SRCERASE_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[0, 0, 0], [0, 0, 0]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
