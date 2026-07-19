@@ -21158,7 +21158,85 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     _ => unreachable!(),
                 };
                 let blank_destination = emf_commands_are_unpainted_clip_scope(&commands);
-                if let Some(raster_transfer) = raster_transfer
+                if record_type == EMR_SETDIBITSTODEVICE {
+                    if let Some(command) =
+                        parse_emf_setdibitstodevice_srcopy(data, &header, &coordinates)
+                    {
+                        push_passive_source_raster_command(&mut commands, command)?;
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
+                } else if record_type == EMR_STRETCHDIBITS {
+                    if let Some(command) = parse_emf_stretchdibits_srcopy(
+                        data,
+                        &header,
+                        &coordinates,
+                        state.fill_color,
+                        blank_destination,
+                    ) {
+                        push_passive_source_raster_command(&mut commands, command)?;
+                    } else if let Some(raster_transfer) = raster_transfer
+                        && let Some((left, top, right, bottom, fill_color)) =
+                            parse_emf_passive_raster_transfer(
+                                data,
+                                raster_transfer.0,
+                                raster_transfer.1,
+                                raster_transfer.2,
+                                raster_transfer.3,
+                                &header,
+                                &coordinates,
+                                state.fill_color,
+                                blank_destination,
+                            )
+                        && bounds_is_visible((left, top, right, bottom))
+                    {
+                        commands.push(StaticImageVectorCommand::Rectangle {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color: None,
+                            stroke_width: 0.0,
+                            stroke_style: BorderStyle::Single,
+                            fill_pattern: ShadingPattern::None,
+                            fill_color: Some(fill_color),
+                        });
+                    } else {
+                        let raster_transfer = raster_transfer?;
+                        if let Some(bounds) = parse_emf_raster_destination_bounds(
+                            data,
+                            raster_transfer.0,
+                            raster_transfer.2,
+                            raster_transfer.3,
+                            &header,
+                            &coordinates,
+                        ) && apply_passive_solid_backdrop_raster_transfer(
+                            &mut commands,
+                            bounds,
+                            read_le_u32(data, raster_transfer.1)?,
+                            state.fill_color,
+                        ) {
+                        } else if is_passive_noop_raster_transfer(
+                            data,
+                            raster_transfer.1,
+                            state.fill_color,
+                        ) {
+                        } else {
+                            skipped_record_count = skipped_record_count.checked_add(1)?;
+                        }
+                    }
+                } else if matches!(record_type, EMR_BITBLT | EMR_STRETCHBLT)
+                    && let Some(command) = parse_emf_bitmap_blt_srcopy(
+                        data,
+                        record_type,
+                        &header,
+                        &coordinates,
+                        state.fill_color,
+                        blank_destination,
+                    )
+                {
+                    push_passive_source_raster_command(&mut commands, command)?;
+                } else if let Some(raster_transfer) = raster_transfer
                     && let Some((left, top, right, bottom, fill_color)) =
                         parse_emf_passive_raster_transfer(
                             data,
@@ -21203,39 +21281,6 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 } else if let Some(raster_transfer) = raster_transfer
                     && is_passive_noop_raster_transfer(data, raster_transfer.1, state.fill_color)
                 {
-                } else if record_type == EMR_SETDIBITSTODEVICE {
-                    if let Some(command) =
-                        parse_emf_setdibitstodevice_srcopy(data, &header, &coordinates)
-                    {
-                        push_passive_source_raster_command(&mut commands, command)?;
-                    } else {
-                        skipped_record_count = skipped_record_count.checked_add(1)?;
-                    }
-                } else if record_type == EMR_STRETCHDIBITS {
-                    if let Some(command) = parse_emf_stretchdibits_srcopy(
-                        data,
-                        &header,
-                        &coordinates,
-                        state.fill_color,
-                        blank_destination,
-                    ) {
-                        push_passive_source_raster_command(&mut commands, command)?;
-                    } else {
-                        skipped_record_count = skipped_record_count.checked_add(1)?;
-                    }
-                } else if matches!(record_type, EMR_BITBLT | EMR_STRETCHBLT) {
-                    if let Some(command) = parse_emf_bitmap_blt_srcopy(
-                        data,
-                        record_type,
-                        &header,
-                        &coordinates,
-                        state.fill_color,
-                        blank_destination,
-                    ) {
-                        push_passive_source_raster_command(&mut commands, command)?;
-                    } else {
-                        skipped_record_count = skipped_record_count.checked_add(1)?;
-                    }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -25268,19 +25313,14 @@ enum PassiveSourceRasterTransferMode {
     Invert,
     Mask(Color),
     Solid(Color),
-    SolidIfSource {
-        source: Color,
-        fill: Color,
-    },
-    SolidOrNoopBySource {
-        solid_source: Color,
-        fill: Color,
-        noop_source: Color,
-    },
     SameBoundsBackdropAndIfSolidSource,
     SameBoundsBackdropNorIfSolidSource,
     SameBoundsBackdropOrIfSolidSource,
     SameBoundsBackdropOrNotSourceIfSolidSource,
+    SameBoundsBackdropOrPatternOrNotSourceIfSolidSource {
+        pattern: Color,
+        blank_destination: bool,
+    },
     SameBoundsBackdropSourceAndNotDestIfSolidSource,
     SameBoundsBackdropXorIfSolidSource,
 }
@@ -27357,43 +27397,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     _ => unreachable!(),
                 };
                 let blank_destination = emf_commands_are_unpainted_clip_scope(&commands);
-                if let Some((left, top, right, bottom, fill_color)) = parse_wmf_blt_passive_transfer(
-                    data,
-                    destination_offset,
-                    window_origin_x,
-                    window_origin_y,
-                    window_width,
-                    window_height,
-                    state.fill_color,
-                    blank_destination,
-                ) && bounds_is_visible((left, top, right, bottom))
-                {
-                    commands.push(StaticImageVectorCommand::Rectangle {
-                        left,
-                        top,
-                        right,
-                        bottom,
-                        stroke_color: None,
-                        stroke_width: 0.0,
-                        stroke_style: BorderStyle::Single,
-                        fill_pattern: ShadingPattern::None,
-                        fill_color: Some(fill_color),
-                    });
-                } else if let Some(bounds) = parse_wmf_blt_destination_bounds(
-                    data,
-                    destination_offset,
-                    window_origin_x,
-                    window_origin_y,
-                    window_width,
-                    window_height,
-                ) && apply_passive_solid_backdrop_raster_transfer(
-                    &mut commands,
-                    bounds,
-                    read_le_u32(data, 0)?,
-                    state.fill_color,
-                ) {
-                } else if is_passive_noop_raster_transfer(data, 0, state.fill_color) {
-                } else if let Some(command) = match function {
+                if let Some(command) = match function {
                     0x0940 => parse_wmf_dibbitblt_srcopy(
                         data,
                         window_origin_x,
@@ -27424,6 +27428,44 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     _ => None,
                 } {
                     push_passive_source_raster_command(&mut commands, command)?;
+                } else if let Some((left, top, right, bottom, fill_color)) =
+                    parse_wmf_blt_passive_transfer(
+                        data,
+                        destination_offset,
+                        window_origin_x,
+                        window_origin_y,
+                        window_width,
+                        window_height,
+                        state.fill_color,
+                        blank_destination,
+                    )
+                    && bounds_is_visible((left, top, right, bottom))
+                {
+                    commands.push(StaticImageVectorCommand::Rectangle {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        stroke_color: None,
+                        stroke_width: 0.0,
+                        stroke_style: BorderStyle::Single,
+                        fill_pattern: ShadingPattern::None,
+                        fill_color: Some(fill_color),
+                    });
+                } else if let Some(bounds) = parse_wmf_blt_destination_bounds(
+                    data,
+                    destination_offset,
+                    window_origin_x,
+                    window_origin_y,
+                    window_width,
+                    window_height,
+                ) && apply_passive_solid_backdrop_raster_transfer(
+                    &mut commands,
+                    bounds,
+                    read_le_u32(data, 0)?,
+                    state.fill_color,
+                ) {
+                } else if is_passive_noop_raster_transfer(data, 0, state.fill_color) {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -28360,16 +28402,11 @@ fn passive_source_raster_transfer_mode(
         WMF_MERGEPAINT_RASTER_OP => {
             Some(PassiveSourceRasterTransferMode::SameBoundsBackdropOrNotSourceIfSolidSource)
         }
-        WMF_PATPAINT_RASTER_OP if selected_fill_color == Some(Color::default()) => {
-            Some(PassiveSourceRasterTransferMode::SolidOrNoopBySource {
-                solid_source: Color::default(),
-                fill: white_color(),
-                noop_source: white_color(),
-            })
-        }
-        WMF_PATPAINT_RASTER_OP => Some(PassiveSourceRasterTransferMode::SolidIfSource {
-            source: Color::default(),
-            fill: white_color(),
+        WMF_PATPAINT_RASTER_OP => selected_fill_color.map(|pattern| {
+            PassiveSourceRasterTransferMode::SameBoundsBackdropOrPatternOrNotSourceIfSolidSource {
+                pattern,
+                blank_destination,
+            }
         }),
         _ => None,
     }
@@ -28387,23 +28424,6 @@ fn apply_passive_source_raster_transfer_mode(
         }
         PassiveSourceRasterTransferMode::Solid(color) => {
             Some(PassiveSourceRasterTransfer::Solid(color))
-        }
-        PassiveSourceRasterTransferMode::SolidIfSource { source, fill } => {
-            vector_raster_pixels_all_color(&image, source)?
-                .then_some(PassiveSourceRasterTransfer::Solid(fill))
-        }
-        PassiveSourceRasterTransferMode::SolidOrNoopBySource {
-            solid_source,
-            fill,
-            noop_source,
-        } => {
-            if vector_raster_pixels_all_color(&image, noop_source)? {
-                Some(PassiveSourceRasterTransfer::Noop)
-            } else if vector_raster_pixels_all_color(&image, solid_source)? {
-                Some(PassiveSourceRasterTransfer::Solid(fill))
-            } else {
-                None
-            }
         }
         PassiveSourceRasterTransferMode::SameBoundsBackdropAndIfSolidSource => {
             let source = vector_raster_solid_color(&image)?;
@@ -28439,6 +28459,21 @@ fn apply_passive_source_raster_transfer_mode(
                 Some(PassiveSourceRasterTransfer::Noop)
             } else if source == white_color() {
                 Some(PassiveSourceRasterTransfer::Solid(white_color()))
+            } else {
+                Some(PassiveSourceRasterTransfer::SameBoundsBackdropOr(source))
+            }
+        }
+        PassiveSourceRasterTransferMode::SameBoundsBackdropOrPatternOrNotSourceIfSolidSource {
+            pattern,
+            blank_destination,
+        } => {
+            let source = or_color(pattern, inverted_color(vector_raster_solid_color(&image)?));
+            if source == white_color() {
+                Some(PassiveSourceRasterTransfer::Solid(white_color()))
+            } else if blank_destination {
+                Some(PassiveSourceRasterTransfer::Solid(source))
+            } else if source == Color::default() {
+                Some(PassiveSourceRasterTransfer::Noop)
             } else {
                 Some(PassiveSourceRasterTransfer::SameBoundsBackdropOr(source))
             }
@@ -28683,70 +28718,6 @@ fn mask_vector_raster_image(image: &mut ParsedVectorRasterImage, color: Color) -
         ImageFormat::PngIndexed => {
             mask_indexed_palette(&mut image.palette, color)?;
             Some(())
-        }
-        _ => None,
-    }
-}
-
-fn vector_raster_pixels_all_color(image: &ParsedVectorRasterImage, color: Color) -> Option<bool> {
-    match image.format {
-        ImageFormat::Rgb8 => {
-            if !image.palette.is_empty() {
-                return None;
-            }
-            let width = usize::try_from(image.width_px).ok()?;
-            let height = usize::try_from(image.height_px).ok()?;
-            let expected_len = width.checked_mul(height)?.checked_mul(3)?;
-            if image.bytes.len() != expected_len {
-                return None;
-            }
-            Some(image.bytes.chunks_exact(3).all(|pixel| {
-                pixel[0] == color.red && pixel[1] == color.green && pixel[2] == color.blue
-            }))
-        }
-        ImageFormat::Png => {
-            let (_, _, row_len, scanlines) =
-                unfiltered_png_scanlines(&image.bytes, image.width_px, image.height_px, 3)?;
-            Some(scanlines.chunks_exact(row_len).all(|row| {
-                row[1..].chunks_exact(3).all(|pixel| {
-                    pixel[0] == color.red && pixel[1] == color.green && pixel[2] == color.blue
-                })
-            }))
-        }
-        ImageFormat::PngGrayscale => {
-            if color.red != color.green || color.red != color.blue {
-                return Some(false);
-            }
-            let (_, _, row_len, scanlines) =
-                unfiltered_png_scanlines(&image.bytes, image.width_px, image.height_px, 1)?;
-            Some(
-                scanlines
-                    .chunks_exact(row_len)
-                    .all(|row| row[1..].iter().all(|sample| *sample == color.red)),
-            )
-        }
-        ImageFormat::PngIndexed => {
-            if image.palette.is_empty() || image.palette.len() % 3 != 0 {
-                return None;
-            }
-            let (_, _, row_len, scanlines) =
-                unfiltered_png_scanlines(&image.bytes, image.width_px, image.height_px, 1)?;
-            Some(scanlines.chunks_exact(row_len).all(|row| {
-                row[1..].iter().all(|sample| {
-                    let palette_start = usize::from(*sample).checked_mul(3);
-                    let Some(palette_start) = palette_start else {
-                        return false;
-                    };
-                    image
-                        .palette
-                        .get(palette_start..palette_start.saturating_add(3))
-                        .is_some_and(|entry| {
-                            entry[0] == color.red
-                                && entry[1] == color.green
-                                && entry[2] == color.blue
-                        })
-                })
-            }))
         }
         _ => None,
     }
@@ -45540,6 +45511,128 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_patpaint_solid_source_on_blank_destination_paints_pattern_or_inverted_source() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 20,
+                    green: 80,
+                    blue: 140,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_PATPAINT_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 20,
+                    green: 80,
+                    blue: 140
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_same_bounds_patpaint_solid_source_after_solid_fill_ors_pattern_and_inverted_source() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 20,
+                    green: 80,
+                    blue: 140,
+                },
+                0,
+            ),
+            emf_create_brush_record(
+                4,
+                0,
+                Color {
+                    red: 100,
+                    green: 30,
+                    blue: 200,
+                },
+                0,
+            ),
+            emf_select_object_record(4),
+            emf_bitblt_record(20, 15, 60, 30, WMF_PATCOPY_RASTER_OP, b"PATCOPY-FILL"),
+            emf_select_object_record(3),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_PATPAINT_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 117,
+                    green: 95,
+                    blue: 221
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn emf_nonwhite_patpaint_after_paint_is_skipped_as_backdrop_dependent() {
         let records = [
             emf_create_brush_record(
@@ -48061,6 +48154,115 @@ After\par}"#;
                     red: 255,
                     green: 255,
                     blue: 255
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_patpaint_solid_source_on_blank_destination_paints_pattern_or_inverted_source() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color {
+                red: 20,
+                green: 80,
+                blue: 140,
+            }),
+            wmf_select_object_record(0),
+            wmf_stretchdib_dib_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_PATPAINT_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 20,
+                    green: 80,
+                    blue: 140
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_same_bounds_patpaint_solid_source_after_solid_fill_ors_pattern_and_inverted_source() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color {
+                red: 20,
+                green: 80,
+                blue: 140,
+            }),
+            wmf_create_brush_record(Color {
+                red: 100,
+                green: 30,
+                blue: 200,
+            }),
+            wmf_select_object_record(1),
+            wmf_dibbitblt_record(15, 25, 80, 40, WMF_PATCOPY_RASTER_OP, b"PATCOPY-FILL"),
+            wmf_select_object_record(0),
+            wmf_stretchdib_dib_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_PATPAINT_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 117,
+                    green: 95,
+                    blue: 221
                 }),
                 ..
             }
