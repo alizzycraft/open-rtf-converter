@@ -33755,6 +33755,126 @@ fn wmf_exttextout_opaque_background_renders_as_passive_fill() {
 }
 
 #[test]
+fn empty_wmf_exttextout_opaque_bounds_render_passive_background_without_payload_leakage() {
+    let mut empty_text = wmf_exttextout_record(40, 20, "", 0x0002, Some((30, 10, 90, 30)));
+    empty_text.extend_from_slice(b"EMPTY-WMF-EXTTEXTOUT /JavaScript /EmbeddedFile /Launch");
+    empty_text.resize(empty_text.len().next_multiple_of(2), 0);
+    let empty_text_words = (empty_text.len() / 2) as u32;
+    write_test_le_u32(&mut empty_text, 0, empty_text_words);
+
+    let records = [empty_text, wmf_bounds_record(0x041b, 0, 0, 80, 40)];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive empty WMF opaque text vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 30.0,
+            top: 10.0,
+            right: 90.0,
+            bottom: 30.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "EMPTY-WMF-EXTTEXTOUT",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "empty WMF opaque text payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(!rendered_text.contains("EMPTY-WMF-EXTTEXTOUT"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "empty WMF opaque text bounds and later rectangle should render passive PDF rectangles"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*")),
+        "empty WMF opaque text bounds should render a passive PDF fill"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"EMPTY-WMF-EXTTEXTOUT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "empty WMF opaque text payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_settextalign_positions_passive_text_without_flag_leakage() {
     let wmf_hex = concat!(
         "0100090000032c00000001000c0000000000",
@@ -61627,6 +61747,39 @@ fn wmf_point_list_record(function: u16, points: &[(i16, i16)]) -> Vec<u8> {
         write_test_le_i16(&mut record, offset, *y);
         write_test_le_i16(&mut record, offset + 2, *x);
     }
+    record
+}
+
+fn wmf_exttextout_record(
+    x: i16,
+    y: i16,
+    text: &str,
+    flags: u16,
+    bounds: Option<(i16, i16, i16, i16)>,
+) -> Vec<u8> {
+    let text_bytes = text.as_bytes();
+    let has_bounds = flags & 0x0006 != 0;
+    let bounds_words = if has_bounds { 4usize } else { 0usize };
+    let text_words = text_bytes.len().next_multiple_of(2) / 2;
+    let size_words = 7 + bounds_words + text_words;
+    let mut record = vec![0; size_words * 2];
+    write_test_le_u32(&mut record, 0, size_words as u32);
+    write_test_le_u16(&mut record, 4, 0x0a32);
+    write_test_le_i16(&mut record, 6, y);
+    write_test_le_i16(&mut record, 8, x);
+    write_test_le_i16(&mut record, 10, text_bytes.len() as i16);
+    write_test_le_u16(&mut record, 12, flags);
+    let text_offset = if has_bounds {
+        let (left, top, right, bottom) = bounds.unwrap_or((0, 0, 0, 0));
+        write_test_le_i16(&mut record, 14, bottom);
+        write_test_le_i16(&mut record, 16, right);
+        write_test_le_i16(&mut record, 18, top);
+        write_test_le_i16(&mut record, 20, left);
+        22usize
+    } else {
+        14usize
+    };
+    record[text_offset..text_offset + text_bytes.len()].copy_from_slice(text_bytes);
     record
 }
 
