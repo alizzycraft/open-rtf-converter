@@ -21005,8 +21005,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 )?;
             }
             EMR_INVERTRGN => {
+                let rects = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)?;
                 if emf_commands_are_unpainted_clip_scope(&commands) {
-                    let rects = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)?;
                     push_emf_region_rectangles(
                         &mut commands,
                         rects,
@@ -21017,6 +21017,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         },
                         ShadingPattern::None,
                     )?;
+                } else if let Some(bounds) = rects.first().copied()
+                    && rects.len() == 1
+                    && bounds_is_visible(bounds)
+                    && apply_passive_same_bounds_invert_fill(&mut commands, bounds)
+                {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -28974,6 +28979,31 @@ fn apply_passive_solid_backdrop_raster_transfer(
         WMF_PATINVERT_RASTER_OP => xor_color(*fill_color, selected_fill_color.unwrap_or_default()),
         _ => return false,
     };
+    true
+}
+
+fn apply_passive_same_bounds_invert_fill(
+    commands: &mut [StaticImageVectorCommand],
+    bounds: (f32, f32, f32, f32),
+) -> bool {
+    let Some(StaticImageVectorCommand::Rectangle {
+        left,
+        top,
+        right,
+        bottom,
+        stroke_color: None,
+        fill_pattern: ShadingPattern::None,
+        fill_color: Some(fill_color),
+        ..
+    }) = commands.last_mut()
+    else {
+        return false;
+    };
+    if (*left, *top, *right, *bottom) != bounds {
+        return false;
+    }
+
+    *fill_color = inverted_color(*fill_color);
     true
 }
 
@@ -44936,7 +44966,56 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_invertrgn_after_paint_is_skipped_as_backdrop_dependent() {
+    fn emf_same_bounds_invertrgn_after_solid_paint_inverts_fill_color() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 100,
+                    green: 30,
+                    blue: 200,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_bitblt_record(20, 15, 60, 30, WMF_PATCOPY_RASTER_OP, b"INVERTRGN-FILL"),
+            emf_invertrgn_record(&[(20, 15, 80, 45)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected partial passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 155,
+                    green: 225,
+                    blue: 55
+                }),
+                ..
+            }
+        ));
+        assert_eq!(output.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn emf_nonmatching_invertrgn_after_paint_is_skipped_as_backdrop_dependent() {
         let records = [
             emf_rect_record(43, 0, 0, 30, 30),
             emf_invertrgn_record(&[(15, 12, 70, 40)]),
