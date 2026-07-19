@@ -36541,6 +36541,103 @@ fn emf_empty_ended_path_paint_records_are_noops_without_payload_leakage() {
 }
 
 #[test]
+fn emf_abortpath_discards_path_without_payload_leakage() {
+    let mut abort = emf_unknown_record(68);
+    abort.extend_from_slice(b"ABORT-EMF-PATH /JavaScript /EmbeddedFile");
+    abort.resize(abort.len().next_multiple_of(4), 0);
+    let abort_len = abort.len() as u32;
+    write_test_le_u32(&mut abort, 4, abort_len);
+
+    let records = [
+        emf_unknown_record(59),
+        emf_point_record(27, 10, 10),
+        emf_point_record(54, 50, 10),
+        abort,
+        emf_rect_record(43, 0, 0, 80, 40),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF ABORTPATH vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in [
+        "emfblip",
+        "ABORTPATH",
+        "ABORT-EMF-PATH",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF ABORTPATH payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "painting after EMF ABORTPATH should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"ABORT-EMF-PATH",
+        b"ABORTPATH",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF ABORTPATH payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_null_object_path_paint_records_are_noops_without_payload_leakage() {
     let mut stroke = emf_unknown_record(64);
     stroke.extend_from_slice(b"NULL-OBJECT-EMF-STROKEPATH /JavaScript");

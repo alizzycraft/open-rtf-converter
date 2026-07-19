@@ -20508,6 +20508,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_STROKEANDFILLPATH: u32 = 63;
     const EMR_STROKEPATH: u32 = 64;
     const EMR_SELECTCLIPPATH: u32 = 67;
+    const EMR_ABORTPATH: u32 = 68;
     const EMR_FILLRGN: u32 = 71;
     const EMR_FRAMERGN: u32 = 72;
     const EMR_INVERTRGN: u32 = 73;
@@ -21028,6 +21029,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     state.fill_color,
                 )?;
                 commands.push(command);
+            }
+            EMR_ABORTPATH => {
+                active_path = None;
             }
             EMR_FILLRGN => {
                 // `data` starts after the EMF record Type and Size fields.
@@ -42655,6 +42659,34 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
             && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_abortpath_discards_unpainted_path_before_later_drawing() {
+        let records = [
+            emf_unknown_record(59),
+            emf_point_record(27, 10, 10),
+            emf_point_record(54, 50, 10),
+            emf_unknown_record(68),
+            emf_rect_record(43, 0, 0, 60, 30),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
