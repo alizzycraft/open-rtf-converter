@@ -21223,11 +21223,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     is_passive_invisible_emf_raster_transfer(data, raster_transfer.3)
                 }) {
                 } else if record_type == EMR_SETDIBITSTODEVICE {
-                    if let Some(command) =
+                    if is_passive_noop_emf_setdibitstodevice(data) {
+                    } else if let Some(command) =
                         parse_emf_setdibitstodevice_srcopy(data, &header, &coordinates)
                     {
                         push_passive_source_raster_command(&mut commands, command)?;
-                    } else if is_passive_noop_emf_setdibitstodevice(data) {
                     } else {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
