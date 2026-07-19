@@ -31082,6 +31082,123 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_zero_extent_and_zero_scan_rasters_are_noops_without_payload_leakage() {
+    let mut hidden_dib = b"INVISIBLE-WMF-RASTER-PAYLOAD /JavaScript /EmbeddedFile /Launch".to_vec();
+    hidden_dib.resize(96, 0x41);
+    let records = [
+        wmf_create_brush_record(Color {
+            red: 30,
+            green: 90,
+            blue: 150,
+        }),
+        wmf_select_object_record(0),
+        wmf_bounds_record(0x041b, 0, 0, 80, 40),
+        wmf_patblt_record(18, 24, 0, 28, 0x00f0_0021),
+        wmf_bitblt_record(70, 24, 48, 0, 0x00f0_0021, &hidden_dib),
+        wmf_stretchblt_record(18, 54, 0, 28, 0x00f0_0021, &hidden_dib),
+        wmf_dibbitblt_record(70, 54, 48, 0, 0x00f0_0021, &hidden_dib),
+        wmf_dibstretchblt_record(18, 84, 0, 28, 0x00f0_0021, &hidden_dib),
+        wmf_stretchdib_dib_record(70, 84, 48, 0, 0x00f0_0021, &hidden_dib),
+        wmf_setdib_to_dev_record(18, 114, 48, 28, 0, 0, &hidden_dib),
+    ];
+    let wmf = minimal_wmf_with_records(160, 140, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich140\\picwgoal2160\\pichgoal1008 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF zero-size raster vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    for forbidden in [
+        "wmetafile",
+        "INVISIBLE-WMF-RASTER-PAYLOAD",
+        "061d",
+        "0922",
+        "0b23",
+        "0940",
+        "0b41",
+        "0f43",
+        "0d33",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "zero-size WMF raster payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert_no_wmf_preview_warning(&output.diagnostics);
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 1,
+        "preexisting paint before zero-size WMF raster records should still render"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"INVISIBLE-WMF-RASTER-PAYLOAD",
+        b"061d",
+        b"0922",
+        b"0b23",
+        b"0940",
+        b"0b41",
+        b"0f43",
+        b"0d33",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero-size WMF raster payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_srccopy_dib_blt_records_render_passive_images_without_payload_leakage() {
     let dib = minimal_24bit_dib_with_dimensions(2, 1);
     let records = [
@@ -57785,6 +57902,66 @@ fn wmf_select_object_record(handle: u16) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, 4);
     write_test_le_u16(&mut record, 4, 0x012d);
     write_test_le_u16(&mut record, 6, handle);
+    record
+}
+
+fn wmf_patblt_record(x: i16, y: i16, width: i16, height: i16, raster_op: u32) -> Vec<u8> {
+    let mut record = vec![0; 18];
+    write_test_le_u32(&mut record, 0, 9);
+    write_test_le_u16(&mut record, 4, 0x061d);
+    write_test_le_u32(&mut record, 6, raster_op);
+    write_test_le_i16(&mut record, 10, y);
+    write_test_le_i16(&mut record, 12, x);
+    write_test_le_i16(&mut record, 14, height);
+    write_test_le_i16(&mut record, 16, width);
+    record
+}
+
+fn wmf_bitblt_record(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    raster_op: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let size = (6 + 16 + payload.len()).next_multiple_of(2);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, (size / 2) as u32);
+    write_test_le_u16(&mut record, 4, 0x0922);
+    write_test_le_u32(&mut record, 6, raster_op);
+    write_test_le_i16(&mut record, 10, 0);
+    write_test_le_i16(&mut record, 12, 0);
+    write_test_le_i16(&mut record, 14, height);
+    write_test_le_i16(&mut record, 16, width);
+    write_test_le_i16(&mut record, 18, y);
+    write_test_le_i16(&mut record, 20, x);
+    record[22..22 + payload.len()].copy_from_slice(payload);
+    record
+}
+
+fn wmf_stretchblt_record(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    raster_op: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let size = (6 + 20 + payload.len()).next_multiple_of(2);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, (size / 2) as u32);
+    write_test_le_u16(&mut record, 4, 0x0b23);
+    write_test_le_u32(&mut record, 6, raster_op);
+    write_test_le_i16(&mut record, 10, 0);
+    write_test_le_i16(&mut record, 12, 0);
+    write_test_le_i16(&mut record, 14, 0);
+    write_test_le_i16(&mut record, 16, 0);
+    write_test_le_i16(&mut record, 18, height);
+    write_test_le_i16(&mut record, 20, width);
+    write_test_le_i16(&mut record, 22, y);
+    write_test_le_i16(&mut record, 24, x);
+    record[26..26 + payload.len()].copy_from_slice(payload);
     record
 }
 

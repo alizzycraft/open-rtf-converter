@@ -27557,7 +27557,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some((left, top, right, bottom, fill_color)) =
+                if is_passive_invisible_wmf_patblt(data) {
+                } else if let Some((left, top, right, bottom, fill_color)) =
                     parse_wmf_patblt_passive_transfer(
                         data,
                         window_origin_x,
@@ -27594,6 +27595,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_height,
                 ) {
                     commands.push(command);
+                } else if is_passive_noop_wmf_setdibits_to_device(data) {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -27609,7 +27611,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     _ => unreachable!(),
                 };
                 let blank_destination = emf_commands_are_unpainted_clip_scope(&commands);
-                if let Some(command) = match function {
+                if is_passive_invisible_wmf_blt(data, destination_offset) {
+                } else if let Some(command) = match function {
                     0x0940 => parse_wmf_dibbitblt_srcopy(
                         data,
                         window_origin_x,
@@ -28097,6 +28100,14 @@ fn parse_wmf_patblt_passive_transfer(
     ))
 }
 
+fn is_passive_invisible_wmf_patblt(data: &[u8]) -> bool {
+    data.len() >= 12
+        && matches!(
+            (read_le_i16(data, 8), read_le_i16(data, 10)),
+            (Some(0), _) | (_, Some(0))
+        )
+}
+
 fn parse_wmf_blt_passive_transfer(
     data: &[u8],
     destination_offset: usize,
@@ -28164,6 +28175,17 @@ fn parse_wmf_blt_destination_bounds(
         left_top.0.max(right_bottom.0),
         left_top.1.max(right_bottom.1),
     ))
+}
+
+fn is_passive_invisible_wmf_blt(data: &[u8], destination_offset: usize) -> bool {
+    data.len() >= destination_offset.saturating_add(4)
+        && matches!(
+            (
+                read_le_i16(data, destination_offset),
+                read_le_i16(data, destination_offset + 2)
+            ),
+            (Some(0), _) | (_, Some(0))
+        )
 }
 
 fn parse_wmf_stretchdib_srcopy(
@@ -28468,6 +28490,18 @@ fn parse_wmf_setdibits_to_device(
         window_height,
         image,
     )
+}
+
+fn is_passive_noop_wmf_setdibits_to_device(data: &[u8]) -> bool {
+    data.len() >= 14
+        && matches!(
+            (
+                read_le_u16(data, 2),
+                read_le_i16(data, 10),
+                read_le_i16(data, 12)
+            ),
+            (Some(0), _, _) | (_, Some(0), _) | (_, _, Some(0))
+        )
 }
 
 fn wmf_raster_image_command(
@@ -48761,6 +48795,47 @@ After\par}"#;
     }
 
     #[test]
+    fn wmf_zero_extent_and_zero_scan_rasters_are_passive_noops_without_parsing_payloads() {
+        let mut hidden_dib =
+            b"INVISIBLE-WMF-RASTER-PAYLOAD /JavaScript /EmbeddedFile /Launch".to_vec();
+        hidden_dib.resize(64, 0x41);
+        let records = [
+            wmf_create_brush_record(Color {
+                red: 30,
+                green: 90,
+                blue: 150,
+            }),
+            wmf_select_object_record(0),
+            wmf_bounds_record(0x041b, 0, 0, 30, 30),
+            wmf_patblt_record(10, 20, 0, 24, WMF_PATCOPY_RASTER_OP),
+            wmf_bitblt_record(40, 20, 44, 0, WMF_PATCOPY_RASTER_OP, &hidden_dib),
+            wmf_stretchblt_record(70, 20, 0, 24, WMF_PATCOPY_RASTER_OP, &hidden_dib),
+            wmf_dibbitblt_record(100, 20, 44, 0, WMF_PATCOPY_RASTER_OP, &hidden_dib),
+            wmf_dibstretchblt_record(10, 50, 0, 24, WMF_PATCOPY_RASTER_OP, &hidden_dib),
+            wmf_stretchdib_dib_record(40, 50, 44, 0, WMF_PATCOPY_RASTER_OP, &hidden_dib),
+            wmf_setdib_to_dev_record(70, 50, 44, 24, 0, 0, &hidden_dib),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(160, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
     fn wmf_blackness_and_whiteness_transfers_become_passive_filled_rectangles() {
         let cases = [
             (
@@ -53106,6 +53181,69 @@ fn wmf_select_object_record(handle: u16) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, 4);
     write_test_le_u16(&mut record, 4, 0x012d);
     write_test_le_u16(&mut record, 6, handle);
+    record
+}
+
+#[cfg(test)]
+fn wmf_patblt_record(x: i16, y: i16, width: i16, height: i16, raster_op: u32) -> Vec<u8> {
+    let mut record = vec![0; 18];
+    write_test_le_u32(&mut record, 0, 9);
+    write_test_le_u16(&mut record, 4, 0x061d);
+    write_test_le_u32(&mut record, 6, raster_op);
+    write_test_le_i16(&mut record, 10, y);
+    write_test_le_i16(&mut record, 12, x);
+    write_test_le_i16(&mut record, 14, height);
+    write_test_le_i16(&mut record, 16, width);
+    record
+}
+
+#[cfg(test)]
+fn wmf_bitblt_record(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    raster_op: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let size = (6 + 16 + payload.len()).next_multiple_of(2);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, (size / 2) as u32);
+    write_test_le_u16(&mut record, 4, 0x0922);
+    write_test_le_u32(&mut record, 6, raster_op);
+    write_test_le_i16(&mut record, 10, 0);
+    write_test_le_i16(&mut record, 12, 0);
+    write_test_le_i16(&mut record, 14, height);
+    write_test_le_i16(&mut record, 16, width);
+    write_test_le_i16(&mut record, 18, y);
+    write_test_le_i16(&mut record, 20, x);
+    record[22..22 + payload.len()].copy_from_slice(payload);
+    record
+}
+
+#[cfg(test)]
+fn wmf_stretchblt_record(
+    x: i16,
+    y: i16,
+    width: i16,
+    height: i16,
+    raster_op: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let size = (6 + 20 + payload.len()).next_multiple_of(2);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, (size / 2) as u32);
+    write_test_le_u16(&mut record, 4, 0x0b23);
+    write_test_le_u32(&mut record, 6, raster_op);
+    write_test_le_i16(&mut record, 10, 0);
+    write_test_le_i16(&mut record, 12, 0);
+    write_test_le_i16(&mut record, 14, 0);
+    write_test_le_i16(&mut record, 16, 0);
+    write_test_le_i16(&mut record, 18, height);
+    write_test_le_i16(&mut record, 20, width);
+    write_test_le_i16(&mut record, 22, y);
+    write_test_le_i16(&mut record, 24, x);
+    record[26..26 + payload.len()].copy_from_slice(payload);
     record
 }
 
