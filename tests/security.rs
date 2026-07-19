@@ -40004,6 +40004,145 @@ fn black_brush_patinvert_raster_transfers_are_noops_without_payload_leakage() {
 }
 
 #[test]
+fn white_brush_patpaint_raster_transfers_render_without_payload_leakage() {
+    let emf_payload = b"EMF-WHITE-PATPAINT-PAYLOAD /JavaScript";
+    let wmf_payload = b"WMF-WHITE-PATPAINT-PAYLOAD /EmbeddedFile";
+    let white = Color {
+        red: u8::MAX,
+        green: u8::MAX,
+        blue: u8::MAX,
+    };
+    let emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[
+            emf_create_brush_record(3, 0, white, 0),
+            emf_select_object_record(3),
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_bitblt_record(10, 20, 30, 15, 0x00fb_0a09, emf_payload),
+        ],
+    );
+    let wmf = minimal_wmf_with_records(
+        200,
+        100,
+        &[
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(white),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(15, 25, 80, 40, 0x00f0_0021, b"WMF-PATCOPY-FILL"),
+            wmf_dibbitblt_record(20, 30, 80, 40, 0x00fb_0a09, wmf_payload),
+        ],
+    );
+    let emf_hex = bytes_to_hex(&emf);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert!(images.iter().all(|image| {
+        image.format == ImageFormat::WmfVector
+            && image.bytes.is_empty()
+            && image.vector_commands.len() == 2
+    }));
+    for image in &images {
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255
+                }),
+                ..
+            }
+        ));
+    }
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "wmetafile",
+        "EMF-WHITE-PATPAINT-PAYLOAD",
+        "WMF-WHITE-PATPAINT-PAYLOAD",
+        "WMF-PATCOPY-FILL",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "white PATPAINT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 4,
+        "white PATPAINT transfers should render passive rectangles"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        b"wmetafile",
+        emf_hex.as_bytes(),
+        wmf_hex.as_bytes(),
+        emf_payload.as_slice(),
+        wmf_payload.as_slice(),
+        b"WMF-PATCOPY-FILL",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "white PATPAINT source payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn black_brush_mergecopy_raster_transfers_render_passively_without_payload_leakage() {
     let emf_payload = b"EMF-MERGECOPY-SOURCE-PAYLOAD /JavaScript";
     let wmf_payload = b"WMF-MERGECOPY-SOURCE-PAYLOAD /EmbeddedFile";
