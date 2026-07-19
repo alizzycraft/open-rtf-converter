@@ -28749,6 +28749,9 @@ fn mask_vector_raster_image(image: &mut ParsedVectorRasterImage, color: Color) -
 }
 
 fn vector_raster_solid_color(image: &ParsedVectorRasterImage) -> Option<Color> {
+    if image.alpha_mask.is_some() {
+        return None;
+    }
     match image.format {
         ImageFormat::Rgb8 => {
             if !image.palette.is_empty() {
@@ -46937,6 +46940,59 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_srccopy_flat_color_alpha_source_remains_passive_raster_image() {
+        let records = [emf_stretchdibits_dib_record(
+            20,
+            15,
+            60,
+            30,
+            WMF_SRCCOPY_RASTER_OP,
+            &minimal_compressed_dib_with_payload(
+                2,
+                1,
+                5,
+                &minimal_rgba_png(&[[12, 34, 56, 64], [12, 34, 56, 192]]),
+            ),
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        let StaticImageVectorCommand::RasterImage {
+            left: 20.0,
+            top: 15.0,
+            right: 80.0,
+            bottom: 45.0,
+            image,
+        } = &image.vector_commands[0]
+        else {
+            panic!("flat RGB source with alpha must not collapse to an opaque rectangle");
+        };
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(
+            unfiltered_png_scanlines(&image.bytes, 2, 1, 3).unwrap().3,
+            vec![0, 12, 34, 56, 12, 34, 56]
+        );
+        let alpha_mask = image.alpha_mask.as_ref().expect("source alpha mask");
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 3).unwrap(),
+            vec![0, 64, 192]
+        );
+    }
+
+    #[test]
     fn emf_srccopy_stretchblt_bi_png_record_becomes_passive_raster_image() {
         let png = minimal_rgb_png_with_dimensions(2, 1);
         let records = [emf_stretchblt_dib_record(
@@ -50640,6 +50696,59 @@ After\par}"#;
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn wmf_notsrccopy_flat_color_alpha_source_remains_passive_raster_image() {
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_NOTSRCCOPY_RASTER_OP,
+            &minimal_compressed_dib_with_payload(
+                2,
+                1,
+                5,
+                &minimal_rgba_png(&[[12, 34, 56, 64], [12, 34, 56, 192]]),
+            ),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &[record]))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        let StaticImageVectorCommand::RasterImage {
+            left: 15.0,
+            top: 25.0,
+            right: 95.0,
+            bottom: 65.0,
+            image,
+        } = &image.vector_commands[0]
+        else {
+            panic!("flat RGB source with alpha must not collapse to an opaque rectangle");
+        };
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(
+            unfiltered_png_scanlines(&image.bytes, 2, 1, 3).unwrap().3,
+            vec![0, 243, 221, 199, 243, 221, 199]
+        );
+        let alpha_mask = image.alpha_mask.as_ref().expect("source alpha mask");
+        assert_eq!(
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 3).unwrap(),
+            vec![0, 64, 192]
+        );
     }
 
     #[test]
