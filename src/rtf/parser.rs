@@ -20965,6 +20965,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
+                if state.stroke_color.is_none() {
+                    pos = record_end;
+                    continue;
+                }
                 let path_commands = path.stroke_commands(
                     state.stroke_color,
                     state.stroke_width,
@@ -20981,6 +20985,17 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 let path = active_path.take()?;
                 if path.is_passive_empty() {
+                    pos = record_end;
+                    continue;
+                }
+                if record_type == EMR_FILLPATH && state.fill_color.is_none() {
+                    pos = record_end;
+                    continue;
+                }
+                if record_type == EMR_STROKEANDFILLPATH
+                    && state.stroke_color.is_none()
+                    && state.fill_color.is_none()
+                {
                     pos = record_end;
                     continue;
                 }
@@ -42624,6 +42639,70 @@ After\par}"#;
                 top: 0.0,
                 right: 60.0,
                 bottom: 30.0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emf_null_object_path_paint_records_are_passive_noops() {
+        let records = [
+            emf_select_object_record(0x8000_0008),
+            emf_unknown_record(59),
+            emf_point_record(27, 10, 10),
+            emf_point_record(54, 80, 10),
+            emf_unknown_record(60),
+            emf_unknown_record(64),
+            emf_select_object_record(0x8000_0005),
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_poly_record(6, &[(80, 20), (80, 50), (20, 50)]),
+            emf_unknown_record(61),
+            emf_unknown_record(60),
+            emf_unknown_record(62),
+            emf_select_object_record(0x8000_0008),
+            emf_select_object_record(0x8000_0005),
+            emf_unknown_record(59),
+            emf_point_record(27, 30, 30),
+            emf_poly_record(6, &[(90, 30), (90, 60), (30, 60)]),
+            emf_unknown_record(61),
+            emf_unknown_record(60),
+            emf_unknown_record(63),
+            emf_select_object_record(0x8000_0007),
+            emf_select_object_record(0x8000_0004),
+            emf_rect_record(43, 0, 0, 60, 30),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 0.0,
+                top: 0.0,
+                right: 60.0,
+                bottom: 30.0,
+                stroke_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
                 ..
             }
         ));
