@@ -21518,6 +21518,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
+                if emf_arc_bounds_are_degenerate(data)? {
+                    pos = record_end;
+                    continue;
+                }
                 let arc = parse_emf_arc_record(data, &header, &coordinates, state.arc_clockwise)?;
                 match record_type {
                     EMR_ARC | EMR_ARCTO => {
@@ -22702,6 +22706,17 @@ fn parse_emf_arc_record(
         points,
         end_position,
     })
+}
+
+fn emf_arc_bounds_are_degenerate(data: &[u8]) -> Option<bool> {
+    if data.len() < 16 {
+        return None;
+    }
+    let left = read_le_i32(data, 0)?;
+    let top = read_le_i32(data, 4)?;
+    let right = read_le_i32(data, 8)?;
+    let bottom = read_le_i32(data, 12)?;
+    Some(left == right || top == bottom)
 }
 
 fn sample_emf_arc_points(
@@ -53137,20 +53152,36 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_arc_records_with_degenerate_bounds_become_passive_placeholders() {
-        let records = [emf_arc_record(45, 20, 10, 20, 70, 100, 40, 60, 70)];
+    fn emf_arc_records_with_degenerate_bounds_are_passive_noops() {
+        let records = [
+            emf_arc_record(45, 20, 10, 20, 70, 100, 40, 60, 70),
+            emf_arc_record(46, 20, 10, 100, 10, 100, 40, 60, 70),
+            emf_arc_record(47, 20, 10, 20, 70, 100, 40, 60, 70),
+            emf_arc_record(55, 20, 10, 100, 10, 100, 40, 60, 70),
+            emf_rect_record(43, 0, 0, 60, 30),
+        ];
         let input = format!(
             r"{{\rtf1{{\pict\emfblip {}}}}}",
             bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 0.0,
+                top: 0.0,
+                right: 60.0,
+                bottom: 30.0,
+                ..
+            }
         ));
     }
 
