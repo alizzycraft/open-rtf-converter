@@ -31321,6 +31321,148 @@ fn wmf_srccopy_cropped_embedded_dibs_render_passive_images_without_payload_leaka
 }
 
 #[test]
+fn wmf_srccopy_cropped_jpeg_embedded_dibs_render_clipped_without_payload_leakage() {
+    let jpeg = minimal_jpeg_with_dimensions(3, 2);
+    let mut jpeg_payload = jpeg.clone();
+    jpeg_payload.extend_from_slice(b"TRAILING-WMF-STRETCHDIB-JPEG-CROP /JavaScript");
+    let mut dib = minimal_compressed_dib_with_payload(3, 2, 4, &jpeg_payload);
+    dib.extend_from_slice(b"TRAILING-WMF-STRETCHDIB-JPEG-CROP-DIB /EmbeddedFile");
+    let records = [
+        wmf_stretchdib_dib_record_with_source(15, 25, 80, 40, 1, 0, 1, 2, &dib),
+        wmf_dibstretchblt_record_with_source(35, 45, 60, 30, 1, 0, 1, 2, &dib),
+    ];
+    let wmf = minimal_wmf_with_records(200, 100, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("JPEG-cropped WMF SRCCOPY embedded-DIB vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 8);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::ClipRect {
+            left: 15.0,
+            top: 25.0,
+            right: 95.0,
+            bottom: 65.0,
+        }
+    ));
+    assert!(matches!(
+        &image.vector_commands[2],
+        StaticImageVectorCommand::RasterImage {
+            left: -65.0,
+            top: 25.0,
+            right: 175.0,
+            bottom: 65.0,
+            image,
+        } if image.format == ImageFormat::Jpeg
+            && image.width_px == 3
+            && image.height_px == 2
+            && image.bytes == jpeg
+            && image.alpha_mask.is_none()
+    ));
+    assert!(matches!(
+        image.vector_commands[5],
+        StaticImageVectorCommand::ClipRect {
+            left: 35.0,
+            top: 45.0,
+            right: 95.0,
+            bottom: 75.0,
+        }
+    ));
+    for forbidden in [
+        "wmetafile",
+        "0f43",
+        "0b41",
+        "cc0020",
+        "TRAILING-WMF-STRETCHDIB-JPEG-CROP",
+        "TRAILING-WMF-STRETCHDIB-JPEG-CROP-DIB",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "JPEG-cropped WMF SRCCOPY payload/control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "JPEG-cropped WMF SRCCOPY records should render passive image XObjects"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "Do")
+            .count()
+            >= 2,
+        "JPEG-cropped WMF SRCCOPY records should invoke passive PDF image XObjects"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "JPEG-cropped WMF SRCCOPY records should clip the full JPEG draw"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"0f43",
+        b"0b41",
+        b"cc0020",
+        b"TRAILING-WMF-STRETCHDIB-JPEG-CROP",
+        b"TRAILING-WMF-STRETCHDIB-JPEG-CROP-DIB",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "JPEG-cropped WMF SRCCOPY payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003900000000400190000000000",

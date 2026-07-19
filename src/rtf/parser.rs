@@ -27835,19 +27835,13 @@ fn parse_wmf_stretchdib_srcopy(
     let destination_width = i32::from(read_le_i16(data, 16)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 18)?);
     let destination_x = i32::from(read_le_i16(data, 20)?);
-    let transfer = apply_passive_source_raster_transfer_mode(
-        parse_vector_raster_dib_image(
-            &data[DIB_HEADER_OFFSET..],
-            source_x,
-            source_y,
-            source_width,
-            i32::try_from(source_height.unsigned_abs()).ok()?,
-            false,
-        )?,
-        transfer_mode,
-    )?;
 
-    wmf_source_transfer_command(
+    wmf_source_dib_transfer_command(
+        &data[DIB_HEADER_OFFSET..],
+        source_x,
+        source_y,
+        source_width,
+        i32::try_from(source_height.unsigned_abs()).ok()?,
         destination_x,
         destination_y,
         destination_width,
@@ -27856,7 +27850,7 @@ fn parse_wmf_stretchdib_srcopy(
         window_origin_y,
         window_width,
         window_height,
-        transfer,
+        transfer_mode,
     )
 }
 
@@ -27886,19 +27880,13 @@ fn parse_wmf_dibbitblt_srcopy(
     let destination_width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 12)?);
     let destination_x = i32::from(read_le_i16(data, 14)?);
-    let transfer = apply_passive_source_raster_transfer_mode(
-        parse_vector_raster_dib_image(
-            &data[DIB_HEADER_OFFSET..],
-            source_x,
-            source_y,
-            destination_width,
-            destination_height,
-            false,
-        )?,
-        transfer_mode,
-    )?;
 
-    wmf_source_transfer_command(
+    wmf_source_dib_transfer_command(
+        &data[DIB_HEADER_OFFSET..],
+        source_x,
+        source_y,
+        destination_width,
+        destination_height,
         destination_x,
         destination_y,
         destination_width,
@@ -27907,7 +27895,7 @@ fn parse_wmf_dibbitblt_srcopy(
         window_origin_y,
         window_width,
         window_height,
-        transfer,
+        transfer_mode,
     )
 }
 
@@ -27942,19 +27930,13 @@ fn parse_wmf_dibstretchblt_srcopy(
     let destination_width = i32::from(read_le_i16(data, 14)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 16)?);
     let destination_x = i32::from(read_le_i16(data, 18)?);
-    let transfer = apply_passive_source_raster_transfer_mode(
-        parse_vector_raster_dib_image(
-            &data[DIB_HEADER_OFFSET..],
-            source_x,
-            source_y,
-            source_width,
-            i32::try_from(source_height.unsigned_abs()).ok()?,
-            false,
-        )?,
-        transfer_mode,
-    )?;
 
-    wmf_source_transfer_command(
+    wmf_source_dib_transfer_command(
+        &data[DIB_HEADER_OFFSET..],
+        source_x,
+        source_y,
+        source_width,
+        i32::try_from(source_height.unsigned_abs()).ok()?,
         destination_x,
         destination_y,
         destination_width,
@@ -27963,11 +27945,17 @@ fn parse_wmf_dibstretchblt_srcopy(
         window_origin_y,
         window_width,
         window_height,
-        transfer,
+        transfer_mode,
     )
 }
 
-fn wmf_source_transfer_command(
+#[allow(clippy::too_many_arguments)]
+fn wmf_source_dib_transfer_command(
+    dib_bytes: &[u8],
+    source_x: i32,
+    source_y: i32,
+    source_width: i32,
+    source_height: i32,
     destination_x: i32,
     destination_y: i32,
     destination_width: i32,
@@ -27976,8 +27964,57 @@ fn wmf_source_transfer_command(
     window_origin_y: i32,
     window_width: i32,
     window_height: i32,
-    transfer: PassiveSourceRasterTransfer,
+    transfer_mode: PassiveSourceRasterTransferMode,
 ) -> Option<PassiveSourceRasterCommand> {
+    let bounds = wmf_source_transfer_bounds(
+        destination_x,
+        destination_y,
+        destination_width,
+        destination_height,
+        window_origin_x,
+        window_origin_y,
+        window_width,
+        window_height,
+    )?;
+    let transfer = parse_vector_raster_dib_image(
+        dib_bytes,
+        source_x,
+        source_y,
+        source_width,
+        source_height,
+        false,
+    )
+    .and_then(|image| apply_passive_source_raster_transfer_mode(image, transfer_mode));
+    if let Some(transfer) = transfer {
+        return Some(passive_source_raster_command(
+            bounds.0, bounds.1, bounds.2, bounds.3, transfer,
+        ));
+    }
+    clipped_compressed_jpeg_source_raster_command(
+        dib_bytes,
+        source_x,
+        source_y,
+        source_width,
+        source_height,
+        bounds.0,
+        bounds.1,
+        bounds.2,
+        bounds.3,
+        transfer_mode,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn wmf_source_transfer_bounds(
+    destination_x: i32,
+    destination_y: i32,
+    destination_width: i32,
+    destination_height: i32,
+    window_origin_x: i32,
+    window_origin_y: i32,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(f32, f32, f32, f32)> {
     let left_top = normalize_wmf_point(
         destination_x,
         destination_y,
@@ -27998,13 +28035,7 @@ fn wmf_source_transfer_command(
     let top = left_top.1.min(right_bottom.1);
     let right = left_top.0.max(right_bottom.0);
     let bottom = left_top.1.max(right_bottom.1);
-    if !bounds_is_visible((left, top, right, bottom)) {
-        return None;
-    }
-
-    Some(passive_source_raster_command(
-        left, top, right, bottom, transfer,
-    ))
+    bounds_is_visible((left, top, right, bottom)).then_some((left, top, right, bottom))
 }
 
 fn parse_wmf_setdibits_to_device(
@@ -48726,6 +48757,81 @@ After\par}"#;
                 left: 35.0,
                 top: 45.0,
                 right: 95.0,
+                bottom: 75.0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_srccopy_cropped_jpeg_embedded_dib_records_become_passive_clipped_raster_images() {
+        let jpeg = minimal_jpeg_with_dimensions(3, 2);
+        let dib = minimal_compressed_dib_with_payload(3, 2, 4, &jpeg);
+        let records = [
+            wmf_stretchdib_dib_record_with_source(15, 25, 80, 40, 1, 0, 1, 2, &dib),
+            wmf_dibstretchblt_record_with_source(35, 45, 60, 30, 1, 0, 1, 2, &dib),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 8);
+        for chunk in image.vector_commands.chunks_exact(4) {
+            assert!(matches!(chunk[0], StaticImageVectorCommand::SaveState));
+            assert!(matches!(chunk[3], StaticImageVectorCommand::RestoreState));
+            assert!(matches!(
+                &chunk[2],
+                StaticImageVectorCommand::RasterImage { image, .. }
+                    if image.format == ImageFormat::Jpeg
+                        && image.width_px == 3
+                        && image.height_px == 2
+                        && image.bytes == jpeg
+                        && image.alpha_mask.is_none()
+            ));
+        }
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::RasterImage {
+                left: -65.0,
+                top: 25.0,
+                right: 175.0,
+                bottom: 65.0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::ClipRect {
+                left: 35.0,
+                top: 45.0,
+                right: 95.0,
+                bottom: 75.0,
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[6],
+            StaticImageVectorCommand::RasterImage {
+                left: -25.0,
+                top: 45.0,
+                right: 155.0,
                 bottom: 75.0,
                 ..
             }
