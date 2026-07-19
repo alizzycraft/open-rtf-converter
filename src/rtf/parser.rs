@@ -24358,13 +24358,16 @@ fn parse_emf_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
 
 fn parse_emf_ext_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
     const BS_NULL: u32 = 1;
+    const BS_HATCHED: u32 = 2;
 
     if data.len() < 44 {
         return None;
     }
     let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
-    validate_emf_optional_record_payload(data, read_le_u32(data, 4)?, read_le_u32(data, 8)?)?;
-    validate_emf_optional_record_payload(data, read_le_u32(data, 12)?, read_le_u32(data, 16)?)?;
+    let off_bmi = read_le_u32(data, 4)?;
+    let cb_bmi = read_le_u32(data, 8)?;
+    let off_bits = read_le_u32(data, 12)?;
+    let cb_bits = read_le_u32(data, 16)?;
 
     let pen_style = read_le_u32(data, 20)?;
     let width = i32::try_from(read_le_u32(data, 24)?.max(1)).unwrap_or(i32::MAX);
@@ -24377,6 +24380,10 @@ fn parse_emf_ext_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
     let entries_end = 44usize.checked_add(style_entry_count.checked_mul(4)?)?;
     if entries_end > data.len() {
         return None;
+    }
+    if !matches!(brush_style, 0 | BS_NULL | BS_HATCHED) {
+        validate_emf_optional_record_payload(data, off_bmi, cb_bmi)?;
+        validate_emf_optional_record_payload(data, off_bits, cb_bits)?;
     }
 
     let style = wmf_pen_border_style((pen_style & 0xffff) as u16);
@@ -42513,7 +42520,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_extcreatepen_with_invalid_optional_payload_becomes_passive_placeholder() {
+    fn emf_extcreatepen_with_irrelevant_invalid_optional_payload_renders() {
         let records = [
             emf_malformed_extcreatepen_record(4, 999, 4),
             emf_select_object_record(4),
@@ -42526,12 +42533,25 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::Line {
+                stroke_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                stroke_width: 1.0,
+                stroke_style: BorderStyle::Single,
+                ..
+            }
         ));
     }
 

@@ -34119,6 +34119,122 @@ fn emf_extcreatepen_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_extcreatepen_irrelevant_invalid_payload_does_not_leak() {
+    let mut ext_pen = emf_extcreatepen_record(
+        4,
+        0,
+        5,
+        0,
+        Color {
+            red: 90,
+            green: 30,
+            blue: 210,
+        },
+        &[],
+    );
+    write_test_le_u32(&mut ext_pen, 12, 999);
+    write_test_le_u32(&mut ext_pen, 16, 4);
+    ext_pen.extend_from_slice(b"IRRELEVANT-EXTCREATEPEN-PAYLOAD /JavaScript /EmbeddedFile");
+    ext_pen.resize(ext_pen.len().next_multiple_of(4), 0);
+    let ext_pen_len = ext_pen.len() as u32;
+    write_test_le_u32(&mut ext_pen, 4, ext_pen_len);
+
+    let records = [
+        ext_pen,
+        emf_select_object_record(4),
+        emf_point_record(27, 10, 20),
+        emf_point_record(54, 80, 60),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF EXTCREATEPEN invalid irrelevant payload image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Line {
+            stroke_color: Some(Color {
+                red: 90,
+                green: 30,
+                blue: 210
+            }),
+            stroke_width: 5.0,
+            stroke_style: BorderStyle::Single,
+            ..
+        }
+    ));
+    for forbidden in [
+        "emfblip",
+        "IRRELEVANT-EXTCREATEPEN-PAYLOAD",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "irrelevant EXTCREATEPEN payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "l"),
+        "EXTCREATEPEN line should render passive PDF line operations"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"IRRELEVANT-EXTCREATEPEN-PAYLOAD",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "irrelevant EXTCREATEPEN payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_stroked_path_records_render_passively_without_payload_leakage() {
     let records = [
         emf_create_pen_record(
