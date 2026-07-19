@@ -20680,13 +20680,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let Some((left, top, right, bottom)) =
-                    parse_emf_record_rect(data, &header, &coordinates)
-                else {
-                    return None;
-                };
+                let (left, top, right, bottom) =
+                    parse_emf_record_rect_including_degenerate(data, &header, &coordinates)?;
                 if !bounds_is_visible((left, top, right, bottom)) {
-                    return None;
+                    pos = record_end;
+                    continue;
                 }
                 if let Some(clip_start) = replaceable_clip_command_start {
                     if let Some(command) = vector_diff_from_unpainted_clip_rect_command(
@@ -27330,6 +27328,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     return None;
                 };
                 if function != 0x0416 && !bounds_is_visible((left, top, right, bottom)) {
+                    if function == 0x0415 {
+                        pos = record_end;
+                        continue;
+                    }
                     return None;
                 }
                 if function == 0x0416 {
@@ -52735,6 +52737,31 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_empty_excludecliprect_is_passive_noop() {
+        let records = [
+            emf_rect_record(29, 20, 20, 20, 60),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
     fn wmf_empty_intersectcliprect_becomes_passive_empty_clip() {
         let records = [
             wmf_bounds_record(0x0416, 20, 20, 20, 60),
@@ -52764,6 +52791,31 @@ After\par}"#;
         );
         assert!(matches!(
             image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn wmf_empty_excludecliprect_is_passive_noop() {
+        let records = [
+            wmf_bounds_record(0x0415, 20, 20, 20, 60),
+            wmf_bounds_record(0x041b, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8\picw160\pich80\picwgoal2160\pichgoal1080 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
             StaticImageVectorCommand::Rectangle { .. }
         ));
     }
