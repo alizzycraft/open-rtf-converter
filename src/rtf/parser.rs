@@ -22966,9 +22966,9 @@ fn parse_emf_exttextout(
         return None;
     }
     let text = if unicode {
-        sanitize_emf_utf16le_text(data.get(string_offset..string_end)?)?
+        sanitize_emf_utf16le_text_allow_empty(data.get(string_offset..string_end)?)?
     } else {
-        sanitize_emf_ansi_text(data.get(string_offset..string_end)?)?
+        sanitize_emf_ansi_text_allow_empty(data.get(string_offset..string_end)?)?
     };
     let (x, y) = normalized_emf_point(x, y, header, coordinates);
     Some(ParsedEmfExtTextOut {
@@ -23099,9 +23099,9 @@ fn parse_emf_text_objects(
         return None;
     }
     let text = if unicode {
-        sanitize_emf_utf16le_text(data.get(string_offset..string_end)?)?
+        sanitize_emf_utf16le_text_allow_empty(data.get(string_offset..string_end)?)?
     } else {
-        sanitize_emf_ansi_text(data.get(string_offset..string_end)?)?
+        sanitize_emf_ansi_text_allow_empty(data.get(string_offset..string_end)?)?
     };
     let (x, y) = normalized_emf_point(x, y, header, coordinates);
     let text = ParsedEmfExtTextOut {
@@ -23120,6 +23120,9 @@ fn parse_emf_text_objects(
         },
     };
     let record_dx_offset = usize::try_from(read_le_u32(data, offset.checked_add(36)?)?).ok()?;
+    if text.text.is_empty() {
+        return Some(vec![text]);
+    }
     if record_dx_offset == 0 {
         return Some(vec![text]);
     }
@@ -23233,7 +23236,7 @@ fn push_emf_text_command(
     Some(())
 }
 
-fn sanitize_emf_utf16le_text(bytes: &[u8]) -> Option<String> {
+fn sanitize_emf_utf16le_text_allow_empty(bytes: &[u8]) -> Option<String> {
     if bytes.len() % 2 != 0 || bytes.len() > MAX_PASSIVE_WMF_TEXT_BYTES {
         return None;
     }
@@ -23250,10 +23253,10 @@ fn sanitize_emf_utf16le_text(bytes: &[u8]) -> Option<String> {
             ch => text.push(ch),
         }
     }
-    if text.is_empty() { None } else { Some(text) }
+    Some(text)
 }
 
-fn sanitize_emf_ansi_text(bytes: &[u8]) -> Option<String> {
+fn sanitize_emf_ansi_text_allow_empty(bytes: &[u8]) -> Option<String> {
     if bytes.is_empty() || bytes.len() > MAX_PASSIVE_WMF_TEXT_BYTES {
         return None;
     }
@@ -23266,7 +23269,7 @@ fn sanitize_emf_ansi_text(bytes: &[u8]) -> Option<String> {
             ch => text.push(ch),
         }
     }
-    if text.is_empty() { None } else { Some(text) }
+    Some(text)
 }
 
 fn normalized_emf_text_height(header: &ParsedEmfHeader) -> f32 {
@@ -29956,7 +29959,7 @@ fn parse_wmf_exttextout(
     let text = if byte_count == 0 {
         String::new()
     } else {
-        sanitize_wmf_text_bytes(data.get(text_start..text_end)?, font_charset)?
+        sanitize_wmf_text_bytes_allow_empty(data.get(text_start..text_end)?, font_charset)?
     };
     let (x, y) = normalize_wmf_point(
         x,
@@ -29984,6 +29987,11 @@ fn parse_wmf_exttextout(
 }
 
 fn sanitize_wmf_text_bytes(bytes: &[u8], font_charset: Option<i32>) -> Option<String> {
+    let text = sanitize_wmf_text_bytes_allow_empty(bytes, font_charset)?;
+    (!text.is_empty()).then_some(text)
+}
+
+fn sanitize_wmf_text_bytes_allow_empty(bytes: &[u8], font_charset: Option<i32>) -> Option<String> {
     let code_page = font_charset
         .and_then(CodePage::from_font_charset)
         .unwrap_or(CodePage::Windows1252);
@@ -29997,7 +30005,7 @@ fn sanitize_wmf_text_bytes(bytes: &[u8], font_charset: Option<i32>) -> Option<St
         }
     }
     let text = text.trim_end().to_string();
-    (!text.is_empty()).then_some(text)
+    Some(text)
 }
 
 fn normalized_wmf_text_height(font_height: Option<i32>, window_height: i32) -> f32 {
