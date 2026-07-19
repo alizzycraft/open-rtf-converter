@@ -23320,10 +23320,10 @@ fn vector_commands_are_only_clip_updates(commands: &[StaticImageVectorCommand]) 
         })
 }
 
-fn vector_commands_have_initial_clip_then_paint_only(
+fn vector_commands_have_replaceable_clip_after_paint(
     commands: &[StaticImageVectorCommand],
 ) -> bool {
-    initial_vector_clip_commands_then_paint_only(commands).is_some()
+    offsettable_clip_commands_after_paint(commands).is_some()
 }
 
 fn replace_emf_clip_scope(
@@ -23345,7 +23345,7 @@ fn replace_emf_clip_scope(
         *clip_scope_command_start = commands.len().checked_sub(1);
         *replaceable_clip_command_start = None;
     } else if let Some(clip_start) = *replaceable_clip_command_start
-        && vector_commands_have_initial_clip_then_paint_only(&commands[clip_start..])
+        && vector_commands_have_replaceable_clip_after_paint(&commands[clip_start..])
     {
         if commands.len().checked_add(3)? > MAX_PASSIVE_WMF_COMMANDS {
             return None;
@@ -44586,7 +44586,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_selectclippath_copy_after_painted_clip_mutation_becomes_passive_placeholder() {
+    fn emf_selectclippath_copy_after_painted_clip_mutation_replaces_current_clip() {
         let records = [
             emf_rect_record(30, 10, 10, 90, 70),
             emf_rect_record(43, 0, 0, 30, 30),
@@ -44604,12 +44604,65 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 8);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert_eq!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::ClipRect {
+                left: 10.0,
+                top: 10.0,
+                right: 90.0,
+                bottom: 70.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[2],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+        assert_eq!(
+            image.vector_commands[3],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 100.0,
+                bottom: 60.0,
+            }
+        );
+        assert!(matches!(
+            image.vector_commands[4],
+            StaticImageVectorCommand::RestoreState
+        ));
+        assert!(matches!(
+            image.vector_commands[5],
+            StaticImageVectorCommand::SaveState
+        ));
+        assert!(matches!(
+            &image.vector_commands[6],
+            StaticImageVectorCommand::ClipPath {
+                start: (20.0, 20.0),
+                segments,
+                closed: false,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+            } if matches!(
+                &segments[..],
+                [
+                    StaticImageVectorPathSegment::LineTo(80.0, 20.0),
+                    StaticImageVectorPathSegment::LineTo(50.0, 60.0),
+                ]
+            )
+        ));
+        assert!(matches!(
+            image.vector_commands[7],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
