@@ -21611,7 +21611,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 let raw_points = parse_emf_raw_poly_points(data)?;
                 if !polybezier_point_count_is_valid(raw_points.len()) {
-                    return None;
+                    pos = record_end;
+                    continue;
                 }
                 let points: Vec<_> = raw_points
                     .iter()
@@ -21633,7 +21634,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 let raw_points = parse_emf_raw_poly_points(data)?;
                 if !polybezierto_point_count_is_valid(raw_points.len()) {
-                    return None;
+                    pos = record_end;
+                    continue;
                 }
                 if let Some(path) = active_path.as_mut() {
                     path.bezier_to(&raw_points, &header, &coordinates)?;
@@ -21753,7 +21755,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 let raw_points = parse_emf_raw_poly16_points(data)?;
                 if !polybezier_point_count_is_valid(raw_points.len()) {
-                    return None;
+                    pos = record_end;
+                    continue;
                 }
                 let points: Vec<_> = raw_points
                     .iter()
@@ -21775,7 +21778,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 let raw_points = parse_emf_raw_poly16_points(data)?;
                 if !polybezierto_point_count_is_valid(raw_points.len()) {
-                    return None;
+                    pos = record_end;
+                    continue;
                 }
                 if let Some(path) = active_path.as_mut() {
                     path.bezier_to(&raw_points, &header, &coordinates)?;
@@ -27496,7 +27500,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_height,
                 )?;
                 if !polybezier_point_count_is_valid(points.len()) {
-                    return None;
+                    pos = record_end;
+                    continue;
                 }
                 if points
                     .windows(2)
@@ -27522,7 +27527,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_height,
                 )?;
                 if !polybezierto_point_count_is_valid(control_points.len()) {
-                    return None;
+                    pos = record_end;
+                    continue;
                 }
                 let new_current_point = *control_points.last()?;
                 let mut points = Vec::with_capacity(control_points.len().checked_add(1)?);
@@ -49275,6 +49281,36 @@ After\par}"#;
     }
 
     #[test]
+    fn incomplete_bezier_records_are_passive_noops_before_later_drawing() {
+        let records = [
+            emf_poly_record(2, &[(10, 10), (30, 5), (50, 35), (70, 30), (80, 40)]),
+            emf_point_record(27, 10, 10),
+            emf_poly_record(5, &[(30, 5), (50, 35)]),
+            emf_poly16_record(85, &[(20, 50), (40, 30), (60, 70), (80, 60), (90, 65)]),
+            emf_point_record(27, 20, 20),
+            emf_poly16_record(88, &[(40, 30), (60, 70)]),
+            emf_rect_record(43, 0, 0, 60, 30),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
     fn wmf_polybezier_with_partial_segments_becomes_passive_placeholder() {
         let wmf_hex = concat!(
             "0100090000031b00000001000a0000000000",
@@ -49290,6 +49326,33 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn wmf_incomplete_bezier_records_are_passive_noops_before_later_drawing() {
+        let records = [
+            wmf_point_list_record(0x1005, &[(10, 10), (30, 5), (70, 50)]),
+            wmf_yx_record(0x0214, 20, 20),
+            wmf_point_list_record(0x1004, &[(30, 5), (70, 50)]),
+            wmf_bounds_record(0x041b, 0, 0, 80, 40),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8\picw160\pich80\picwgoal2160\pichgoal1080 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
@@ -54112,6 +54175,21 @@ fn wmf_yx_record(function: u16, y: i16, x: i16) -> Vec<u8> {
     write_test_le_u16(&mut record, 4, function);
     write_test_le_i16(&mut record, 6, y);
     write_test_le_i16(&mut record, 8, x);
+    record
+}
+
+#[cfg(test)]
+fn wmf_point_list_record(function: u16, points: &[(i16, i16)]) -> Vec<u8> {
+    let size_words = 4 + (points.len() * 2);
+    let mut record = vec![0; size_words * 2];
+    write_test_le_u32(&mut record, 0, size_words as u32);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_u16(&mut record, 6, points.len() as u16);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = 8 + (idx * 4);
+        write_test_le_i16(&mut record, offset, *y);
+        write_test_le_i16(&mut record, offset + 2, *x);
+    }
     record
 }
 

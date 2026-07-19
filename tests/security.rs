@@ -28481,6 +28481,111 @@ fn wmf_polybezierto_records_update_current_point_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_incomplete_bezier_records_are_noops_without_payload_leakage() {
+    let mut polybezier = wmf_point_list_record(0x1005, &[(10, 10), (30, 5), (70, 50)]);
+    polybezier.extend_from_slice(b"PARTIAL-WMF-POLYBEZIER /JavaScript");
+    polybezier.resize(polybezier.len().next_multiple_of(2), 0);
+    let polybezier_len_words = (polybezier.len() / 2) as u32;
+    write_test_le_u32(&mut polybezier, 0, polybezier_len_words);
+
+    let mut polybezierto = wmf_point_list_record(0x1004, &[(30, 5), (70, 50)]);
+    polybezierto.extend_from_slice(b"PARTIAL-WMF-POLYBEZIERTO /EmbeddedFile");
+    polybezierto.resize(polybezierto.len().next_multiple_of(2), 0);
+    let polybezierto_len_words = (polybezierto.len() / 2) as u32;
+    write_test_le_u32(&mut polybezierto, 0, polybezierto_len_words);
+
+    let records = [
+        polybezier,
+        wmf_yx_record(0x0214, 20, 20),
+        polybezierto,
+        wmf_bounds_record(0x041b, 0, 0, 80, 40),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal2160\\pichgoal1080 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF incomplete Bezier no-op image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in [
+        "wmetafile",
+        "PARTIAL-WMF-POLYBEZIER",
+        "PARTIAL-WMF-POLYBEZIERTO",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "incomplete WMF Bezier payload/control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "painting after incomplete WMF Bezier no-ops should still render"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"PARTIAL-WMF-POLYBEZIER",
+        b"PARTIAL-WMF-POLYBEZIERTO",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "incomplete WMF Bezier payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_polypolygon_records_render_compound_path_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003360000000100160000000000",
@@ -47519,6 +47624,130 @@ fn emf_polybezier_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_incomplete_bezier_records_are_noops_without_payload_leakage() {
+    let mut polybezier = emf_poly_record(2, &[(10, 10), (30, 5), (50, 35), (70, 30), (80, 40)]);
+    polybezier.extend_from_slice(b"PARTIAL-EMF-POLYBEZIER /JavaScript");
+    polybezier.resize(polybezier.len().next_multiple_of(4), 0);
+    let polybezier_len = polybezier.len() as u32;
+    write_test_le_u32(&mut polybezier, 4, polybezier_len);
+
+    let mut polybezierto = emf_poly_record(5, &[(30, 5), (50, 35)]);
+    polybezierto.extend_from_slice(b"PARTIAL-EMF-POLYBEZIERTO /EmbeddedFile");
+    polybezierto.resize(polybezierto.len().next_multiple_of(4), 0);
+    let polybezierto_len = polybezierto.len() as u32;
+    write_test_le_u32(&mut polybezierto, 4, polybezierto_len);
+
+    let mut polybezier16 =
+        emf_poly16_record(85, &[(20, 50), (40, 30), (60, 70), (80, 60), (90, 65)]);
+    polybezier16.extend_from_slice(b"PARTIAL-EMF-POLYBEZIER16 /Launch");
+    polybezier16.resize(polybezier16.len().next_multiple_of(4), 0);
+    let polybezier16_len = polybezier16.len() as u32;
+    write_test_le_u32(&mut polybezier16, 4, polybezier16_len);
+
+    let mut polybezierto16 = emf_poly16_record(88, &[(40, 30), (60, 70)]);
+    polybezierto16.extend_from_slice(b"PARTIAL-EMF-POLYBEZIERTO16 /RichMedia");
+    polybezierto16.resize(polybezierto16.len().next_multiple_of(4), 0);
+    let polybezierto16_len = polybezierto16.len() as u32;
+    write_test_le_u32(&mut polybezierto16, 4, polybezierto16_len);
+
+    let records = [
+        polybezier,
+        emf_point_record(27, 10, 10),
+        polybezierto,
+        polybezier16,
+        emf_point_record(27, 20, 20),
+        polybezierto16,
+        emf_rect_record(43, 0, 0, 80, 40),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF incomplete Bezier no-op image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in [
+        "emfblip",
+        "PARTIAL-EMF-POLYBEZIER",
+        "PARTIAL-EMF-POLYBEZIERTO",
+        "PARTIAL-EMF-POLYBEZIER16",
+        "PARTIAL-EMF-POLYBEZIERTO16",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "RichMedia",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "incomplete EMF Bezier payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "painting after incomplete EMF Bezier no-ops should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"PARTIAL-EMF-POLYBEZIER",
+        b"PARTIAL-EMF-POLYBEZIERTO",
+        b"PARTIAL-EMF-POLYBEZIER16",
+        b"PARTIAL-EMF-POLYBEZIERTO16",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "incomplete EMF Bezier payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_coordinate_mapping_records_render_passively_without_payload_leakage() {
     let records = [
         emf_size_record(9, 320, 160),
@@ -60246,6 +60475,20 @@ fn wmf_yx_record(function: u16, y: i16, x: i16) -> Vec<u8> {
     write_test_le_u16(&mut record, 4, function);
     write_test_le_i16(&mut record, 6, y);
     write_test_le_i16(&mut record, 8, x);
+    record
+}
+
+fn wmf_point_list_record(function: u16, points: &[(i16, i16)]) -> Vec<u8> {
+    let size_words = 4 + (points.len() * 2);
+    let mut record = vec![0; size_words * 2];
+    write_test_le_u32(&mut record, 0, size_words as u32);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_u16(&mut record, 6, points.len() as u16);
+    for (idx, (x, y)) in points.iter().enumerate() {
+        let offset = 8 + (idx * 4);
+        write_test_le_i16(&mut record, offset, *y);
+        write_test_le_i16(&mut record, offset + 2, *x);
+    }
     record
 }
 
