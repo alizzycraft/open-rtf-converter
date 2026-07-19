@@ -24697,6 +24697,7 @@ enum PassiveSourceRasterTransferMode {
     Copy,
     Invert,
     Mask(Color),
+    Solid(Color),
     SolidIfSource {
         source: Color,
         fill: Color,
@@ -27587,6 +27588,8 @@ fn passive_source_raster_transfer_mode(
         WMF_MERGECOPY_RASTER_OP => selected_fill_color.map(|color| {
             if is_white_color(color) {
                 PassiveSourceRasterTransferMode::Copy
+            } else if color == Color::default() {
+                PassiveSourceRasterTransferMode::Solid(Color::default())
             } else {
                 PassiveSourceRasterTransferMode::Mask(color)
             }
@@ -27634,6 +27637,9 @@ fn apply_passive_source_raster_transfer_mode(
         PassiveSourceRasterTransferMode::Mask(color) => {
             mask_vector_raster_image(&mut image, color)?;
             Some(PassiveSourceRasterTransfer::Image(image))
+        }
+        PassiveSourceRasterTransferMode::Solid(color) => {
+            Some(PassiveSourceRasterTransfer::Solid(color))
         }
         PassiveSourceRasterTransferMode::SolidIfSource { source, fill } => {
             vector_raster_pixels_all_color(&image, source)?
@@ -43308,6 +43314,53 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_black_brush_mergecopy_stretchdibits_jpeg_becomes_passive_black_rectangle() {
+        let records = [
+            emf_create_brush_record(3, 0, Color::default(), 0),
+            emf_select_object_record(3),
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_MERGECOPY_RASTER_OP,
+                &minimal_compressed_dib_with_payload(2, 1, 4, &minimal_jpeg_with_dimensions(2, 1)),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn emf_white_brush_mergecopy_stretchdibits_jpeg_copies_embedded_source() {
         let jpeg = minimal_jpeg_with_dimensions(2, 1);
         let records = [
@@ -46504,6 +46557,65 @@ After\par}"#;
         assert_eq!(image.height_px, 1);
         assert_eq!(image.palette, vec![240, 0, 0, 0, 15, 0]);
         assert!(!image.bytes.is_empty());
+    }
+
+    #[test]
+    fn wmf_black_brush_mergecopy_stretchdib_jpeg_becomes_passive_black_rectangle() {
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_MERGECOPY_RASTER_OP,
+            &minimal_compressed_dib_with_payload(2, 1, 4, &minimal_jpeg_with_dimensions(2, 1)),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(
+                200,
+                100,
+                &[
+                    wmf_set_window_ext_record(200, 100),
+                    wmf_create_brush_record(Color::default()),
+                    wmf_select_object_record(0),
+                    wmf_dibbitblt_record(
+                        10,
+                        20,
+                        70,
+                        60,
+                        WMF_WHITENESS_RASTER_OP,
+                        b"WHITENESS-PAINT",
+                    ),
+                    record,
+                ],
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                ..
+            }
+        ));
     }
 
     #[test]
