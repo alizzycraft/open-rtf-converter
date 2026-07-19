@@ -40717,6 +40717,144 @@ fn emf_srccopy_stretchdibits_crop_renders_as_passive_image_without_payload_leaka
 }
 
 #[test]
+fn emf_srccopy_stretchdibits_jpeg_crop_renders_clipped_without_payload_leakage() {
+    let jpeg = minimal_jpeg_with_dimensions(3, 2);
+    let mut jpeg_payload = jpeg.clone();
+    jpeg_payload.extend_from_slice(b"TRAILING-EMF-STRETCHDIBITS-JPEG-CROP /JavaScript");
+    let mut dib = minimal_compressed_dib_with_payload(3, 2, 4, &jpeg_payload);
+    dib.extend_from_slice(b"TRAILING-EMF-STRETCHDIBITS-JPEG-CROP-DIB /EmbeddedFile");
+    let mut record = emf_stretchdibits_dib_record(20, 15, 60, 30, 0x00cc_0020, &dib);
+    write_test_le_i32(&mut record, 32, 1);
+    write_test_le_i32(&mut record, 36, 0);
+    write_test_le_i32(&mut record, 40, 1);
+    write_test_le_i32(&mut record, 44, 2);
+    let records = [record];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive JPEG-cropped EMF SRCCOPY STRETCHDIBITS vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 4);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::SaveState
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::ClipRect {
+            left: 20.0,
+            top: 15.0,
+            right: 80.0,
+            bottom: 45.0,
+        }
+    ));
+    assert!(matches!(
+        &image.vector_commands[2],
+        StaticImageVectorCommand::RasterImage {
+            left: -40.0,
+            top: 15.0,
+            right: 140.0,
+            bottom: 45.0,
+            image,
+        } if image.format == ImageFormat::Jpeg
+            && image.width_px == 3
+            && image.height_px == 2
+            && image.bytes == jpeg
+            && image.alpha_mask.is_none()
+    ));
+    assert!(matches!(
+        image.vector_commands[3],
+        StaticImageVectorCommand::RestoreState
+    ));
+    for forbidden in [
+        "emfblip",
+        "STRETCHDIBITS",
+        "TRAILING-EMF-STRETCHDIBITS-JPEG-CROP",
+        "TRAILING-EMF-STRETCHDIBITS-JPEG-CROP-DIB",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "JPEG-cropped EMF STRETCHDIBITS payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "JPEG-cropped EMF SRCCOPY STRETCHDIBITS should render a passive image XObject"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "JPEG-cropped EMF SRCCOPY STRETCHDIBITS should invoke a passive PDF image XObject"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "JPEG-cropped EMF SRCCOPY STRETCHDIBITS should clip the full JPEG draw"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"STRETCHDIBITS",
+        b"TRAILING-EMF-STRETCHDIBITS-JPEG-CROP",
+        b"TRAILING-EMF-STRETCHDIBITS-JPEG-CROP-DIB",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "JPEG-cropped EMF STRETCHDIBITS payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload_leakage() {
     let patinvert_payload = b"PATINVERT-SOURCE-PAYLOAD";
     let notpatcopy_payload = b"NOTPATCOPY-SOURCE-PAYLOAD";
