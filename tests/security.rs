@@ -28689,6 +28689,114 @@ fn wmf_cliprect_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_empty_intersectcliprect_renders_empty_clip_without_payload_leakage() {
+    let mut clip = wmf_bounds_record(0x0416, 20, 20, 20, 60);
+    clip.extend_from_slice(b"EMPTY-WMF-INTERSECTCLIPRECT /JavaScript /EmbeddedFile");
+    clip.resize(clip.len().next_multiple_of(2), 0);
+    let clip_len_words = (clip.len() / 2) as u32;
+    write_test_le_u32(&mut clip, 0, clip_len_words);
+
+    let records = [clip, wmf_bounds_record(0x041b, 0, 0, 160, 80)];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal2160\\pichgoal1080 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF empty clip vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert_no_wmf_preview_warning(&parsed.diagnostics);
+    assert_eq!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::ClipRect {
+            left: 20.0,
+            top: 20.0,
+            right: 20.0,
+            bottom: 60.0,
+        }
+    );
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in [
+        "wmetafile",
+        "EMPTY-WMF-INTERSECTCLIPRECT",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "empty WMF IntersectClipRect payload/control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "empty WMF IntersectClipRect should render a passive PDF clipping path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "empty WMF IntersectClipRect fixture should still emit passive rectangle paths"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"EMPTY-WMF-INTERSECTCLIPRECT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "empty WMF IntersectClipRect payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_offsetcliprgn_offsets_unpainted_clip_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032f0000000100070000000000",

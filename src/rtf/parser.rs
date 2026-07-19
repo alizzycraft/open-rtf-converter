@@ -27329,7 +27329,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 ) else {
                     return None;
                 };
-                if !bounds_is_visible((left, top, right, bottom)) {
+                if function != 0x0416 && !bounds_is_visible((left, top, right, bottom)) {
                     return None;
                 }
                 if function == 0x0416 {
@@ -52728,6 +52728,40 @@ After\par}"#;
                 StaticImageVectorPathSegment::MoveTo(40.0, 20.0),
             ]) && segments.len() == 9
         ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn wmf_empty_intersectcliprect_becomes_passive_empty_clip() {
+        let records = [
+            wmf_bounds_record(0x0416, 20, 20, 20, 60),
+            wmf_bounds_record(0x041b, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8\picw160\pich80\picwgoal2160\pichgoal1080 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 20.0,
+                top: 20.0,
+                right: 20.0,
+                bottom: 60.0,
+            }
+        );
         assert!(matches!(
             image.vector_commands[1],
             StaticImageVectorCommand::Rectangle { .. }
