@@ -20478,6 +20478,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETMAPMODE: u32 = 17;
     const EMR_SETBKMODE: u32 = 18;
     const EMR_SETPOLYFILLMODE: u32 = 19;
+    const EMR_SETROP2: u32 = 20;
     const EMR_SETSTRETCHBLTMODE: u32 = 21;
     const EMR_SETTEXTALIGN: u32 = 22;
     const EMR_SETTEXTCOLOR: u32 = 24;
@@ -20875,6 +20876,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 } else {
                     StaticImageVectorFillRule::Alternate
                 };
+            }
+            EMR_SETROP2 => {
+                if read_le_u32(data, 0)? != 13 {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_SETSTRETCHBLTMODE => {
                 read_le_u32(data, 0)?;
