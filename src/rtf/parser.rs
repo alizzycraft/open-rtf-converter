@@ -20715,6 +20715,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 let region_mode = read_le_u32(data, 4)?;
+                if is_passive_empty_emf_clip_combine_noop(region_mode)
+                    && is_passive_empty_emf_region(data, 0, 8)
+                {
+                    pos = record_end;
+                    continue;
+                }
                 if region_mode == EMF_RGN_OR && !clip_active {
                     let _ = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
                     pos = record_end;
@@ -22011,6 +22017,10 @@ fn is_passive_empty_emf_region(
         ),
         (Some(32), Some(1), Some(0), Some(0))
     )
+}
+
+fn is_passive_empty_emf_clip_combine_noop(region_mode: u32) -> bool {
+    matches!(region_mode, EMF_RGN_OR | EMF_RGN_XOR | EMF_RGN_DIFF)
 }
 
 fn is_passive_noop_emf_framergn(data: &[u8]) -> bool {
@@ -43062,6 +43072,44 @@ After\par}"#;
                 bottom: 70.0,
             }
         ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_empty_extselectcliprgn_or_diff_xor_are_passive_noops() {
+        let records = [
+            emf_rect_record(30, 10, 10, 120, 70),
+            emf_extselectcliprgn_record(EMF_RGN_OR, &[]),
+            emf_extselectcliprgn_record(EMF_RGN_DIFF, &[]),
+            emf_extselectcliprgn_record(EMF_RGN_XOR, &[]),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 10.0,
+                top: 10.0,
+                right: 120.0,
+                bottom: 70.0,
+            }
+        );
         assert!(matches!(
             image.vector_commands[1],
             StaticImageVectorCommand::Rectangle { .. }
