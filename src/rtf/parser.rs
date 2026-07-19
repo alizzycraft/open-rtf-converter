@@ -20583,6 +20583,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_SETWINDOWEXTEX => {
                 let (width, height) = parse_emf_size_record(data)?;
+                if width == 0 || height == 0 {
+                    pos = record_end;
+                    continue;
+                }
                 coordinates.set_window_extent(width, height)?;
             }
             EMR_SETWINDOWORGEX => {
@@ -20591,6 +20595,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_SETVIEWPORTEXTEX => {
                 let (width, height) = parse_emf_size_record(data)?;
+                if width == 0 || height == 0 {
+                    pos = record_end;
+                    continue;
+                }
                 coordinates.set_viewport_extent(width, height)?;
             }
             EMR_SETVIEWPORTORGEX => {
@@ -20599,10 +20607,18 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_SCALEVIEWPORTEXTEX => {
                 let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
+                if x_num == 0 || y_num == 0 {
+                    pos = record_end;
+                    continue;
+                }
                 coordinates.scale_viewport_extent(x_num, x_denom, y_num, y_denom)?;
             }
             EMR_SCALEWINDOWEXTEX => {
                 let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
+                if x_num == 0 || y_num == 0 {
+                    pos = record_end;
+                    continue;
+                }
                 coordinates.scale_window_extent(x_num, x_denom, y_num, y_denom)?;
             }
             EMR_OFFSETCLIPRGN => {
@@ -53019,9 +53035,10 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_scale_records_with_zero_factor_become_passive_placeholders() {
+    fn emf_scale_records_with_zero_factor_are_passive_noops() {
         let records = [
             emf_scale_record(31, 0, 1, 1, 1),
+            emf_scale_record(32, 1, 1, 0, 1),
             emf_rect_record(43, 10, 20, 170, 100),
         ];
         let input = format!(
@@ -53030,12 +53047,16 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
@@ -53378,9 +53399,10 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_coordinate_records_with_zero_extent_become_passive_placeholders() {
+    fn emf_coordinate_records_with_zero_extent_are_passive_noops() {
         let records = [
             emf_size_record(9, 0, 160),
+            emf_size_record(11, 160, 0),
             emf_rect_record(43, 10, 20, 170, 100),
         ];
         let input = format!(
@@ -53389,12 +53411,16 @@ After\par}"#;
         );
         let output = parse_rtf(&input).unwrap();
 
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
         assert!(matches!(
-            &output.document.blocks[0],
-            Block::Image(image)
-                if image.format == ImageFormat::Placeholder
-                    && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
