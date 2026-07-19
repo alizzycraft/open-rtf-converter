@@ -27622,7 +27622,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some(command) = parse_wmf_setdibits_to_device(
+                if is_passive_noop_wmf_setdibits_to_device(data) {
+                } else if let Some(command) = parse_wmf_setdibits_to_device(
                     data,
                     window_origin_x,
                     window_origin_y,
@@ -27630,7 +27631,6 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_height,
                 ) {
                     commands.push(command);
-                } else if is_passive_noop_wmf_setdibits_to_device(data) {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
