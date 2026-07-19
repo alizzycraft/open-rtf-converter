@@ -20512,6 +20512,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_STROKEPATH: u32 = 64;
     const EMR_SELECTCLIPPATH: u32 = 67;
     const EMR_ABORTPATH: u32 = 68;
+    const EMR_COMMENT: u32 = 70;
     const EMR_FILLRGN: u32 = 71;
     const EMR_FRAMERGN: u32 = 72;
     const EMR_INVERTRGN: u32 = 73;
@@ -21059,6 +21060,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_ABORTPATH => {
                 active_path = None;
+            }
+            EMR_COMMENT => {
+                parse_emf_comment_record(data)?;
             }
             EMR_FILLRGN => {
                 // `data` starts after the EMF record Type and Size fields.
@@ -24542,6 +24546,18 @@ fn validate_emf_optional_record_payload(
     let data_offset = usize::try_from(record_offset).ok()?.checked_sub(8)?;
     let byte_count = usize::try_from(byte_count).ok()?;
     let end = data_offset.checked_add(byte_count)?;
+    if end > data.len() {
+        return None;
+    }
+    Some(())
+}
+
+fn parse_emf_comment_record(data: &[u8]) -> Option<()> {
+    if data.len() < 4 {
+        return None;
+    }
+    let byte_count = usize::try_from(read_le_u32(data, 0)?).ok()?;
+    let end = 4usize.checked_add(byte_count)?;
     if end > data.len() {
         return None;
     }
