@@ -21084,7 +21084,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         fill_color: Some(fill_color),
                     });
                 } else if let Some(raster_transfer) = raster_transfer
-                    && is_passive_noop_raster_transfer(data, raster_transfer.1)
+                    && is_passive_noop_raster_transfer(data, raster_transfer.1, state.fill_color)
                 {
                 } else if record_type == EMR_SETDIBITSTODEVICE {
                     if let Some(command) =
@@ -26681,7 +26681,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         fill_pattern: ShadingPattern::None,
                         fill_color: Some(fill_color),
                     });
-                } else if is_passive_noop_raster_transfer(data, 0) {
+                } else if is_passive_noop_raster_transfer(data, 0, state.fill_color) {
                 } else if let Some(command) = match function {
                     0x0940 => parse_wmf_dibbitblt_srcopy(
                         data,
@@ -27501,8 +27501,16 @@ fn passive_wmf_raster_transfer_color(
     }
 }
 
-fn is_passive_noop_raster_transfer(data: &[u8], raster_op_offset: usize) -> bool {
-    read_le_u32(data, raster_op_offset) == Some(WMF_DSTCOPY_RASTER_OP)
+fn is_passive_noop_raster_transfer(
+    data: &[u8],
+    raster_op_offset: usize,
+    selected_fill_color: Option<Color>,
+) -> bool {
+    match read_le_u32(data, raster_op_offset) {
+        Some(WMF_DSTCOPY_RASTER_OP) => true,
+        Some(WMF_PATINVERT_RASTER_OP) if selected_fill_color == Some(Color::default()) => true,
+        _ => false,
+    }
 }
 
 fn passive_source_raster_transfer_mode(
@@ -43381,6 +43389,41 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_black_brush_patinvert_after_paint_is_passive_noop_without_skipped_diagnostic() {
+        let records = [
+            emf_create_brush_record(3, 0, Color::default(), 0),
+            emf_select_object_record(3),
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_bitblt_record(
+                10,
+                20,
+                80,
+                40,
+                WMF_PATINVERT_RASTER_OP,
+                b"PATINVERT-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
     fn emf_initial_patinvert_bitblt_record_becomes_passive_inverted_brush_rectangle() {
         let records = [
             emf_create_brush_record(
@@ -45154,6 +45197,49 @@ After\par}"#;
                 40,
                 WMF_DSTCOPY_RASTER_OP,
                 b"DSTCOPY-SOURCE-PAYLOAD",
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn wmf_black_brush_patinvert_after_paint_is_passive_noop_without_skipped_diagnostic() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color::default()),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(
+                10,
+                20,
+                70,
+                60,
+                WMF_PATCOPY_RASTER_OP,
+                b"PATCOPY-SOURCE-PAYLOAD",
+            ),
+            wmf_dibbitblt_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_PATINVERT_RASTER_OP,
+                b"PATINVERT-SOURCE-PAYLOAD",
             ),
         ];
         let input = format!(
