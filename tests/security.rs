@@ -39707,6 +39707,114 @@ fn emf_zero_alpha_alphablend_is_noop_without_payload_leakage() {
 }
 
 #[test]
+fn emf_invisible_alpha_and_transparent_bitmap_transfers_are_noops_without_payload_leakage() {
+    let mut hidden_dib =
+        b"INVISIBLE-EMF-BITMAP-TRANSFER-DIB /JavaScript /EmbeddedFile /Launch".to_vec();
+    hidden_dib.resize(96, 0x41);
+    let records = [
+        emf_rect_record(43, 0, 0, 80, 40),
+        emf_alphablend_dib_record(18, 24, 0, 28, 0xff, 0, &hidden_dib),
+        emf_transparentblt_dib_record(
+            70,
+            24,
+            48,
+            0,
+            Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+            },
+            &hidden_dib,
+        ),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF invisible bitmap transfer vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in [
+        "emfblip",
+        "INVISIBLE-EMF-BITMAP-TRANSFER-DIB",
+        "ALPHABLEND",
+        "TRANSPARENTBLT",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invisible EMF bitmap-transfer payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 1,
+        "preexisting paint before invisible bitmap transfers should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"INVISIBLE-EMF-BITMAP-TRANSFER-DIB",
+        b"ALPHABLEND",
+        b"TRANSPARENTBLT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invisible EMF bitmap-transfer payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payload_leakage() {
     let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
     dib.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT /JavaScript");
