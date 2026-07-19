@@ -20477,6 +20477,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETPIXELV: u32 = 15;
     const EMR_SETBKMODE: u32 = 18;
     const EMR_SETPOLYFILLMODE: u32 = 19;
+    const EMR_SETSTRETCHBLTMODE: u32 = 21;
     const EMR_SETTEXTALIGN: u32 = 22;
     const EMR_SETTEXTCOLOR: u32 = 24;
     const EMR_SETBKCOLOR: u32 = 25;
@@ -20868,6 +20869,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 } else {
                     StaticImageVectorFillRule::Alternate
                 };
+            }
+            EMR_SETSTRETCHBLTMODE => {
+                read_le_u32(data, 0)?;
             }
             EMR_SETARCDIRECTION => {
                 state.arc_clockwise = parse_emf_arc_direction(data)?;

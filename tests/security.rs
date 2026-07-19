@@ -38841,6 +38841,122 @@ fn emf_comment_only_renders_blank_vector_without_payload_leakage() {
 }
 
 #[test]
+fn emf_setstretchbltmode_is_passive_state_without_payload_leakage() {
+    let mut mode = emf_u32_record(21, 4);
+    mode.extend_from_slice(b"EMF-SETSTRETCHBLTMODE /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(4), 0);
+    let mode_len = mode.len() as u32;
+    write_test_le_u32(&mut mode, 4, mode_len);
+    let records = [mode, emf_rect_record(43, 0, 0, 80, 40)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF stretch mode vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-SETSTRETCHBLTMODE",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF SETSTRETCHBLTMODE payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after EMF SETSTRETCHBLTMODE should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-SETSTRETCHBLTMODE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF SETSTRETCHBLTMODE payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_emf_setstretchbltmode_becomes_passive_placeholder() {
+    let mut mode = emf_unknown_record(21);
+    write_test_le_u32(&mut mode, 4, 8);
+    let records = [mode];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF stretch mode placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn malformed_emf_comment_becomes_passive_placeholder() {
     let mut comment = emf_comment_record(b"SHORT-EMF-COMMENT");
     write_test_le_u32(&mut comment, 8, 1024);
