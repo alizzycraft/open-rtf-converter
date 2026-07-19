@@ -34819,6 +34819,99 @@ fn emf_offsetcliprgn_offsets_unpainted_clip_without_payload_leakage() {
 }
 
 #[test]
+fn emf_zero_offsetcliprgn_is_noop_without_payload_leakage() {
+    let mut offset = emf_point_record(26, 0, 0);
+    offset.extend_from_slice(b"ZERO-OFFSET-EMF-OFFSETCLIPRGN /JavaScript /EmbeddedFile /Launch");
+    offset.resize(offset.len().next_multiple_of(4), 0);
+    let offset_len = offset.len() as u32;
+    write_test_le_u32(&mut offset, 4, offset_len);
+    let records = [
+        emf_rect_record(43, 0, 0, 80, 40),
+        offset,
+        emf_rect_record(43, 90, 10, 130, 50),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF zero-offset clip vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "OFFSETCLIPRGN",
+        "ZERO-OFFSET-EMF-OFFSETCLIPRGN",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "zero-offset EMF OffsetClipRgn payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "painting before and after zero-offset EMF OffsetClipRgn should render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"ZERO-OFFSET-EMF-OFFSETCLIPRGN",
+        b"OFFSETCLIPRGN",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "zero-offset EMF OffsetClipRgn payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_offsetcliprgn_offsets_saved_painted_clip_without_payload_leakage() {
     let records = [
         emf_unknown_record(33),

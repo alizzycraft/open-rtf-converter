@@ -20602,6 +20602,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 coordinates.scale_window_extent(x_num, x_denom, y_num, y_denom)?;
             }
             EMR_OFFSETCLIPRGN => {
+                if is_passive_zero_emf_offset_clip_region(data) {
+                    pos = record_end;
+                    continue;
+                }
                 let (offset_x, offset_y) =
                     parse_emf_offset_clip_region(data, &header, &coordinates)?;
                 if let Some(clip_start) = replaceable_clip_command_start
@@ -23174,6 +23178,14 @@ fn parse_emf_offset_clip_region(
             header.height_px,
         ),
     ))
+}
+
+fn is_passive_zero_emf_offset_clip_region(data: &[u8]) -> bool {
+    data.len() >= 8
+        && matches!(
+            (read_le_i32(data, 0), read_le_i32(data, 4)),
+            (Some(0), Some(0))
+        )
 }
 
 fn vector_commands_are_only_clip_updates(commands: &[StaticImageVectorCommand]) -> bool {
@@ -42693,6 +42705,54 @@ After\par}"#;
         assert!(matches!(
             image.vector_commands[1],
             StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_zero_offsetcliprgn_is_passive_noop_without_clip_state() {
+        let mut offset = emf_point_record(26, 0, 0);
+        offset.extend_from_slice(b"ZERO-OFFSET-EMF-OFFSETCLIPRGN /JavaScript");
+        offset.resize(offset.len().next_multiple_of(4), 0);
+        let offset_len = offset.len() as u32;
+        write_test_le_u32(&mut offset, 4, offset_len);
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            offset,
+            emf_rect_record(43, 40, 10, 80, 40),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 0.0,
+                top: 0.0,
+                right: 30.0,
+                bottom: 30.0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 40.0,
+                top: 10.0,
+                right: 80.0,
+                bottom: 40.0,
+                ..
+            }
         ));
     }
 
