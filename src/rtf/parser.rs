@@ -20719,12 +20719,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if region_mode == EMF_RGN_OR && clip_active {
                     let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
                     if let Some(clip_start) = replaceable_clip_command_start {
-                        if vector_rects_are_inside_unpainted_clip_rect(
+                        if let Some(command) = vector_region_or_unpainted_clip_rect_command(
                             &commands, clip_start, &rects,
                         )? {
-                            pos = record_end;
-                            continue;
+                            commands.truncate(clip_start);
+                            commands.push(command);
                         }
+                        pos = record_end;
+                        continue;
                     }
                     return None;
                 }
@@ -21920,6 +21922,41 @@ fn vector_rects_are_inside_unpainted_clip_rect(
             .iter()
             .all(|rect| !bounds_is_visible(*rect) || rectangle_is_inside_rect(*rect, outer)),
     )
+}
+
+fn vector_region_or_unpainted_clip_rect_command(
+    commands: &[StaticImageVectorCommand],
+    clip_start: usize,
+    rects: &[(f32, f32, f32, f32)],
+) -> Option<Option<StaticImageVectorCommand>> {
+    let outer = unpainted_clip_rect(commands, clip_start)?;
+    let visible_rects: Vec<_> = rects
+        .iter()
+        .copied()
+        .filter(|rect| bounds_is_visible(*rect))
+        .collect();
+    if visible_rects.is_empty()
+        || vector_rects_are_inside_unpainted_clip_rect(commands, clip_start, &visible_rects)?
+    {
+        return Some(None);
+    }
+    if !visible_rects
+        .iter()
+        .any(|rect| rectangle_is_inside_rect(outer, *rect))
+    {
+        return None;
+    }
+    if visible_rects.len() == 1 {
+        let (left, top, right, bottom) = visible_rects[0];
+        return Some(Some(StaticImageVectorCommand::ClipRect {
+            left,
+            top,
+            right,
+            bottom,
+        }));
+    }
+
+    Some(Some(emf_region_clip_path_command(visible_rects)?))
 }
 
 fn emf_exclude_rectangles_from_rect_command(
@@ -41778,6 +41815,42 @@ After\par}"#;
                 left: 10.0,
                 top: 10.0,
                 right: 120.0,
+                bottom: 70.0,
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_extselectcliprgn_or_containing_unpainted_clip_rect_replaces_prior_clip() {
+        let records = [
+            emf_rect_record(30, 40, 20, 100, 60),
+            emf_extselectcliprgn_record(EMF_RGN_OR, &[(10, 10, 130, 70)]),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 10.0,
+                top: 10.0,
+                right: 130.0,
                 bottom: 70.0,
             }
         ));

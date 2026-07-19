@@ -37168,6 +37168,112 @@ fn emf_contained_rgn_or_clips_are_passive_noops_without_payload_leakage() {
 }
 
 #[test]
+fn emf_containing_rgn_or_clip_replaces_unpainted_clip_without_payload_leakage() {
+    let records = [
+        emf_rect_record(30, 40, 20, 100, 60),
+        emf_extselectcliprgn_record(2, &[(10, 10, 130, 70)]),
+        emf_rect_record(43, 0, 0, 160, 80),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex} 2f4a617661536372697074 2f456d62656464656446696c65}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive containing EMF RGN_OR vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::ClipRect {
+            left: 10.0,
+            top: 10.0,
+            right: 130.0,
+            bottom: 70.0,
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in [
+        "emfblip",
+        "JavaScript",
+        "EmbeddedFile",
+        "EXTSELECTCLIPRGN",
+        "RGNDATA",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "containing EMF RGN_OR payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W"),
+        "containing EMF RGN_OR should render the replacement passive PDF clip"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after containing EMF RGN_OR should still render passive rectangles"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "containing EMF RGN_OR payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_initial_rgn_diff_clip_region_renders_passively_without_payload_leakage() {
     let records = [
         emf_extselectcliprgn_record(4, &[(20, 10, 90, 50), (100, 20, 140, 70)]),
