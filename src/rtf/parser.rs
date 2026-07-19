@@ -20716,6 +20716,20 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
+                if region_mode == EMF_RGN_DIFF && clip_active {
+                    let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
+                    if let Some(clip_start) = replaceable_clip_command_start {
+                        if let Some(command) =
+                            emf_diff_from_unpainted_clip_rect_command(&commands, clip_start, rects)?
+                        {
+                            commands.truncate(clip_start);
+                            commands.push(command);
+                        }
+                        pos = record_end;
+                        continue;
+                    }
+                    return None;
+                }
                 if region_mode == EMF_RGN_COPY && clip_active {
                     replace_emf_clip_scope(
                         &mut commands,
@@ -21806,6 +21820,77 @@ fn emf_exclude_clip_region_command(
     }
     Some(StaticImageVectorCommand::ClipPath {
         start: (0.0, 0.0),
+        segments,
+        closed: false,
+        fill_rule: StaticImageVectorFillRule::Alternate,
+    })
+}
+
+fn emf_diff_from_unpainted_clip_rect_command(
+    commands: &[StaticImageVectorCommand],
+    clip_start: usize,
+    rects: Vec<(f32, f32, f32, f32)>,
+) -> Option<Option<StaticImageVectorCommand>> {
+    if commands.len() != clip_start.checked_add(1)? {
+        return None;
+    }
+    let StaticImageVectorCommand::ClipRect {
+        left,
+        top,
+        right,
+        bottom,
+    } = commands.get(clip_start)?
+    else {
+        return None;
+    };
+    let outer = (*left, *top, *right, *bottom);
+    if !bounds_is_visible(outer) {
+        return None;
+    }
+
+    let mut clipped_rects = Vec::new();
+    for rect in rects {
+        let clipped = (
+            rect.0.max(outer.0),
+            rect.1.max(outer.1),
+            rect.2.min(outer.2),
+            rect.3.min(outer.3),
+        );
+        if bounds_is_visible(clipped) {
+            clipped_rects.push(clipped);
+        }
+    }
+    if clipped_rects.is_empty() {
+        return Some(None);
+    }
+    if !rectangles_are_pairwise_non_overlapping(&clipped_rects) {
+        return None;
+    }
+
+    Some(Some(emf_exclude_rectangles_from_rect_command(
+        outer,
+        clipped_rects,
+    )?))
+}
+
+fn emf_exclude_rectangles_from_rect_command(
+    outer: (f32, f32, f32, f32),
+    rects: Vec<(f32, f32, f32, f32)>,
+) -> Option<StaticImageVectorCommand> {
+    let mut segments = Vec::with_capacity(rects.len().checked_mul(5)?.checked_add(4)?);
+    segments.push(StaticImageVectorPathSegment::LineTo(outer.2, outer.1));
+    segments.push(StaticImageVectorPathSegment::LineTo(outer.2, outer.3));
+    segments.push(StaticImageVectorPathSegment::LineTo(outer.0, outer.3));
+    segments.push(StaticImageVectorPathSegment::LineTo(outer.0, outer.1));
+    for (left, top, right, bottom) in rects {
+        segments.push(StaticImageVectorPathSegment::MoveTo(left, top));
+        segments.push(StaticImageVectorPathSegment::LineTo(right, top));
+        segments.push(StaticImageVectorPathSegment::LineTo(right, bottom));
+        segments.push(StaticImageVectorPathSegment::LineTo(left, bottom));
+        segments.push(StaticImageVectorPathSegment::LineTo(left, top));
+    }
+    Some(StaticImageVectorCommand::ClipPath {
+        start: (outer.0, outer.1),
         segments,
         closed: false,
         fill_rule: StaticImageVectorFillRule::Alternate,
@@ -41527,6 +41612,106 @@ After\par}"#;
     fn emf_initial_extselectcliprgn_diff_with_overlapping_rects_becomes_placeholder() {
         let records = [
             emf_extselectcliprgn_record(EMF_RGN_DIFF, &[(20, 10, 90, 50), (80, 20, 140, 70)]),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_extselectcliprgn_diff_from_unpainted_clip_rect_becomes_passive_exclude_clip_path() {
+        let records = [
+            emf_rect_record(30, 10, 10, 120, 70),
+            emf_extselectcliprgn_record(EMF_RGN_DIFF, &[(40, 20, 80, 50)]),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipPath {
+                start: (10.0, 10.0),
+                ref segments,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                ..
+            } if segments.starts_with(&[
+                StaticImageVectorPathSegment::LineTo(120.0, 10.0),
+                StaticImageVectorPathSegment::LineTo(120.0, 70.0),
+                StaticImageVectorPathSegment::LineTo(10.0, 70.0),
+                StaticImageVectorPathSegment::LineTo(10.0, 10.0),
+                StaticImageVectorPathSegment::MoveTo(40.0, 20.0),
+            ]) && segments.len() == 9
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_extselectcliprgn_diff_disjoint_from_unpainted_clip_rect_is_passive_noop() {
+        let records = [
+            emf_rect_record(30, 10, 10, 120, 70),
+            emf_extselectcliprgn_record(EMF_RGN_DIFF, &[(130, 20, 150, 50)]),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipRect {
+                left: 10.0,
+                top: 10.0,
+                right: 120.0,
+                bottom: 70.0,
+            }
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_extselectcliprgn_diff_from_unpainted_clip_rect_with_overlaps_becomes_placeholder() {
+        let records = [
+            emf_rect_record(30, 10, 10, 120, 70),
+            emf_extselectcliprgn_record(EMF_RGN_DIFF, &[(30, 20, 80, 50), (70, 30, 100, 60)]),
             emf_rect_record(43, 0, 0, 160, 80),
         ];
         let input = format!(
