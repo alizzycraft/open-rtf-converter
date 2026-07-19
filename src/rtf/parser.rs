@@ -25278,6 +25278,7 @@ enum PassiveSourceRasterTransferMode {
         noop_source: Color,
     },
     SameBoundsBackdropAndIfSolidSource,
+    SameBoundsBackdropNorIfSolidSource,
     SameBoundsBackdropOrIfSolidSource,
     SameBoundsBackdropOrNotSourceIfSolidSource,
     SameBoundsBackdropXorIfSolidSource,
@@ -25287,6 +25288,7 @@ enum PassiveSourceRasterTransfer {
     Image(ParsedVectorRasterImage),
     Solid(Color),
     SameBoundsBackdropAnd(Color),
+    SameBoundsBackdropNor(Color),
     SameBoundsBackdropOr(Color),
     SameBoundsBackdropXor(Color),
     Noop,
@@ -28346,10 +28348,9 @@ fn passive_source_raster_transfer_mode(
             fill: Color::default(),
             noop_source: Color::default(),
         }),
-        WMF_NOTSRCERASE_RASTER_OP => Some(PassiveSourceRasterTransferMode::SolidIfSource {
-            source: white_color(),
-            fill: Color::default(),
-        }),
+        WMF_NOTSRCERASE_RASTER_OP => {
+            Some(PassiveSourceRasterTransferMode::SameBoundsBackdropNorIfSolidSource)
+        }
         WMF_SRCPAINT_RASTER_OP => {
             Some(PassiveSourceRasterTransferMode::SameBoundsBackdropOrIfSolidSource)
         }
@@ -28409,6 +28410,14 @@ fn apply_passive_source_raster_transfer_mode(
                 Some(PassiveSourceRasterTransfer::Solid(Color::default()))
             } else {
                 Some(PassiveSourceRasterTransfer::SameBoundsBackdropAnd(source))
+            }
+        }
+        PassiveSourceRasterTransferMode::SameBoundsBackdropNorIfSolidSource => {
+            let source = vector_raster_solid_color(&image)?;
+            if source == white_color() {
+                Some(PassiveSourceRasterTransfer::Solid(Color::default()))
+            } else {
+                Some(PassiveSourceRasterTransfer::SameBoundsBackdropNor(source))
             }
         }
         PassiveSourceRasterTransferMode::SameBoundsBackdropOrIfSolidSource => {
@@ -28522,6 +28531,13 @@ fn passive_source_raster_command(
                 selected_fill_color: Some(color),
             }
         }
+        PassiveSourceRasterTransfer::SameBoundsBackdropNor(color) => {
+            PassiveSourceRasterCommand::ReduceSameBoundsBackdrop {
+                bounds: (left, top, right, bottom),
+                raster_op: WMF_NOTSRCERASE_RASTER_OP,
+                selected_fill_color: Some(color),
+            }
+        }
         PassiveSourceRasterTransfer::SameBoundsBackdropOr(color) => {
             PassiveSourceRasterCommand::ReduceSameBoundsBackdrop {
                 bounds: (left, top, right, bottom),
@@ -28567,6 +28583,15 @@ fn push_passive_source_raster_command(
                 let source_color = selected_fill_color?;
                 if !apply_passive_same_bounds_srcand_source_transfer(commands, bounds, source_color)
                 {
+                    return None;
+                }
+            } else if raster_op == WMF_NOTSRCERASE_RASTER_OP {
+                let source_color = selected_fill_color?;
+                if !apply_passive_same_bounds_notsrcerase_source_transfer(
+                    commands,
+                    bounds,
+                    source_color,
+                ) {
                     return None;
                 }
             } else if raster_op == WMF_SRCPAINT_RASTER_OP {
@@ -28891,6 +28916,10 @@ fn or_color(lhs: Color, rhs: Color) -> Color {
     }
 }
 
+fn nor_color(lhs: Color, rhs: Color) -> Color {
+    inverted_color(or_color(lhs, rhs))
+}
+
 fn apply_passive_solid_backdrop_raster_transfer(
     commands: &mut [StaticImageVectorCommand],
     bounds: (f32, f32, f32, f32),
@@ -28945,6 +28974,32 @@ fn apply_passive_same_bounds_srcand_source_transfer(
     }
 
     *fill_color = and_color(*fill_color, source_color);
+    true
+}
+
+fn apply_passive_same_bounds_notsrcerase_source_transfer(
+    commands: &mut [StaticImageVectorCommand],
+    bounds: (f32, f32, f32, f32),
+    source_color: Color,
+) -> bool {
+    let Some(StaticImageVectorCommand::Rectangle {
+        left,
+        top,
+        right,
+        bottom,
+        stroke_color: None,
+        fill_pattern: ShadingPattern::None,
+        fill_color: Some(fill_color),
+        ..
+    }) = commands.last_mut()
+    else {
+        return false;
+    };
+    if (*left, *top, *right, *bottom) != bounds {
+        return false;
+    }
+
+    *fill_color = nor_color(*fill_color, source_color);
     true
 }
 
@@ -45577,6 +45632,62 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_same_bounds_notsrcerase_solid_source_after_solid_fill_nors_rectangle() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 100,
+                    green: 30,
+                    blue: 200,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_bitblt_record(20, 15, 60, 30, WMF_PATCOPY_RASTER_OP, b"PATCOPY-FILL"),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_NOTSRCERASE_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 17,
+                    green: 65,
+                    blue: 21
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn emf_same_bounds_srcpaint_solid_source_after_solid_fill_ors_rectangle() {
         let records = [
             emf_create_brush_record(
@@ -48136,6 +48247,58 @@ After\par}"#;
                     red: 32,
                     green: 10,
                     blue: 136
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_same_bounds_notsrcerase_solid_source_after_solid_fill_nors_rectangle() {
+        let records = [
+            wmf_set_window_ext_record(200, 100),
+            wmf_create_brush_record(Color {
+                red: 100,
+                green: 30,
+                blue: 200,
+            }),
+            wmf_select_object_record(0),
+            wmf_dibbitblt_record(15, 25, 80, 40, WMF_PATCOPY_RASTER_OP, b"PATCOPY-FILL"),
+            wmf_stretchdib_dib_record(
+                15,
+                25,
+                80,
+                40,
+                WMF_NOTSRCERASE_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 17,
+                    green: 65,
+                    blue: 21
                 }),
                 ..
             }
