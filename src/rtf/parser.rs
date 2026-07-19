@@ -20466,6 +20466,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETWINDOWORGEX: u32 = 10;
     const EMR_SETVIEWPORTEXTEX: u32 = 11;
     const EMR_SETVIEWPORTORGEX: u32 = 12;
+    const EMR_SETBRUSHORGEX: u32 = 13;
     const EMR_POLYBEZIER: u32 = 2;
     const EMR_POLYBEZIERTO: u32 = 5;
     const EMR_MOVETOEX: u32 = 27;
@@ -20613,6 +20614,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             EMR_SETVIEWPORTORGEX => {
                 let (x, y) = parse_emf_raw_point_record(data)?;
                 coordinates.set_viewport_origin(x, y);
+            }
+            EMR_SETBRUSHORGEX => {
+                let (x, y) = parse_emf_raw_point_record(data)?;
+                if x != 0 || y != 0 {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_SCALEVIEWPORTEXTEX => {
                 let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
