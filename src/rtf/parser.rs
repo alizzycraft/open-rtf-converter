@@ -21358,12 +21358,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some(command) = parse_emf_alphablend_passive(data, &header, &coordinates) {
-                    commands.push(command);
-                } else if is_passive_noop_emf_alphablend(data)
+                if is_passive_noop_emf_alphablend(data)
                     || is_passive_invisible_emf_bitmap_transfer(data)
                     || is_passive_noop_emf_bitmap_transfer_source_extent(data)
                 {
+                } else if let Some(command) =
+                    parse_emf_alphablend_passive(data, &header, &coordinates)
+                {
+                    commands.push(command);
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -21372,11 +21374,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some(command) = parse_emf_transparentblt_keyed(data, &header, &coordinates) {
-                    commands.push(command);
-                } else if is_passive_invisible_emf_bitmap_transfer(data)
+                if is_passive_invisible_emf_bitmap_transfer(data)
                     || is_passive_noop_emf_bitmap_transfer_source_extent(data)
                 {
+                } else if let Some(command) =
+                    parse_emf_transparentblt_keyed(data, &header, &coordinates)
+                {
+                    commands.push(command);
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
