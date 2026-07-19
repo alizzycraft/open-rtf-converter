@@ -27624,6 +27624,17 @@ fn passive_source_raster_transfer_mode(
             fill: white_color(),
             noop_source: white_color(),
         }),
+        WMF_PATPAINT_RASTER_OP if selected_fill_color == Some(Color::default()) => {
+            Some(PassiveSourceRasterTransferMode::SolidOrNoopBySource {
+                solid_source: Color::default(),
+                fill: white_color(),
+                noop_source: white_color(),
+            })
+        }
+        WMF_PATPAINT_RASTER_OP => Some(PassiveSourceRasterTransferMode::SolidIfSource {
+            source: Color::default(),
+            fill: white_color(),
+        }),
         _ => None,
     }
 }
@@ -43693,6 +43704,62 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_after_paint_patpaint_black_source_becomes_passive_white_rectangle() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 20,
+                    green: 80,
+                    blue: 140,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_stretchdibits_dib_record(
+                20,
+                15,
+                60,
+                30,
+                WMF_PATPAINT_RASTER_OP,
+                &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[0, 0, 0], [0, 0, 0]]),
+            ),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 15.0,
+                right: 80.0,
+                bottom: 45.0,
+                stroke_color: None,
+                fill_color: Some(Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn emf_after_paint_srcand_black_source_becomes_passive_black_rectangle() {
         let records = [
             emf_rect_record(43, 0, 0, 30, 30),
@@ -45568,6 +45635,59 @@ After\par}"#;
                     green: 255,
                     blue: 255
                 }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn wmf_after_paint_patpaint_white_source_with_black_brush_is_passive_noop() {
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_PATPAINT_RASTER_OP,
+            &minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(
+                200,
+                100,
+                &[
+                    wmf_set_window_ext_record(200, 100),
+                    wmf_create_brush_record(Color::default()),
+                    wmf_select_object_record(0),
+                    wmf_dibbitblt_record(
+                        10,
+                        20,
+                        70,
+                        60,
+                        WMF_WHITENESS_RASTER_OP,
+                        b"WHITENESS-SOURCE-PAYLOAD",
+                    ),
+                    record,
+                ],
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle {
+                left: 10.0,
+                top: 20.0,
+                right: 80.0,
+                bottom: 80.0,
                 ..
             }
         ));
