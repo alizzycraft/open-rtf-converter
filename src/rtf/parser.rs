@@ -20999,6 +20999,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 push_emf_region_rectangles(&mut commands, rects, fill_color, pattern)?;
             }
             EMR_FRAMERGN => {
+                if is_passive_noop_emf_framergn(data) {
+                    pos = record_end;
+                    continue;
+                }
                 let handle = read_le_u32(data, 20)?;
                 let Some(EmfObject::Brush { color, pattern }) =
                     emf_stock_object(handle).or_else(|| {
@@ -21961,6 +21965,14 @@ fn parse_emf_region_data_rects(
         )?);
     }
     Some(rects)
+}
+
+fn is_passive_noop_emf_framergn(data: &[u8]) -> bool {
+    data.len() >= 32
+        && matches!(
+            (read_le_i32(data, 24), read_le_i32(data, 28)),
+            (Some(0), _) | (_, Some(0))
+        )
 }
 
 fn emf_region_clip_path_command(
@@ -45222,6 +45234,35 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_zero_frame_framergn_is_passive_noop_without_parsing_region_payload() {
+        let mut frame = emf_framergn_record(0xFFFF_FFFE, 0, 4, &[(20, 10, 90, 50)]);
+        frame.extend_from_slice(b"ZERO-FRAME-EMF-FRAMERGN /JavaScript /EmbeddedFile");
+        frame.resize(frame.len().next_multiple_of(4), 0);
+        let frame_len = frame.len() as u32;
+        write_test_le_u32(&mut frame, 4, frame_len);
+        write_test_le_u32(&mut frame, 24, 31);
+        let records = [emf_rect_record(43, 0, 0, 30, 30), frame];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
