@@ -39829,6 +39829,152 @@ fn emf_srccopy_stretchdibits_dib_renders_as_passive_image_without_payload_leakag
 }
 
 #[test]
+fn solid_srccopy_and_notsrccopy_sources_reduce_to_rectangles_without_payload_leakage() {
+    let mut emf_src_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[12, 34, 56], [12, 34, 56]]);
+    emf_src_dib.extend_from_slice(b"TRAILING-EMF-SOLID-SRCCOPY-DIB /JavaScript");
+    let mut emf_not_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[12, 34, 56], [12, 34, 56]]);
+    emf_not_dib.extend_from_slice(b"TRAILING-EMF-SOLID-NOTSRCCOPY-DIB /OpenAction");
+    let mut wmf_src_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[12, 34, 56], [12, 34, 56]]);
+    wmf_src_dib.extend_from_slice(b"TRAILING-WMF-SOLID-SRCCOPY-DIB /EmbeddedFile");
+    let mut wmf_not_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[12, 34, 56], [12, 34, 56]]);
+    wmf_not_dib.extend_from_slice(b"TRAILING-WMF-SOLID-NOTSRCCOPY-DIB /RichMedia");
+    let emf = minimal_emf_with_records(
+        180,
+        120,
+        2858,
+        1905,
+        &[
+            emf_stretchdibits_dib_record(20, 15, 60, 30, 0x00cc_0020, &emf_src_dib),
+            emf_stretchdibits_dib_record(90, 15, 60, 30, 0x0033_0008, &emf_not_dib),
+        ],
+    );
+    let wmf = minimal_wmf_with_records(
+        220,
+        120,
+        &[
+            wmf_set_window_ext_record(220, 120),
+            wmf_stretchdib_dib_record(15, 25, 80, 40, 0x00cc_0020, &wmf_src_dib),
+            wmf_stretchdib_dib_record(110, 25, 80, 40, 0x0033_0008, &wmf_not_dib),
+        ],
+    );
+    let emf_hex = bytes_to_hex(&emf);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw220\\pich120\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let images: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+
+    assert!(text.contains("before"));
+    assert!(text.contains("middle"));
+    assert!(text.contains("after"));
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].vector_commands.len(), 2);
+    assert_eq!(images[1].vector_commands.len(), 2);
+    let expected = [
+        Color {
+            red: 12,
+            green: 34,
+            blue: 56,
+        },
+        Color {
+            red: 243,
+            green: 221,
+            blue: 199,
+        },
+    ];
+    for image in &images {
+        for (command, fill_color) in image.vector_commands.iter().zip(expected) {
+            assert!(matches!(
+                command,
+                StaticImageVectorCommand::Rectangle {
+                    fill_color: Some(actual_fill_color),
+                    ..
+                } if *actual_fill_color == fill_color
+            ));
+        }
+    }
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "wmetafile",
+        "TRAILING-EMF-SOLID-SRCCOPY-DIB",
+        "TRAILING-EMF-SOLID-NOTSRCCOPY-DIB",
+        "TRAILING-WMF-SOLID-SRCCOPY-DIB",
+        "TRAILING-WMF-SOLID-NOTSRCCOPY-DIB",
+        "JavaScript",
+        "OpenAction",
+        "EmbeddedFile",
+        "RichMedia",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "solid SRCCOPY/NOTSRCCOPY payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("middle"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 4,
+        "solid SRCCOPY/NOTSRCCOPY reductions should render passive PDF rectangles"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        b"wmetafile",
+        emf_hex.as_bytes(),
+        wmf_hex.as_bytes(),
+        b"TRAILING-EMF-SOLID-SRCCOPY-DIB",
+        b"TRAILING-EMF-SOLID-NOTSRCCOPY-DIB",
+        b"TRAILING-WMF-SOLID-SRCCOPY-DIB",
+        b"TRAILING-WMF-SOLID-NOTSRCCOPY-DIB",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "solid SRCCOPY/NOTSRCCOPY source payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn blank_destination_srcand_dib_rasters_render_as_passive_images_without_payload_leakage() {
     let mut emf_dib = minimal_24bit_dib_with_dimensions(2, 1);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SRCAND-DIB /JavaScript");
