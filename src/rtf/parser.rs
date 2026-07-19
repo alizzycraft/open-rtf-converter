@@ -21000,6 +21000,20 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
+                if region_mode == EMF_RGN_DIFF
+                    && !clip_active
+                    && state.fill_rule == StaticImageVectorFillRule::Alternate
+                {
+                    let path = active_path.take()?;
+                    let command = emf_exclude_clip_path_command(&header, path)?;
+                    commands.push(command);
+                    if replaceable_clip_command_start.is_none() {
+                        replaceable_clip_command_start = commands.len().checked_sub(1);
+                    }
+                    clip_active = true;
+                    pos = record_end;
+                    continue;
+                }
                 if region_mode == EMF_RGN_COPY && clip_active {
                     replace_emf_clip_scope(
                         &mut commands,
@@ -21811,6 +21825,37 @@ fn rectangles_are_pairwise_non_overlapping(rects: &[(f32, f32, f32, f32)]) -> bo
         }
     }
     true
+}
+
+fn emf_exclude_clip_path_command(
+    header: &ParsedEmfHeader,
+    path: EmfPathBuilder,
+) -> Option<StaticImageVectorCommand> {
+    if path.collecting {
+        return None;
+    }
+    let (path_start, path_segments, path_closed) = path.path_segments()?;
+    let image_right = header.width_px.max(1) as f32;
+    let image_bottom = header.height_px.max(1) as f32;
+    let mut segments = Vec::with_capacity(path_segments.len().checked_add(5)?);
+    segments.push(StaticImageVectorPathSegment::LineTo(image_right, 0.0));
+    segments.push(StaticImageVectorPathSegment::LineTo(
+        image_right,
+        image_bottom,
+    ));
+    segments.push(StaticImageVectorPathSegment::LineTo(0.0, image_bottom));
+    segments.push(StaticImageVectorPathSegment::LineTo(0.0, 0.0));
+    segments.push(StaticImageVectorPathSegment::MoveTo(
+        path_start.0,
+        path_start.1,
+    ));
+    segments.extend(path_segments);
+    Some(StaticImageVectorCommand::ClipPath {
+        start: (0.0, 0.0),
+        segments,
+        closed: path_closed,
+        fill_rule: StaticImageVectorFillRule::Alternate,
+    })
 }
 
 fn push_emf_region_rectangles(
@@ -41643,13 +41688,13 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_selectclippath_unsupported_region_mode_becomes_passive_placeholder() {
+    fn emf_selectclippath_xor_region_mode_becomes_passive_placeholder() {
         let records = [
             emf_unknown_record(59),
             emf_point_record(27, 20, 20),
             emf_poly_record(6, &[(80, 20), (50, 60)]),
             emf_unknown_record(60),
-            emf_u32_record(67, 4),
+            emf_u32_record(67, 3), // RGN_XOR requires active boolean path-region composition.
             emf_rect_record(43, 0, 0, 160, 80),
         ];
         let input = format!(
@@ -41694,6 +41739,79 @@ After\par}"#;
         assert!(matches!(
             image.vector_commands[0],
             StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_initial_selectclippath_diff_becomes_passive_exclude_clip_path() {
+        let records = [
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_poly_record(6, &[(80, 20), (50, 60)]),
+            emf_unknown_record(60),
+            emf_u32_record(67, EMF_RGN_DIFF),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::ClipPath {
+                start: (0.0, 0.0),
+                ref segments,
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                ..
+            } if segments.starts_with(&[
+                StaticImageVectorPathSegment::LineTo(160.0, 0.0),
+                StaticImageVectorPathSegment::LineTo(160.0, 80.0),
+                StaticImageVectorPathSegment::LineTo(0.0, 80.0),
+                StaticImageVectorPathSegment::LineTo(0.0, 0.0),
+                StaticImageVectorPathSegment::MoveTo(20.0, 20.0),
+            ]) && segments
+                .iter()
+                .any(|segment| *segment == StaticImageVectorPathSegment::LineTo(50.0, 60.0))
+        ));
+        assert!(matches!(
+            image.vector_commands[1],
+            StaticImageVectorCommand::Rectangle { .. }
+        ));
+    }
+
+    #[test]
+    fn emf_initial_selectclippath_diff_with_winding_fill_becomes_placeholder() {
+        let records = [
+            emf_u32_record(19, u32::from(WMF_POLYFILLMODE_WINDING)),
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_poly_record(6, &[(80, 20), (50, 60)]),
+            emf_unknown_record(60),
+            emf_u32_record(67, EMF_RGN_DIFF),
+            emf_rect_record(43, 0, 0, 160, 80),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(matches!(
+            &output.document.blocks[0],
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.vector_commands.is_empty()
         ));
     }
 

@@ -36953,6 +36953,111 @@ fn emf_initial_rgn_diff_clip_region_renders_passively_without_payload_leakage() 
 }
 
 #[test]
+fn emf_initial_selectclippath_diff_renders_passively_without_payload_leakage() {
+    let records = [
+        emf_unknown_record(59),
+        emf_point_record(27, 20, 20),
+        emf_poly_record(6, &[(80, 20), (50, 60)]),
+        emf_unknown_record(60),
+        emf_u32_record(67, 4),
+        emf_rect_record(43, 0, 0, 160, 80),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {emf_hex} 2f4a617661536372697074 2f456d62656464656446696c65}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF SELECTCLIPPATH RGN_DIFF vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    assert!(
+        image.vector_commands.iter().any(|command| matches!(
+            command,
+            StaticImageVectorCommand::ClipPath {
+                start: (0.0, 0.0),
+                fill_rule: StaticImageVectorFillRule::Alternate,
+                ..
+            }
+        )),
+        "expected a passive even-odd exclude clip path"
+    );
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    for forbidden in ["emfblip", "JavaScript", "EmbeddedFile", "SELECTCLIPPATH"] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF SELECTCLIPPATH RGN_DIFF payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "W*"),
+        "initial SELECTCLIPPATH RGN_DIFF should render a passive even-odd clipping path"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after SELECTCLIPPATH RGN_DIFF should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF SELECTCLIPPATH RGN_DIFF payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_paintrgn_records_render_passively_without_payload_leakage() {
     let records = [
         emf_create_brush_record(
