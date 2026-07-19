@@ -28697,10 +28697,17 @@ fn zero_count_wmf_poly_records_are_noops_without_payload_leakage() {
     let polybezier_len_words = (polybezier.len() / 2) as u32;
     write_test_le_u32(&mut polybezier, 0, polybezier_len_words);
 
+    let mut polybezierto = wmf_point_list_record(0x1004, &[]);
+    polybezierto.extend_from_slice(b"ZERO-WMF-POLYBEZIERTO /AcroForm");
+    polybezierto.resize(polybezierto.len().next_multiple_of(2), 0);
+    let polybezierto_len_words = (polybezierto.len() / 2) as u32;
+    write_test_le_u32(&mut polybezierto, 0, polybezierto_len_words);
+
     let records = [
         polygon,
         polyline,
         polybezier,
+        polybezierto,
         wmf_bounds_record(0x041b, 0, 0, 80, 40),
     ];
     let wmf = minimal_wmf_with_records(160, 80, &records);
@@ -28736,11 +28743,13 @@ fn zero_count_wmf_poly_records_are_noops_without_payload_leakage() {
         "ZERO-WMF-POLYGON",
         "ZERO-WMF-POLYLINE",
         "ZERO-WMF-POLYBEZIER",
+        "ZERO-WMF-POLYBEZIERTO",
         "JavaScript",
         "EmbeddedFile",
         "Launch",
         "OpenAction",
         "RichMedia",
+        "AcroForm",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -28776,11 +28785,13 @@ fn zero_count_wmf_poly_records_are_noops_without_payload_leakage() {
         b"ZERO-WMF-POLYGON",
         b"ZERO-WMF-POLYLINE",
         b"ZERO-WMF-POLYBEZIER",
+        b"ZERO-WMF-POLYBEZIERTO",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
         b"/OpenAction",
         b"/RichMedia",
+        b"/AcroForm",
     ] {
         assert!(
             !output
@@ -48511,6 +48522,12 @@ fn zero_count_emf_poly_records_are_noops_without_payload_leakage() {
     let polyline_len = polyline.len() as u32;
     write_test_le_u32(&mut polyline, 4, polyline_len);
 
+    let mut polylineto = emf_poly_record(6, &[]);
+    polylineto.extend_from_slice(b"ZERO-EMF-POLYLINETO /AcroForm");
+    polylineto.resize(polylineto.len().next_multiple_of(4), 0);
+    let polylineto_len = polylineto.len() as u32;
+    write_test_le_u32(&mut polylineto, 4, polylineto_len);
+
     let mut polybezier = emf_poly_record(2, &[]);
     polybezier.extend_from_slice(b"ZERO-EMF-POLYBEZIER /OpenAction");
     polybezier.resize(polybezier.len().next_multiple_of(4), 0);
@@ -48523,6 +48540,12 @@ fn zero_count_emf_poly_records_are_noops_without_payload_leakage() {
     let polyline16_len = polyline16.len() as u32;
     write_test_le_u32(&mut polyline16, 4, polyline16_len);
 
+    let mut polylineto16 = emf_poly16_record(89, &[]);
+    polylineto16.extend_from_slice(b"ZERO-EMF-POLYLINETO16 /AA");
+    polylineto16.resize(polylineto16.len().next_multiple_of(4), 0);
+    let polylineto16_len = polylineto16.len() as u32;
+    write_test_le_u32(&mut polylineto16, 4, polylineto16_len);
+
     let mut polydraw = emf_polydraw_record(56, &[], &[]);
     polydraw.extend_from_slice(b"ZERO-EMF-POLYDRAW /Subtype /Image");
     polydraw.resize(polydraw.len().next_multiple_of(4), 0);
@@ -48532,8 +48555,10 @@ fn zero_count_emf_poly_records_are_noops_without_payload_leakage() {
     let records = [
         polygon,
         polyline,
+        polylineto,
         polybezier,
         polyline16,
+        polylineto16,
         polydraw,
         emf_rect_record(43, 0, 0, 80, 40),
     ];
@@ -48566,14 +48591,18 @@ fn zero_count_emf_poly_records_are_noops_without_payload_leakage() {
         "emfblip",
         "ZERO-EMF-POLYGON",
         "ZERO-EMF-POLYLINE",
+        "ZERO-EMF-POLYLINETO",
         "ZERO-EMF-POLYBEZIER",
         "ZERO-EMF-POLYLINE16",
+        "ZERO-EMF-POLYLINETO16",
         "ZERO-EMF-POLYDRAW",
         "JavaScript",
         "EmbeddedFile",
         "Launch",
         "OpenAction",
         "RichMedia",
+        "AcroForm",
+        "AA",
         "Subtype",
         "Image",
     ] {
@@ -48610,14 +48639,18 @@ fn zero_count_emf_poly_records_are_noops_without_payload_leakage() {
         emf_hex.as_bytes(),
         b"ZERO-EMF-POLYGON",
         b"ZERO-EMF-POLYLINE",
+        b"ZERO-EMF-POLYLINETO",
         b"ZERO-EMF-POLYBEZIER",
         b"ZERO-EMF-POLYLINE16",
+        b"ZERO-EMF-POLYLINETO16",
         b"ZERO-EMF-POLYDRAW",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
         b"/OpenAction",
         b"/RichMedia",
+        b"/AcroForm",
+        b"/AA",
         b"/Subtype /Image",
     ] {
         assert!(

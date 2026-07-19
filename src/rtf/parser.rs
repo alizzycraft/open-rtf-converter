@@ -21725,6 +21725,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 let raw_points = parse_emf_raw_poly_points(data)?;
+                if raw_points.is_empty() {
+                    pos = record_end;
+                    continue;
+                }
                 if let Some(path) = active_path.as_mut() {
                     path.polyline_to(&raw_points, &header, &coordinates)?;
                 } else {
@@ -21841,6 +21845,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 let raw_points = parse_emf_raw_poly16_points(data)?;
+                if raw_points.is_empty() {
+                    pos = record_end;
+                    continue;
+                }
                 if let Some(path) = active_path.as_mut() {
                     path.polyline_to(&raw_points, &header, &coordinates)?;
                 } else {
