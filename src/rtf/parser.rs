@@ -21947,9 +21947,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     if !reached_eof {
         return None;
     }
-    if active_path.is_some() {
-        return None;
-    }
+    let _ = active_path.take();
     if !saved_states.is_empty() {
         if commands.len().checked_add(saved_states.len())? > MAX_PASSIVE_WMF_COMMANDS {
             return None;
@@ -42659,6 +42657,33 @@ After\par}"#;
                 if image.format == ImageFormat::Placeholder
                     && image.bytes.is_empty()
             && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn emf_dangling_unpainted_path_at_eof_preserves_prior_drawing() {
+        let records = [
+            emf_rect_record(43, 0, 0, 60, 30),
+            emf_unknown_record(59),
+            emf_point_record(27, 10, 10),
+            emf_point_record(54, 50, 10),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
