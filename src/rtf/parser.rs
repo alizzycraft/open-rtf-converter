@@ -21352,6 +21352,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 if let Some(command) = parse_emf_alphablend_passive(data, &header, &coordinates) {
                     commands.push(command);
+                } else if is_passive_noop_emf_alphablend(data) {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -23704,6 +23705,29 @@ fn parse_emf_alphablend_passive(
             alpha_mask: image.alpha_mask,
         },
     })
+}
+
+fn is_passive_noop_emf_alphablend(data: &[u8]) -> bool {
+    const AC_SRC_OVER: u8 = 0;
+    const AC_SRC_ALPHA: u8 = 1;
+
+    let Some((&blend_op, rest)) = data.get(32..).and_then(|slice| slice.split_first()) else {
+        return false;
+    };
+    let Some((&blend_flags, rest)) = rest.split_first() else {
+        return false;
+    };
+    let Some((&source_constant_alpha, rest)) = rest.split_first() else {
+        return false;
+    };
+    let Some((&alpha_format, _)) = rest.split_first() else {
+        return false;
+    };
+
+    blend_op == AC_SRC_OVER
+        && blend_flags == 0
+        && source_constant_alpha == 0
+        && matches!(alpha_format, 0 | AC_SRC_ALPHA)
 }
 
 fn parse_emf_transparentblt_keyed(
@@ -47782,6 +47806,34 @@ After\par}"#;
             } if image.format == ImageFormat::Jpeg
                 && image.width_px == 2
                 && image.height_px == 1
+        ));
+    }
+
+    #[test]
+    fn emf_zero_alpha_alphablend_is_passive_noop_without_parsing_dib_payload() {
+        let mut hidden_dib = b"NOT-A-DIB /JavaScript /EmbeddedFile".to_vec();
+        hidden_dib.resize(64, 0x41);
+        let records = [
+            emf_rect_record(43, 0, 0, 30, 30),
+            emf_alphablend_dib_record(10, 20, 44, 24, 0, 0, &hidden_dib),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Rectangle { .. }
         ));
     }
 
