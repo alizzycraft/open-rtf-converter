@@ -45217,6 +45217,43 @@ After\par}"#;
     }
 
     #[test]
+    fn emf_blank_srcinvert_bi_png_stretchdibits_inverts_scanlines() {
+        let png = minimal_rgb_png(&[[10, 20, 30], [200, 210, 220]]);
+        let dib = minimal_compressed_dib_with_payload(2, 1, 5, &png);
+        let records = [emf_stretchdibits_dib_record(
+            20,
+            15,
+            60,
+            30,
+            WMF_SRCINVERT_RASTER_OP,
+            &dib,
+        )];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert_eq!(output.diagnostics.len(), 0);
+        let StaticImageVectorCommand::RasterImage { image, .. } = &image.vector_commands[0] else {
+            panic!("expected passive raster command");
+        };
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 7)
+            .expect("inverted PNG scanlines");
+        assert_eq!(scanlines, vec![0, 245, 235, 225, 55, 45, 35]);
+    }
+
+    #[test]
     fn emf_notsrccopy_stretchdibits_after_paint_becomes_passive_inverted_raster_image() {
         let records = [
             emf_rect_record(43, 0, 0, 30, 30),
@@ -45650,6 +45687,41 @@ After\par}"#;
                 && image.height_px == 1
                 && image.bytes == vec![0, 255, 255, 255, 0, 255]
         ));
+    }
+
+    #[test]
+    fn wmf_blank_destination_srcinvert_stretchdib_indexed_bi_png_record_inverts_palette() {
+        let png = minimal_indexed_png_with_dimensions(2, 1);
+        let record = wmf_stretchdib_dib_record(
+            15,
+            25,
+            80,
+            40,
+            WMF_SRCINVERT_RASTER_OP,
+            &minimal_compressed_dib_with_payload(2, 1, 5, &png),
+        );
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &[record]))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(output.diagnostics.len(), 0);
+        assert_eq!(image.vector_commands.len(), 1);
+        let StaticImageVectorCommand::RasterImage { image, .. } = &image.vector_commands[0] else {
+            panic!("expected passive raster command");
+        };
+        assert_eq!(image.format, ImageFormat::PngIndexed);
+        assert_eq!(image.width_px, 2);
+        assert_eq!(image.height_px, 1);
+        assert_eq!(image.palette, vec![0, 255, 255, 255, 0, 255]);
+        assert!(!image.bytes.is_empty());
     }
 
     #[test]
