@@ -27525,6 +27525,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 parse_wmf_font_object(data).unwrap_or(WmfObject::Other),
             )?,
             0x02fd => store_wmf_object(&mut objects, WmfObject::Other)?,
+            0x01f9 => store_wmf_object(&mut objects, parse_wmf_pattern_brush_object(data)?)?,
+            0x0142 => store_wmf_object(&mut objects, parse_wmf_dib_pattern_brush_object(data)?)?,
             0x012d => {
                 let handle = usize::from(read_le_u16(data, 0)?);
                 if let Some(object) = objects.get(handle).and_then(|object| *object) {
@@ -28532,6 +28534,17 @@ fn parse_wmf_palette_object(data: &[u8]) -> Option<WmfObject> {
     let entries_len = entry_count.checked_mul(4)?;
     let entries_end = 4usize.checked_add(entries_len)?;
     data.get(..entries_end)?;
+    Some(WmfObject::Other)
+}
+
+fn parse_wmf_pattern_brush_object(data: &[u8]) -> Option<WmfObject> {
+    read_le_u16(data, 0)?;
+    Some(WmfObject::Other)
+}
+
+fn parse_wmf_dib_pattern_brush_object(data: &[u8]) -> Option<WmfObject> {
+    read_le_u16(data, 0)?;
+    read_le_u16(data, 2)?;
     Some(WmfObject::Other)
 }
 
