@@ -41551,6 +41551,73 @@ fn emf_setstretchbltmode_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
+fn invalid_emf_modes_stay_partial_without_payload_leakage() {
+    for (record_type, value, marker) in [
+        (18, 99, "EMF-SETBKMODE-INVALID"),
+        (19, 99, "EMF-SETPOLYFILLMODE-INVALID"),
+        (21, 99, "EMF-SETSTRETCHBLTMODE-INVALID"),
+    ] {
+        let mut mode = emf_u32_record(record_type, value);
+        mode.extend_from_slice(format!("{marker} /JavaScript /EmbeddedFile /Launch").as_bytes());
+        mode.resize(mode.len().next_multiple_of(4), 0);
+        let mode_len = mode.len() as u32;
+        write_test_le_u32(&mut mode, 4, mode_len);
+        let records = [mode, emf_rect_record(43, 0, 0, 80, 40)];
+        let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        let emf_hex = bytes_to_hex(&emf);
+        let input =
+            format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "drawing after invalid EMF mode should render a passive PDF rectangle"
+        );
+        for forbidden in [
+            b"emfblip".as_slice(),
+            emf_hex.as_bytes(),
+            marker.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "invalid EMF mode payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn emf_mm_text_setmapmode_is_passive_state_without_payload_leakage() {
     let mut mode = emf_u32_record(17, 1);
     mode.extend_from_slice(b"EMF-SETMAPMODE-MM-TEXT /JavaScript /EmbeddedFile /Launch");
@@ -43170,6 +43237,37 @@ fn malformed_emf_setmapmode_becomes_passive_placeholder() {
     assert_eq!(image.format, ImageFormat::Placeholder);
     assert!(image.bytes.is_empty());
     assert!(image.vector_commands.is_empty());
+}
+
+#[test]
+fn malformed_emf_modes_become_passive_placeholders() {
+    for (record_type, name) in [(18, "SETBKMODE"), (19, "SETPOLYFILLMODE")] {
+        let mut mode = emf_unknown_record(record_type);
+        write_test_le_u32(&mut mode, 4, 8);
+        let records = [mode];
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed EMF mode placeholder");
+
+        assert!(text.contains("before"), "{name}");
+        assert!(text.contains("after"), "{name}");
+        assert_eq!(image.format, ImageFormat::Placeholder, "{name}");
+        assert!(image.bytes.is_empty(), "{name}");
+        assert!(image.vector_commands.is_empty(), "{name}");
+    }
 }
 
 #[test]

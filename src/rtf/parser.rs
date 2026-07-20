@@ -20881,29 +20881,42 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
-            EMR_SETBKMODE => {
-                state.text_background_mode =
-                    if read_le_u32(data, 0)? == u32::from(WMF_BKMODE_OPAQUE) {
-                        WmfTextBackgroundMode::Opaque
-                    } else {
-                        WmfTextBackgroundMode::Transparent
-                    };
-            }
-            EMR_SETPOLYFILLMODE => {
-                state.fill_rule = if read_le_u32(data, 0)? == u32::from(WMF_POLYFILLMODE_WINDING) {
-                    StaticImageVectorFillRule::Winding
-                } else {
-                    StaticImageVectorFillRule::Alternate
-                };
-            }
+            EMR_SETBKMODE => match read_le_u32(data, 0)? {
+                value if value == u32::from(WMF_BKMODE_TRANSPARENT) => {
+                    state.text_background_mode = WmfTextBackgroundMode::Transparent
+                }
+                value if value == u32::from(WMF_BKMODE_OPAQUE) => {
+                    state.text_background_mode = WmfTextBackgroundMode::Opaque
+                }
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            EMR_SETPOLYFILLMODE => match read_le_u32(data, 0)? {
+                value if value == u32::from(WMF_POLYFILLMODE_ALTERNATE) => {
+                    state.fill_rule = StaticImageVectorFillRule::Alternate
+                }
+                value if value == u32::from(WMF_POLYFILLMODE_WINDING) => {
+                    state.fill_rule = StaticImageVectorFillRule::Winding
+                }
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_SETROP2 => {
                 if read_le_u32(data, 0)? != 13 {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
-            EMR_SETSTRETCHBLTMODE => {
-                read_le_u32(data, 0)?;
-            }
+            EMR_SETSTRETCHBLTMODE => match read_le_u32(data, 0)? {
+                value
+                    if matches!(
+                        u16::try_from(value).ok(),
+                        Some(
+                            WMF_STRETCHMODE_BLACKONWHITE
+                                | WMF_STRETCHMODE_WHITEONBLACK
+                                | WMF_STRETCHMODE_COLORONCOLOR
+                                | WMF_STRETCHMODE_HALFTONE
+                        )
+                    ) => {}
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_SETARCDIRECTION => {
                 state.arc_clockwise = parse_emf_arc_direction(data)?;
             }
