@@ -27598,6 +27598,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             skipped_record_count = skipped_record_count.checked_add(1)?
                         }
                     }
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             0x0209 => {
