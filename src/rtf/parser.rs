@@ -26281,14 +26281,6 @@ struct WmfCoordinateMap {
 }
 
 impl WmfCoordinateMap {
-    fn mapped_origin_x(self) -> i32 {
-        self.window_origin_x.saturating_sub(self.viewport_origin_x)
-    }
-
-    fn mapped_origin_y(self) -> i32 {
-        self.window_origin_y.saturating_sub(self.viewport_origin_y)
-    }
-
     fn normalized_point(self, x: i32, y: i32) -> (f32, f32) {
         (
             self.normalized_axis(
@@ -27559,9 +27551,6 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             image_width: window_width,
             image_height: window_height,
         };
-        let mapped_origin_x = coordinates.mapped_origin_x();
-        let mapped_origin_y = coordinates.mapped_origin_y();
-
         match function {
             0x0000 => break,
             0x001e => {
@@ -28065,13 +28054,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let (points, center) = parse_wmf_arc_record(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                )?;
+                let (points, center) = parse_wmf_arc_record(data, coordinates)?;
                 match function {
                     0x0817 => {
                         if points
@@ -28122,14 +28105,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some((x, y, text)) = parse_wmf_textout(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                    state.font_charset,
-                ) {
+                if let Some((x, y, text)) = parse_wmf_textout(data, coordinates, state.font_charset)
+                {
                     commands.push(StaticImageVectorCommand::Text {
                         x,
                         y,
@@ -28152,14 +28129,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some(ext_text) = parse_wmf_exttextout(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                    state.font_charset,
-                ) {
+                if let Some(ext_text) = parse_wmf_exttextout(data, coordinates, state.font_charset)
+                {
                     let visible_opaque_bounds = ext_text
                         .opaque_bounds
                         .is_some_and(|bounds| bounds_is_visible(bounds));
@@ -28222,10 +28193,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 } else if let Some((left, top, right, bottom, fill_color)) =
                     parse_wmf_patblt_passive_transfer(
                         data,
-                        mapped_origin_x,
-                        mapped_origin_y,
-                        window_width,
-                        window_height,
+                        coordinates,
                         state.fill_color,
                         emf_commands_are_unpainted_clip_scope(&commands),
                     )
@@ -28249,13 +28217,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     return None;
                 }
                 if is_passive_noop_wmf_setdibits_to_device(data) {
-                } else if let Some(command) = parse_wmf_setdibits_to_device(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                ) {
+                } else if let Some(command) = parse_wmf_setdibits_to_device(data, coordinates) {
                     commands.push(command);
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -28276,28 +28238,19 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 } else if let Some(command) = match function {
                     0x0940 => parse_wmf_dibbitblt_srcopy(
                         data,
-                        mapped_origin_x,
-                        mapped_origin_y,
-                        window_width,
-                        window_height,
+                        coordinates,
                         state.fill_color,
                         blank_destination,
                     ),
                     0x0b41 => parse_wmf_dibstretchblt_srcopy(
                         data,
-                        mapped_origin_x,
-                        mapped_origin_y,
-                        window_width,
-                        window_height,
+                        coordinates,
                         state.fill_color,
                         blank_destination,
                     ),
                     0x0f43 => parse_wmf_stretchdib_srcopy(
                         data,
-                        mapped_origin_x,
-                        mapped_origin_y,
-                        window_width,
-                        window_height,
+                        coordinates,
                         state.fill_color,
                         blank_destination,
                     ),
@@ -28308,10 +28261,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     parse_wmf_blt_passive_transfer(
                         data,
                         destination_offset,
-                        mapped_origin_x,
-                        mapped_origin_y,
-                        window_width,
-                        window_height,
+                        coordinates,
                         state.fill_color,
                         blank_destination,
                     )
@@ -28328,19 +28278,15 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         fill_pattern: ShadingPattern::None,
                         fill_color: Some(fill_color),
                     });
-                } else if let Some(bounds) = parse_wmf_blt_destination_bounds(
-                    data,
-                    destination_offset,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                ) && apply_passive_solid_backdrop_raster_transfer(
-                    &mut commands,
-                    bounds,
-                    read_le_u32(data, 0)?,
-                    state.fill_color,
-                ) {
+                } else if let Some(bounds) =
+                    parse_wmf_blt_destination_bounds(data, destination_offset, coordinates)
+                    && apply_passive_solid_backdrop_raster_transfer(
+                        &mut commands,
+                        bounds,
+                        read_le_u32(data, 0)?,
+                        state.fill_color,
+                    )
+                {
                 } else if is_passive_noop_raster_transfer(data, 0, state.fill_color) {
                 } else if matches!(function, 0x0b23 | 0x0b41 | 0x0f43)
                     && is_passive_noop_wmf_stretch_source_extent(data, destination_offset)
@@ -28353,13 +28299,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some((left, top, right, bottom, color)) = parse_wmf_setpixel_rect(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                ) && bounds_is_visible((left, top, right, bottom))
+                if let Some((left, top, right, bottom, color)) =
+                    parse_wmf_setpixel_rect(data, coordinates)
+                    && bounds_is_visible((left, top, right, bottom))
                 {
                     commands.push(StaticImageVectorCommand::Rectangle {
                         left,
@@ -28775,10 +28717,7 @@ fn scale_wmf_extent(
 
 fn parse_wmf_patblt_passive_transfer(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     selected_fill_color: Option<Color>,
     blank_destination: bool,
 ) -> Option<(f32, f32, f32, f32, Color)> {
@@ -28794,22 +28733,9 @@ fn parse_wmf_patblt_passive_transfer(
     let x = i32::from(read_le_i16(data, 6)?);
     let height = i32::from(read_le_i16(data, 8)?.unsigned_abs().max(1));
     let width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
-    let left_top = normalize_wmf_point(
-        x,
-        y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
-    let right_bottom = normalize_wmf_point(
-        x.saturating_add(width),
-        y.saturating_add(height),
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
+    let left_top = coordinates.normalized_point(x, y);
+    let right_bottom =
+        coordinates.normalized_point(x.saturating_add(width), y.saturating_add(height));
     Some((
         left_top.0.min(right_bottom.0),
         left_top.1.min(right_bottom.1),
@@ -28830,10 +28756,7 @@ fn is_passive_invisible_wmf_patblt(data: &[u8]) -> bool {
 fn parse_wmf_blt_passive_transfer(
     data: &[u8],
     destination_offset: usize,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     selected_fill_color: Option<Color>,
     blank_destination: bool,
 ) -> Option<(f32, f32, f32, f32, Color)> {
@@ -28842,24 +28765,15 @@ fn parse_wmf_blt_passive_transfer(
         selected_fill_color,
         blank_destination,
     )?;
-    let (left, top, right, bottom) = parse_wmf_blt_destination_bounds(
-        data,
-        destination_offset,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    )?;
+    let (left, top, right, bottom) =
+        parse_wmf_blt_destination_bounds(data, destination_offset, coordinates)?;
     Some((left, top, right, bottom, fill_color))
 }
 
 fn parse_wmf_blt_destination_bounds(
     data: &[u8],
     destination_offset: usize,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<(f32, f32, f32, f32)> {
     if data.len() < destination_offset.checked_add(8)? {
         return None;
@@ -28872,22 +28786,9 @@ fn parse_wmf_blt_destination_bounds(
     );
     let y = i32::from(read_le_i16(data, destination_offset + 4)?);
     let x = i32::from(read_le_i16(data, destination_offset + 6)?);
-    let left_top = normalize_wmf_point(
-        x,
-        y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
-    let right_bottom = normalize_wmf_point(
-        x.saturating_add(width),
-        y.saturating_add(height),
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
+    let left_top = coordinates.normalized_point(x, y);
+    let right_bottom =
+        coordinates.normalized_point(x.saturating_add(width), y.saturating_add(height));
     Some((
         left_top.0.min(right_bottom.0),
         left_top.1.min(right_bottom.1),
@@ -28923,10 +28824,7 @@ fn is_passive_noop_wmf_stretch_source_extent(data: &[u8], destination_offset: us
 
 fn parse_wmf_stretchdib_srcopy(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     selected_fill_color: Option<Color>,
     blank_destination: bool,
 ) -> Option<PassiveSourceRasterCommand> {
@@ -28968,20 +28866,14 @@ fn parse_wmf_stretchdib_srcopy(
         destination_y,
         destination_width,
         destination_height,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
+        coordinates,
         transfer_mode,
     )
 }
 
 fn parse_wmf_dibbitblt_srcopy(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     selected_fill_color: Option<Color>,
     blank_destination: bool,
 ) -> Option<PassiveSourceRasterCommand> {
@@ -29013,20 +28905,14 @@ fn parse_wmf_dibbitblt_srcopy(
         destination_y,
         destination_width,
         destination_height,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
+        coordinates,
         transfer_mode,
     )
 }
 
 fn parse_wmf_dibstretchblt_srcopy(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     selected_fill_color: Option<Color>,
     blank_destination: bool,
 ) -> Option<PassiveSourceRasterCommand> {
@@ -29063,10 +28949,7 @@ fn parse_wmf_dibstretchblt_srcopy(
         destination_y,
         destination_width,
         destination_height,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
+        coordinates,
         transfer_mode,
     )
 }
@@ -29082,10 +28965,7 @@ fn wmf_source_dib_transfer_command(
     destination_y: i32,
     destination_width: i32,
     destination_height: i32,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     transfer_mode: PassiveSourceRasterTransferMode,
 ) -> Option<PassiveSourceRasterCommand> {
     let bounds = wmf_source_transfer_bounds(
@@ -29093,10 +28973,7 @@ fn wmf_source_dib_transfer_command(
         destination_y,
         destination_width,
         destination_height,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
+        coordinates,
     )?;
     if let PassiveSourceRasterTransferMode::SourceIgnoring {
         raster_op,
@@ -29145,26 +29022,12 @@ fn wmf_source_transfer_bounds(
     destination_y: i32,
     destination_width: i32,
     destination_height: i32,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<(f32, f32, f32, f32)> {
-    let left_top = normalize_wmf_point(
-        destination_x,
-        destination_y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
-    let right_bottom = normalize_wmf_point(
+    let left_top = coordinates.normalized_point(destination_x, destination_y);
+    let right_bottom = coordinates.normalized_point(
         destination_x.saturating_add(destination_width),
         destination_y.saturating_add(destination_height),
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
     );
     let left = left_top.0.min(right_bottom.0);
     let top = left_top.1.min(right_bottom.1);
@@ -29175,10 +29038,7 @@ fn wmf_source_transfer_bounds(
 
 fn parse_wmf_setdibits_to_device(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<StaticImageVectorCommand> {
     const DIB_RGB_COLORS: u16 = 0;
     const DIB_HEADER_OFFSET: usize = 18;
@@ -29217,10 +29077,7 @@ fn parse_wmf_setdibits_to_device(
         destination_y,
         source_width,
         i32::from(scan_count.max(1)),
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
+        coordinates,
         image,
     )
 }
@@ -29242,27 +29099,13 @@ fn wmf_raster_image_command(
     destination_y: i32,
     destination_width: i32,
     destination_height: i32,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     image: ParsedVectorRasterImage,
 ) -> Option<StaticImageVectorCommand> {
-    let left_top = normalize_wmf_point(
-        destination_x,
-        destination_y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
-    let right_bottom = normalize_wmf_point(
+    let left_top = coordinates.normalized_point(destination_x, destination_y);
+    let right_bottom = coordinates.normalized_point(
         destination_x.saturating_add(destination_width),
         destination_y.saturating_add(destination_height),
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
     );
     let left = left_top.0.min(right_bottom.0);
     let top = left_top.1.min(right_bottom.1);
@@ -30147,10 +29990,7 @@ fn white_color() -> Color {
 
 fn parse_wmf_setpixel_rect(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<(f32, f32, f32, f32, Color)> {
     if data.len() < 8 {
         return None;
@@ -30158,16 +29998,9 @@ fn parse_wmf_setpixel_rect(
     let color = color_from_colorref(data, 0)?;
     let y = i32::from(read_le_i16(data, 4)?);
     let x = i32::from(read_le_i16(data, 6)?);
-    let (x, y) = normalize_wmf_point(
-        x,
-        y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
-    let max_x = window_width.max(1) as f32;
-    let max_y = window_height.max(1) as f32;
+    let (x, y) = coordinates.normalized_point(x, y);
+    let max_x = coordinates.image_width.max(1) as f32;
+    let max_y = coordinates.image_height.max(1) as f32;
     Some((
         pixel_rect_start(x, max_x),
         pixel_rect_start(y, max_y),
@@ -30179,10 +30012,7 @@ fn parse_wmf_setpixel_rect(
 
 fn parse_wmf_arc_record(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<(Vec<(f32, f32)>, (f32, f32))> {
     if data.len() < 16 {
         return None;
@@ -30206,22 +30036,11 @@ fn parse_wmf_arc_record(
     )?;
     let mut points = Vec::with_capacity(raw_points.len());
     for (x, y) in raw_points {
-        points.push(normalize_wmf_point(
-            x,
-            y,
-            window_origin_x,
-            window_origin_y,
-            window_width,
-            window_height,
-        ));
+        points.push(coordinates.normalized_point(x, y));
     }
-    let center = normalize_wmf_point(
+    let center = coordinates.normalized_point(
         left.saturating_add(right) / 2,
         top.saturating_add(bottom) / 2,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
     );
     Some((points, center))
 }
@@ -30238,10 +30057,7 @@ fn wmf_escape_is_non_visual_comment(data: &[u8]) -> bool {
 
 fn parse_wmf_textout(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     font_charset: Option<i32>,
 ) -> Option<(f32, f32, String)> {
     let byte_count = usize::from(read_le_u16(data, 0)?);
@@ -30257,23 +30073,13 @@ fn parse_wmf_textout(
     let text = sanitize_wmf_text_bytes(data.get(text_start..text_end)?, font_charset)?;
     let y = i32::from(read_le_i16(data, coordinate_offset)?);
     let x = i32::from(read_le_i16(data, coordinate_offset + 2)?);
-    let (x, y) = normalize_wmf_point(
-        x,
-        y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
+    let (x, y) = coordinates.normalized_point(x, y);
     Some((x, y, text))
 }
 
 fn parse_wmf_exttextout(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
     font_charset: Option<i32>,
 ) -> Option<ParsedWmfExtTextOut> {
     if data.len() < 8 {
@@ -30290,22 +30096,7 @@ fn parse_wmf_exttextout(
         return None;
     }
     let bounds = if flags & (WMF_ETO_OPAQUE | WMF_ETO_CLIPPED) != 0 {
-        Some(parse_wmf_bounds_at(
-            data,
-            8,
-            WmfCoordinateMap {
-                window_origin_x,
-                window_origin_y,
-                viewport_origin_x: 0,
-                viewport_origin_y: 0,
-                viewport_width: window_width,
-                viewport_height: window_height,
-                window_width,
-                window_height,
-                image_width: window_width,
-                image_height: window_height,
-            },
-        )?)
+        Some(parse_wmf_bounds_at(data, 8, coordinates)?)
     } else {
         None
     };
@@ -30323,14 +30114,7 @@ fn parse_wmf_exttextout(
     } else {
         sanitize_wmf_text_bytes_allow_empty(data.get(text_start..text_end)?, font_charset)?
     };
-    let (x, y) = normalize_wmf_point(
-        x,
-        y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    );
+    let (x, y) = coordinates.normalized_point(x, y);
     Some(ParsedWmfExtTextOut {
         x,
         y,
@@ -30436,22 +30220,6 @@ fn parse_wmf_xy_point(
     let x = i32::from(read_le_i16(data, offset)?);
     let y = i32::from(read_le_i16(data, offset.checked_add(2)?)?);
     Some(coordinates.normalized_point(x, y))
-}
-
-fn normalize_wmf_point(
-    x: i32,
-    y: i32,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
-) -> (f32, f32) {
-    let max_x = window_width.max(1);
-    let max_y = window_height.max(1);
-    (
-        x.saturating_sub(window_origin_x).clamp(0, max_x) as f32,
-        y.saturating_sub(window_origin_y).clamp(0, max_y) as f32,
-    )
 }
 
 fn parse_wmf_point_list(data: &[u8], coordinates: WmfCoordinateMap) -> Option<Vec<(f32, f32)>> {

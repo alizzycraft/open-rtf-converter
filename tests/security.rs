@@ -29403,6 +29403,117 @@ fn nonidentity_wmf_scaleviewportext_scales_passive_coordinates_without_payload_l
 }
 
 #[test]
+fn wmf_viewportext_scales_text_and_raster_coordinates_without_payload_leakage() {
+    let mut viewport = wmf_yx_record(0x020e, 40, 160);
+    viewport.extend_from_slice(b"WMF-VIEWPORTEXT-TEXT-RASTER /JavaScript /EmbeddedFile /Launch");
+    viewport.resize(viewport.len().next_multiple_of(2), 0);
+    let viewport_len = (viewport.len() / 2) as u32;
+    write_test_le_u32(&mut viewport, 0, viewport_len);
+    let mut raster = wmf_patblt_record(20, 10, 60, 40, 0x0000_0042);
+    raster.extend_from_slice(b"WMF-VIEWPORTEXT-RASTER-PAYLOAD /JavaScript");
+    raster.resize(raster.len().next_multiple_of(2), 0);
+    let raster_len = (raster.len() / 2) as u32;
+    write_test_le_u32(&mut raster, 0, raster_len);
+    let records = [
+        viewport,
+        wmf_exttextout_record(40, 20, "Scaled", 0, None),
+        raster,
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF scaled text/raster viewport image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                x: 40.0,
+                y: 10.0,
+                text,
+                ..
+            } if text == "Scaled"
+        )
+    }));
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Rectangle {
+                left: 20.0,
+                top: 5.0,
+                right: 80.0,
+                bottom: 25.0,
+                fill_color: Some(color),
+                ..
+            } if color.red == 0 && color.green == 0 && color.blue == 0
+        )
+    }));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-VIEWPORTEXT-TEXT-RASTER",
+        "WMF-VIEWPORTEXT-RASTER-PAYLOAD",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF viewport text/raster payload leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.is_empty());
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-VIEWPORTEXT-TEXT-RASTER",
+        b"WMF-VIEWPORTEXT-RASTER-PAYLOAD",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF viewport text/raster payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn zero_denom_wmf_scaleviewportext_becomes_passive_placeholder() {
     let records = [wmf_scale_record(0x0412, 1, 1, 0, 1)];
     let input = format!(
