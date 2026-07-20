@@ -33709,6 +33709,138 @@ fn wmf_text_character_extra_renders_passive_spacing_without_record_leakage() {
 }
 
 #[test]
+fn wmf_settextjustification_renders_passive_word_spacing_without_record_leakage() {
+    let mut justification = wmf_i16_pair_record(0x020a, 2, 40);
+    justification.extend_from_slice(b"WMF-SETTEXTJUSTIFICATION /JavaScript /EmbeddedFile /Launch");
+    justification.resize(justification.len().next_multiple_of(2), 0);
+    let justification_len = (justification.len() / 2) as u32;
+    write_test_le_u32(&mut justification, 0, justification_len);
+    let records = [
+        justification,
+        wmf_exttextout_record(40, 20, "A B C", 0, None),
+    ];
+    let wmf = minimal_wmf_with_records(200, 100, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF SETTEXTJUSTIFICATION vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("A B C"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    assert!(image.vector_commands.iter().any(|command| {
+        matches!(
+            command,
+            StaticImageVectorCommand::Text {
+                text,
+                word_extra,
+                character_extra: 0.0,
+                ..
+            } if text == "A B C" && (*word_extra - 20.0).abs() < 0.01
+        )
+    }));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-SETTEXTJUSTIFICATION",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SETTEXTJUSTIFICATION internals leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        decoded_pdf_text(&content).contains("A B C"),
+        "WMF SETTEXTJUSTIFICATION should still render passive PDF text"
+    );
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "Tw"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(pdf_operand_number)
+                    .is_some_and(|value| value > 1.0)
+        }),
+        "WMF SETTEXTJUSTIFICATION should emit nonzero passive PDF word spacing"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-SETTEXTJUSTIFICATION",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SETTEXTJUSTIFICATION leaked forbidden PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_wmf_settextjustification_becomes_passive_placeholder() {
+    let records = [wmf_function_record(0x020a)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SETTEXTJUSTIFICATION placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_textout_opaque_background_mode_renders_passive_fill_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000033100000001000c0000000000",
@@ -64390,6 +64522,15 @@ fn wmf_u16_record(function: u16, value: u16) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, 4);
     write_test_le_u16(&mut record, 4, function);
     write_test_le_u16(&mut record, 6, value);
+    record
+}
+
+fn wmf_i16_pair_record(function: u16, first: i16, second: i16) -> Vec<u8> {
+    let mut record = vec![0; 10];
+    write_test_le_u32(&mut record, 0, 5);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_i16(&mut record, 6, first);
+    write_test_le_i16(&mut record, 8, second);
     record
 }
 
