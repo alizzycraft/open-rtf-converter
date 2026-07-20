@@ -21106,7 +21106,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     if matches!(object, EmfObject::Other) {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     } else {
-                        apply_emf_object(&mut state, object, &header);
+                        apply_emf_object(&mut state, object, &header, &coordinates);
                     }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -24840,7 +24840,12 @@ fn store_emf_object(
     Some(())
 }
 
-fn apply_emf_object(state: &mut EmfDrawingState, object: EmfObject, header: &ParsedEmfHeader) {
+fn apply_emf_object(
+    state: &mut EmfDrawingState,
+    object: EmfObject,
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) {
     match object {
         EmfObject::Pen {
             color,
@@ -24848,8 +24853,7 @@ fn apply_emf_object(state: &mut EmfDrawingState, object: EmfObject, header: &Par
             style,
         } => {
             state.stroke_color = color;
-            state.stroke_width =
-                width.clamp(1, i32::try_from(header.width_px.max(1)).unwrap_or(i32::MAX)) as f32;
+            state.stroke_width = normalized_emf_stroke_width(width, header, coordinates);
             state.stroke_style = style;
         }
         EmfObject::Brush { color, pattern } => {
@@ -24858,6 +24862,29 @@ fn apply_emf_object(state: &mut EmfDrawingState, object: EmfObject, header: &Par
         }
         EmfObject::Other => {}
     }
+}
+
+fn normalized_emf_stroke_width(
+    width: i32,
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> f32 {
+    let width = width.max(1);
+    let x = map_emf_length_axis(
+        width,
+        coordinates.window_extent_x,
+        coordinates.viewport_extent_x,
+        header.width_px,
+    ) * coordinates.world_transform.scale_x.abs();
+    let y = map_emf_length_axis(
+        width,
+        coordinates.window_extent_y,
+        coordinates.viewport_extent_y,
+        header.height_px,
+    ) * coordinates.world_transform.scale_y.abs();
+    x.abs()
+        .max(y.abs())
+        .clamp(1.0, header.width_px.max(header.height_px) as f32)
 }
 
 fn restore_emf_saved_state(
