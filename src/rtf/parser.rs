@@ -21483,7 +21483,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     return None;
                 }
                 let text = if record_type == EMR_EXTTEXTOUTA {
-                    parse_emf_exttextouta(data, &header, &coordinates)
+                    parse_emf_exttextouta(data, &header, &coordinates, state.font_charset)
                 } else {
                     parse_emf_exttextoutw(data, &header, &coordinates)
                 };
@@ -21495,9 +21495,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_POLYTEXTOUTA | EMR_POLYTEXTOUTW => {
                 let texts = if record_type == EMR_POLYTEXTOUTA {
-                    parse_emf_polytextout(data, &header, &coordinates, false)
+                    parse_emf_polytextout(data, &header, &coordinates, false, state.font_charset)
                 } else {
-                    parse_emf_polytextout(data, &header, &coordinates, true)
+                    parse_emf_polytextout(data, &header, &coordinates, true, None)
                 };
                 if let Some(texts) = texts {
                     for text in texts {
@@ -23107,15 +23107,16 @@ fn parse_emf_exttextoutw(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
 ) -> Option<ParsedEmfExtTextOut> {
-    parse_emf_exttextout(data, header, coordinates, true)
+    parse_emf_exttextout(data, header, coordinates, true, None)
 }
 
 fn parse_emf_exttextouta(
     data: &[u8],
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
+    font_charset: Option<i32>,
 ) -> Option<ParsedEmfExtTextOut> {
-    parse_emf_exttextout(data, header, coordinates, false)
+    parse_emf_exttextout(data, header, coordinates, false, font_charset)
 }
 
 fn parse_emf_exttextout(
@@ -23123,6 +23124,7 @@ fn parse_emf_exttextout(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
     unicode: bool,
+    font_charset: Option<i32>,
 ) -> Option<ParsedEmfExtTextOut> {
     const EMF_ETO_OPAQUE: u32 = 0x0002;
     const EMF_ETO_CLIPPED: u32 = 0x0004;
@@ -23190,7 +23192,7 @@ fn parse_emf_exttextout(
     let text = if unicode {
         sanitize_emf_utf16le_text_allow_empty(data.get(string_offset..string_end)?)?
     } else {
-        sanitize_emf_ansi_text_allow_empty(data.get(string_offset..string_end)?)?
+        sanitize_emf_ansi_text_allow_empty(data.get(string_offset..string_end)?, font_charset)?
     };
     let (x, y) = normalized_emf_point(x, y, header, coordinates);
     Some(ParsedEmfExtTextOut {
@@ -23215,6 +23217,7 @@ fn parse_emf_polytextout(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
     unicode: bool,
+    font_charset: Option<i32>,
 ) -> Option<Vec<ParsedEmfExtTextOut>> {
     if data.len() < 32 {
         return None;
@@ -23244,7 +23247,8 @@ fn parse_emf_polytextout(
         if total_text_bytes > MAX_PASSIVE_WMF_TEXT_BYTES {
             return None;
         }
-        let mut text_items = parse_emf_text_objects(data, offset, header, coordinates, unicode)?;
+        let mut text_items =
+            parse_emf_text_objects(data, offset, header, coordinates, unicode, font_charset)?;
         texts.append(&mut text_items);
     }
     Some(texts)
@@ -23256,6 +23260,7 @@ fn parse_emf_text_objects(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
     unicode: bool,
+    font_charset: Option<i32>,
 ) -> Option<Vec<ParsedEmfExtTextOut>> {
     const EMF_ETO_OPAQUE: u32 = 0x0002;
     const EMF_ETO_CLIPPED: u32 = 0x0004;
@@ -23323,7 +23328,7 @@ fn parse_emf_text_objects(
     let text = if unicode {
         sanitize_emf_utf16le_text_allow_empty(data.get(string_offset..string_end)?)?
     } else {
-        sanitize_emf_ansi_text_allow_empty(data.get(string_offset..string_end)?)?
+        sanitize_emf_ansi_text_allow_empty(data.get(string_offset..string_end)?, font_charset)?
     };
     let (x, y) = normalized_emf_point(x, y, header, coordinates);
     let text = ParsedEmfExtTextOut {
@@ -23479,17 +23484,20 @@ fn sanitize_emf_utf16le_text_allow_empty(bytes: &[u8]) -> Option<String> {
     Some(text)
 }
 
-fn sanitize_emf_ansi_text_allow_empty(bytes: &[u8]) -> Option<String> {
+fn sanitize_emf_ansi_text_allow_empty(bytes: &[u8], font_charset: Option<i32>) -> Option<String> {
     if bytes.is_empty() || bytes.len() > MAX_PASSIVE_WMF_TEXT_BYTES {
         return None;
     }
+    let code_page = font_charset
+        .and_then(CodePage::from_font_charset)
+        .unwrap_or(CodePage::Windows1252);
     let mut text = String::new();
-    for byte in bytes {
-        match decode_windows_1252(*byte) {
+    for ch in decode_raw_bytes(bytes, code_page).chars() {
+        match ch {
             '\0' => {}
             '\t' | '\n' | '\r' => text.push(' '),
-            ch if ch.is_control() => {}
-            ch => text.push(ch),
+            decoded if decoded.is_control() => {}
+            decoded => text.push(decoded),
         }
     }
     Some(text)

@@ -42129,6 +42129,124 @@ fn rotated_emf_extcreatefontindirectw_stays_partial_without_payload_leakage() {
 }
 
 #[test]
+fn emf_selected_font_charset_decodes_ansi_text_passively_without_payload_leakage() {
+    let mut font = emf_extcreatefontindirectw_record(7, -16, 0, 0, 238);
+    font.extend_from_slice(b"EMF-ANSI-CHARSET-FONT /JavaScript /EmbeddedFile /Launch");
+    font.resize(font.len().next_multiple_of(4), 0);
+    let font_len = font.len() as u32;
+    write_test_le_u32(&mut font, 4, font_len);
+    let records = [
+        font,
+        emf_select_object_record(7),
+        emf_exttextouta_record(30, 20, b"\x8c", 0, None, false),
+        emf_polytextouta_record(&[(50, 20, b"\x8c".as_slice(), 0, None)]),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF ANSI charset text vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains('\u{015a}'));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Text {
+            x: 30.0,
+            ref text,
+            ..
+        } if text == "\u{015a}"
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Text {
+            x: 50.0,
+            ref text,
+            ..
+        } if text == "\u{015a}"
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-ANSI-CHARSET-FONT",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF ANSI charset payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("Latin Extended characters in passive WMF vector text")),
+        "visible EMF Latin Extended vector text should produce a passive glyph diagnostic: {:?}",
+        output.diagnostics
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|font| font.as_slice() == b"F1"),
+        "EMF ANSI charset text should use a passive built-in font resource"
+    );
+    assert!(
+        pdf_text_bytes_for_font(&content, b"F1").contains(&0xda),
+        "EMF ANSI charset text should encode Central European text as passive WinAnsi bytes"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-ANSI-CHARSET-FONT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF ANSI charset payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn invalid_emf_settextalign_stays_partial_without_payload_leakage() {
     let mut mode = emf_u32_record(22, 0x0000_0004);
     mode.extend_from_slice(b"EMF-SETTEXTALIGN-INVALID /JavaScript /EmbeddedFile /Launch");
@@ -70358,6 +70476,16 @@ fn emf_polytextoutw_record(
         })
         .collect();
     emf_polytextout_record(97, &encoded)
+}
+
+fn emf_polytextouta_record(
+    items: &[(i32, i32, &[u8], u32, Option<(i32, i32, i32, i32)>)],
+) -> Vec<u8> {
+    let encoded: Vec<(i32, i32, Vec<u8>, usize, u32, Option<(i32, i32, i32, i32)>)> = items
+        .iter()
+        .map(|(x, y, text, options, bounds)| (*x, *y, text.to_vec(), text.len(), *options, *bounds))
+        .collect();
+    emf_polytextout_record(96, &encoded)
 }
 
 fn emf_polytextoutw_dx_record(x: i32, y: i32, text: &str, dx: &[i32]) -> Vec<u8> {
