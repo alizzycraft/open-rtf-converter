@@ -23163,7 +23163,9 @@ fn parse_emf_exttextout(
     const EMF_ETO_CLIPPED: u32 = 0x0004;
     const EMF_ETO_GLYPH_INDEX: u32 = 0x0010;
     const EMF_ETO_NO_RECT: u32 = 0x0100;
-    const EMF_ETO_SUPPORTED_MASK: u32 = EMF_ETO_OPAQUE | EMF_ETO_CLIPPED | EMF_ETO_NO_RECT;
+    const EMF_ETO_PDY: u32 = 0x2000;
+    const EMF_ETO_SUPPORTED_MASK: u32 =
+        EMF_ETO_OPAQUE | EMF_ETO_CLIPPED | EMF_ETO_NO_RECT | EMF_ETO_PDY;
 
     if data.len() < 68 {
         return None;
@@ -23257,6 +23259,7 @@ fn parse_emf_exttextout(
         record_dx_offset,
         char_count,
         text,
+        options & EMF_ETO_PDY != 0,
         header,
         coordinates,
     )
@@ -23316,7 +23319,9 @@ fn parse_emf_text_objects(
     const EMF_ETO_CLIPPED: u32 = 0x0004;
     const EMF_ETO_GLYPH_INDEX: u32 = 0x0010;
     const EMF_ETO_NO_RECT: u32 = 0x0100;
-    const EMF_ETO_SUPPORTED_MASK: u32 = EMF_ETO_OPAQUE | EMF_ETO_CLIPPED | EMF_ETO_NO_RECT;
+    const EMF_ETO_PDY: u32 = 0x2000;
+    const EMF_ETO_SUPPORTED_MASK: u32 =
+        EMF_ETO_OPAQUE | EMF_ETO_CLIPPED | EMF_ETO_NO_RECT | EMF_ETO_PDY;
 
     if data.len() < offset.checked_add(40)? {
         return None;
@@ -23410,6 +23415,7 @@ fn parse_emf_text_objects(
         record_dx_offset,
         char_count,
         text,
+        options & EMF_ETO_PDY != 0,
         header,
         coordinates,
     )
@@ -23420,6 +23426,7 @@ fn split_emf_text_object_by_dx(
     record_dx_offset: usize,
     char_count: usize,
     text: ParsedEmfExtTextOut,
+    has_pdy: bool,
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
 ) -> Option<Vec<ParsedEmfExtTextOut>> {
@@ -23431,26 +23438,43 @@ fn split_emf_text_object_by_dx(
         return None;
     }
     let dx_offset = record_dx_offset.checked_sub(8)?;
-    let dx_bytes = char_count.checked_mul(4)?;
+    let spacing_values_per_char = if has_pdy { 2usize } else { 1usize };
+    let spacing_stride = spacing_values_per_char.checked_mul(4)?;
+    let dx_bytes = char_count.checked_mul(spacing_stride)?;
     let dx_end = dx_offset.checked_add(dx_bytes)?;
     if dx_offset < 32 || dx_end > data.len() {
         return None;
     }
     let mut x = text.x;
+    let mut y = text.y;
     let mut items = Vec::with_capacity(char_count);
     for (index, ch) in chars.into_iter().enumerate() {
         let mut item = text.clone();
         item.x = x;
+        item.y = y;
         item.text.clear();
         item.text.push(ch);
+        if index != 0 {
+            item.opaque_bounds = None;
+        }
         items.push(item);
-        let dx = read_le_i32(data, dx_offset.checked_add(index.checked_mul(4)?)?)?;
+        let spacing_offset = dx_offset.checked_add(index.checked_mul(spacing_stride)?)?;
+        let dx = read_le_i32(data, spacing_offset)?;
         x += map_emf_length_axis(
             dx,
             coordinates.window_extent_x,
             coordinates.viewport_extent_x,
             header.width_px,
         );
+        if has_pdy {
+            let dy = read_le_i32(data, spacing_offset.checked_add(4)?)?;
+            y += map_emf_length_axis(
+                dy,
+                coordinates.window_extent_y,
+                coordinates.viewport_extent_y,
+                header.height_px,
+            );
+        }
     }
     Some(items)
 }
