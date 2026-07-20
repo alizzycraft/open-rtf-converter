@@ -20542,6 +20542,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYPOLYGON16: u32 = 91;
     const EMR_POLYDRAW16: u32 = 92;
     const EMR_EXTCREATEPEN: u32 = 95;
+    const EMR_SETICMMODE: u32 = 98;
     const EMR_ALPHABLEND: u32 = 114;
     const EMR_SETLAYOUT: u32 = 115;
     const EMR_TRANSPARENTBLT: u32 = 116;
@@ -21344,6 +21345,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         push_emf_text_command(&mut commands, text, &state, &header)?;
                     }
                 } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
+            EMR_SETICMMODE => {
+                if read_le_u32(data, 0)? != 1 {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
