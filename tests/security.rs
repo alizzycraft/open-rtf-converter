@@ -27945,6 +27945,173 @@ fn wmf_unknown_record_reports_partial_preview_without_payload_leakage() {
 }
 
 #[test]
+fn wmf_mm_text_setmapmode_is_passive_state_without_payload_leakage() {
+    let mut mode = wmf_u16_record(0x0103, 1);
+    mode.extend_from_slice(b"WMF-SETMAPMODE-MM-TEXT /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(2), 0);
+    let mode_len = (mode.len() / 2) as u32;
+    write_test_le_u32(&mut mode, 0, mode_len);
+    let records = [mode, wmf_bounds_record(0x041b, 20, 10, 80, 50)];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF MM_TEXT map mode vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-SETMAPMODE-MM-TEXT",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SETMAPMODE payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after WMF SETMAPMODE MM_TEXT should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-SETMAPMODE-MM-TEXT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SETMAPMODE payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn non_text_wmf_setmapmode_stays_partial_without_payload_leakage() {
+    let mut mode = wmf_u16_record(0x0103, 8);
+    mode.extend_from_slice(b"WMF-SETMAPMODE-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(2), 0);
+    let mode_len = (mode.len() / 2) as u32;
+    write_test_le_u32(&mut mode, 0, mode_len);
+    let records = [mode, wmf_bounds_record(0x041b, 20, 10, 80, 50)];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-SETMAPMODE-UNSUPPORTED",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsupported WMF SETMAPMODE payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_wmf_setmapmode_becomes_passive_placeholder() {
+    let records = [wmf_function_record(0x0103)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SETMAPMODE placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_mfcomment_escape_is_ignored_as_non_visual_metadata_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000033e0000000100140000000000",
@@ -63874,6 +64041,21 @@ fn wmf_set_window_ext_record(width: i16, height: i16) -> Vec<u8> {
     write_test_le_u16(&mut record, 4, 0x020c);
     write_test_le_i16(&mut record, 6, height);
     write_test_le_i16(&mut record, 8, width);
+    record
+}
+
+fn wmf_function_record(function: u16) -> Vec<u8> {
+    let mut record = vec![0; 6];
+    write_test_le_u32(&mut record, 0, 3);
+    write_test_le_u16(&mut record, 4, function);
+    record
+}
+
+fn wmf_u16_record(function: u16, value: u16) -> Vec<u8> {
+    let mut record = vec![0; 8];
+    write_test_le_u32(&mut record, 0, 4);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_u16(&mut record, 6, value);
     record
 }
 
