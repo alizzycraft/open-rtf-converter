@@ -40151,6 +40151,7 @@ fn emf_offsetcliprgn_offsets_saved_painted_clip_without_payload_leakage() {
 fn emf_offsetcliprgn_offsets_unscoped_painted_clip_without_payload_leakage() {
     let records = [
         emf_rect_record(30, 20, 20, 100, 60),
+        emf_f32_record(58, 2.0),
         emf_rect_record(43, 0, 0, 30, 30),
         emf_point_record(26, 10, 5),
         emf_rect_record(43, 0, 0, 160, 80),
@@ -40189,6 +40190,13 @@ fn emf_offsetcliprgn_offsets_unscoped_painted_clip_without_payload_leakage() {
             .filter(|command| matches!(command, StaticImageVectorCommand::RestoreState))
             .count(),
         1
+    );
+    assert!(
+        image.vector_commands.iter().any(|command| matches!(
+            command,
+            StaticImageVectorCommand::SetMiterLimit { limit: 2.0 }
+        )),
+        "unscoped EMF OffsetClipRgn should retain passive graphics state before paint"
     );
     assert!(
         image.vector_commands.iter().any(|command| matches!(
@@ -40239,6 +40247,13 @@ fn emf_offsetcliprgn_offsets_unscoped_painted_clip_without_payload_leakage() {
             .iter()
             .any(|operation| operation.operator == "Q"),
         "EMF unscoped OffsetClipRgn should emit passive restore-state operators"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "M"),
+        "EMF unscoped OffsetClipRgn should retain passive graphics-state operators"
     );
     assert!(
         content

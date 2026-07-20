@@ -23683,6 +23683,10 @@ fn vector_commands_are_only_clip_updates(commands: &[StaticImageVectorCommand]) 
         })
 }
 
+fn vector_command_is_passive_graphics_state(command: &StaticImageVectorCommand) -> bool {
+    matches!(command, StaticImageVectorCommand::SetMiterLimit { .. })
+}
+
 fn vector_commands_have_replaceable_clip_after_paint(
     commands: &[StaticImageVectorCommand],
 ) -> bool {
@@ -23746,6 +23750,7 @@ fn initial_vector_clip_commands_then_paint_only(
             StaticImageVectorCommand::SaveState | StaticImageVectorCommand::RestoreState => {
                 return None;
             }
+            command if vector_command_is_passive_graphics_state(command) => {}
             _ => {
                 if !saw_clip {
                     return None;
@@ -23789,6 +23794,7 @@ fn initial_vector_clip_commands_then_paint_then_clip_updates(
             StaticImageVectorCommand::SaveState | StaticImageVectorCommand::RestoreState => {
                 return None;
             }
+            command if vector_command_is_passive_graphics_state(command) => {}
             _ if saw_trailing_clip => return None,
             _ => {
                 if !saw_initial_clip {
