@@ -27508,6 +27508,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             0x0234 => {
                 read_le_u16(data, 0)?;
             }
+            0x00f7 => store_wmf_object(&mut objects, parse_wmf_palette_object(data)?)?,
             0x02fa => store_wmf_object(
                 &mut objects,
                 parse_wmf_pen_object(data).unwrap_or(WmfObject::Other),
@@ -28524,6 +28525,15 @@ fn parse_wmf_font_object(data: &[u8]) -> Option<WmfObject> {
     let height = i32::from(read_le_i16(data, 0)?);
     let charset = data.get(13).copied().map(i32::from);
     Some(WmfObject::Font { height, charset })
+}
+
+fn parse_wmf_palette_object(data: &[u8]) -> Option<WmfObject> {
+    read_le_u16(data, 0)?;
+    let entry_count = usize::from(read_le_u16(data, 2)?);
+    let entries_len = entry_count.checked_mul(4)?;
+    let entries_end = 4usize.checked_add(entries_len)?;
+    data.get(..entries_end)?;
+    Some(WmfObject::Other)
 }
 
 fn wmf_text_horizontal_align(mode: u16) -> StaticImageTextHorizontalAlign {

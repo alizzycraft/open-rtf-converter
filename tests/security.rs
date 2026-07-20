@@ -29246,6 +29246,131 @@ fn malformed_wmf_selectpalette_becomes_passive_placeholder() {
 }
 
 #[test]
+fn wmf_createpalette_is_inert_object_without_payload_leakage() {
+    let mut palette = wmf_create_palette_record(&[(255, 0, 0), (0, 255, 0)]);
+    palette.extend_from_slice(b"WMF-CREATEPALETTE /JavaScript /EmbeddedFile /OpenAction");
+    palette.resize(palette.len().next_multiple_of(2), 0);
+    let palette_len = (palette.len() / 2) as u32;
+    write_test_le_u32(&mut palette, 0, palette_len);
+
+    let records = [
+        palette,
+        wmf_u16_record(0x0234, 0),
+        wmf_bounds_record(0x041b, 20, 10, 80, 50),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF CREATEPALETTE vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-CREATEPALETTE",
+        "JavaScript",
+        "EmbeddedFile",
+        "OpenAction",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF CREATEPALETTE payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after inert WMF CREATEPALETTE should render a passive PDF rectangle"
+    );
+    assert!(output.diagnostics.is_empty());
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-CREATEPALETTE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/OpenAction",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF CREATEPALETTE payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_wmf_createpalette_becomes_passive_placeholder() {
+    let mut palette = wmf_create_palette_record(&[]);
+    write_test_le_u16(&mut palette, 8, 2);
+    let records = [palette];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF CREATEPALETTE placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_setrelabs_is_ignored_without_payload_leakage() {
     let mut mode = wmf_function_record(0x0105);
     mode.extend_from_slice(b"WMF-SETRELABS /JavaScript /EmbeddedFile /Launch");
@@ -65552,6 +65677,23 @@ fn wmf_scale_record(function: u16, y_denom: i16, y_num: i16, x_denom: i16, x_num
     write_test_le_i16(&mut record, 8, y_num);
     write_test_le_i16(&mut record, 10, x_denom);
     write_test_le_i16(&mut record, 12, x_num);
+    record
+}
+
+fn wmf_create_palette_record(entries: &[(u8, u8, u8)]) -> Vec<u8> {
+    let mut record = vec![0; 10 + entries.len() * 4];
+    let record_size_words = (record.len() / 2) as u32;
+    write_test_le_u32(&mut record, 0, record_size_words);
+    write_test_le_u16(&mut record, 4, 0x00f7);
+    write_test_le_u16(&mut record, 6, 0x0300);
+    write_test_le_u16(&mut record, 8, entries.len() as u16);
+    for (index, &(red, green, blue)) in entries.iter().enumerate() {
+        let offset = 10 + index * 4;
+        record[offset] = red;
+        record[offset + 1] = green;
+        record[offset + 2] = blue;
+        record[offset + 3] = 0;
+    }
     record
 }
 
