@@ -20483,6 +20483,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETROP2: u32 = 20;
     const EMR_SETSTRETCHBLTMODE: u32 = 21;
     const EMR_SETTEXTALIGN: u32 = 22;
+    const EMR_SETCOLORADJUSTMENT: u32 = 23;
     const EMR_SETTEXTCOLOR: u32 = 24;
     const EMR_SETBKCOLOR: u32 = 25;
     const EMR_OFFSETCLIPRGN: u32 = 26;
@@ -20915,6 +20916,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 let mode = (read_le_u32(data, 0)? & 0xffff) as u16;
                 state.text_horizontal_align = wmf_text_horizontal_align(mode);
                 state.text_vertical_align = wmf_text_vertical_align(mode);
+            }
+            EMR_SETCOLORADJUSTMENT => {
+                if !is_neutral_emf_color_adjustment(data)? {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_SETTEXTCOLOR => {
                 if let Some(color) = color_from_colorref(data, 0) {
@@ -23381,6 +23387,23 @@ fn is_identity_emf_xform(data: &[u8], offset: usize) -> Option<bool> {
             && read_le_f32(data, offset.checked_add(12)?)? == 1.0
             && read_le_f32(data, offset.checked_add(16)?)? == 0.0
             && read_le_f32(data, offset.checked_add(20)?)? == 0.0,
+    )
+}
+
+fn is_neutral_emf_color_adjustment(data: &[u8]) -> Option<bool> {
+    Some(
+        read_le_u16(data, 0)? == 24
+            && read_le_u16(data, 2)? == 0
+            && read_le_u16(data, 4)? == 0
+            && read_le_u16(data, 6)? == 10_000
+            && read_le_u16(data, 8)? == 10_000
+            && read_le_u16(data, 10)? == 10_000
+            && read_le_u16(data, 12)? == 0
+            && read_le_u16(data, 14)? == 10_000
+            && read_le_i16(data, 16)? == 0
+            && read_le_i16(data, 18)? == 0
+            && read_le_i16(data, 20)? == 0
+            && read_le_i16(data, 22)? == 0,
     )
 }
 

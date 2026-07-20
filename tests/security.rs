@@ -40365,6 +40365,168 @@ fn malformed_emf_seticmmode_becomes_passive_placeholder() {
 }
 
 #[test]
+fn emf_neutral_setcoloradjustment_is_passive_state_without_payload_leakage() {
+    let mut mode = emf_color_adjustment_record(0, 10_000, 0, 0);
+    mode.extend_from_slice(b"EMF-SETCOLORADJUSTMENT-NEUTRAL /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(4), 0);
+    let mode_len = mode.len() as u32;
+    write_test_le_u32(&mut mode, 4, mode_len);
+    let records = [mode, emf_rect_record(43, 0, 0, 80, 40)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF color adjustment vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-SETCOLORADJUSTMENT-NEUTRAL",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF SETCOLORADJUSTMENT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after neutral EMF SETCOLORADJUSTMENT should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-SETCOLORADJUSTMENT-NEUTRAL",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF SETCOLORADJUSTMENT payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn non_neutral_emf_setcoloradjustment_stays_partial_without_payload_leakage() {
+    let mut mode = emf_color_adjustment_record(0, 8_000, 10, 0);
+    mode.extend_from_slice(b"EMF-SETCOLORADJUSTMENT-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(4), 0);
+    let mode_len = mode.len() as u32;
+    write_test_le_u32(&mut mode, 4, mode_len);
+    let records = [mode, emf_rect_record(43, 0, 0, 80, 40)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-SETCOLORADJUSTMENT-UNSUPPORTED",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsupported EMF SETCOLORADJUSTMENT payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_emf_setcoloradjustment_becomes_passive_placeholder() {
+    let mut mode = emf_unknown_record(23);
+    write_test_le_u32(&mut mode, 4, 8);
+    let records = [mode];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF color adjustment placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn malformed_emf_setmapmode_becomes_passive_placeholder() {
     let mut mode = emf_unknown_record(17);
     write_test_le_u32(&mut mode, 4, 8);
@@ -64299,6 +64461,25 @@ fn emf_f32_record(record_type: u32, value: f32) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, record_type);
     write_test_le_u32(&mut record, 4, 12);
     write_test_le_f32(&mut record, 8, value);
+    record
+}
+
+fn emf_color_adjustment_record(values: u16, gamma: u16, contrast: i16, brightness: i16) -> Vec<u8> {
+    let mut record = vec![0; 32];
+    write_test_le_u32(&mut record, 0, 23);
+    write_test_le_u32(&mut record, 4, 32);
+    write_test_le_u16(&mut record, 8, 24);
+    write_test_le_u16(&mut record, 10, values);
+    write_test_le_u16(&mut record, 12, 0);
+    write_test_le_u16(&mut record, 14, gamma);
+    write_test_le_u16(&mut record, 16, gamma);
+    write_test_le_u16(&mut record, 18, gamma);
+    write_test_le_u16(&mut record, 20, 0);
+    write_test_le_u16(&mut record, 22, 10_000);
+    write_test_le_i16(&mut record, 24, contrast);
+    write_test_le_i16(&mut record, 26, brightness);
+    write_test_le_i16(&mut record, 28, 0);
+    write_test_le_i16(&mut record, 30, 0);
     record
 }
 
