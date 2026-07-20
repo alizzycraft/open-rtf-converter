@@ -20687,10 +20687,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 coordinates.set_viewport_origin(x, y);
             }
             EMR_SETBRUSHORGEX => {
-                let (x, y) = parse_emf_raw_point_record(data)?;
-                if x != 0 || y != 0 {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
-                }
+                let _ = parse_emf_raw_point_record(data)?;
             }
             EMR_SETMAPPERFLAGS => {
                 let _ = read_le_u32(data, 0)?;
