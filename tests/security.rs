@@ -28242,9 +28242,106 @@ fn wmf_copypen_setrop2_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
-fn non_copypen_wmf_setrop2_stays_partial_without_payload_leakage() {
+fn notcopypen_wmf_setrop2_inverts_passive_pen_without_payload_leakage() {
+    let mut mode = wmf_u16_record(0x0104, 4);
+    mode.extend_from_slice(b"WMF-SETROP2-NOTCOPYPEN /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(2), 0);
+    let mode_len = (mode.len() / 2) as u32;
+    write_test_le_u32(&mut mode, 0, mode_len);
+    let records = [
+        mode,
+        wmf_create_pen_record(
+            0,
+            1,
+            Color {
+                red: 20,
+                green: 40,
+                blue: 60,
+            },
+        ),
+        wmf_select_object_record(0),
+        wmf_bounds_record(0x041b, 20, 10, 80, 50),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF R2_NOTCOPYPEN vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            stroke_color: Some(color),
+            ..
+        } if color.red == 235 && color.green == 215 && color.blue == 195
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-SETROP2-NOTCOPYPEN",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SETROP2 R2_NOTCOPYPEN payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.is_empty());
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-SETROP2-NOTCOPYPEN",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SETROP2 R2_NOTCOPYPEN payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn backdrop_dependent_wmf_setrop2_stays_partial_without_payload_leakage() {
     let mut mode = wmf_u16_record(0x0104, 6);
-    mode.extend_from_slice(b"WMF-SETROP2-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+    mode.extend_from_slice(b"WMF-SETROP2-BACKDROP /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(2), 0);
     let mode_len = (mode.len() / 2) as u32;
     write_test_le_u32(&mut mode, 0, mode_len);
@@ -28273,7 +28370,7 @@ fn non_copypen_wmf_setrop2_stays_partial_without_payload_leakage() {
         b"/Subtype /Image".as_slice(),
         b"wmetafile",
         wmf_hex.as_bytes(),
-        b"WMF-SETROP2-UNSUPPORTED",
+        b"WMF-SETROP2-BACKDROP",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -68188,6 +68285,19 @@ fn wmf_create_brush_record(color: Color) -> Vec<u8> {
     record[9] = color.green;
     record[10] = color.blue;
     write_test_le_u16(&mut record, 12, 0);
+    record
+}
+
+fn wmf_create_pen_record(style: u16, width: i16, color: Color) -> Vec<u8> {
+    let mut record = vec![0; 16];
+    write_test_le_u32(&mut record, 0, 8);
+    write_test_le_u16(&mut record, 4, 0x02fa);
+    write_test_le_u16(&mut record, 6, style);
+    write_test_le_i16(&mut record, 8, width);
+    write_test_le_i16(&mut record, 10, 0);
+    record[12] = color.red;
+    record[13] = color.green;
+    record[14] = color.blue;
     record
 }
 

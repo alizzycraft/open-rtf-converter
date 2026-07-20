@@ -26162,6 +26162,7 @@ struct WmfDrawingState {
     text_word_extra: f32,
     font_height: Option<i32>,
     font_charset: Option<i32>,
+    stroke_rop2: u16,
     text_horizontal_align: StaticImageTextHorizontalAlign,
     text_vertical_align: StaticImageTextVerticalAlign,
 }
@@ -26208,8 +26209,22 @@ impl Default for WmfDrawingState {
             text_word_extra: 0.0,
             font_height: None,
             font_charset: None,
+            stroke_rop2: WMF_ROP2_COPYPEN,
             text_horizontal_align: StaticImageTextHorizontalAlign::Left,
             text_vertical_align: StaticImageTextVerticalAlign::Top,
+        }
+    }
+}
+
+impl WmfDrawingState {
+    fn passive_stroke_color(self) -> Option<Color> {
+        match self.stroke_rop2 {
+            WMF_ROP2_BLACK => Some(Color::default()),
+            WMF_ROP2_NOTCOPYPEN => self.stroke_color.map(inverted_color),
+            WMF_ROP2_NOP => None,
+            WMF_ROP2_COPYPEN => self.stroke_color,
+            WMF_ROP2_WHITE => Some(white_color()),
+            _ => None,
         }
     }
 }
@@ -26232,6 +26247,11 @@ const WMF_POLYFILLMODE_WINDING: u16 = 2;
 const WMF_MAPMODE_TEXT: u16 = 1;
 const WMF_MAPMODE_ISOTROPIC: u16 = 7;
 const WMF_MAPMODE_ANISOTROPIC: u16 = 8;
+const WMF_ROP2_BLACK: u16 = 1;
+const WMF_ROP2_NOTCOPYPEN: u16 = 4;
+const WMF_ROP2_NOP: u16 = 11;
+const WMF_ROP2_COPYPEN: u16 = 13;
+const WMF_ROP2_WHITE: u16 = 16;
 const WMF_STRETCHMODE_BLACKONWHITE: u16 = 1;
 const WMF_STRETCHMODE_WHITEONBLACK: u16 = 2;
 const WMF_STRETCHMODE_COLORONCOLOR: u16 = 3;
@@ -27736,7 +27756,17 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0104 => {
-                if read_le_u16(data, 0)? != 13 {
+                let mode = read_le_u16(data, 0)?;
+                if matches!(
+                    mode,
+                    WMF_ROP2_BLACK
+                        | WMF_ROP2_NOTCOPYPEN
+                        | WMF_ROP2_NOP
+                        | WMF_ROP2_COPYPEN
+                        | WMF_ROP2_WHITE
+                ) {
+                    state.stroke_rop2 = mode;
+                } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
@@ -27808,7 +27838,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         y1: current_point.1,
                         x2: end.0,
                         y2: end.1,
-                        stroke_color: state.stroke_color,
+                        stroke_color: state.passive_stroke_color(),
                         stroke_width: state.stroke_width,
                         stroke_style: state.stroke_style,
                     });
@@ -27925,7 +27955,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     if points.len() >= 3 && point_bounds_are_visible(&points) {
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
-                            stroke_color: state.stroke_color,
+                            stroke_color: state.passive_stroke_color(),
                             stroke_width: state.stroke_width,
                             stroke_style: state.stroke_style,
                             fill_rule: state.fill_rule,
@@ -27939,7 +27969,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 {
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
-                        stroke_color: state.stroke_color,
+                        stroke_color: state.passive_stroke_color(),
                         stroke_width: state.stroke_width,
                         stroke_style: state.stroke_style,
                     });
@@ -27949,7 +27979,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 let polygons = parse_wmf_polypolygon_list(data, coordinates)?;
                 if let Some(command) = wmf_polypolygon_command(
                     polygons,
-                    state.stroke_color,
+                    state.passive_stroke_color(),
                     state.stroke_width,
                     state.stroke_style,
                     state.fill_rule,
@@ -27977,7 +28007,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 {
                     commands.push(StaticImageVectorCommand::Bezier {
                         points,
-                        stroke_color: state.stroke_color,
+                        stroke_color: state.passive_stroke_color(),
                         stroke_width: state.stroke_width,
                         stroke_style: state.stroke_style,
                     });
@@ -28002,7 +28032,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 {
                     commands.push(StaticImageVectorCommand::Bezier {
                         points,
-                        stroke_color: state.stroke_color,
+                        stroke_color: state.passive_stroke_color(),
                         stroke_width: state.stroke_width,
                         stroke_style: state.stroke_style,
                     });
@@ -28026,7 +28056,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             top,
                             right,
                             bottom,
-                            stroke_color: state.stroke_color,
+                            stroke_color: state.passive_stroke_color(),
                             stroke_width: state.stroke_width,
                             stroke_style: state.stroke_style,
                             fill_pattern: state.fill_pattern,
@@ -28038,7 +28068,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             top,
                             right,
                             bottom,
-                            stroke_color: state.stroke_color,
+                            stroke_color: state.passive_stroke_color(),
                             stroke_width: state.stroke_width,
                             stroke_style: state.stroke_style,
                             fill_pattern: state.fill_pattern,
@@ -28054,7 +28084,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             bottom,
                             corner_width,
                             corner_height,
-                            stroke_color: state.stroke_color,
+                            stroke_color: state.passive_stroke_color(),
                             stroke_width: state.stroke_width,
                             stroke_style: state.stroke_style,
                             fill_pattern: state.fill_pattern,
@@ -28077,7 +28107,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         {
                             commands.push(StaticImageVectorCommand::Polyline {
                                 points,
-                                stroke_color: state.stroke_color,
+                                stroke_color: state.passive_stroke_color(),
                                 stroke_width: state.stroke_width,
                                 stroke_style: state.stroke_style,
                             });
@@ -28090,7 +28120,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         if pie_points.len() >= 3 && point_bounds_are_visible(&pie_points) {
                             commands.push(StaticImageVectorCommand::Polygon {
                                 points: pie_points,
-                                stroke_color: state.stroke_color,
+                                stroke_color: state.passive_stroke_color(),
                                 stroke_width: state.stroke_width,
                                 stroke_style: state.stroke_style,
                                 fill_rule: state.fill_rule,
@@ -28103,7 +28133,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         if points.len() >= 3 && point_bounds_are_visible(&points) {
                             commands.push(StaticImageVectorCommand::Polygon {
                                 points,
-                                stroke_color: state.stroke_color,
+                                stroke_color: state.passive_stroke_color(),
                                 stroke_width: state.stroke_width,
                                 stroke_style: state.stroke_style,
                                 fill_rule: state.fill_rule,
