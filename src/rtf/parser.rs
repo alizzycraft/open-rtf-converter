@@ -20495,6 +20495,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SAVEDC: u32 = 33;
     const EMR_RESTOREDC: u32 = 34;
     const EMR_SETWORLDTRANSFORM: u32 = 35;
+    const EMR_MODIFYWORLDTRANSFORM: u32 = 36;
     const EMR_SELECTOBJECT: u32 = 37;
     const EMR_CREATEPEN: u32 = 38;
     const EMR_CREATEBRUSHINDIRECT: u32 = 39;
@@ -20961,6 +20962,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_SETWORLDTRANSFORM => {
                 if !is_identity_emf_xform(data, 0)? {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
+            EMR_MODIFYWORLDTRANSFORM => {
+                if read_le_u32(data, 24)? != 1 {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
