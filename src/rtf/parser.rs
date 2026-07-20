@@ -27517,6 +27517,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut viewport_extent_explicit = false;
     let mut window_width = header.window_width;
     let mut window_height = header.window_height;
+    let mut image_width = header.window_width;
+    let mut image_height = header.window_height;
     let mut objects: Vec<Option<WmfObject>> = Vec::new();
     let mut state = WmfDrawingState::default();
     let mut saved_states: Vec<WmfSavedDrawingState> = Vec::new();
@@ -27551,8 +27553,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             viewport_height,
             window_width,
             window_height,
-            image_width: window_width,
-            image_height: window_height,
+            image_width,
+            image_height,
         };
         match function {
             0x0000 => break,
@@ -27617,6 +27619,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 let width = read_le_i16(data, 2)?;
                 window_width = i32::from(width.unsigned_abs().max(1));
                 window_height = i32::from(height.unsigned_abs().max(1));
+                image_width = window_width;
+                image_height = window_height;
                 if !viewport_extent_explicit {
                     viewport_width = window_width;
                     viewport_height = window_height;
@@ -27625,8 +27629,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             0x020e => {
                 let height = read_le_i16(data, 0)?;
                 let width = read_le_i16(data, 2)?;
-                viewport_width = i32::from(width).clamp(-window_width, window_width);
-                viewport_height = i32::from(height).clamp(-window_height, window_height);
+                viewport_width = i32::from(width).clamp(-image_width, image_width);
+                viewport_height = i32::from(height).clamp(-image_height, image_height);
                 if viewport_width == 0 || viewport_height == 0 {
                     return None;
                 }
@@ -27646,8 +27650,12 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if x_denom == 0 || y_denom == 0 {
                     return None;
                 }
-                if x_num != x_denom || y_num != y_denom {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                window_width = scale_wmf_logical_extent(window_width, x_num, x_denom, image_width)?;
+                window_height =
+                    scale_wmf_logical_extent(window_height, y_num, y_denom, image_height)?;
+                if !viewport_extent_explicit {
+                    viewport_width = image_width;
+                    viewport_height = image_height;
                 }
             }
             0x0412 => {
@@ -27658,8 +27666,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if x_denom == 0 || y_denom == 0 {
                     return None;
                 }
-                viewport_width = scale_wmf_extent(viewport_width, x_num, x_denom, window_width)?;
-                viewport_height = scale_wmf_extent(viewport_height, y_num, y_denom, window_height)?;
+                viewport_width = scale_wmf_extent(viewport_width, x_num, x_denom, image_width)?;
+                viewport_height = scale_wmf_extent(viewport_height, y_num, y_denom, image_height)?;
                 viewport_extent_explicit = true;
             }
             0x01f0 => {
@@ -28345,8 +28353,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     }
 
     Some(ParsedWmfVector {
-        width_px: u32::try_from(window_width.max(1)).ok()?,
-        height_px: u32::try_from(window_height.max(1)).ok()?,
+        width_px: u32::try_from(image_width.max(1)).ok()?,
+        height_px: u32::try_from(image_height.max(1)).ok()?,
         skipped_record_count,
         commands,
     })
@@ -28718,6 +28726,21 @@ fn scale_wmf_extent(
     if clamped == 0 {
         return None;
     }
+    i32::try_from(clamped).ok()
+}
+
+fn scale_wmf_logical_extent(
+    extent: i32,
+    numerator: i16,
+    denominator: i16,
+    image_extent: i32,
+) -> Option<i32> {
+    let image_extent = image_extent.max(1);
+    let max_extent = i128::from(image_extent).checked_mul(64)?;
+    let scaled = i128::from(extent)
+        .checked_mul(i128::from(numerator))?
+        .checked_div(i128::from(denominator))?;
+    let clamped = scaled.clamp(1, max_extent);
     i32::try_from(clamped).ok()
 }
 

@@ -29162,9 +29162,9 @@ fn wmf_identity_scalewindowext_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
-fn nonidentity_wmf_scalewindowext_stays_partial_without_payload_leakage() {
+fn nonidentity_wmf_scalewindowext_scales_passive_coordinates_without_payload_leakage() {
     let mut mode = wmf_scale_record(0x0410, 1, 2, 1, 1);
-    mode.extend_from_slice(b"WMF-SCALEWINDOWEXT-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+    mode.extend_from_slice(b"WMF-SCALEWINDOWEXT-SCALED /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(2), 0);
     let mode_len = (mode.len() / 2) as u32;
     write_test_le_u32(&mut mode, 0, mode_len);
@@ -29175,6 +29175,49 @@ fn nonidentity_wmf_scalewindowext_stays_partial_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF nonidentity SCALEWINDOWEXT vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.width_px, 160);
+    assert_eq!(image.height_px, 80);
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 20.0,
+            top: 5.0,
+            right: 80.0,
+            bottom: 25.0,
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-SCALEWINDOWEXT-SCALED",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SCALEWINDOWEXT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
@@ -29184,16 +29227,12 @@ fn nonidentity_wmf_scalewindowext_stays_partial_without_payload_leakage() {
     )
     .unwrap();
 
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert!(output.diagnostics.is_empty());
     for forbidden in [
         b"/Subtype /Image".as_slice(),
         b"wmetafile",
         wmf_hex.as_bytes(),
-        b"WMF-SCALEWINDOWEXT-UNSUPPORTED",
+        b"WMF-SCALEWINDOWEXT-SCALED",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -29205,7 +29244,7 @@ fn nonidentity_wmf_scalewindowext_stays_partial_without_payload_leakage() {
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "unsupported WMF SCALEWINDOWEXT payload leaked to PDF: {:?}",
+            "WMF SCALEWINDOWEXT payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
