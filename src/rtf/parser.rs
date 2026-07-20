@@ -28072,6 +28072,12 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0035 => {}
+            0x0037 | 0x0436 => {
+                validate_wmf_palette_entries(data)?;
+            }
+            0x0139 => {
+                read_le_u16(data, 0)?;
+            }
             0x0234 => {
                 read_le_u16(data, 0)?;
             }
@@ -29035,8 +29041,21 @@ fn parse_wmf_palette_object(data: &[u8]) -> Option<WmfObject> {
     let entry_count = usize::from(read_le_u16(data, 2)?);
     let entries_len = entry_count.checked_mul(4)?;
     let entries_end = 4usize.checked_add(entries_len)?;
-    data.get(..entries_end)?;
+    if entries_end > data.len() || entry_count > MAX_PASSIVE_WMF_OBJECTS {
+        return None;
+    }
     Some(WmfObject::Other)
+}
+
+fn validate_wmf_palette_entries(data: &[u8]) -> Option<()> {
+    read_le_u16(data, 0)?;
+    let entry_count = usize::from(read_le_u16(data, 2)?);
+    let entries_len = entry_count.checked_mul(4)?;
+    let entries_end = 4usize.checked_add(entries_len)?;
+    if entries_end > data.len() || entry_count > MAX_PASSIVE_WMF_OBJECTS {
+        return None;
+    }
+    Some(())
 }
 
 fn parse_wmf_pattern_brush_object(data: &[u8]) -> Option<WmfObject> {

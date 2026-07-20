@@ -29988,6 +29988,150 @@ fn malformed_wmf_createpalette_becomes_passive_placeholder() {
 }
 
 #[test]
+fn wmf_palette_mutation_records_are_passive_noops_without_payload_leakage() {
+    let mut set_entries = wmf_palette_entries_record(0x0037, 1, &[(12, 34, 56), (78, 90, 123)]);
+    set_entries.extend_from_slice(b"WMF-SETPALENTRIES /JavaScript /EmbeddedFile");
+    set_entries.resize(set_entries.len().next_multiple_of(2), 0);
+    let set_entries_len = (set_entries.len() / 2) as u32;
+    write_test_le_u32(&mut set_entries, 0, set_entries_len);
+
+    let mut resize = wmf_u16_record(0x0139, 16);
+    resize.extend_from_slice(b"WMF-RESIZEPALETTE /Launch /RichMedia");
+    resize.resize(resize.len().next_multiple_of(2), 0);
+    let resize_len = (resize.len() / 2) as u32;
+    write_test_le_u32(&mut resize, 0, resize_len);
+
+    let mut animate = wmf_palette_entries_record(0x0436, 0, &[(220, 10, 80)]);
+    animate.extend_from_slice(b"WMF-ANIMATEPALETTE /OpenAction /JavaScript");
+    animate.resize(animate.len().next_multiple_of(2), 0);
+    let animate_len = (animate.len() / 2) as u32;
+    write_test_le_u32(&mut animate, 0, animate_len);
+
+    let records = [
+        set_entries,
+        resize,
+        animate,
+        wmf_bounds_record(0x041b, 20, 10, 80, 50),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF palette mutation vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-SETPALENTRIES",
+        "WMF-RESIZEPALETTE",
+        "WMF-ANIMATEPALETTE",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "RichMedia",
+        "OpenAction",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF palette mutation payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after WMF palette mutations should render a passive PDF rectangle"
+    );
+    assert!(output.diagnostics.is_empty());
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-SETPALENTRIES",
+        b"WMF-RESIZEPALETTE",
+        b"WMF-ANIMATEPALETTE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF palette mutation payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_wmf_setpalentries_becomes_passive_placeholder() {
+    let mut entries = wmf_palette_entries_record(0x0037, 0, &[(255, 0, 0)]);
+    write_test_le_u16(&mut entries, 8, 2);
+    let records = [entries];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SETPALENTRIES placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_setmapperflags_is_passive_noop_without_payload_leakage() {
     let mut mapper = wmf_u32_record(0x0231, 1);
     mapper.extend_from_slice(b"WMF-SETMAPPERFLAGS /JavaScript /EmbeddedFile /Launch");
@@ -70305,6 +70449,27 @@ fn wmf_create_palette_record(entries: &[(u8, u8, u8)]) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, record_size_words);
     write_test_le_u16(&mut record, 4, 0x00f7);
     write_test_le_u16(&mut record, 6, 0x0300);
+    write_test_le_u16(&mut record, 8, entries.len() as u16);
+    for (index, &(red, green, blue)) in entries.iter().enumerate() {
+        let offset = 10 + index * 4;
+        record[offset] = red;
+        record[offset + 1] = green;
+        record[offset + 2] = blue;
+        record[offset + 3] = 0;
+    }
+    record
+}
+
+fn wmf_palette_entries_record(
+    function: u16,
+    start_index: u16,
+    entries: &[(u8, u8, u8)],
+) -> Vec<u8> {
+    let mut record = vec![0; 10 + entries.len() * 4];
+    let record_size_words = (record.len() / 2) as u32;
+    write_test_le_u32(&mut record, 0, record_size_words);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_u16(&mut record, 6, start_index);
     write_test_le_u16(&mut record, 8, entries.len() as u16);
     for (index, &(red, green, blue)) in entries.iter().enumerate() {
         let offset = 10 + index * 4;
