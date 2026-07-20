@@ -20913,9 +20913,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETTEXTALIGN => {
-                let mode = (read_le_u32(data, 0)? & 0xffff) as u16;
-                state.text_horizontal_align = wmf_text_horizontal_align(mode);
-                state.text_vertical_align = wmf_text_vertical_align(mode);
+                let mode = read_le_u32(data, 0)?;
+                if let Some(mode) = supported_wmf_text_align_mode(mode) {
+                    state.text_horizontal_align = wmf_text_horizontal_align(mode);
+                    state.text_vertical_align = wmf_text_vertical_align(mode);
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_SETCOLORADJUSTMENT => {
                 if !is_neutral_emf_color_adjustment(data)? {
@@ -26175,6 +26179,7 @@ const WMF_TA_BOTTOM: u16 = 0x0008;
 const WMF_TA_BASELINE: u16 = 0x0018;
 const WMF_TA_HORIZONTAL_MASK: u16 = 0x0006;
 const WMF_TA_VERTICAL_MASK: u16 = 0x0018;
+const WMF_TA_SUPPORTED_MASK: u16 = WMF_TA_HORIZONTAL_MASK | WMF_TA_VERTICAL_MASK;
 const WMF_BLACKNESS_RASTER_OP: u32 = 0x0000_0042;
 const WMF_DSTCOPY_RASTER_OP: u32 = 0x00aa_0029;
 const WMF_DSTINVERT_RASTER_OP: u32 = 0x0055_0009;
@@ -27605,9 +27610,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 state.text_word_extra = normalized_wmf_text_justification(data, window_width)?;
             }
             0x012e => {
-                let mode = read_le_u16(data, 0)?;
-                state.text_horizontal_align = wmf_text_horizontal_align(mode);
-                state.text_vertical_align = wmf_text_vertical_align(mode);
+                let mode = u32::from(read_le_u16(data, 0)?);
+                if let Some(mode) = supported_wmf_text_align_mode(mode) {
+                    state.text_horizontal_align = wmf_text_horizontal_align(mode);
+                    state.text_vertical_align = wmf_text_vertical_align(mode);
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             0x0214 => {
                 current_point = parse_wmf_yx_point(
@@ -28560,6 +28569,26 @@ fn wmf_text_horizontal_align(mode: u16) -> StaticImageTextHorizontalAlign {
         WMF_TA_CENTER => StaticImageTextHorizontalAlign::Center,
         _ => StaticImageTextHorizontalAlign::Left,
     }
+}
+
+fn supported_wmf_text_align_mode(mode: u32) -> Option<u16> {
+    let mode = u16::try_from(mode).ok()?;
+    if mode & !WMF_TA_SUPPORTED_MASK != 0 {
+        return None;
+    }
+    if !matches!(
+        mode & WMF_TA_HORIZONTAL_MASK,
+        0 | WMF_TA_RIGHT | WMF_TA_CENTER
+    ) {
+        return None;
+    }
+    if !matches!(
+        mode & WMF_TA_VERTICAL_MASK,
+        0 | WMF_TA_BOTTOM | WMF_TA_BASELINE
+    ) {
+        return None;
+    }
+    Some(mode)
 }
 
 fn wmf_text_vertical_align(mode: u16) -> StaticImageTextVerticalAlign {

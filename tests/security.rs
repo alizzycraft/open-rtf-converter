@@ -36533,6 +36533,96 @@ fn wmf_settextalign_positions_passive_text_without_flag_leakage() {
 }
 
 #[test]
+fn invalid_wmf_settextalign_stays_partial_without_payload_leakage() {
+    let mut mode = wmf_u16_record(0x012e, 0x0100);
+    mode.extend_from_slice(b"WMF-SETTEXTALIGN-INVALID /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(2), 0);
+    let mode_len = (mode.len() / 2) as u32;
+    write_test_le_u32(&mut mode, 0, mode_len);
+    let records = [
+        mode,
+        wmf_exttextout_record(40, 20, "Hi", 0, None),
+        wmf_bounds_record(0x041b, 20, 10, 80, 50),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Hi"));
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-SETTEXTALIGN-INVALID",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid WMF SETTEXTALIGN payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_wmf_settextalign_becomes_passive_placeholder() {
+    let records = [
+        wmf_function_record(0x012e),
+        wmf_exttextout_record(40, 20, "Hi", 0, None),
+    ];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SETTEXTALIGN placeholder");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+    assert!(!text.contains("Hi"));
+}
+
+#[test]
 fn wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003250000000100070000000000",
@@ -40396,6 +40486,96 @@ fn emf_exttextoutw_records_render_passively_without_payload_leakage() {
             String::from_utf8_lossy(forbidden)
         );
     }
+}
+
+#[test]
+fn invalid_emf_settextalign_stays_partial_without_payload_leakage() {
+    let mut mode = emf_u32_record(22, 0x0000_0004);
+    mode.extend_from_slice(b"EMF-SETTEXTALIGN-INVALID /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(4), 0);
+    let size = mode.len() as u32;
+    write_test_le_u32(&mut mode, 4, size);
+    let records = [
+        emf_u32_record(24, 0x0033_2211),
+        mode,
+        emf_exttextoutw_record(40, 20, "Hi", 0, None, false),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip\\picw160\\pich80\\picwgoal1600\\pichgoal800 {emf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Hi"));
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"emfblip",
+        emf_hex.as_bytes(),
+        b"EMF-SETTEXTALIGN-INVALID",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid EMF SETTEXTALIGN payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_emf_settextalign_becomes_passive_placeholder() {
+    let records = [
+        emf_unknown_record(22),
+        emf_exttextoutw_record(40, 20, "Hi", 0, None, false),
+    ];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF SETTEXTALIGN placeholder");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+    assert!(!text.contains("Hi"));
 }
 
 #[test]
