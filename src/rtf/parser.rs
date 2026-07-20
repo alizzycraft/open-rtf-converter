@@ -21047,7 +21047,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETLAYOUT => {
-                if read_le_u32(data, 0)? != 0 {
+                if !emf_layout_is_supported_passive_noop(read_le_u32(data, 0)?) {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
@@ -24889,6 +24889,13 @@ fn emf_pen_style_is_supported(style: u32) -> bool {
         && matches!(style & PS_JOIN_MASK, 0x0000 | 0x1000 | 0x2000)
         && matches!(style & PS_TYPE_MASK, 0x0000 | 0x0001_0000)
         && (style & !(PS_STYLE_MASK | PS_ENDCAP_MASK | PS_JOIN_MASK | PS_TYPE_MASK)) == 0
+}
+
+fn emf_layout_is_supported_passive_noop(layout: u32) -> bool {
+    const LAYOUT_LTR: u32 = 0x0000;
+    const LAYOUT_BITMAPORIENTATIONPRESERVED: u32 = 0x0008;
+
+    matches!(layout, LAYOUT_LTR | LAYOUT_BITMAPORIENTATIONPRESERVED)
 }
 
 fn validate_emf_optional_record_payload(
