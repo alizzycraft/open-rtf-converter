@@ -24596,6 +24596,9 @@ fn parse_emf_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
     }
     let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
     let style = read_le_u32(data, 4)?;
+    if !emf_pen_style_is_supported(style) {
+        return Some((handle, EmfObject::Other));
+    }
     let width = i32::try_from(read_le_i32(data, 8)?.unsigned_abs().max(1)).unwrap_or(i32::MAX);
     let color = color_from_colorref(data, 16)?;
     Some((
@@ -24626,6 +24629,9 @@ fn parse_emf_ext_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
     let cb_bits = read_le_u32(data, 16)?;
 
     let pen_style = read_le_u32(data, 20)?;
+    if !emf_pen_style_is_supported(pen_style) {
+        return Some((handle, EmfObject::Other));
+    }
     let width = i32::try_from(read_le_u32(data, 24)?.max(1)).unwrap_or(i32::MAX);
     let brush_style = read_le_u32(data, 28)?;
     let color = color_from_colorref(data, 32)?;
@@ -24657,6 +24663,10 @@ fn parse_emf_ext_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
             style,
         },
     ))
+}
+
+fn emf_pen_style_is_supported(style: u32) -> bool {
+    matches!(style & 0x000f, 0..=6)
 }
 
 fn validate_emf_optional_record_payload(
