@@ -29827,6 +29827,37 @@ fn malformed_wmf_pen_and_brush_objects_become_passive_placeholders() {
 }
 
 #[test]
+fn malformed_wmf_font_object_becomes_passive_placeholder() {
+    let records = [
+        wmf_function_record(0x02fb),
+        wmf_exttextout_record(30, 20, "Font", 0, None),
+    ];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF font object placeholder");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+    assert!(!text.contains("Font"));
+}
+
+#[test]
 fn wmf_setrelabs_is_ignored_without_payload_leakage() {
     let mut mode = wmf_function_record(0x0105);
     mode.extend_from_slice(b"WMF-SETRELABS /JavaScript /EmbeddedFile /Launch");

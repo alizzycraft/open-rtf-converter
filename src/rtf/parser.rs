@@ -27514,10 +27514,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             0x00f7 => store_wmf_object(&mut objects, parse_wmf_palette_object(data)?)?,
             0x02fa => store_wmf_object(&mut objects, parse_wmf_pen_object(data)?)?,
             0x02fc => store_wmf_object(&mut objects, parse_wmf_brush_object(data)?)?,
-            0x02fb => store_wmf_object(
-                &mut objects,
-                parse_wmf_font_object(data).unwrap_or(WmfObject::Other),
-            )?,
+            0x02fb => store_wmf_object(&mut objects, parse_wmf_font_object(data)?)?,
             0x02fd => store_wmf_object(&mut objects, WmfObject::Other)?,
             0x01f9 => store_wmf_object(&mut objects, parse_wmf_pattern_brush_object(data)?)?,
             0x0142 => store_wmf_object(&mut objects, parse_wmf_dib_pattern_brush_object(data)?)?,
