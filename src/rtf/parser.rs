@@ -20494,6 +20494,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETTEXTJUSTIFICATION: u32 = 120;
     const EMR_SAVEDC: u32 = 33;
     const EMR_RESTOREDC: u32 = 34;
+    const EMR_SETWORLDTRANSFORM: u32 = 35;
     const EMR_SELECTOBJECT: u32 = 37;
     const EMR_CREATEPEN: u32 = 38;
     const EMR_CREATEBRUSHINDIRECT: u32 = 39;
@@ -20956,6 +20957,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 replaceable_clip_command_start = None;
                 for _ in 0..restored.restore_count {
                     commands.push(StaticImageVectorCommand::RestoreState);
+                }
+            }
+            EMR_SETWORLDTRANSFORM => {
+                if !is_identity_emf_xform(data, 0)? {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             EMR_CREATEPEN => {
@@ -23341,6 +23347,17 @@ fn parse_emf_arc_direction(data: &[u8]) -> Option<bool> {
         2 => Some(true),
         _ => None,
     }
+}
+
+fn is_identity_emf_xform(data: &[u8], offset: usize) -> Option<bool> {
+    Some(
+        read_le_f32(data, offset)? == 1.0
+            && read_le_f32(data, offset.checked_add(4)?)? == 0.0
+            && read_le_f32(data, offset.checked_add(8)?)? == 0.0
+            && read_le_f32(data, offset.checked_add(12)?)? == 1.0
+            && read_le_f32(data, offset.checked_add(16)?)? == 0.0
+            && read_le_f32(data, offset.checked_add(20)?)? == 0.0,
+    )
 }
 
 fn parse_emf_setpixelv_rect(
