@@ -21495,7 +21495,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETICMMODE => {
-                if read_le_u32(data, 0)? != 1 {
+                if !matches!(read_le_u32(data, 0)?, 1 | 3 | 4) {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
