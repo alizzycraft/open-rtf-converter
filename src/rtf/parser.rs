@@ -26229,6 +26229,9 @@ const WMF_BKMODE_TRANSPARENT: u16 = 1;
 const WMF_BKMODE_OPAQUE: u16 = 2;
 const WMF_POLYFILLMODE_ALTERNATE: u16 = 1;
 const WMF_POLYFILLMODE_WINDING: u16 = 2;
+const WMF_MAPMODE_TEXT: u16 = 1;
+const WMF_MAPMODE_ISOTROPIC: u16 = 7;
+const WMF_MAPMODE_ANISOTROPIC: u16 = 8;
 const WMF_STRETCHMODE_BLACKONWHITE: u16 = 1;
 const WMF_STRETCHMODE_WHITEONBLACK: u16 = 2;
 const WMF_STRETCHMODE_COLORONCOLOR: u16 = 3;
@@ -27717,7 +27720,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 state.background_color = Some(color_from_colorref(data, 0)?);
             }
             0x0103 => {
-                if read_le_u16(data, 0)? != 1 {
+                if !matches!(
+                    read_le_u16(data, 0)?,
+                    WMF_MAPMODE_TEXT | WMF_MAPMODE_ISOTROPIC | WMF_MAPMODE_ANISOTROPIC
+                ) {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
