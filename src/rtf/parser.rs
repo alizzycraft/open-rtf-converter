@@ -20577,6 +20577,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_DELETEOBJECT: u32 = 40;
     const EMR_SELECTPALETTE: u32 = 48;
     const EMR_CREATEPALETTE: u32 = 49;
+    const EMR_SETPALETTEENTRIES: u32 = 50;
+    const EMR_RESIZEPALETTE: u32 = 51;
     const EMR_REALIZEPALETTE: u32 = 52;
     const EMR_ANGLEARC: u32 = 41;
     const EMR_ARC: u32 = 45;
@@ -21161,6 +21163,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_SELECTPALETTE => {
                 read_le_u32(data, 0)?;
+            }
+            EMR_SETPALETTEENTRIES => {
+                validate_emf_set_palette_entries(data)?;
+            }
+            EMR_RESIZEPALETTE => {
+                read_le_u32(data, 0)?;
+                read_le_u32(data, 4)?;
             }
             EMR_REALIZEPALETTE => {}
             EMR_SELECTOBJECT => {
@@ -25005,6 +25014,20 @@ fn parse_emf_palette_object(data: &[u8]) -> Option<usize> {
         return None;
     }
     Some(handle)
+}
+
+fn validate_emf_set_palette_entries(data: &[u8]) -> Option<()> {
+    if data.len() < 12 {
+        return None;
+    }
+    read_le_u32(data, 0)?;
+    read_le_u32(data, 4)?;
+    let entry_count = usize::try_from(read_le_u32(data, 8)?).ok()?;
+    let entries_end = 12usize.checked_add(entry_count.checked_mul(4)?)?;
+    if entries_end > data.len() || entry_count > MAX_PASSIVE_WMF_OBJECTS {
+        return None;
+    }
+    Some(())
 }
 
 fn store_emf_object(
