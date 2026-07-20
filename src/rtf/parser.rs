@@ -21550,6 +21550,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         fill_pattern: ShadingPattern::None,
                         fill_color: Some(color),
                     });
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             EMR_BITBLT | EMR_STRETCHBLT | EMR_SETDIBITSTODEVICE | EMR_STRETCHDIBITS => {
@@ -28739,6 +28741,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         fill_pattern: ShadingPattern::None,
                         fill_color: Some(color),
                     });
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             0x0626 if wmf_escape_is_non_visual_comment(data) => {}

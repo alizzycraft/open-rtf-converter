@@ -35909,6 +35909,30 @@ fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
 }
 
 #[test]
+fn malformed_wmf_setpixel_becomes_passive_placeholder() {
+    let records = [wmf_u32_record(0x041f, 0x0000_00ff)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SETPIXEL placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_textout_renders_passive_text_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032d00000001000c0000000000",
@@ -47521,6 +47545,35 @@ fn emf_setpixelv_records_render_passively_without_payload_leakage() {
             String::from_utf8_lossy(forbidden)
         );
     }
+}
+
+#[test]
+fn malformed_emf_setpixelv_becomes_passive_placeholder() {
+    let mut record = vec![0; 16];
+    write_test_le_u32(&mut record, 0, 15);
+    write_test_le_u32(&mut record, 4, 16);
+    write_test_le_i32(&mut record, 8, 10);
+    write_test_le_i32(&mut record, 12, 20);
+    let records = [record];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF SETPIXELV placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
 }
 
 #[test]
