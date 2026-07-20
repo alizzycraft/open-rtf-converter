@@ -25014,6 +25014,30 @@ fn emf_stock_object(handle: u32) -> Option<EmfObject> {
             }),
             pattern: ShadingPattern::None,
         }),
+        0x8000_0001 => Some(EmfObject::Brush {
+            color: Some(Color {
+                red: 192,
+                green: 192,
+                blue: 192,
+            }),
+            pattern: ShadingPattern::None,
+        }),
+        0x8000_0002 => Some(EmfObject::Brush {
+            color: Some(Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            }),
+            pattern: ShadingPattern::None,
+        }),
+        0x8000_0003 => Some(EmfObject::Brush {
+            color: Some(Color {
+                red: 64,
+                green: 64,
+                blue: 64,
+            }),
+            pattern: ShadingPattern::None,
+        }),
         0x8000_0004 => Some(EmfObject::Brush {
             color: Some(Color::default()),
             pattern: ShadingPattern::None,
@@ -25038,6 +25062,19 @@ fn emf_stock_object(handle: u32) -> Option<EmfObject> {
         }),
         0x8000_0008 => Some(EmfObject::Pen {
             color: None,
+            width: 1,
+            style: BorderStyle::Single,
+        }),
+        0x8000_0012 => Some(EmfObject::Brush {
+            color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255,
+            }),
+            pattern: ShadingPattern::None,
+        }),
+        0x8000_0013 => Some(EmfObject::Pen {
+            color: Some(Color::default()),
             width: 1,
             style: BorderStyle::Single,
         }),

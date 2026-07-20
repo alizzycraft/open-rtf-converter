@@ -41703,6 +41703,171 @@ fn emf_null_object_path_paint_records_are_noops_without_payload_leakage() {
 }
 
 #[test]
+fn emf_gray_and_dc_stock_objects_render_passively_without_payload_leakage() {
+    let mut light_gray = emf_select_object_record(0x8000_0001);
+    light_gray.extend_from_slice(b"EMF-LTGRAY-BRUSH /JavaScript");
+    light_gray.resize(light_gray.len().next_multiple_of(4), 0);
+    let light_gray_len = light_gray.len() as u32;
+    write_test_le_u32(&mut light_gray, 4, light_gray_len);
+
+    let mut dc_pen = emf_select_object_record(0x8000_0013);
+    dc_pen.extend_from_slice(b"EMF-DC-PEN /EmbeddedFile");
+    dc_pen.resize(dc_pen.len().next_multiple_of(4), 0);
+    let dc_pen_len = dc_pen.len() as u32;
+    write_test_le_u32(&mut dc_pen, 4, dc_pen_len);
+
+    let mut dc_brush = emf_select_object_record(0x8000_0012);
+    dc_brush.extend_from_slice(b"EMF-DC-BRUSH /Launch");
+    dc_brush.resize(dc_brush.len().next_multiple_of(4), 0);
+    let dc_brush_len = dc_brush.len() as u32;
+    write_test_le_u32(&mut dc_brush, 4, dc_brush_len);
+
+    let records = [
+        light_gray,
+        emf_rect_record(43, 0, 0, 80, 40),
+        emf_select_object_record(0x8000_0003),
+        emf_rect_record(43, 90, 0, 140, 40),
+        dc_pen,
+        dc_brush,
+        emf_rect_record(43, 0, 50, 80, 75),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF stock object vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 3);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            fill_color: Some(Color {
+                red: 192,
+                green: 192,
+                blue: 192
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle {
+            fill_color: Some(Color {
+                red: 64,
+                green: 64,
+                blue: 64
+            }),
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[2],
+        StaticImageVectorCommand::Rectangle {
+            stroke_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            fill_color: Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255
+            }),
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-LTGRAY-BRUSH",
+        "EMF-DC-PEN",
+        "EMF-DC-BRUSH",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF stock object payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 3,
+        "EMF stock objects should render passive PDF rectangles"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "B" | "b")),
+        "EMF stock brushes should render passive PDF fills"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "s" | "B" | "b")),
+        "EMF DC pen should render passive PDF strokes"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-LTGRAY-BRUSH",
+        b"EMF-DC-PEN",
+        b"EMF-DC-BRUSH",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF stock object payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_exttextoutw_records_render_passively_without_payload_leakage() {
     let records = [
         emf_u32_record(24, 0x0033_2211),
