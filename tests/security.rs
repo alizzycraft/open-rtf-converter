@@ -28446,6 +28446,173 @@ fn malformed_wmf_setviewportorg_becomes_passive_placeholder() {
 }
 
 #[test]
+fn wmf_zero_offsetviewportorg_is_passive_state_without_payload_leakage() {
+    let mut mode = wmf_yx_record(0x0211, 0, 0);
+    mode.extend_from_slice(b"WMF-OFFSETVIEWPORTORG-ZERO /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(2), 0);
+    let mode_len = (mode.len() / 2) as u32;
+    write_test_le_u32(&mut mode, 0, mode_len);
+    let records = [mode, wmf_bounds_record(0x041b, 20, 10, 80, 50)];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF zero OFFSETVIEWPORTORG vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-OFFSETVIEWPORTORG-ZERO",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF OFFSETVIEWPORTORG payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after zero WMF OFFSETVIEWPORTORG should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-OFFSETVIEWPORTORG-ZERO",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF OFFSETVIEWPORTORG payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn nonzero_wmf_offsetviewportorg_stays_partial_without_payload_leakage() {
+    let mut mode = wmf_yx_record(0x0211, 3, 5);
+    mode.extend_from_slice(b"WMF-OFFSETVIEWPORTORG-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(2), 0);
+    let mode_len = (mode.len() / 2) as u32;
+    write_test_le_u32(&mut mode, 0, mode_len);
+    let records = [mode, wmf_bounds_record(0x041b, 20, 10, 80, 50)];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-OFFSETVIEWPORTORG-UNSUPPORTED",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsupported WMF OFFSETVIEWPORTORG payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_wmf_offsetviewportorg_becomes_passive_placeholder() {
+    let records = [wmf_function_record(0x0211)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF OFFSETVIEWPORTORG placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_matching_setviewportext_is_passive_state_without_payload_leakage() {
     let mut mode = wmf_yx_record(0x020e, 80, 160);
     mode.extend_from_slice(b"WMF-SETVIEWPORTEXT-MATCH /JavaScript /EmbeddedFile /Launch");
