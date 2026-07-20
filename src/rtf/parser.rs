@@ -27461,6 +27461,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 window_width = i32::from(width.unsigned_abs().max(1));
                 window_height = i32::from(height.unsigned_abs().max(1));
             }
+            0x020e => {
+                let height = read_le_i16(data, 0)?;
+                let width = read_le_i16(data, 2)?;
+                if i32::from(width) != window_width || i32::from(height) != window_height {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
             0x01f0 => {
                 let handle = usize::from(read_le_u16(data, 0)?);
                 if let Some(object) = objects.get_mut(handle) {
