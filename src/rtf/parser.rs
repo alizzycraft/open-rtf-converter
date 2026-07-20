@@ -27523,6 +27523,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
+            0x020d => {
+                if read_le_i16(data, 0)? != 0 || read_le_i16(data, 2)? != 0 {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
             0x0102 => {
                 state.text_background_mode = if read_le_u16(data, 0)? == WMF_BKMODE_OPAQUE {
                     WmfTextBackgroundMode::Opaque
