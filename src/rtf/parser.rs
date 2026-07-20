@@ -26161,7 +26161,9 @@ const MAX_PASSIVE_VECTOR_RASTER_PIXELS: usize = 1_000_000;
 const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
 const WMF_ETO_GLYPH_INDEX: u16 = 0x0010;
+const WMF_BKMODE_TRANSPARENT: u16 = 1;
 const WMF_BKMODE_OPAQUE: u16 = 2;
+const WMF_POLYFILLMODE_ALTERNATE: u16 = 1;
 const WMF_POLYFILLMODE_WINDING: u16 = 2;
 const WMF_TA_RIGHT: u16 = 0x0002;
 const WMF_TA_CENTER: u16 = 0x0006;
@@ -27573,20 +27575,20 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
-            0x0102 => {
-                state.text_background_mode = if read_le_u16(data, 0)? == WMF_BKMODE_OPAQUE {
-                    WmfTextBackgroundMode::Opaque
-                } else {
-                    WmfTextBackgroundMode::Transparent
-                };
-            }
-            0x0106 => {
-                state.fill_rule = if read_le_u16(data, 0)? == WMF_POLYFILLMODE_WINDING {
-                    StaticImageVectorFillRule::Winding
-                } else {
-                    StaticImageVectorFillRule::Alternate
-                };
-            }
+            0x0102 => match read_le_u16(data, 0)? {
+                WMF_BKMODE_TRANSPARENT => {
+                    state.text_background_mode = WmfTextBackgroundMode::Transparent
+                }
+                WMF_BKMODE_OPAQUE => state.text_background_mode = WmfTextBackgroundMode::Opaque,
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            0x0106 => match read_le_u16(data, 0)? {
+                WMF_POLYFILLMODE_ALTERNATE => {
+                    state.fill_rule = StaticImageVectorFillRule::Alternate
+                }
+                WMF_POLYFILLMODE_WINDING => state.fill_rule = StaticImageVectorFillRule::Winding,
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             0x0108 => {
                 state.text_character_extra =
                     normalized_wmf_text_character_extra(data, 0, window_width)?;

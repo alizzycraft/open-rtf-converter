@@ -29858,6 +29858,93 @@ fn malformed_wmf_font_object_becomes_passive_placeholder() {
 }
 
 #[test]
+fn invalid_wmf_modes_stay_partial_without_payload_leakage() {
+    for (function, marker) in [
+        (0x0102, "WMF-SETBKMODE-INVALID"),
+        (0x0106, "WMF-SETPOLYFILLMODE-INVALID"),
+    ] {
+        let mut mode = wmf_u16_record(function, 99);
+        mode.extend_from_slice(format!("{marker} /JavaScript /EmbeddedFile /Launch").as_bytes());
+        mode.resize(mode.len().next_multiple_of(2), 0);
+        let mode_len = (mode.len() / 2) as u32;
+        write_test_le_u32(&mut mode, 0, mode_len);
+        let records = [mode, wmf_bounds_record(0x041b, 20, 10, 80, 50)];
+        let wmf = minimal_wmf_with_records(160, 80, &records);
+        let wmf_hex = bytes_to_hex(&wmf);
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+        )
+        .into_bytes();
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+        for forbidden in [
+            b"/Subtype /Image".as_slice(),
+            b"wmetafile",
+            wmf_hex.as_bytes(),
+            marker.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "invalid WMF mode payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
+fn malformed_wmf_modes_become_passive_placeholders() {
+    for (function, name) in [(0x0102, "SETBKMODE"), (0x0106, "SETPOLYFILLMODE")] {
+        let records = [
+            wmf_function_record(function),
+            wmf_bounds_record(0x041b, 20, 10, 80, 50),
+        ];
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+            bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed WMF mode placeholder");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::Placeholder, "{name}");
+        assert!(image.bytes.is_empty());
+        assert!(image.vector_commands.is_empty());
+    }
+}
+
+#[test]
 fn wmf_setrelabs_is_ignored_without_payload_leakage() {
     let mut mode = wmf_function_record(0x0105);
     mode.extend_from_slice(b"WMF-SETRELABS /JavaScript /EmbeddedFile /Launch");
