@@ -27508,6 +27508,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             0x0234 => {
                 read_le_u16(data, 0)?;
             }
+            0x0231 => {
+                read_le_u32(data, 0)?;
+            }
             0x00f7 => store_wmf_object(&mut objects, parse_wmf_palette_object(data)?)?,
             0x02fa => store_wmf_object(
                 &mut objects,

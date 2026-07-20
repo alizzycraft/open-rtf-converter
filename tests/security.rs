@@ -29371,6 +29371,125 @@ fn malformed_wmf_createpalette_becomes_passive_placeholder() {
 }
 
 #[test]
+fn wmf_setmapperflags_is_passive_noop_without_payload_leakage() {
+    let mut mapper = wmf_u32_record(0x0231, 1);
+    mapper.extend_from_slice(b"WMF-SETMAPPERFLAGS /JavaScript /EmbeddedFile /Launch");
+    mapper.resize(mapper.len().next_multiple_of(2), 0);
+    let mapper_len = (mapper.len() / 2) as u32;
+    write_test_le_u32(&mut mapper, 0, mapper_len);
+    let records = [
+        mapper,
+        wmf_exttextout_record(30, 20, "Mapper", 0, None),
+        wmf_bounds_record(0x041b, 20, 40, 90, 70),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF SETMAPPERFLAGS vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-SETMAPPERFLAGS",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SETMAPPERFLAGS payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("Mapper"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after WMF SETMAPPERFLAGS should render a passive PDF rectangle"
+    );
+    assert!(output.diagnostics.is_empty());
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-SETMAPPERFLAGS",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF SETMAPPERFLAGS payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_wmf_setmapperflags_becomes_passive_placeholder() {
+    let records = [wmf_function_record(0x0231)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SETMAPPERFLAGS placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_setrelabs_is_ignored_without_payload_leakage() {
     let mut mode = wmf_function_record(0x0105);
     mode.extend_from_slice(b"WMF-SETRELABS /JavaScript /EmbeddedFile /Launch");
@@ -65657,6 +65776,14 @@ fn wmf_u16_record(function: u16, value: u16) -> Vec<u8> {
     write_test_le_u32(&mut record, 0, 4);
     write_test_le_u16(&mut record, 4, function);
     write_test_le_u16(&mut record, 6, value);
+    record
+}
+
+fn wmf_u32_record(function: u16, value: u32) -> Vec<u8> {
+    let mut record = vec![0; 10];
+    write_test_le_u32(&mut record, 0, 5);
+    write_test_le_u16(&mut record, 4, function);
+    write_test_le_u32(&mut record, 6, value);
     record
 }
 
