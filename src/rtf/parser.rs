@@ -21511,13 +21511,15 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let text = if record_type == EMR_EXTTEXTOUTA {
+                let texts = if record_type == EMR_EXTTEXTOUTA {
                     parse_emf_exttextouta(data, &header, &coordinates, state.font_charset)
                 } else {
                     parse_emf_exttextoutw(data, &header, &coordinates)
                 };
-                if let Some(text) = text {
-                    push_emf_text_command(&mut commands, text, &state, &header, &coordinates)?;
+                if let Some(texts) = texts {
+                    for text in texts {
+                        push_emf_text_command(&mut commands, text, &state, &header, &coordinates)?;
+                    }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -23137,7 +23139,7 @@ fn parse_emf_exttextoutw(
     data: &[u8],
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
-) -> Option<ParsedEmfExtTextOut> {
+) -> Option<Vec<ParsedEmfExtTextOut>> {
     parse_emf_exttextout(data, header, coordinates, true, None)
 }
 
@@ -23146,7 +23148,7 @@ fn parse_emf_exttextouta(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
     font_charset: Option<i32>,
-) -> Option<ParsedEmfExtTextOut> {
+) -> Option<Vec<ParsedEmfExtTextOut>> {
     parse_emf_exttextout(data, header, coordinates, false, font_charset)
 }
 
@@ -23156,7 +23158,7 @@ fn parse_emf_exttextout(
     coordinates: &EmfCoordinateState,
     unicode: bool,
     font_charset: Option<i32>,
-) -> Option<ParsedEmfExtTextOut> {
+) -> Option<Vec<ParsedEmfExtTextOut>> {
     const EMF_ETO_OPAQUE: u32 = 0x0002;
     const EMF_ETO_CLIPPED: u32 = 0x0004;
     const EMF_ETO_GLYPH_INDEX: u32 = 0x0010;
@@ -23196,7 +23198,7 @@ fn parse_emf_exttextout(
     };
     if char_count == 0 {
         let (x, y) = normalized_emf_point(x, y, header, coordinates);
-        return Some(ParsedEmfExtTextOut {
+        return Some(vec![ParsedEmfExtTextOut {
             x,
             y,
             text: String::new(),
@@ -23210,7 +23212,7 @@ fn parse_emf_exttextout(
             } else {
                 None
             },
-        });
+        }]);
     }
     let byte_count = if unicode {
         char_count.checked_mul(2)?
@@ -23228,7 +23230,7 @@ fn parse_emf_exttextout(
         sanitize_emf_ansi_text_allow_empty(data.get(string_offset..string_end)?, font_charset)?
     };
     let (x, y) = normalized_emf_point(x, y, header, coordinates);
-    Some(ParsedEmfExtTextOut {
+    let text = ParsedEmfExtTextOut {
         x,
         y,
         text,
@@ -23242,7 +23244,22 @@ fn parse_emf_exttextout(
         } else {
             None
         },
-    })
+    };
+    let record_dx_offset = usize::try_from(read_le_u32(data, 64)?).ok()?;
+    if text.text.is_empty() {
+        return Some(vec![text]);
+    }
+    if record_dx_offset == 0 {
+        return Some(vec![text]);
+    }
+    split_emf_text_object_by_dx(
+        data,
+        record_dx_offset,
+        char_count,
+        text,
+        header,
+        coordinates,
+    )
 }
 
 fn parse_emf_polytextout(
