@@ -20575,6 +20575,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_CREATEPEN: u32 = 38;
     const EMR_CREATEBRUSHINDIRECT: u32 = 39;
     const EMR_DELETEOBJECT: u32 = 40;
+    const EMR_SELECTPALETTE: u32 = 48;
+    const EMR_CREATEPALETTE: u32 = 49;
+    const EMR_REALIZEPALETTE: u32 = 52;
     const EMR_ANGLEARC: u32 = 41;
     const EMR_ARC: u32 = 45;
     const EMR_CHORD: u32 = 46;
@@ -21144,6 +21147,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 let (handle, object) = parse_emf_brush_object(data)?;
                 store_emf_object(&mut objects, handle, object)?;
             }
+            EMR_CREATEPALETTE => {
+                let handle = parse_emf_palette_object(data)?;
+                store_emf_object(&mut objects, handle, EmfObject::Other)?;
+            }
             EMR_DELETEOBJECT => {
                 let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
                 if let Some(slot) = objects.get_mut(handle) {
@@ -21152,6 +21159,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
+            EMR_SELECTPALETTE => {
+                read_le_u32(data, 0)?;
+            }
+            EMR_REALIZEPALETTE => {}
             EMR_SELECTOBJECT => {
                 let handle = read_le_u32(data, 0)?;
                 if let Some(object) = emf_stock_object(handle).or_else(|| {
@@ -24981,6 +24992,19 @@ fn parse_emf_brush_object(data: &[u8]) -> Option<(usize, EmfObject)> {
             pattern,
         },
     ))
+}
+
+fn parse_emf_palette_object(data: &[u8]) -> Option<usize> {
+    if data.len() < 8 {
+        return None;
+    }
+    let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
+    let entry_count = usize::from(read_le_u16(data, 6)?);
+    let entries_end = 8usize.checked_add(entry_count.checked_mul(4)?)?;
+    if entries_end > data.len() || entry_count > MAX_PASSIVE_WMF_OBJECTS {
+        return None;
+    }
+    Some(handle)
 }
 
 fn store_emf_object(

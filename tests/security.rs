@@ -38448,6 +38448,146 @@ fn unsupported_emf_brush_style_is_inert_without_payload_leakage() {
 }
 
 #[test]
+fn emf_palette_records_are_passive_noops_without_payload_leakage() {
+    let mut palette = emf_create_palette_record(4, &[(255, 0, 0), (0, 255, 0)]);
+    palette.extend_from_slice(b"EMF-CREATEPALETTE /JavaScript /EmbeddedFile /OpenAction");
+    palette.resize(palette.len().next_multiple_of(4), 0);
+    let palette_len = palette.len() as u32;
+    write_test_le_u32(&mut palette, 4, palette_len);
+
+    let mut select = emf_u32_record(48, 4);
+    select.extend_from_slice(b"EMF-SELECTPALETTE /Launch /RichMedia");
+    select.resize(select.len().next_multiple_of(4), 0);
+    let select_len = select.len() as u32;
+    write_test_le_u32(&mut select, 4, select_len);
+
+    let mut realize = emf_unknown_record(52);
+    realize.extend_from_slice(b"EMF-REALIZEPALETTE /JavaScript /EmbeddedFile");
+    realize.resize(realize.len().next_multiple_of(4), 0);
+    let realize_len = realize.len() as u32;
+    write_test_le_u32(&mut realize, 4, realize_len);
+
+    let records = [
+        palette,
+        select,
+        realize,
+        emf_rect_record(43, 10, 10, 70, 40),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF palette no-op vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-CREATEPALETTE",
+        "EMF-SELECTPALETTE",
+        "EMF-REALIZEPALETTE",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "RichMedia",
+        "OpenAction",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF palette payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after EMF palette no-ops should render a passive PDF rectangle"
+    );
+    assert!(output.diagnostics.is_empty());
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-CREATEPALETTE",
+        b"EMF-SELECTPALETTE",
+        b"EMF-REALIZEPALETTE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF palette payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_emf_createpalette_becomes_passive_placeholder() {
+    let mut palette = emf_create_palette_record(4, &[(255, 0, 0)]);
+    write_test_le_u16(&mut palette, 14, 2);
+    let records = [palette];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF CREATEPALETTE placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn unsupported_emf_pen_styles_are_inert_without_payload_leakage() {
     for (mut pen, marker) in [
         (
@@ -70224,6 +70364,23 @@ fn emf_create_brush_record(handle: u32, style: u32, color: Color, hatch: u32) ->
     record[17] = color.green;
     record[18] = color.blue;
     write_test_le_u32(&mut record, 20, hatch);
+    record
+}
+
+fn emf_create_palette_record(handle: u32, entries: &[(u8, u8, u8)]) -> Vec<u8> {
+    let size = 16 + (entries.len() * 4);
+    let mut record = vec![0; size];
+    write_test_le_u32(&mut record, 0, 49);
+    write_test_le_u32(&mut record, 4, size as u32);
+    write_test_le_u32(&mut record, 8, handle);
+    write_test_le_u16(&mut record, 12, 0x0300);
+    write_test_le_u16(&mut record, 14, entries.len() as u16);
+    for (index, (red, green, blue)) in entries.iter().copied().enumerate() {
+        let offset = 16 + (index * 4);
+        record[offset] = red;
+        record[offset + 1] = green;
+        record[offset + 2] = blue;
+    }
     record
 }
 
