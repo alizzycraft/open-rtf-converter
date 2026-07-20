@@ -20917,9 +20917,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     ) => {}
                 _ => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
-            EMR_SETARCDIRECTION => {
-                state.arc_clockwise = parse_emf_arc_direction(data)?;
-            }
+            EMR_SETARCDIRECTION => match parse_emf_arc_direction(data)? {
+                Some(clockwise) => state.arc_clockwise = clockwise,
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_SETMITERLIMIT => {
                 if read_le_f32(data, 0)? != 10.0 {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -23385,14 +23386,14 @@ fn parse_emf_text_justification(
     Some(extra)
 }
 
-fn parse_emf_arc_direction(data: &[u8]) -> Option<bool> {
+fn parse_emf_arc_direction(data: &[u8]) -> Option<Option<bool>> {
     if data.len() < 4 {
         return None;
     }
     match read_le_u32(data, 0)? {
-        1 => Some(false),
-        2 => Some(true),
-        _ => None,
+        1 => Some(Some(false)),
+        2 => Some(Some(true)),
+        _ => Some(None),
     }
 }
 

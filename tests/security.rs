@@ -54322,6 +54322,95 @@ fn emf_polypolygon_records_render_single_passive_fill_path_without_payload_leaka
 }
 
 #[test]
+fn invalid_emf_setarcdirection_stays_partial_without_payload_leakage() {
+    let mut mode = emf_u32_record(57, 99);
+    mode.extend_from_slice(b"EMF-SETARCDIRECTION-INVALID /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(4), 0);
+    let mode_len = mode.len() as u32;
+    write_test_le_u32(&mut mode, 4, mode_len);
+    let records = [mode, emf_rect_record(43, 0, 0, 80, 40)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after invalid EMF SETARCDIRECTION should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-SETARCDIRECTION-INVALID",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid EMF SETARCDIRECTION payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_emf_setarcdirection_becomes_passive_placeholder() {
+    let mut mode = emf_unknown_record(57);
+    write_test_le_u32(&mut mode, 4, 8);
+    let records = [mode, emf_rect_record(43, 0, 0, 80, 40)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF SETARCDIRECTION placeholder");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn emf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
     let records = [
         emf_create_brush_record(
