@@ -20693,9 +20693,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETMAPPERFLAGS => {
-                if read_le_u32(data, 0)? != 0 {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
-                }
+                let _ = read_le_u32(data, 0)?;
             }
             EMR_SCALEVIEWPORTEXTEX => {
                 let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;

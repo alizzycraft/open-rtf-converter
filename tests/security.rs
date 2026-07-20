@@ -44796,9 +44796,9 @@ fn emf_default_setmapperflags_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
-fn non_default_emf_setmapperflags_stays_partial_without_payload_leakage() {
+fn non_default_emf_setmapperflags_is_passive_noop_without_payload_leakage() {
     let mut mode = emf_u32_record(16, 1);
-    mode.extend_from_slice(b"EMF-SETMAPPERFLAGS-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+    mode.extend_from_slice(b"EMF-SETMAPPERFLAGS-NONDEFAULT /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(4), 0);
     let mode_len = mode.len() as u32;
     write_test_le_u32(&mut mode, 4, mode_len);
@@ -44806,6 +44806,41 @@ fn non_default_emf_setmapperflags_stays_partial_without_payload_leakage() {
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
     let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF non-default mapper flags vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-SETMAPPERFLAGS-NONDEFAULT",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "non-default EMF SETMAPPERFLAGS payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
@@ -44814,15 +44849,21 @@ fn non_default_emf_setmapperflags_stays_partial_without_payload_leakage() {
         },
     )
     .unwrap();
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert!(output.diagnostics.is_empty());
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after non-default EMF SETMAPPERFLAGS should render a passive PDF rectangle"
+    );
     for forbidden in [
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
-        b"EMF-SETMAPPERFLAGS-UNSUPPORTED",
+        b"EMF-SETMAPPERFLAGS-NONDEFAULT",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Subtype /Image",
@@ -44835,7 +44876,7 @@ fn non_default_emf_setmapperflags_stays_partial_without_payload_leakage() {
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "unsupported EMF SETMAPPERFLAGS payload leaked to PDF: {:?}",
+            "non-default EMF SETMAPPERFLAGS payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
