@@ -29118,6 +29118,134 @@ fn malformed_wmf_scaleviewportext_becomes_passive_placeholder() {
 }
 
 #[test]
+fn wmf_palette_records_are_passive_noops_without_payload_leakage() {
+    let mut realize = wmf_function_record(0x0035);
+    realize.extend_from_slice(b"WMF-REALIZEPALETTE /JavaScript /EmbeddedFile");
+    realize.resize(realize.len().next_multiple_of(2), 0);
+    let realize_len = (realize.len() / 2) as u32;
+    write_test_le_u32(&mut realize, 0, realize_len);
+
+    let mut select = wmf_u16_record(0x0234, 0);
+    select.extend_from_slice(b"WMF-SELECTPALETTE /Launch /RichMedia");
+    select.resize(select.len().next_multiple_of(2), 0);
+    let select_len = (select.len() / 2) as u32;
+    write_test_le_u32(&mut select, 0, select_len);
+
+    let records = [realize, select, wmf_bounds_record(0x041b, 20, 10, 80, 50)];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF palette no-op vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-REALIZEPALETTE",
+        "WMF-SELECTPALETTE",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "RichMedia",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF palette payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after WMF palette no-ops should render a passive PDF rectangle"
+    );
+    assert!(output.diagnostics.is_empty());
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-REALIZEPALETTE",
+        b"WMF-SELECTPALETTE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF palette payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_wmf_selectpalette_becomes_passive_placeholder() {
+    let records = [wmf_function_record(0x0234)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SELECTPALETTE placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_setrelabs_is_ignored_without_payload_leakage() {
     let mut mode = wmf_function_record(0x0105);
     mode.extend_from_slice(b"WMF-SETRELABS /JavaScript /EmbeddedFile /Launch");

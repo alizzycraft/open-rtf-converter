@@ -27504,6 +27504,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     *object = None;
                 }
             }
+            0x0035 => {}
+            0x0234 => {
+                read_le_u16(data, 0)?;
+            }
             0x02fa => store_wmf_object(
                 &mut objects,
                 parse_wmf_pen_object(data).unwrap_or(WmfObject::Other),
