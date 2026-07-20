@@ -19788,6 +19788,7 @@ struct EmfDrawingState {
     font_charset: Option<i32>,
     text_horizontal_align: StaticImageTextHorizontalAlign,
     text_vertical_align: StaticImageTextVerticalAlign,
+    text_character_extra: f32,
     text_word_extra: f32,
     arc_clockwise: bool,
     stroke_rop2: u16,
@@ -19949,6 +19950,7 @@ impl Default for EmfDrawingState {
             font_charset: None,
             text_horizontal_align: StaticImageTextHorizontalAlign::Left,
             text_vertical_align: StaticImageTextVerticalAlign::Top,
+            text_character_extra: 0.0,
             text_word_extra: 0.0,
             arc_clockwise: false,
             stroke_rop2: WMF_ROP2_COPYPEN,
@@ -20560,6 +20562,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_SETTEXTCOLOR: u32 = 24;
     const EMR_SETBKCOLOR: u32 = 25;
     const EMR_OFFSETCLIPRGN: u32 = 26;
+    const EMR_SETTEXTCHAREXTRA: u32 = 106;
     const EMR_SCALEVIEWPORTEXTEX: u32 = 31;
     const EMR_SCALEWINDOWEXTEX: u32 = 32;
     const EMR_EXCLUDECLIPRECT: u32 = 29;
@@ -21044,6 +21047,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_SETBKCOLOR => {
                 state.background_color = Some(color_from_colorref(data, 0)?);
+            }
+            EMR_SETTEXTCHAREXTRA => {
+                match normalized_emf_text_character_extra(data, &header, &coordinates) {
+                    Some(extra) => state.text_character_extra = extra,
+                    None => skipped_record_count = skipped_record_count.checked_add(1)?,
+                }
             }
             EMR_SETTEXTJUSTIFICATION => {
                 match parse_emf_text_justification(data, &header, &coordinates)? {
@@ -23482,7 +23491,7 @@ fn push_emf_text_command(
                 bottom,
             }
         }),
-        character_extra: 0.0,
+        character_extra: state.text_character_extra,
         word_extra: state.text_word_extra,
         horizontal_align: state.text_horizontal_align,
         vertical_align: state.text_vertical_align,
@@ -23576,6 +23585,33 @@ fn parse_emf_text_justification(
         header.width_px,
     );
     Some(Some(extra.clamp(-max, max)))
+}
+
+fn normalized_emf_text_character_extra(
+    data: &[u8],
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> Option<f32> {
+    if data.len() < 4 {
+        return None;
+    }
+    let value = read_le_i32(data, 0)?;
+    let max_axis = i32::try_from(header.width_px.max(1)).ok()?;
+    let max = map_emf_length_axis(
+        max_axis,
+        coordinates.window_extent_x,
+        coordinates.viewport_extent_x,
+        header.width_px,
+    )
+    .abs()
+    .max(1.0);
+    let extra = map_emf_length_axis(
+        value,
+        coordinates.window_extent_x,
+        coordinates.viewport_extent_x,
+        header.width_px,
+    );
+    Some(extra.clamp(-max, max))
 }
 
 fn parse_emf_arc_direction(data: &[u8]) -> Option<Option<bool>> {

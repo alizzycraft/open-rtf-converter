@@ -43689,6 +43689,137 @@ fn sanitized_empty_emf_exttextout_opaque_bounds_render_passive_background_withou
 }
 
 #[test]
+fn emf_settextcharextra_renders_passive_spacing_without_payload_leakage() {
+    let mut extra = emf_i32_record(106, 12);
+    extra.extend_from_slice(b"EMF-SETTEXTCHAREXTRA /JavaScript /EmbeddedFile /Launch");
+    extra.resize(extra.len().next_multiple_of(4), 0);
+    let extra_len = extra.len() as u32;
+    write_test_le_u32(&mut extra, 4, extra_len);
+    let records = [
+        emf_size_record(9, 320, 160),
+        emf_size_record(11, 160, 80),
+        extra,
+        emf_exttextoutw_record(40, 20, "Hi", 0, None, false),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF text character extra vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Text {
+            ref text,
+            character_extra,
+            word_extra: 0.0,
+            ..
+        } if text == "Hi" && (character_extra - 6.0).abs() < 0.01
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-SETTEXTCHAREXTRA",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF text character extra payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(rendered_text.contains("Hi"));
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "Tc"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(pdf_operand_number)
+                    .is_some_and(|value| value > 1.0)
+        }),
+        "EMF SETTEXTCHAREXTRA should emit nonzero passive PDF character spacing"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-SETTEXTCHAREXTRA",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF text character extra payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn malformed_emf_settextcharextra_becomes_passive_placeholder() {
+    let mut record = vec![0; 8];
+    write_test_le_u32(&mut record, 0, 106);
+    write_test_le_u32(&mut record, 4, 8);
+    let records = [record];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF SETTEXTCHAREXTRA placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn emf_settextjustification_renders_passive_word_spacing_without_payload_leakage() {
     let records = [
         emf_size_record(9, 320, 160),
