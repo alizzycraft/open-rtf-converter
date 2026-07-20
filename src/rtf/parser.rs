@@ -26172,6 +26172,8 @@ struct WmfSavedDrawingState {
     current_point: (f32, f32),
     window_origin_x: i32,
     window_origin_y: i32,
+    viewport_origin_x: i32,
+    viewport_origin_y: i32,
     window_width: i32,
     window_height: i32,
     clip_scope_command_start: Option<usize>,
@@ -27445,6 +27447,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut record_count = 0usize;
     let mut window_origin_x = header.window_origin_x;
     let mut window_origin_y = header.window_origin_y;
+    let mut viewport_origin_x = 0i32;
+    let mut viewport_origin_y = 0i32;
     let mut window_width = header.window_width;
     let mut window_height = header.window_height;
     let mut objects: Vec<Option<WmfObject>> = Vec::new();
@@ -27472,6 +27476,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             return None;
         }
         let data = &bytes[pos + 6..record_end];
+        let mapped_origin_x = window_origin_x.saturating_sub(viewport_origin_x);
+        let mapped_origin_y = window_origin_y.saturating_sub(viewport_origin_y);
 
         match function {
             0x0000 => break,
@@ -27487,6 +27493,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     current_point,
                     window_origin_x,
                     window_origin_y,
+                    viewport_origin_x,
+                    viewport_origin_y,
                     window_width,
                     window_height,
                     clip_scope_command_start,
@@ -27506,6 +27514,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     current_point = restored.state.current_point;
                     window_origin_x = restored.state.window_origin_x;
                     window_origin_y = restored.state.window_origin_y;
+                    viewport_origin_x = restored.state.viewport_origin_x;
+                    viewport_origin_y = restored.state.viewport_origin_y;
                     window_width = restored.state.window_width;
                     window_height = restored.state.window_height;
                     clip_scope_command_start = restored.state.clip_scope_command_start;
@@ -27640,14 +27650,20 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 _ => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
             0x020d => {
-                if read_le_i16(data, 0)? != 0 || read_le_i16(data, 2)? != 0 {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
-                }
+                viewport_origin_y = i32::from(read_le_i16(data, 0)?)
+                    .clamp(-window_height.max(1), window_height.max(1));
+                viewport_origin_x = i32::from(read_le_i16(data, 2)?)
+                    .clamp(-window_width.max(1), window_width.max(1));
             }
             0x0211 => {
-                if read_le_i16(data, 0)? != 0 || read_le_i16(data, 2)? != 0 {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
-                }
+                let y_offset = i32::from(read_le_i16(data, 0)?);
+                let x_offset = i32::from(read_le_i16(data, 2)?);
+                viewport_origin_y = viewport_origin_y
+                    .checked_add(y_offset)?
+                    .clamp(-window_height.max(1), window_height.max(1));
+                viewport_origin_x = viewport_origin_x
+                    .checked_add(x_offset)?
+                    .clamp(-window_width.max(1), window_width.max(1));
             }
             0x0102 => match read_le_u16(data, 0)? {
                 WMF_BKMODE_TRANSPARENT => {
@@ -27683,8 +27699,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 current_point = parse_wmf_yx_point(
                     data,
                     0,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 )?;
@@ -27696,8 +27712,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 let end = parse_wmf_yx_point(
                     data,
                     0,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 )?;
@@ -27720,8 +27736,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 let Some((left, top, right, bottom)) = parse_wmf_bounds(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 ) else {
@@ -27827,8 +27843,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 let points = parse_wmf_point_list(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 )?;
@@ -27859,8 +27875,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             0x0538 => {
                 let polygons = parse_wmf_polypolygon_list(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 )?;
@@ -27885,8 +27901,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 let points = parse_wmf_point_list(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 )?;
@@ -27912,8 +27928,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 let control_points = parse_wmf_point_list(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 )?;
@@ -27946,16 +27962,16 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     parse_wmf_bounds_at(
                         data,
                         4,
-                        window_origin_x,
-                        window_origin_y,
+                        mapped_origin_x,
+                        mapped_origin_y,
                         window_width,
                         window_height,
                     )?
                 } else {
                     parse_wmf_bounds(
                         data,
-                        window_origin_x,
-                        window_origin_y,
+                        mapped_origin_x,
+                        mapped_origin_y,
                         window_width,
                         window_height,
                     )?
@@ -28012,8 +28028,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 let (points, center) = parse_wmf_arc_record(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 )?;
@@ -28069,8 +28085,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 if let Some((x, y, text)) = parse_wmf_textout(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                     state.font_charset,
@@ -28099,8 +28115,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 if let Some(ext_text) = parse_wmf_exttextout(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                     state.font_charset,
@@ -28167,8 +28183,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 } else if let Some((left, top, right, bottom, fill_color)) =
                     parse_wmf_patblt_passive_transfer(
                         data,
-                        window_origin_x,
-                        window_origin_y,
+                        mapped_origin_x,
+                        mapped_origin_y,
                         window_width,
                         window_height,
                         state.fill_color,
@@ -28196,8 +28212,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if is_passive_noop_wmf_setdibits_to_device(data) {
                 } else if let Some(command) = parse_wmf_setdibits_to_device(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 ) {
@@ -28221,8 +28237,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 } else if let Some(command) = match function {
                     0x0940 => parse_wmf_dibbitblt_srcopy(
                         data,
-                        window_origin_x,
-                        window_origin_y,
+                        mapped_origin_x,
+                        mapped_origin_y,
                         window_width,
                         window_height,
                         state.fill_color,
@@ -28230,8 +28246,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     ),
                     0x0b41 => parse_wmf_dibstretchblt_srcopy(
                         data,
-                        window_origin_x,
-                        window_origin_y,
+                        mapped_origin_x,
+                        mapped_origin_y,
                         window_width,
                         window_height,
                         state.fill_color,
@@ -28239,8 +28255,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     ),
                     0x0f43 => parse_wmf_stretchdib_srcopy(
                         data,
-                        window_origin_x,
-                        window_origin_y,
+                        mapped_origin_x,
+                        mapped_origin_y,
                         window_width,
                         window_height,
                         state.fill_color,
@@ -28253,8 +28269,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     parse_wmf_blt_passive_transfer(
                         data,
                         destination_offset,
-                        window_origin_x,
-                        window_origin_y,
+                        mapped_origin_x,
+                        mapped_origin_y,
                         window_width,
                         window_height,
                         state.fill_color,
@@ -28276,8 +28292,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 } else if let Some(bounds) = parse_wmf_blt_destination_bounds(
                     data,
                     destination_offset,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 ) && apply_passive_solid_backdrop_raster_transfer(
@@ -28300,8 +28316,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
                 if let Some((left, top, right, bottom, color)) = parse_wmf_setpixel_rect(
                     data,
-                    window_origin_x,
-                    window_origin_y,
+                    mapped_origin_x,
+                    mapped_origin_y,
                     window_width,
                     window_height,
                 ) && bounds_is_visible((left, top, right, bottom))
