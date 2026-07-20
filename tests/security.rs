@@ -40579,6 +40579,41 @@ fn malformed_emf_settextalign_becomes_passive_placeholder() {
 }
 
 #[test]
+fn malformed_emf_color_state_becomes_passive_placeholder() {
+    for (record_type, name) in [(24, "SETTEXTCOLOR"), (25, "SETBKCOLOR")] {
+        let mut color = emf_unknown_record(record_type);
+        write_test_le_u32(&mut color, 4, 8);
+        let records = [
+            color,
+            emf_exttextoutw_record(40, 20, "Hi", 0x0002, Some((30, 10, 90, 35)), false),
+        ];
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\emfblip\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed EMF color-state placeholder");
+
+        assert!(text.contains("before"), "{name}");
+        assert!(text.contains("after"), "{name}");
+        assert_eq!(image.format, ImageFormat::Placeholder, "{name}");
+        assert!(image.bytes.is_empty(), "{name}");
+        assert!(image.vector_commands.is_empty(), "{name}");
+        assert!(!text.contains("Hi"), "{name}");
+    }
+}
+
+#[test]
 fn emf_polytextoutw_records_render_passively_without_payload_leakage() {
     let records = [
         emf_u32_record(24, 0x0033_2211),

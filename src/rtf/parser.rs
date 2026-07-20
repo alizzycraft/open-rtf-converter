@@ -20941,14 +20941,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETTEXTCOLOR => {
-                if let Some(color) = color_from_colorref(data, 0) {
-                    state.text_color = Some(color);
-                }
+                state.text_color = Some(color_from_colorref(data, 0)?);
             }
             EMR_SETBKCOLOR => {
-                if let Some(color) = color_from_colorref(data, 0) {
-                    state.background_color = Some(color);
-                }
+                state.background_color = Some(color_from_colorref(data, 0)?);
             }
             EMR_SETTEXTJUSTIFICATION => {
                 state.text_word_extra = parse_emf_text_justification(data, &header, &coordinates)?;
