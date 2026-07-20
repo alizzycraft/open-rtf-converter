@@ -35095,6 +35095,54 @@ fn malformed_wmf_settextjustification_becomes_passive_placeholder() {
 }
 
 #[test]
+fn malformed_wmf_settextcolor_becomes_passive_placeholder() {
+    let records = [wmf_function_record(0x0209)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SETTEXTCOLOR placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
+fn malformed_wmf_setbkcolor_becomes_passive_placeholder() {
+    let records = [wmf_function_record(0x0201)];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed WMF SETBKCOLOR placeholder");
+
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+}
+
+#[test]
 fn wmf_textout_opaque_background_mode_renders_passive_fill_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000033100000001000c0000000000",

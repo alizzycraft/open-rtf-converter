@@ -27551,14 +27551,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0209 => {
-                if let Some(color) = color_from_colorref(data, 0) {
-                    state.text_color = Some(color);
-                }
+                state.text_color = Some(color_from_colorref(data, 0)?);
             }
             0x0201 => {
-                if let Some(color) = color_from_colorref(data, 0) {
-                    state.background_color = Some(color);
-                }
+                state.background_color = Some(color_from_colorref(data, 0)?);
             }
             0x0103 => {
                 if read_le_u16(data, 0)? != 1 {
