@@ -26174,6 +26174,9 @@ struct WmfSavedDrawingState {
     window_origin_y: i32,
     viewport_origin_x: i32,
     viewport_origin_y: i32,
+    viewport_width: i32,
+    viewport_height: i32,
+    viewport_extent_explicit: bool,
     window_width: i32,
     window_height: i32,
     clip_scope_command_start: Option<usize>,
@@ -26262,6 +26265,71 @@ const EMF_RGN_OR: u32 = 2;
 const EMF_RGN_XOR: u32 = 3;
 const EMF_RGN_DIFF: u32 = 4;
 const EMF_RGN_COPY: u32 = 5;
+
+#[derive(Debug, Copy, Clone)]
+struct WmfCoordinateMap {
+    window_origin_x: i32,
+    window_origin_y: i32,
+    viewport_origin_x: i32,
+    viewport_origin_y: i32,
+    viewport_width: i32,
+    viewport_height: i32,
+    window_width: i32,
+    window_height: i32,
+    image_width: i32,
+    image_height: i32,
+}
+
+impl WmfCoordinateMap {
+    fn mapped_origin_x(self) -> i32 {
+        self.window_origin_x.saturating_sub(self.viewport_origin_x)
+    }
+
+    fn mapped_origin_y(self) -> i32 {
+        self.window_origin_y.saturating_sub(self.viewport_origin_y)
+    }
+
+    fn normalized_point(self, x: i32, y: i32) -> (f32, f32) {
+        (
+            self.normalized_axis(
+                x,
+                self.window_origin_x,
+                self.window_width,
+                self.viewport_origin_x,
+                self.viewport_width,
+                self.image_width,
+            ),
+            self.normalized_axis(
+                y,
+                self.window_origin_y,
+                self.window_height,
+                self.viewport_origin_y,
+                self.viewport_height,
+                self.image_height,
+            ),
+        )
+    }
+
+    fn normalized_axis(
+        self,
+        value: i32,
+        window_origin: i32,
+        window_extent: i32,
+        viewport_origin: i32,
+        viewport_extent: i32,
+        image_extent: i32,
+    ) -> f32 {
+        let logical_extent = window_extent.max(1);
+        let image_extent = image_extent.max(1);
+        let viewport_extent = viewport_extent.clamp(-image_extent, image_extent);
+        let logical = i128::from(value.saturating_sub(window_origin));
+        let scaled = logical
+            .saturating_mul(i128::from(viewport_extent))
+            .saturating_div(i128::from(logical_extent));
+        let device = i128::from(viewport_origin).saturating_add(scaled);
+        device.clamp(0, i128::from(image_extent)) as f32
+    }
+}
 
 fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     const BITMAPCOREHEADER_SIZE: usize = 12;
@@ -27449,6 +27517,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut window_origin_y = header.window_origin_y;
     let mut viewport_origin_x = 0i32;
     let mut viewport_origin_y = 0i32;
+    let mut viewport_width = header.window_width;
+    let mut viewport_height = header.window_height;
+    let mut viewport_extent_explicit = false;
     let mut window_width = header.window_width;
     let mut window_height = header.window_height;
     let mut objects: Vec<Option<WmfObject>> = Vec::new();
@@ -27476,8 +27547,20 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
             return None;
         }
         let data = &bytes[pos + 6..record_end];
-        let mapped_origin_x = window_origin_x.saturating_sub(viewport_origin_x);
-        let mapped_origin_y = window_origin_y.saturating_sub(viewport_origin_y);
+        let coordinates = WmfCoordinateMap {
+            window_origin_x,
+            window_origin_y,
+            viewport_origin_x,
+            viewport_origin_y,
+            viewport_width,
+            viewport_height,
+            window_width,
+            window_height,
+            image_width: window_width,
+            image_height: window_height,
+        };
+        let mapped_origin_x = coordinates.mapped_origin_x();
+        let mapped_origin_y = coordinates.mapped_origin_y();
 
         match function {
             0x0000 => break,
@@ -27495,6 +27578,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_origin_y,
                     viewport_origin_x,
                     viewport_origin_y,
+                    viewport_width,
+                    viewport_height,
+                    viewport_extent_explicit,
                     window_width,
                     window_height,
                     clip_scope_command_start,
@@ -27516,6 +27602,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     window_origin_y = restored.state.window_origin_y;
                     viewport_origin_x = restored.state.viewport_origin_x;
                     viewport_origin_y = restored.state.viewport_origin_y;
+                    viewport_width = restored.state.viewport_width;
+                    viewport_height = restored.state.viewport_height;
+                    viewport_extent_explicit = restored.state.viewport_extent_explicit;
                     window_width = restored.state.window_width;
                     window_height = restored.state.window_height;
                     clip_scope_command_start = restored.state.clip_scope_command_start;
@@ -27536,13 +27625,20 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 let width = read_le_i16(data, 2)?;
                 window_width = i32::from(width.unsigned_abs().max(1));
                 window_height = i32::from(height.unsigned_abs().max(1));
+                if !viewport_extent_explicit {
+                    viewport_width = window_width;
+                    viewport_height = window_height;
+                }
             }
             0x020e => {
                 let height = read_le_i16(data, 0)?;
                 let width = read_le_i16(data, 2)?;
-                if i32::from(width) != window_width || i32::from(height) != window_height {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                viewport_width = i32::from(width).clamp(-window_width, window_width);
+                viewport_height = i32::from(height).clamp(-window_height, window_height);
+                if viewport_width == 0 || viewport_height == 0 {
+                    return None;
                 }
+                viewport_extent_explicit = true;
             }
             0x020f => {
                 let y_offset = i32::from(read_le_i16(data, 0)?);
@@ -27570,9 +27666,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if x_denom == 0 || y_denom == 0 {
                     return None;
                 }
-                if x_num != x_denom || y_num != y_denom {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
-                }
+                viewport_width = scale_wmf_extent(viewport_width, x_num, x_denom, window_width)?;
+                viewport_height = scale_wmf_extent(viewport_height, y_num, y_denom, window_height)?;
+                viewport_extent_explicit = true;
             }
             0x01f0 => {
                 let handle = usize::from(read_le_u16(data, 0)?);
@@ -27696,27 +27792,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0214 => {
-                current_point = parse_wmf_yx_point(
-                    data,
-                    0,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                )?;
+                current_point = parse_wmf_yx_point(data, 0, coordinates)?;
             }
             0x0213 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let end = parse_wmf_yx_point(
-                    data,
-                    0,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                )?;
+                let end = parse_wmf_yx_point(data, 0, coordinates)?;
                 if segment_is_visible(current_point, end) {
                     commands.push(StaticImageVectorCommand::Line {
                         x1: current_point.0,
@@ -27734,13 +27816,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let Some((left, top, right, bottom)) = parse_wmf_bounds(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                ) else {
+                let Some((left, top, right, bottom)) = parse_wmf_bounds(data, coordinates) else {
                     return None;
                 };
                 if function != 0x0416 && !bounds_is_visible((left, top, right, bottom)) {
@@ -27841,13 +27917,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let points = parse_wmf_point_list(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                )?;
+                let points = parse_wmf_point_list(data, coordinates)?;
                 if function == 0x0324 {
                     if points.len() >= 3 && point_bounds_are_visible(&points) {
                         commands.push(StaticImageVectorCommand::Polygon {
@@ -27873,13 +27943,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0538 => {
-                let polygons = parse_wmf_polypolygon_list(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                )?;
+                let polygons = parse_wmf_polypolygon_list(data, coordinates)?;
                 if let Some(command) = wmf_polypolygon_command(
                     polygons,
                     state.stroke_color,
@@ -27899,13 +27963,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let points = parse_wmf_point_list(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                )?;
+                let points = parse_wmf_point_list(data, coordinates)?;
                 if !polybezier_point_count_is_valid(points.len()) {
                     pos = record_end;
                     continue;
@@ -27926,13 +27984,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let control_points = parse_wmf_point_list(
-                    data,
-                    mapped_origin_x,
-                    mapped_origin_y,
-                    window_width,
-                    window_height,
-                )?;
+                let control_points = parse_wmf_point_list(data, coordinates)?;
                 if !polybezierto_point_count_is_valid(control_points.len()) {
                     pos = record_end;
                     continue;
@@ -27959,22 +28011,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     return None;
                 }
                 let bounds = if function == 0x061c {
-                    parse_wmf_bounds_at(
-                        data,
-                        4,
-                        mapped_origin_x,
-                        mapped_origin_y,
-                        window_width,
-                        window_height,
-                    )?
+                    parse_wmf_bounds_at(data, 4, coordinates)?
                 } else {
-                    parse_wmf_bounds(
-                        data,
-                        mapped_origin_x,
-                        mapped_origin_y,
-                        window_width,
-                        window_height,
-                    )?
+                    parse_wmf_bounds(data, coordinates)?
                 };
                 if bounds_is_visible(bounds) {
                     let (left, top, right, bottom) = bounds;
@@ -28686,30 +28725,14 @@ fn wmf_text_vertical_align(mode: u16) -> StaticImageTextVerticalAlign {
     }
 }
 
-fn parse_wmf_bounds(
-    data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
-) -> Option<(f32, f32, f32, f32)> {
-    parse_wmf_bounds_at(
-        data,
-        0,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    )
+fn parse_wmf_bounds(data: &[u8], coordinates: WmfCoordinateMap) -> Option<(f32, f32, f32, f32)> {
+    parse_wmf_bounds_at(data, 0, coordinates)
 }
 
 fn parse_wmf_bounds_at(
     data: &[u8],
     offset: usize,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<(f32, f32, f32, f32)> {
     if data.len() < offset.checked_add(8)? {
         return None;
@@ -28718,12 +28741,8 @@ fn parse_wmf_bounds_at(
     let right = i32::from(read_le_i16(data, offset.checked_add(2)?)?);
     let top = i32::from(read_le_i16(data, offset.checked_add(4)?)?);
     let left = i32::from(read_le_i16(data, offset.checked_add(6)?)?);
-    let max_x = window_width.max(1);
-    let max_y = window_height.max(1);
-    let left = left.saturating_sub(window_origin_x).clamp(0, max_x) as f32;
-    let right = right.saturating_sub(window_origin_x).clamp(0, max_x) as f32;
-    let top = top.saturating_sub(window_origin_y).clamp(0, max_y) as f32;
-    let bottom = bottom.saturating_sub(window_origin_y).clamp(0, max_y) as f32;
+    let (left, top) = coordinates.normalized_point(left, top);
+    let (right, bottom) = coordinates.normalized_point(right, bottom);
     Some((
         left.min(right),
         top.min(bottom),
@@ -28735,6 +28754,23 @@ fn parse_wmf_bounds_at(
 fn normalized_wmf_size(data: &[u8], offset: usize, extent: i32) -> Option<f32> {
     let value = i32::from(read_le_i16(data, offset)?.unsigned_abs());
     Some(value.clamp(0, extent.max(1)) as f32)
+}
+
+fn scale_wmf_extent(
+    extent: i32,
+    numerator: i16,
+    denominator: i16,
+    image_extent: i32,
+) -> Option<i32> {
+    let image_extent = image_extent.max(1);
+    let scaled = i128::from(extent)
+        .checked_mul(i128::from(numerator))?
+        .checked_div(i128::from(denominator))?;
+    let clamped = scaled.clamp(-i128::from(image_extent), i128::from(image_extent));
+    if clamped == 0 {
+        return None;
+    }
+    i32::try_from(clamped).ok()
 }
 
 fn parse_wmf_patblt_passive_transfer(
@@ -30257,10 +30293,18 @@ fn parse_wmf_exttextout(
         Some(parse_wmf_bounds_at(
             data,
             8,
-            window_origin_x,
-            window_origin_y,
-            window_width,
-            window_height,
+            WmfCoordinateMap {
+                window_origin_x,
+                window_origin_y,
+                viewport_origin_x: 0,
+                viewport_origin_y: 0,
+                viewport_width: window_width,
+                viewport_height: window_height,
+                window_width,
+                window_height,
+                image_width: window_width,
+                image_height: window_height,
+            },
         )?)
     } else {
         None
@@ -30377,41 +30421,21 @@ fn pixel_rect_end(value: f32, max: f32) -> f32 {
 fn parse_wmf_yx_point(
     data: &[u8],
     offset: usize,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<(f32, f32)> {
     let y = i32::from(read_le_i16(data, offset)?);
     let x = i32::from(read_le_i16(data, offset.checked_add(2)?)?);
-    Some(normalize_wmf_point(
-        x,
-        y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    ))
+    Some(coordinates.normalized_point(x, y))
 }
 
 fn parse_wmf_xy_point(
     data: &[u8],
     offset: usize,
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<(f32, f32)> {
     let x = i32::from(read_le_i16(data, offset)?);
     let y = i32::from(read_le_i16(data, offset.checked_add(2)?)?);
-    Some(normalize_wmf_point(
-        x,
-        y,
-        window_origin_x,
-        window_origin_y,
-        window_width,
-        window_height,
-    ))
+    Some(coordinates.normalized_point(x, y))
 }
 
 fn normalize_wmf_point(
@@ -30430,13 +30454,7 @@ fn normalize_wmf_point(
     )
 }
 
-fn parse_wmf_point_list(
-    data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
-) -> Option<Vec<(f32, f32)>> {
+fn parse_wmf_point_list(data: &[u8], coordinates: WmfCoordinateMap) -> Option<Vec<(f32, f32)>> {
     let count = usize::from(read_le_u16(data, 0)?);
     if count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
         return None;
@@ -30449,24 +30467,14 @@ fn parse_wmf_point_list(
     let mut points = Vec::with_capacity(count);
     for index in 0..count {
         let offset = 2usize.checked_add(index.checked_mul(4)?)?;
-        points.push(parse_wmf_xy_point(
-            data,
-            offset,
-            window_origin_x,
-            window_origin_y,
-            window_width,
-            window_height,
-        )?);
+        points.push(parse_wmf_xy_point(data, offset, coordinates)?);
     }
     Some(points)
 }
 
 fn parse_wmf_polypolygon_list(
     data: &[u8],
-    window_origin_x: i32,
-    window_origin_y: i32,
-    window_width: i32,
-    window_height: i32,
+    coordinates: WmfCoordinateMap,
 ) -> Option<Vec<Vec<(f32, f32)>>> {
     let polygon_count = usize::from(read_le_u16(data, 0)?);
     if polygon_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
@@ -30498,14 +30506,7 @@ fn parse_wmf_polypolygon_list(
         let mut points = Vec::with_capacity(count);
         for _ in 0..count {
             let offset = points_start.checked_add(point_index.checked_mul(4)?)?;
-            points.push(parse_wmf_xy_point(
-                data,
-                offset,
-                window_origin_x,
-                window_origin_y,
-                window_width,
-                window_height,
-            )?);
+            points.push(parse_wmf_xy_point(data, offset, coordinates)?);
             point_index += 1;
         }
         polygons.push(points);

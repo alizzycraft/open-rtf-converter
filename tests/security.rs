@@ -28798,7 +28798,7 @@ fn wmf_matching_setviewportext_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
-fn nonmatching_wmf_setviewportext_stays_partial_without_payload_leakage() {
+fn nonmatching_wmf_setviewportext_scales_passive_coordinates_without_payload_leakage() {
     let mut mode = wmf_yx_record(0x020e, 40, 160);
     mode.extend_from_slice(b"WMF-SETVIEWPORTEXT-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(2), 0);
@@ -28811,6 +28811,47 @@ fn nonmatching_wmf_setviewportext_stays_partial_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF scaled viewport extent vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 20.0,
+            top: 5.0,
+            right: 80.0,
+            bottom: 25.0,
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-SETVIEWPORTEXT-UNSUPPORTED",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SETVIEWPORTEXT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
@@ -28820,11 +28861,7 @@ fn nonmatching_wmf_setviewportext_stays_partial_without_payload_leakage() {
     )
     .unwrap();
 
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert!(output.diagnostics.is_empty());
     for forbidden in [
         b"/Subtype /Image".as_slice(),
         b"wmetafile",
@@ -29279,8 +29316,8 @@ fn wmf_identity_scaleviewportext_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
-fn nonidentity_wmf_scaleviewportext_stays_partial_without_payload_leakage() {
-    let mut mode = wmf_scale_record(0x0412, 1, 1, 1, 2);
+fn nonidentity_wmf_scaleviewportext_scales_passive_coordinates_without_payload_leakage() {
+    let mut mode = wmf_scale_record(0x0412, 2, 1, 2, 1);
     mode.extend_from_slice(b"WMF-SCALEVIEWPORTEXT-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(2), 0);
     let mode_len = (mode.len() / 2) as u32;
@@ -29292,6 +29329,47 @@ fn nonidentity_wmf_scaleviewportext_stays_partial_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive WMF scaled SCALEVIEWPORTEXT vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 5.0,
+            right: 40.0,
+            bottom: 25.0,
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "wmetafile",
+        "WMF-SCALEVIEWPORTEXT-UNSUPPORTED",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF SCALEVIEWPORTEXT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
@@ -29301,11 +29379,7 @@ fn nonidentity_wmf_scaleviewportext_stays_partial_without_payload_leakage() {
     )
     .unwrap();
 
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert!(output.diagnostics.is_empty());
     for forbidden in [
         b"/Subtype /Image".as_slice(),
         b"wmetafile",
