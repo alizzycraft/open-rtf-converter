@@ -19796,6 +19796,26 @@ struct EmfCoordinateState {
     viewport_origin_y: i32,
     viewport_extent_x: i32,
     viewport_extent_y: i32,
+    world_transform: EmfWorldTransform,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct EmfWorldTransform {
+    scale_x: f32,
+    scale_y: f32,
+    translate_x: f32,
+    translate_y: f32,
+}
+
+impl Default for EmfWorldTransform {
+    fn default() -> Self {
+        Self {
+            scale_x: 1.0,
+            scale_y: 1.0,
+            translate_x: 0.0,
+            translate_y: 0.0,
+        }
+    }
 }
 
 impl EmfCoordinateState {
@@ -19811,6 +19831,7 @@ impl EmfCoordinateState {
             viewport_origin_y: 0,
             viewport_extent_x: width,
             viewport_extent_y: height,
+            world_transform: EmfWorldTransform::default(),
         }
     }
 
@@ -19864,6 +19885,14 @@ impl EmfCoordinateState {
         self.viewport_extent_x = scale_emf_extent(self.viewport_extent_x, x_num, x_denom)?;
         self.viewport_extent_y = scale_emf_extent(self.viewport_extent_y, y_num, y_denom)?;
         Some(())
+    }
+
+    fn set_world_transform(&mut self, transform: EmfWorldTransform) {
+        self.world_transform = transform;
+    }
+
+    fn reset_world_transform(&mut self) {
+        self.world_transform = EmfWorldTransform::default();
     }
 }
 
@@ -21030,15 +21059,23 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETWORLDTRANSFORM => {
-                if !is_identity_emf_xform(data, 0)? {
+                if let Some(transform) = parse_passive_emf_world_transform(data, 0)? {
+                    coordinates.set_world_transform(transform);
+                } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
-            EMR_MODIFYWORLDTRANSFORM => {
-                if read_le_u32(data, 24)? != 1 {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
+            EMR_MODIFYWORLDTRANSFORM => match read_le_u32(data, 24)? {
+                1 => coordinates.reset_world_transform(),
+                4 => {
+                    if let Some(transform) = parse_passive_emf_world_transform(data, 0)? {
+                        coordinates.set_world_transform(transform);
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 }
-            }
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_CREATEPEN => {
                 let (handle, object) = parse_emf_pen_object(data)?;
                 store_emf_object(&mut objects, handle, object)?;
@@ -23445,15 +23482,36 @@ fn parse_emf_arc_direction(data: &[u8]) -> Option<Option<bool>> {
     }
 }
 
-fn is_identity_emf_xform(data: &[u8], offset: usize) -> Option<bool> {
-    Some(
-        read_le_f32(data, offset)? == 1.0
-            && read_le_f32(data, offset.checked_add(4)?)? == 0.0
-            && read_le_f32(data, offset.checked_add(8)?)? == 0.0
-            && read_le_f32(data, offset.checked_add(12)?)? == 1.0
-            && read_le_f32(data, offset.checked_add(16)?)? == 0.0
-            && read_le_f32(data, offset.checked_add(20)?)? == 0.0,
-    )
+fn parse_passive_emf_world_transform(
+    data: &[u8],
+    offset: usize,
+) -> Option<Option<EmfWorldTransform>> {
+    let scale_x = read_le_f32(data, offset)?;
+    let shear_y = read_le_f32(data, offset.checked_add(4)?)?;
+    let shear_x = read_le_f32(data, offset.checked_add(8)?)?;
+    let scale_y = read_le_f32(data, offset.checked_add(12)?)?;
+    let translate_x = read_le_f32(data, offset.checked_add(16)?)?;
+    let translate_y = read_le_f32(data, offset.checked_add(20)?)?;
+    let values = [scale_x, shear_y, shear_x, scale_y, translate_x, translate_y];
+    if !values.iter().all(|value| value.is_finite()) {
+        return Some(None);
+    }
+    if shear_x != 0.0 || shear_y != 0.0 || scale_x == 0.0 || scale_y == 0.0 {
+        return Some(None);
+    }
+    if scale_x.abs() > 64.0
+        || scale_y.abs() > 64.0
+        || translate_x.abs() > 1_000_000.0
+        || translate_y.abs() > 1_000_000.0
+    {
+        return Some(None);
+    }
+    Some(Some(EmfWorldTransform {
+        scale_x,
+        scale_y,
+        translate_x,
+        translate_y,
+    }))
 }
 
 fn is_neutral_emf_color_adjustment(data: &[u8]) -> Option<bool> {
@@ -25517,6 +25575,10 @@ fn normalized_emf_point(
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
 ) -> (f32, f32) {
+    let x = f64::from(x) * f64::from(coordinates.world_transform.scale_x)
+        + f64::from(coordinates.world_transform.translate_x);
+    let y = f64::from(y) * f64::from(coordinates.world_transform.scale_y)
+        + f64::from(coordinates.world_transform.translate_y);
     let x = map_emf_axis(
         x,
         coordinates.window_origin_x,
@@ -25537,7 +25599,7 @@ fn normalized_emf_point(
 }
 
 fn map_emf_axis(
-    value: i32,
+    value: f64,
     window_origin: i32,
     window_extent: i32,
     viewport_origin: i32,
@@ -25548,10 +25610,10 @@ fn map_emf_axis(
     if window_extent == 0 || viewport_extent == 0 {
         return 0.0;
     }
-    let relative = i128::from(value) - i128::from(window_origin);
-    let scaled = (relative * i128::from(viewport_extent)) / i128::from(window_extent);
-    let device = i128::from(viewport_origin) + scaled;
-    device.clamp(0, max) as f32
+    let relative = value - f64::from(window_origin);
+    let scaled = (relative * f64::from(viewport_extent)) / f64::from(window_extent);
+    let device = f64::from(viewport_origin) + scaled;
+    device.clamp(0.0, max as f64) as f32
 }
 
 fn map_emf_length_axis(value: i32, window_extent: i32, viewport_extent: i32, max: u32) -> f32 {

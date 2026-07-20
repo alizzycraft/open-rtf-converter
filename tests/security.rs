@@ -43921,9 +43921,102 @@ fn emf_identity_setworldtransform_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
-fn non_identity_emf_setworldtransform_stays_partial_without_payload_leakage() {
-    let mut mode = emf_xform_record(35, [2.0, 0.0, 0.0, 2.0, 3.0, 4.0]);
-    mode.extend_from_slice(b"EMF-SETWORLDTRANSFORM-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+fn scale_translate_emf_setworldtransform_maps_passive_geometry_without_payload_leakage() {
+    let mut mode = emf_xform_record(35, [2.0, 0.0, 0.0, 2.0, 10.0, 5.0]);
+    mode.extend_from_slice(b"EMF-SETWORLDTRANSFORM-SCALE /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(4), 0);
+    let mode_len = mode.len() as u32;
+    write_test_le_u32(&mut mode, 4, mode_len);
+    let records = [mode, emf_rect_record(43, 0, 0, 80, 40)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF transformed vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 5.0,
+            right: 160.0,
+            bottom: 80.0,
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-SETWORLDTRANSFORM-SCALE",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF SETWORLDTRANSFORM payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.is_empty());
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "transformed EMF SETWORLDTRANSFORM should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-SETWORLDTRANSFORM-SCALE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF SETWORLDTRANSFORM scale payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn shear_emf_setworldtransform_stays_partial_without_payload_leakage() {
+    let mut mode = emf_xform_record(35, [1.0, 0.25, 0.0, 1.0, 0.0, 0.0]);
+    mode.extend_from_slice(b"EMF-SETWORLDTRANSFORM-SHEAR /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(4), 0);
     let mode_len = mode.len() as u32;
     write_test_le_u32(&mut mode, 4, mode_len);
@@ -43947,7 +44040,7 @@ fn non_identity_emf_setworldtransform_stays_partial_without_payload_leakage() {
     for forbidden in [
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
-        b"EMF-SETWORLDTRANSFORM-UNSUPPORTED",
+        b"EMF-SETWORLDTRANSFORM-SHEAR",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Subtype /Image",
@@ -43960,7 +44053,7 @@ fn non_identity_emf_setworldtransform_stays_partial_without_payload_leakage() {
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "unsupported EMF SETWORLDTRANSFORM payload leaked to PDF: {:?}",
+            "unsupported EMF SETWORLDTRANSFORM shear payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -44083,11 +44176,102 @@ fn emf_identity_modifyworldtransform_is_passive_state_without_payload_leakage() 
 }
 
 #[test]
-fn non_identity_emf_modifyworldtransform_stays_partial_without_payload_leakage() {
-    let mut mode = emf_modifyworldtransform_record(4, [2.0, 0.0, 0.0, 2.0, 3.0, 4.0]);
-    mode.extend_from_slice(
-        b"EMF-MODIFYWORLDTRANSFORM-UNSUPPORTED /JavaScript /EmbeddedFile /Launch",
+fn set_mode_emf_modifyworldtransform_maps_passive_geometry_without_payload_leakage() {
+    let mut mode = emf_modifyworldtransform_record(4, [2.0, 0.0, 0.0, 2.0, 10.0, 5.0]);
+    mode.extend_from_slice(b"EMF-MODIFYWORLDTRANSFORM-SET /JavaScript /EmbeddedFile /Launch");
+    mode.resize(mode.len().next_multiple_of(4), 0);
+    let mode_len = mode.len() as u32;
+    write_test_le_u32(&mut mode, 4, mode_len);
+    let records = [mode, emf_rect_record(43, 0, 0, 80, 40)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF modify-world-transform vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 5.0,
+            right: 160.0,
+            bottom: 80.0,
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-MODIFYWORLDTRANSFORM-SET",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF MODIFYWORLDTRANSFORM payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.is_empty());
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "EMF MODIFYWORLDTRANSFORM MWT_SET should render a passive PDF rectangle"
     );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-MODIFYWORLDTRANSFORM-SET",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF MODIFYWORLDTRANSFORM MWT_SET payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn shear_emf_modifyworldtransform_stays_partial_without_payload_leakage() {
+    let mut mode = emf_modifyworldtransform_record(4, [1.0, 0.25, 0.0, 1.0, 0.0, 0.0]);
+    mode.extend_from_slice(b"EMF-MODIFYWORLDTRANSFORM-SHEAR /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(4), 0);
     let mode_len = mode.len() as u32;
     write_test_le_u32(&mut mode, 4, mode_len);
@@ -44111,7 +44295,7 @@ fn non_identity_emf_modifyworldtransform_stays_partial_without_payload_leakage()
     for forbidden in [
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
-        b"EMF-MODIFYWORLDTRANSFORM-UNSUPPORTED",
+        b"EMF-MODIFYWORLDTRANSFORM-SHEAR",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Subtype /Image",
@@ -44124,7 +44308,7 @@ fn non_identity_emf_modifyworldtransform_stays_partial_without_payload_leakage()
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "unsupported EMF MODIFYWORLDTRANSFORM payload leaked to PDF: {:?}",
+            "unsupported EMF MODIFYWORLDTRANSFORM shear payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
