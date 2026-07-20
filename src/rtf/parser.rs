@@ -19765,6 +19765,10 @@ enum EmfObject {
         color: Option<Color>,
         pattern: ShadingPattern,
     },
+    Font {
+        height: i32,
+        charset: Option<i32>,
+    },
     Other,
 }
 
@@ -19780,6 +19784,8 @@ struct EmfDrawingState {
     text_color: Option<Color>,
     background_color: Option<Color>,
     text_background_mode: WmfTextBackgroundMode,
+    font_height: Option<i32>,
+    font_charset: Option<i32>,
     text_horizontal_align: StaticImageTextHorizontalAlign,
     text_vertical_align: StaticImageTextVerticalAlign,
     text_word_extra: f32,
@@ -19939,6 +19945,8 @@ impl Default for EmfDrawingState {
                 blue: 255,
             }),
             text_background_mode: WmfTextBackgroundMode::Transparent,
+            font_height: None,
+            font_charset: None,
             text_horizontal_align: StaticImageTextHorizontalAlign::Left,
             text_vertical_align: StaticImageTextVerticalAlign::Top,
             text_word_extra: 0.0,
@@ -20608,6 +20616,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYPOLYGON16: u32 = 91;
     const EMR_POLYDRAW16: u32 = 92;
     const EMR_EXTCREATEPEN: u32 = 95;
+    const EMR_EXTCREATEFONTINDIRECTW: u32 = 82;
     const EMR_SETICMMODE: u32 = 98;
     const EMR_ALPHABLEND: u32 = 114;
     const EMR_SETLAYOUT: u32 = 115;
@@ -21127,6 +21136,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 let (handle, object) = parse_emf_ext_pen_object(data)?;
                 store_emf_object(&mut objects, handle, object)?;
             }
+            EMR_EXTCREATEFONTINDIRECTW => {
+                let (handle, object) = parse_emf_ext_font_object(data)?;
+                store_emf_object(&mut objects, handle, object)?;
+            }
             EMR_CREATEBRUSHINDIRECT => {
                 let (handle, object) = parse_emf_brush_object(data)?;
                 store_emf_object(&mut objects, handle, object)?;
@@ -21475,7 +21488,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     parse_emf_exttextoutw(data, &header, &coordinates)
                 };
                 if let Some(text) = text {
-                    push_emf_text_command(&mut commands, text, &state, &header)?;
+                    push_emf_text_command(&mut commands, text, &state, &header, &coordinates)?;
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -21488,7 +21501,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 };
                 if let Some(texts) = texts {
                     for text in texts {
-                        push_emf_text_command(&mut commands, text, &state, &header)?;
+                        push_emf_text_command(&mut commands, text, &state, &header, &coordinates)?;
                     }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -23390,6 +23403,7 @@ fn push_emf_text_command(
     text: ParsedEmfExtTextOut,
     state: &EmfDrawingState,
     header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
 ) -> Option<()> {
     if let (Some((left, top, right, bottom)), Some(fill_color)) =
         (text.opaque_bounds, state.background_color)
@@ -23418,7 +23432,7 @@ fn push_emf_text_command(
     commands.push(StaticImageVectorCommand::Text {
         x: text.x,
         y: text.y,
-        height: normalized_emf_text_height(header),
+        height: normalized_emf_text_height(state.font_height, header, coordinates),
         text: text.text,
         color: state.text_color,
         background_color: if text.opaque_bounds.is_none() {
@@ -23481,8 +23495,18 @@ fn sanitize_emf_ansi_text_allow_empty(bytes: &[u8]) -> Option<String> {
     Some(text)
 }
 
-fn normalized_emf_text_height(header: &ParsedEmfHeader) -> f32 {
-    (header.height_px.max(1) as f32 / 12.0).clamp(4.0, 48.0)
+fn normalized_emf_text_height(
+    font_height: Option<i32>,
+    header: &ParsedEmfHeader,
+    coordinates: &EmfCoordinateState,
+) -> f32 {
+    font_height
+        .and_then(|height| {
+            let height = i32::try_from(height.unsigned_abs()).ok()?;
+            normalized_emf_extent_height(height, header, coordinates)
+        })
+        .unwrap_or_else(|| header.height_px.max(1) as f32 / 12.0)
+        .clamp(4.0, 48.0)
 }
 
 fn parse_emf_text_justification(
@@ -24879,6 +24903,35 @@ fn validate_emf_optional_record_payload(
     Some(())
 }
 
+fn parse_emf_ext_font_object(data: &[u8]) -> Option<(usize, EmfObject)> {
+    const LOGFONTW_MIN_BYTES: usize = 28;
+    const LF_HEIGHT_OFFSET: usize = 4;
+    const LF_ESCAPEMENT_OFFSET: usize = 12;
+    const LF_ORIENTATION_OFFSET: usize = 16;
+    const LF_CHARSET_OFFSET: usize = 27;
+
+    if data.len() < LF_HEIGHT_OFFSET.checked_add(LOGFONTW_MIN_BYTES)? {
+        return None;
+    }
+    let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
+    let height = read_le_i32(data, LF_HEIGHT_OFFSET)?;
+    if height == 0 {
+        return Some((handle, EmfObject::Other));
+    }
+    let escapement = read_le_i32(data, LF_ESCAPEMENT_OFFSET)?;
+    let orientation = read_le_i32(data, LF_ORIENTATION_OFFSET)?;
+    if escapement != 0 || orientation != 0 {
+        return Some((handle, EmfObject::Other));
+    }
+    Some((
+        handle,
+        EmfObject::Font {
+            height,
+            charset: data.get(LF_CHARSET_OFFSET).copied().map(i32::from),
+        },
+    ))
+}
+
 fn parse_emf_comment_record(data: &[u8]) -> Option<()> {
     if data.len() < 4 {
         return None;
@@ -24951,6 +25004,10 @@ fn apply_emf_object(
         EmfObject::Brush { color, pattern } => {
             state.fill_color = color;
             state.fill_pattern = pattern;
+        }
+        EmfObject::Font { height, charset } => {
+            state.font_height = Some(height);
+            state.font_charset = charset;
         }
         EmfObject::Other => {}
     }

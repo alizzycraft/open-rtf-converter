@@ -41965,6 +41965,170 @@ fn emf_exttextoutw_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn emf_extcreatefontindirectw_sets_passive_text_height_without_payload_leakage() {
+    let mut font = emf_extcreatefontindirectw_record(7, -32, 0, 0, 0);
+    font.extend_from_slice(b"EMF-EXTCREATEFONTINDIRECTW-FACE /JavaScript /EmbeddedFile /Launch");
+    font.resize(font.len().next_multiple_of(4), 0);
+    let font_len = font.len() as u32;
+    write_test_le_u32(&mut font, 4, font_len);
+
+    let records = [
+        font,
+        emf_select_object_record(7),
+        emf_exttextoutw_record(40, 20, "Tall", 0, None, false),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF font-height text vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("Tall"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(
+        matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Text {
+                height,
+                ref text,
+                ..
+            } if text == "Tall" && (height - 32.0).abs() < 0.01
+        ),
+        "selected EMF font height should drive passive text height: {:?}; diagnostics: {:?}",
+        image.vector_commands[0],
+        parsed.diagnostics
+    );
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-EXTCREATEFONTINDIRECTW-FACE",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF font payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(rendered_text.contains("Tall"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Tf"),
+        "selected EMF font should render through passive PDF text state"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-EXTCREATEFONTINDIRECTW-FACE",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF font payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn rotated_emf_extcreatefontindirectw_stays_partial_without_payload_leakage() {
+    let mut font = emf_extcreatefontindirectw_record(7, -32, 900, 900, 0);
+    font.extend_from_slice(b"EMF-ROTATED-EXTCREATEFONTINDIRECTW /JavaScript /EmbeddedFile /Launch");
+    font.resize(font.len().next_multiple_of(4), 0);
+    let font_len = font.len() as u32;
+    write_test_le_u32(&mut font, 4, font_len);
+    let records = [
+        font,
+        emf_select_object_record(7),
+        emf_exttextoutw_record(40, 20, "Rotated", 0, None, false),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(rendered_text.contains("Rotated"));
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-ROTATED-EXTCREATEFONTINDIRECTW",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "rotated EMF font payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn invalid_emf_settextalign_stays_partial_without_payload_leakage() {
     let mut mode = emf_u32_record(22, 0x0000_0004);
     mode.extend_from_slice(b"EMF-SETTEXTALIGN-INVALID /JavaScript /EmbeddedFile /Launch");
@@ -70110,6 +70274,24 @@ fn emf_exttextoutw_record(
         let offset = 76 + (idx * 2);
         record[offset..offset + 2].copy_from_slice(&unit.to_le_bytes());
     }
+    record
+}
+
+fn emf_extcreatefontindirectw_record(
+    handle: u32,
+    height: i32,
+    escapement: i32,
+    orientation: i32,
+    charset: u8,
+) -> Vec<u8> {
+    let mut record = vec![0; 104];
+    write_test_le_u32(&mut record, 0, 82);
+    write_test_le_u32(&mut record, 4, 104);
+    write_test_le_u32(&mut record, 8, handle);
+    write_test_le_i32(&mut record, 12, height);
+    write_test_le_i32(&mut record, 20, escapement);
+    write_test_le_i32(&mut record, 24, orientation);
+    record[35] = charset;
     record
 }
 
