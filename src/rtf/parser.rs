@@ -24668,7 +24668,16 @@ fn parse_emf_ext_pen_object(data: &[u8]) -> Option<(usize, EmfObject)> {
 }
 
 fn emf_pen_style_is_supported(style: u32) -> bool {
-    matches!(style & 0x000f, 0..=6)
+    const PS_STYLE_MASK: u32 = 0x0000_000f;
+    const PS_ENDCAP_MASK: u32 = 0x0000_0f00;
+    const PS_JOIN_MASK: u32 = 0x0000_f000;
+    const PS_TYPE_MASK: u32 = 0x000f_0000;
+
+    matches!(style & PS_STYLE_MASK, 0..=6)
+        && matches!(style & PS_ENDCAP_MASK, 0x0000 | 0x0100 | 0x0200)
+        && matches!(style & PS_JOIN_MASK, 0x0000 | 0x1000 | 0x2000)
+        && matches!(style & PS_TYPE_MASK, 0x0000 | 0x0001_0000)
+        && (style & !(PS_STYLE_MASK | PS_ENDCAP_MASK | PS_JOIN_MASK | PS_TYPE_MASK)) == 0
 }
 
 fn validate_emf_optional_record_payload(

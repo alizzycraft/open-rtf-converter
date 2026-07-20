@@ -38130,6 +38130,140 @@ fn unsupported_emf_pen_styles_are_inert_without_payload_leakage() {
 }
 
 #[test]
+fn unknown_high_bit_emf_pen_styles_are_inert_without_payload_leakage() {
+    for (mut pen, select_handle, marker) in [
+        (
+            emf_create_pen_record(
+                3,
+                0x0040_0001,
+                7,
+                Color {
+                    red: 220,
+                    green: 80,
+                    blue: 40,
+                },
+            ),
+            3,
+            "EMF-CREATEPEN-HIGHBITS",
+        ),
+        (
+            emf_extcreatepen_record(
+                4,
+                0x0080_0002,
+                9,
+                0,
+                Color {
+                    red: 30,
+                    green: 160,
+                    blue: 210,
+                },
+                &[],
+            ),
+            4,
+            "EMF-EXTCREATEPEN-HIGHBITS",
+        ),
+    ] {
+        pen.extend_from_slice(format!("{marker} /JavaScript /EmbeddedFile /Launch").as_bytes());
+        pen.resize(pen.len().next_multiple_of(4), 0);
+        let pen_len = pen.len() as u32;
+        write_test_le_u32(&mut pen, 4, pen_len);
+        let records = [
+            pen,
+            emf_select_object_record(select_handle),
+            emf_point_record(27, 10, 20),
+            emf_point_record(54, 70, 60),
+        ];
+        let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        let emf_hex = bytes_to_hex(&emf);
+        let input =
+            format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("unknown high-bit EMF pen-style vector image");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 1);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Line {
+                stroke_color: Some(Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0
+                }),
+                stroke_width: 1.0,
+                stroke_style: BorderStyle::Single,
+                ..
+            }
+        ));
+        for forbidden in ["emfblip", marker, "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "unknown high-bit EMF pen payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")
+        }));
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| matches!(operation.operator.as_str(), "m" | "l" | "S")),
+            "drawing after unknown high-bit EMF pen should render passive PDF path operations"
+        );
+        for forbidden in [
+            b"emfblip".as_slice(),
+            emf_hex.as_bytes(),
+            marker.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "unknown high-bit EMF pen payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn emf_extcreatepen_records_render_passively_without_payload_leakage() {
     let payload = b"EXTCREATEPEN-DIB-PAYLOAD";
     let records = [
