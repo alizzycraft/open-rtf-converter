@@ -23149,6 +23149,8 @@ fn parse_emf_exttextout(
     const EMF_ETO_OPAQUE: u32 = 0x0002;
     const EMF_ETO_CLIPPED: u32 = 0x0004;
     const EMF_ETO_GLYPH_INDEX: u32 = 0x0010;
+    const EMF_ETO_NO_RECT: u32 = 0x0100;
+    const EMF_ETO_SUPPORTED_MASK: u32 = EMF_ETO_OPAQUE | EMF_ETO_CLIPPED | EMF_ETO_NO_RECT;
 
     if data.len() < 68 {
         return None;
@@ -23166,7 +23168,7 @@ fn parse_emf_exttextout(
     }
     let record_string_offset = usize::try_from(read_le_u32(data, 40)?).ok()?;
     let options = read_le_u32(data, 44)?;
-    if options & EMF_ETO_GLYPH_INDEX != 0 {
+    if options & !EMF_ETO_SUPPORTED_MASK != 0 || options & EMF_ETO_GLYPH_INDEX != 0 {
         return None;
     }
     let bounds = if options & (EMF_ETO_OPAQUE | EMF_ETO_CLIPPED) != 0 {
@@ -23285,6 +23287,8 @@ fn parse_emf_text_objects(
     const EMF_ETO_OPAQUE: u32 = 0x0002;
     const EMF_ETO_CLIPPED: u32 = 0x0004;
     const EMF_ETO_GLYPH_INDEX: u32 = 0x0010;
+    const EMF_ETO_NO_RECT: u32 = 0x0100;
+    const EMF_ETO_SUPPORTED_MASK: u32 = EMF_ETO_OPAQUE | EMF_ETO_CLIPPED | EMF_ETO_NO_RECT;
 
     if data.len() < offset.checked_add(40)? {
         return None;
@@ -23302,7 +23306,7 @@ fn parse_emf_text_objects(
     }
     let record_string_offset = usize::try_from(read_le_u32(data, offset.checked_add(12)?)?).ok()?;
     let options = read_le_u32(data, offset.checked_add(16)?)?;
-    if options & EMF_ETO_GLYPH_INDEX != 0 {
+    if options & !EMF_ETO_SUPPORTED_MASK != 0 || options & EMF_ETO_GLYPH_INDEX != 0 {
         return None;
     }
     let bounds = if options & (EMF_ETO_OPAQUE | EMF_ETO_CLIPPED) != 0 {
