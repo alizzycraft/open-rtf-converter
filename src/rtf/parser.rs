@@ -27468,6 +27468,12 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
+            0x020f => {
+                let y_offset = i32::from(read_le_i16(data, 0)?);
+                let x_offset = i32::from(read_le_i16(data, 2)?);
+                window_origin_x = window_origin_x.checked_add(x_offset)?;
+                window_origin_y = window_origin_y.checked_add(y_offset)?;
+            }
             0x01f0 => {
                 let handle = usize::from(read_le_u16(data, 0)?);
                 if let Some(object) = objects.get_mut(handle) {
