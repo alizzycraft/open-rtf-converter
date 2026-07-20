@@ -23826,6 +23826,7 @@ fn emf_commands_are_unpainted_clip_scope(commands: &[StaticImageVectorCommand]) 
             command,
             StaticImageVectorCommand::ClipRect { .. }
                 | StaticImageVectorCommand::ClipPath { .. }
+                | StaticImageVectorCommand::SetMiterLimit { .. }
                 | StaticImageVectorCommand::SaveState
                 | StaticImageVectorCommand::RestoreState
         )

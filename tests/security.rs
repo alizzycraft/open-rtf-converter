@@ -52554,6 +52554,123 @@ fn emf_blackness_and_whiteness_raster_transfers_render_passively_without_payload
 }
 
 #[test]
+fn emf_miter_state_before_blank_raster_stays_unpainted_without_payload_leakage() {
+    let mut miter = emf_f32_record(58, 2.0);
+    miter.extend_from_slice(b"EMF-MITER-BEFORE-BLANK-RASTER /JavaScript");
+    miter.resize(miter.len().next_multiple_of(4), 0);
+    let miter_len = miter.len() as u32;
+    write_test_le_u32(&mut miter, 4, miter_len);
+
+    let payload = b"EMF-BLANK-DSTINVERT-AFTER-MITER /EmbeddedFile /Launch";
+    let records = [
+        miter,
+        emf_bitblt_record(10, 20, 30, 15, 0x0055_0009, payload),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF miter state before blank raster vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::SetMiterLimit { limit: 2.0 }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Rectangle {
+            left: 10.0,
+            top: 20.0,
+            right: 40.0,
+            bottom: 35.0,
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-MITER-BEFORE-BLANK-RASTER",
+        "EMF-BLANK-DSTINVERT-AFTER-MITER",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF miter/blank-raster payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.is_empty());
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "M"),
+        "miter state before blank raster should still render passive PDF miter state"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "blank-destination DSTINVERT after miter state should render passive black rectangle"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-MITER-BEFORE-BLANK-RASTER",
+        payload.as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF miter/blank-raster payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn same_bounds_backdrop_raster_transfers_reduce_to_passive_solid_rectangles_without_payload_leakage()
  {
     let emf_payload = b"EMF-SAME-BOUNDS-DSTINVERT /JavaScript";
