@@ -26165,6 +26165,10 @@ const WMF_BKMODE_TRANSPARENT: u16 = 1;
 const WMF_BKMODE_OPAQUE: u16 = 2;
 const WMF_POLYFILLMODE_ALTERNATE: u16 = 1;
 const WMF_POLYFILLMODE_WINDING: u16 = 2;
+const WMF_STRETCHMODE_BLACKONWHITE: u16 = 1;
+const WMF_STRETCHMODE_WHITEONBLACK: u16 = 2;
+const WMF_STRETCHMODE_COLORONCOLOR: u16 = 3;
+const WMF_STRETCHMODE_HALFTONE: u16 = 4;
 const WMF_TA_RIGHT: u16 = 0x0002;
 const WMF_TA_CENTER: u16 = 0x0006;
 const WMF_TA_BOTTOM: u16 = 0x0008;
@@ -27562,9 +27566,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0105 => {}
-            0x0107 => {
-                read_le_u16(data, 0)?;
-            }
+            0x0107 => match read_le_u16(data, 0)? {
+                WMF_STRETCHMODE_BLACKONWHITE
+                | WMF_STRETCHMODE_WHITEONBLACK
+                | WMF_STRETCHMODE_COLORONCOLOR
+                | WMF_STRETCHMODE_HALFTONE => {}
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             0x020d => {
                 if read_le_i16(data, 0)? != 0 || read_le_i16(data, 2)? != 0 {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
