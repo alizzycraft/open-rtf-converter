@@ -19892,6 +19892,16 @@ impl EmfCoordinateState {
         self.world_transform = transform;
     }
 
+    fn left_multiply_world_transform(&mut self, transform: EmfWorldTransform) -> Option<()> {
+        self.world_transform = multiply_emf_world_transforms(transform, self.world_transform)?;
+        Some(())
+    }
+
+    fn right_multiply_world_transform(&mut self, transform: EmfWorldTransform) -> Option<()> {
+        self.world_transform = multiply_emf_world_transforms(self.world_transform, transform)?;
+        Some(())
+    }
+
     fn reset_world_transform(&mut self) {
         self.world_transform = EmfWorldTransform::default();
     }
@@ -21077,6 +21087,26 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_MODIFYWORLDTRANSFORM => match read_le_u32(data, 24)? {
                 1 => coordinates.reset_world_transform(),
+                2 => {
+                    if let Some(transform) = parse_passive_emf_world_transform(data, 0)?
+                        && coordinates
+                            .left_multiply_world_transform(transform)
+                            .is_some()
+                    {
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
+                }
+                3 => {
+                    if let Some(transform) = parse_passive_emf_world_transform(data, 0)?
+                        && coordinates
+                            .right_multiply_world_transform(transform)
+                            .is_some()
+                    {
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
+                }
                 4 => {
                     if let Some(transform) = parse_passive_emf_world_transform(data, 0)? {
                         coordinates.set_world_transform(transform);
@@ -23528,6 +23558,33 @@ fn parse_passive_emf_world_transform(
         translate_x,
         translate_y,
     }))
+}
+
+fn multiply_emf_world_transforms(
+    left: EmfWorldTransform,
+    right: EmfWorldTransform,
+) -> Option<EmfWorldTransform> {
+    let scale_x = left.scale_x * right.scale_x;
+    let scale_y = left.scale_y * right.scale_y;
+    let translate_x = left.scale_x * right.translate_x + left.translate_x;
+    let translate_y = left.scale_y * right.translate_y + left.translate_y;
+    let values = [scale_x, scale_y, translate_x, translate_y];
+    if !values.iter().all(|value| value.is_finite())
+        || scale_x == 0.0
+        || scale_y == 0.0
+        || scale_x.abs() > 64.0
+        || scale_y.abs() > 64.0
+        || translate_x.abs() > 1_000_000.0
+        || translate_y.abs() > 1_000_000.0
+    {
+        return None;
+    }
+    Some(EmfWorldTransform {
+        scale_x,
+        scale_y,
+        translate_x,
+        translate_y,
+    })
 }
 
 fn is_neutral_emf_color_adjustment(data: &[u8]) -> Option<bool> {
