@@ -37010,6 +37010,93 @@ fn wmf_exttextout_opaque_background_renders_as_passive_fill() {
 }
 
 #[test]
+fn unsupported_wmf_exttextout_options_stay_partial_without_payload_leakage() {
+    let mut text_record = wmf_exttextout_record(40, 20, "Hidden", 0x2000, None);
+    text_record.extend_from_slice(b"WMF-EXTTEXTOUT-PDY /JavaScript /EmbeddedFile /Launch");
+    text_record.resize(text_record.len().next_multiple_of(2), 0);
+    let text_words = (text_record.len() / 2) as u32;
+    write_test_le_u32(&mut text_record, 0, text_words);
+
+    let wmf = minimal_wmf_with_records(160, 80, &[text_record]);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("unsupported WMF EXTTEXTOUT option placeholder");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+    for forbidden in [
+        "wmetafile",
+        "WMF-EXTTEXTOUT-PDY",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "unsupported WMF EXTTEXTOUT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("unsupported picture format replaced with a passive geometry placeholder")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(!rendered_text.contains("Hidden"));
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"WMF-EXTTEXTOUT-PDY",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsupported WMF EXTTEXTOUT payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn empty_wmf_exttextout_opaque_bounds_render_passive_background_without_payload_leakage() {
     let mut empty_text = wmf_exttextout_record(40, 20, "", 0x0002, Some((30, 10, 90, 30)));
     empty_text.extend_from_slice(b"EMPTY-WMF-EXTTEXTOUT /JavaScript /EmbeddedFile /Launch");

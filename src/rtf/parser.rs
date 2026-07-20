@@ -26611,6 +26611,8 @@ const MAX_PASSIVE_VECTOR_RASTER_PIXELS: usize = 1_000_000;
 const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
 const WMF_ETO_GLYPH_INDEX: u16 = 0x0010;
+const WMF_ETO_NO_RECT: u16 = 0x0100;
+const WMF_ETO_SUPPORTED_MASK: u16 = WMF_ETO_OPAQUE | WMF_ETO_CLIPPED | WMF_ETO_NO_RECT;
 const WMF_BKMODE_TRANSPARENT: u16 = 1;
 const WMF_BKMODE_OPAQUE: u16 = 2;
 const WMF_POLYFILLMODE_ALTERNATE: u16 = 1;
@@ -28598,6 +28600,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             vertical_align: state.text_vertical_align,
                         });
                     }
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             0x061d => {
@@ -30522,7 +30526,7 @@ fn parse_wmf_exttextout(
         return None;
     }
     let flags = read_le_u16(data, 6)?;
-    if flags & WMF_ETO_GLYPH_INDEX != 0 {
+    if flags & !WMF_ETO_SUPPORTED_MASK != 0 || flags & WMF_ETO_GLYPH_INDEX != 0 {
         return None;
     }
     let bounds = if flags & (WMF_ETO_OPAQUE | WMF_ETO_CLIPPED) != 0 {
