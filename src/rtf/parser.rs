@@ -19772,6 +19772,7 @@ enum EmfObject {
 struct EmfDrawingState {
     stroke_color: Option<Color>,
     stroke_width: f32,
+    stroke_width_logical: i32,
     stroke_style: BorderStyle,
     fill_color: Option<Color>,
     fill_pattern: ShadingPattern,
@@ -19916,6 +19917,7 @@ impl Default for EmfDrawingState {
         Self {
             stroke_color: Some(Color::default()),
             stroke_width: 1.0,
+            stroke_width_logical: 1,
             stroke_style: BorderStyle::Single,
             fill_color: None,
             fill_pattern: ShadingPattern::None,
@@ -19946,6 +19948,14 @@ impl EmfDrawingState {
             WMF_ROP2_WHITE => Some(white_color()),
             _ => None,
         }
+    }
+
+    fn passive_stroke_width(
+        self,
+        header: &ParsedEmfHeader,
+        coordinates: &EmfCoordinateState,
+    ) -> f32 {
+        normalized_emf_stroke_width(self.stroke_width_logical, header, coordinates)
     }
 }
 
@@ -21135,7 +21145,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             x2: endpoint_normalized.0,
                             y2: endpoint_normalized.1,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                         });
                     }
@@ -21167,8 +21177,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
-                let path_commands =
-                    path.stroke_commands(stroke_color, state.stroke_width, state.stroke_style)?;
+                let path_commands = path.stroke_commands(
+                    stroke_color,
+                    state.passive_stroke_width(&header, &coordinates),
+                    state.stroke_style,
+                )?;
                 if commands.len().checked_add(path_commands.len())? > MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
@@ -21195,7 +21208,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     continue;
                 }
                 let (stroke_color, stroke_width) = if record_type == EMR_STROKEANDFILLPATH {
-                    (state.passive_stroke_color(), state.stroke_width)
+                    (
+                        state.passive_stroke_color(),
+                        state.passive_stroke_width(&header, &coordinates),
+                    )
                 } else {
                     (None, 0.0)
                 };
@@ -21665,7 +21681,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             right,
                             bottom,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                             fill_pattern: state.fill_pattern,
                             fill_color: state.fill_color,
@@ -21676,7 +21692,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             right,
                             bottom,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                             fill_pattern: state.fill_pattern,
                             fill_color: state.fill_color,
@@ -21692,7 +21708,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                                 corner_width,
                                 corner_height,
                                 stroke_color: state.passive_stroke_color(),
-                                stroke_width: state.stroke_width,
+                                stroke_width: state.passive_stroke_width(&header, &coordinates),
                                 stroke_style: state.stroke_style,
                                 fill_pattern: state.fill_pattern,
                                 fill_color: state.fill_color,
@@ -21718,7 +21734,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
                         stroke_color: state.passive_stroke_color(),
-                        stroke_width: state.stroke_width,
+                        stroke_width: state.passive_stroke_width(&header, &coordinates),
                         stroke_style: state.stroke_style,
                     });
                 }
@@ -21756,7 +21772,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             commands.push(StaticImageVectorCommand::Polyline {
                                 points: arc.points,
                                 stroke_color: state.passive_stroke_color(),
-                                stroke_width: state.stroke_width,
+                                stroke_width: state.passive_stroke_width(&header, &coordinates),
                                 stroke_style: state.stroke_style,
                             });
                         }
@@ -21769,7 +21785,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             commands.push(StaticImageVectorCommand::Polygon {
                                 points: arc.points,
                                 stroke_color: state.passive_stroke_color(),
-                                stroke_width: state.stroke_width,
+                                stroke_width: state.passive_stroke_width(&header, &coordinates),
                                 stroke_style: state.stroke_style,
                                 fill_rule: state.fill_rule,
                                 fill_pattern: state.fill_pattern,
@@ -21785,7 +21801,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             commands.push(StaticImageVectorCommand::Polygon {
                                 points,
                                 stroke_color: state.passive_stroke_color(),
-                                stroke_width: state.stroke_width,
+                                stroke_width: state.passive_stroke_width(&header, &coordinates),
                                 stroke_style: state.stroke_style,
                                 fill_rule: state.fill_rule,
                                 fill_pattern: state.fill_pattern,
@@ -21813,7 +21829,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     commands.push(StaticImageVectorCommand::Bezier {
                         points,
                         stroke_color: state.passive_stroke_color(),
-                        stroke_width: state.stroke_width,
+                        stroke_width: state.passive_stroke_width(&header, &coordinates),
                         stroke_style: state.stroke_style,
                     });
                 }
@@ -21845,7 +21861,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         commands.push(StaticImageVectorCommand::Bezier {
                             points,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                         });
                     }
@@ -21864,7 +21880,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                             fill_rule: state.fill_rule,
                             fill_pattern: state.fill_pattern,
@@ -21875,7 +21891,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
                         stroke_color: state.passive_stroke_color(),
-                        stroke_width: state.stroke_width,
+                        stroke_width: state.passive_stroke_width(&header, &coordinates),
                         stroke_style: state.stroke_style,
                     });
                 }
@@ -21909,7 +21925,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         commands.push(StaticImageVectorCommand::Polyline {
                             points,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                         });
                     }
@@ -21928,7 +21944,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                             fill_rule: state.fill_rule,
                             fill_pattern: state.fill_pattern,
@@ -21939,7 +21955,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
                         stroke_color: state.passive_stroke_color(),
-                        stroke_width: state.stroke_width,
+                        stroke_width: state.passive_stroke_width(&header, &coordinates),
                         stroke_style: state.stroke_style,
                     });
                 }
@@ -21961,7 +21977,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     commands.push(StaticImageVectorCommand::Bezier {
                         points,
                         stroke_color: state.passive_stroke_color(),
-                        stroke_width: state.stroke_width,
+                        stroke_width: state.passive_stroke_width(&header, &coordinates),
                         stroke_style: state.stroke_style,
                     });
                 }
@@ -21993,7 +22009,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         commands.push(StaticImageVectorCommand::Bezier {
                             points,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                         });
                     }
@@ -22029,7 +22045,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         commands.push(StaticImageVectorCommand::Polyline {
                             points,
                             stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.stroke_width,
+                            stroke_width: state.passive_stroke_width(&header, &coordinates),
                             stroke_style: state.stroke_style,
                         });
                     }
@@ -22047,7 +22063,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         &coordinates,
                         current_position,
                         state.passive_stroke_color(),
-                        state.stroke_width,
+                        state.passive_stroke_width(&header, &coordinates),
                         state.stroke_style,
                     )?
                 } else {
@@ -22057,7 +22073,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         &coordinates,
                         current_position,
                         state.passive_stroke_color(),
-                        state.stroke_width,
+                        state.passive_stroke_width(&header, &coordinates),
                         state.stroke_style,
                     )?
                 };
@@ -22076,7 +22092,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     if let Some(command) = emf_polypolygon_path_command(
                         polygons,
                         state.passive_stroke_color(),
-                        state.stroke_width,
+                        state.passive_stroke_width(&header, &coordinates),
                         state.stroke_style,
                         state.fill_rule,
                         state.fill_pattern,
@@ -22096,7 +22112,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             commands.push(StaticImageVectorCommand::Polyline {
                                 points,
                                 stroke_color: state.passive_stroke_color(),
-                                stroke_width: state.stroke_width,
+                                stroke_width: state.passive_stroke_width(&header, &coordinates),
                                 stroke_style: state.stroke_style,
                             });
                         }
@@ -22112,7 +22128,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     if let Some(command) = emf_polypolygon_path_command(
                         polygons,
                         state.passive_stroke_color(),
-                        state.stroke_width,
+                        state.passive_stroke_width(&header, &coordinates),
                         state.stroke_style,
                         state.fill_rule,
                         state.fill_pattern,
@@ -22132,7 +22148,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             commands.push(StaticImageVectorCommand::Polyline {
                                 points,
                                 stroke_color: state.passive_stroke_color(),
-                                stroke_width: state.stroke_width,
+                                stroke_width: state.passive_stroke_width(&header, &coordinates),
                                 stroke_style: state.stroke_style,
                             });
                         }
@@ -24853,6 +24869,7 @@ fn apply_emf_object(
             style,
         } => {
             state.stroke_color = color;
+            state.stroke_width_logical = width.max(1);
             state.stroke_width = normalized_emf_stroke_width(width, header, coordinates);
             state.stroke_style = style;
         }
@@ -54045,7 +54062,7 @@ After\par}"#;
                     right: 100.0,
                     bottom: 60.0,
                     stroke_color: Some(Color::default()),
-                    stroke_width: 1.0,
+                    stroke_width: 2.0,
                     stroke_style: BorderStyle::Single,
                     fill_pattern: ShadingPattern::None,
                     fill_color: None,

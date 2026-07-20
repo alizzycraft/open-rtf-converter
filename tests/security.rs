@@ -44113,6 +44113,104 @@ fn scale_emf_setworldtransform_maps_passive_pen_width_without_payload_leakage() 
 }
 
 #[test]
+fn later_emf_setworldtransform_rescales_selected_pen_width_without_payload_leakage() {
+    let mut mode = emf_xform_record(35, [2.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+    mode.extend_from_slice(b"EMF-SETWORLDTRANSFORM-LATE-PENWIDTH /JavaScript /EmbeddedFile");
+    mode.resize(mode.len().next_multiple_of(4), 0);
+    let mode_len = mode.len() as u32;
+    write_test_le_u32(&mut mode, 4, mode_len);
+    let records = [
+        emf_create_pen_record(
+            2,
+            0,
+            3,
+            Color {
+                red: 20,
+                green: 40,
+                blue: 60,
+            },
+        ),
+        emf_select_object_record(2),
+        mode,
+        emf_point_record(27, 10, 10),
+        emf_point_record(54, 70, 10),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF late transformed pen-width vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Line {
+            x1: 20.0,
+            y1: 20.0,
+            x2: 140.0,
+            y2: 20.0,
+            stroke_width: 6.0,
+            ..
+        }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-SETWORLDTRANSFORM-LATE-PENWIDTH",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "late EMF SETWORLDTRANSFORM pen-width payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.is_empty());
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-SETWORLDTRANSFORM-LATE-PENWIDTH",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "late EMF SETWORLDTRANSFORM pen-width payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shear_emf_setworldtransform_stays_partial_without_payload_leakage() {
     let mut mode = emf_xform_record(35, [1.0, 0.25, 0.0, 1.0, 0.0, 0.0]);
     mode.extend_from_slice(b"EMF-SETWORLDTRANSFORM-SHEAR /JavaScript /EmbeddedFile /Launch");
