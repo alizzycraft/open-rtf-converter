@@ -20513,6 +20513,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     const EMR_POLYDRAW: u32 = 56;
     const EMR_BEGINPATH: u32 = 59;
     const EMR_ENDPATH: u32 = 60;
+    const EMR_SETMITERLIMIT: u32 = 58;
     const EMR_CLOSEFIGURE: u32 = 61;
     const EMR_FILLPATH: u32 = 62;
     const EMR_STROKEANDFILLPATH: u32 = 63;
@@ -20903,6 +20904,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             }
             EMR_SETARCDIRECTION => {
                 state.arc_clockwise = parse_emf_arc_direction(data)?;
+            }
+            EMR_SETMITERLIMIT => {
+                if read_le_f32(data, 0)? != 10.0 {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_SETTEXTALIGN => {
                 let mode = (read_le_u32(data, 0)? & 0xffff) as u16;
