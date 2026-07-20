@@ -26530,7 +26530,7 @@ struct ParsedWmfVector {
     commands: Vec<StaticImageVectorCommand>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ParsedWmfExtTextOut {
     x: f32,
     y: f32,
@@ -26771,6 +26771,16 @@ impl WmfCoordinateMap {
             .saturating_div(i128::from(logical_extent));
         let device = i128::from(viewport_origin).saturating_add(scaled);
         device.clamp(0, i128::from(image_extent)) as f32
+    }
+
+    fn normalized_x_distance(self, value: i32) -> f32 {
+        let logical_extent = self.window_width.max(1);
+        let image_extent = self.image_width.max(1);
+        let viewport_extent = self.viewport_width.clamp(-image_extent, image_extent);
+        let scaled = i128::from(value)
+            .saturating_mul(i128::from(viewport_extent))
+            .saturating_div(i128::from(logical_extent));
+        scaled.clamp(-i128::from(image_extent), i128::from(image_extent)) as f32
     }
 }
 
@@ -28607,59 +28617,75 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some(ext_text) = parse_wmf_exttextout(data, coordinates, state.font_charset)
+                if let Some(ext_text_items) =
+                    parse_wmf_exttextout(data, coordinates, state.font_charset)
                 {
-                    let visible_opaque_bounds = ext_text
-                        .opaque_bounds
-                        .is_some_and(|bounds| bounds_is_visible(bounds));
-                    let required_commands =
-                        usize::from(visible_opaque_bounds) + usize::from(!ext_text.text.is_empty());
+                    let required_commands = ext_text_items
+                        .iter()
+                        .map(|ext_text| {
+                            usize::from(
+                                ext_text
+                                    .opaque_bounds
+                                    .is_some_and(|bounds| bounds_is_visible(bounds)),
+                            ) + usize::from(!ext_text.text.is_empty())
+                        })
+                        .try_fold(0usize, |total, count| total.checked_add(count));
+                    let Some(required_commands) = required_commands else {
+                        return None;
+                    };
                     if commands.len().saturating_add(required_commands) > MAX_PASSIVE_WMF_COMMANDS {
                         return None;
                     }
-                    if let Some((left, top, right, bottom)) = ext_text.opaque_bounds
-                        && bounds_is_visible((left, top, right, bottom))
-                    {
-                        commands.push(StaticImageVectorCommand::Rectangle {
-                            left,
-                            top,
-                            right,
-                            bottom,
-                            stroke_color: None,
-                            stroke_width: 0.0,
-                            stroke_style: BorderStyle::Single,
-                            fill_pattern: ShadingPattern::None,
-                            fill_color: state.background_color,
-                        });
-                    }
-                    if !ext_text.text.is_empty() {
-                        commands.push(StaticImageVectorCommand::Text {
-                            x: ext_text.x,
-                            y: ext_text.y,
-                            height: normalized_wmf_text_height(state.font_height, window_height),
-                            text: ext_text.text,
-                            color: state.text_color,
-                            background_color: if ext_text.opaque_bounds.is_none() {
-                                match state.text_background_mode {
-                                    WmfTextBackgroundMode::Opaque => state.background_color,
-                                    WmfTextBackgroundMode::Transparent => None,
-                                }
-                            } else {
-                                None
-                            },
-                            clip_bounds: ext_text.clip_bounds.map(|(left, top, right, bottom)| {
-                                crate::model::StaticImageVectorTextBounds {
-                                    left,
-                                    top,
-                                    right,
-                                    bottom,
-                                }
-                            }),
-                            character_extra: state.text_character_extra,
-                            word_extra: state.text_word_extra,
-                            horizontal_align: state.text_horizontal_align,
-                            vertical_align: state.text_vertical_align,
-                        });
+                    for ext_text in ext_text_items {
+                        if let Some((left, top, right, bottom)) = ext_text.opaque_bounds
+                            && bounds_is_visible((left, top, right, bottom))
+                        {
+                            commands.push(StaticImageVectorCommand::Rectangle {
+                                left,
+                                top,
+                                right,
+                                bottom,
+                                stroke_color: None,
+                                stroke_width: 0.0,
+                                stroke_style: BorderStyle::Single,
+                                fill_pattern: ShadingPattern::None,
+                                fill_color: state.background_color,
+                            });
+                        }
+                        if !ext_text.text.is_empty() {
+                            commands.push(StaticImageVectorCommand::Text {
+                                x: ext_text.x,
+                                y: ext_text.y,
+                                height: normalized_wmf_text_height(
+                                    state.font_height,
+                                    window_height,
+                                ),
+                                text: ext_text.text,
+                                color: state.text_color,
+                                background_color: if ext_text.opaque_bounds.is_none() {
+                                    match state.text_background_mode {
+                                        WmfTextBackgroundMode::Opaque => state.background_color,
+                                        WmfTextBackgroundMode::Transparent => None,
+                                    }
+                                } else {
+                                    None
+                                },
+                                clip_bounds: ext_text.clip_bounds.map(
+                                    |(left, top, right, bottom)| {
+                                        crate::model::StaticImageVectorTextBounds {
+                                            left,
+                                            top,
+                                            right,
+                                            bottom,
+                                        }
+                                    },
+                                ),
+                                character_extra: state.text_character_extra,
+                                word_extra: state.text_word_extra,
+                                horizontal_align: state.text_horizontal_align,
+                                vertical_align: state.text_vertical_align,
+                            });
+                        }
                     }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -30591,7 +30617,7 @@ fn parse_wmf_exttextout(
     data: &[u8],
     coordinates: WmfCoordinateMap,
     font_charset: Option<i32>,
-) -> Option<ParsedWmfExtTextOut> {
+) -> Option<Vec<ParsedWmfExtTextOut>> {
     if data.len() < 8 {
         return None;
     }
@@ -30619,13 +30645,17 @@ fn parse_wmf_exttextout(
     if data.len() < text_end {
         return None;
     }
+    let text_data_end = text_start.checked_add(byte_count.next_multiple_of(2))?;
+    if data.len() < text_data_end {
+        return None;
+    }
     let text = if byte_count == 0 {
         String::new()
     } else {
         sanitize_wmf_text_bytes_allow_empty(data.get(text_start..text_end)?, font_charset)?
     };
     let (x, y) = coordinates.normalized_point(x, y);
-    Some(ParsedWmfExtTextOut {
+    let text = ParsedWmfExtTextOut {
         x,
         y,
         text,
@@ -30639,7 +30669,53 @@ fn parse_wmf_exttextout(
         } else {
             None
         },
-    })
+    };
+    if text.text.is_empty() {
+        return Some(vec![text]);
+    }
+    let dx_bytes = byte_count.checked_mul(2)?;
+    if data.len().checked_sub(text_data_end)? != dx_bytes {
+        return Some(vec![text]);
+    }
+    split_wmf_exttextout_by_dx(data, text_data_end, byte_count, text, coordinates)
+}
+
+fn split_wmf_exttextout_by_dx(
+    data: &[u8],
+    dx_offset: usize,
+    byte_count: usize,
+    text: ParsedWmfExtTextOut,
+    coordinates: WmfCoordinateMap,
+) -> Option<Vec<ParsedWmfExtTextOut>> {
+    if byte_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
+        return None;
+    }
+    let chars: Vec<char> = text.text.chars().collect();
+    if chars.len() != byte_count {
+        return None;
+    }
+    let dx_end = dx_offset.checked_add(byte_count.checked_mul(2)?)?;
+    if dx_end != data.len() {
+        return None;
+    }
+    let mut x = text.x;
+    let mut items = Vec::with_capacity(byte_count);
+    for (index, ch) in chars.into_iter().enumerate() {
+        let mut item = text.clone();
+        item.x = x;
+        item.text.clear();
+        item.text.push(ch);
+        if index != 0 {
+            item.opaque_bounds = None;
+        }
+        items.push(item);
+        let dx = i32::from(read_le_i16(
+            data,
+            dx_offset.checked_add(index.checked_mul(2)?)?,
+        )?);
+        x += coordinates.normalized_x_distance(dx);
+    }
+    Some(items)
 }
 
 fn sanitize_wmf_text_bytes(bytes: &[u8], font_charset: Option<i32>) -> Option<String> {
