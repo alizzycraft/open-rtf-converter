@@ -474,6 +474,9 @@ pub enum ImageFormat {
 pub enum StaticImageVectorCommand {
     SaveState,
     RestoreState,
+    SetMiterLimit {
+        limit: f32,
+    },
     ClipRect {
         left: f32,
         top: f32,

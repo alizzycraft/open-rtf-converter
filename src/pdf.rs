@@ -1859,6 +1859,9 @@ fn draw_passive_wmf_vector_image(
                     vector_state_depth -= 1;
                 }
             }
+            StaticImageVectorCommand::SetMiterLimit { limit } => {
+                content.set_miter_limit((*limit).clamp(1.0, 256.0));
+            }
             StaticImageVectorCommand::ClipRect {
                 left,
                 top,

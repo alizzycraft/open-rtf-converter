@@ -20999,8 +20999,16 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 None => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
             EMR_SETMITERLIMIT => {
-                if read_le_f32(data, 0)? != 10.0 {
+                let Some(limit) = parse_passive_emf_miter_limit(data) else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                if limit != 10.0 {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
+                    commands.push(StaticImageVectorCommand::SetMiterLimit { limit });
                 }
             }
             EMR_SETTEXTALIGN => {
@@ -23553,6 +23561,14 @@ fn parse_passive_emf_world_transform(
         translate_x,
         translate_y,
     }))
+}
+
+fn parse_passive_emf_miter_limit(data: &[u8]) -> Option<f32> {
+    let limit = read_le_f32(data, 0)?;
+    if !limit.is_finite() || !(1.0..=256.0).contains(&limit) {
+        return None;
+    }
+    Some(limit)
 }
 
 fn multiply_emf_world_transforms(
