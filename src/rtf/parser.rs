@@ -19765,6 +19765,7 @@ enum EmfObject {
         color: Option<Color>,
         pattern: ShadingPattern,
     },
+    Other,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -21031,7 +21032,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         .ok()
                         .and_then(|idx| objects.get(idx).copied().flatten())
                 }) {
-                    apply_emf_object(&mut state, object, &header);
+                    if matches!(object, EmfObject::Other) {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    } else {
+                        apply_emf_object(&mut state, object, &header);
+                    }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -24693,6 +24698,9 @@ fn parse_emf_brush_object(data: &[u8]) -> Option<(usize, EmfObject)> {
     let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
     let style = read_le_u32(data, 4)?;
     let color = color_from_colorref(data, 8)?;
+    if !matches!(style, 0 | 1 | 2) {
+        return Some((handle, EmfObject::Other));
+    }
     let pattern = if style == 2 {
         wmf_hatch_shading_pattern((read_le_u32(data, 12)? & 0xffff) as u16)
     } else {
@@ -24739,6 +24747,7 @@ fn apply_emf_object(state: &mut EmfDrawingState, object: EmfObject, header: &Par
             state.fill_color = color;
             state.fill_pattern = pattern;
         }
+        EmfObject::Other => {}
     }
 }
 
