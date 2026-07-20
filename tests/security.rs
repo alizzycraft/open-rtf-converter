@@ -29704,7 +29704,7 @@ fn wmf_pattern_brush_objects_are_inert_without_payload_leakage() {
         image.vector_commands[0],
         StaticImageVectorCommand::Rectangle { .. }
     ));
-    assert_eq!(parsed.diagnostics.len(), 0);
+    assert_eq!(parsed.diagnostics.len(), 1);
     for forbidden in [
         "wmetafile",
         "WMF-CREATEPATTERNBRUSH",
@@ -29742,7 +29742,7 @@ fn wmf_pattern_brush_objects_are_inert_without_payload_leakage() {
             .any(|operation| operation.operator == "re"),
         "drawing after inert WMF pattern brushes should render a passive PDF rectangle"
     );
-    assert!(output.diagnostics.is_empty());
+    assert_eq!(output.diagnostics.len(), 1);
     for forbidden in [
         b"/Subtype /Image".as_slice(),
         b"wmetafile",
@@ -29761,6 +29761,157 @@ fn wmf_pattern_brush_objects_are_inert_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "WMF pattern-brush payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn unsupported_wmf_pen_and_brush_styles_are_inert_without_payload_leakage() {
+    let mut pen = vec![0; 16];
+    write_test_le_u32(&mut pen, 0, 8);
+    write_test_le_u16(&mut pen, 4, 0x02fa);
+    write_test_le_u16(&mut pen, 6, 9);
+    write_test_le_i16(&mut pen, 8, 7);
+    pen[12] = 220;
+    pen[13] = 80;
+    pen[14] = 40;
+    pen.extend_from_slice(b"WMF-CREATEPEN-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+    pen.resize(pen.len().next_multiple_of(2), 0);
+    let pen_len = (pen.len() / 2) as u32;
+    write_test_le_u32(&mut pen, 0, pen_len);
+
+    let mut brush = wmf_create_brush_record(Color {
+        red: 220,
+        green: 180,
+        blue: 120,
+    });
+    write_test_le_u16(&mut brush, 6, 3);
+    brush.extend_from_slice(b"WMF-CREATEBRUSH-UNSUPPORTED /RichMedia /OpenAction");
+    brush.resize(brush.len().next_multiple_of(2), 0);
+    let brush_len = (brush.len() / 2) as u32;
+    write_test_le_u32(&mut brush, 0, brush_len);
+
+    let records = [
+        pen,
+        brush,
+        wmf_select_object_record(0),
+        wmf_select_object_record(1),
+        wmf_bounds_record(0x041b, 20, 10, 80, 50),
+        wmf_yx_record(0x0214, 60, 20),
+        wmf_yx_record(0x0213, 70, 80),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("unsupported WMF object-style vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle {
+            stroke_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            stroke_width: 1.0,
+            stroke_style: BorderStyle::Single,
+            fill_color: None,
+            fill_pattern: ShadingPattern::None,
+            ..
+        }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Line {
+            stroke_color: Some(Color {
+                red: 0,
+                green: 0,
+                blue: 0
+            }),
+            stroke_width: 1.0,
+            stroke_style: BorderStyle::Single,
+            ..
+        }
+    ));
+    for forbidden in [
+        "wmetafile",
+        "WMF-CREATEPEN-UNSUPPORTED",
+        "WMF-CREATEBRUSH-UNSUPPORTED",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+        "RichMedia",
+        "OpenAction",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "unsupported WMF object-style payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("2 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after unsupported WMF objects should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-CREATEPEN-UNSUPPORTED",
+        b"WMF-CREATEBRUSH-UNSUPPORTED",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsupported WMF object-style payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

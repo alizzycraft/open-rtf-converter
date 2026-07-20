@@ -27594,7 +27594,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             state.font_height = Some(height);
                             state.font_charset = charset;
                         }
-                        WmfObject::Other => {}
+                        WmfObject::Other => {
+                            skipped_record_count = skipped_record_count.checked_add(1)?
+                        }
                     }
                 }
             }
@@ -28535,6 +28537,9 @@ fn parse_wmf_pen_object(data: &[u8]) -> Option<WmfObject> {
         return None;
     }
     let style = read_le_u16(data, 0)?;
+    if !wmf_pen_style_is_supported(style) {
+        return Some(WmfObject::Other);
+    }
     let width = i32::from(read_le_i16(data, 2)?.unsigned_abs().max(1));
     let color = color_from_colorref(data, 6)?;
     Some(WmfObject::Pen {
@@ -28542,6 +28547,10 @@ fn parse_wmf_pen_object(data: &[u8]) -> Option<WmfObject> {
         width,
         style: wmf_pen_border_style(style),
     })
+}
+
+fn wmf_pen_style_is_supported(style: u16) -> bool {
+    matches!(style & 0x000f, 0..=6)
 }
 
 fn wmf_pen_border_style(style: u16) -> BorderStyle {
@@ -28558,6 +28567,9 @@ fn parse_wmf_brush_object(data: &[u8]) -> Option<WmfObject> {
     }
     let style = read_le_u16(data, 0)?;
     let color = color_from_colorref(data, 2)?;
+    if !matches!(style, 0 | 1 | 2) {
+        return Some(WmfObject::Other);
+    }
     let pattern = if style == 2 {
         wmf_hatch_shading_pattern(read_le_u16(data, 6)?)
     } else {
