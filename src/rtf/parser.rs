@@ -21023,6 +21023,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
                 if let Some(slot) = objects.get_mut(handle) {
                     *slot = None;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             EMR_SELECTOBJECT => {
@@ -27557,6 +27559,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 let handle = usize::from(read_le_u16(data, 0)?);
                 if let Some(object) = objects.get_mut(handle) {
                     *object = None;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             0x0035 => {}

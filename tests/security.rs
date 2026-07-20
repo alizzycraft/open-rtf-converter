@@ -30025,6 +30025,113 @@ fn missing_wmf_selectobject_is_inert_without_payload_leakage() {
 }
 
 #[test]
+fn missing_wmf_deleteobject_is_inert_without_payload_leakage() {
+    let mut delete = wmf_u16_record(0x01f0, 42);
+    delete.extend_from_slice(b"WMF-MISSING-DELETEOBJECT /JavaScript /EmbeddedFile /Launch");
+    delete.resize(delete.len().next_multiple_of(2), 0);
+    let delete_len = (delete.len() / 2) as u32;
+    write_test_le_u32(&mut delete, 0, delete_len);
+
+    let records = [
+        delete,
+        wmf_bounds_record(0x041b, 20, 10, 80, 50),
+        wmf_yx_record(0x0214, 60, 20),
+        wmf_yx_record(0x0213, 70, 80),
+    ];
+    let wmf = minimal_wmf_with_records(160, 80, &records);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal160\\pichgoal80 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("missing WMF DELETEOBJECT vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Line { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 1);
+    for forbidden in [
+        "wmetafile",
+        "WMF-MISSING-DELETEOBJECT",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "missing WMF DELETEOBJECT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after missing WMF DELETEOBJECT should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"wmetafile",
+        wmf_hex.as_bytes(),
+        b"WMF-MISSING-DELETEOBJECT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "missing WMF DELETEOBJECT payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn malformed_wmf_pattern_brushes_become_passive_placeholders() {
     for function in [0x01f9, 0x0142] {
         let records = [wmf_function_record(function)];
@@ -37427,6 +37534,111 @@ fn emf_simple_vector_records_render_passively_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "EMF payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn missing_emf_deleteobject_is_inert_without_payload_leakage() {
+    let mut delete = emf_u32_record(40, 42);
+    delete.extend_from_slice(b"EMF-MISSING-DELETEOBJECT /JavaScript /EmbeddedFile /Launch");
+    delete.resize(delete.len().next_multiple_of(4), 0);
+    let delete_len = delete.len() as u32;
+    write_test_le_u32(&mut delete, 4, delete_len);
+
+    let records = [
+        delete,
+        emf_rect_record(43, 10, 10, 70, 40),
+        emf_point_record(27, 10, 50),
+        emf_point_record(54, 70, 70),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("missing EMF DELETEOBJECT vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert!(matches!(
+        image.vector_commands[1],
+        StaticImageVectorCommand::Line { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 1);
+    for forbidden in [
+        "emfblip",
+        " EMF",
+        "EMF-MISSING-DELETEOBJECT",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "missing EMF DELETEOBJECT payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "drawing after missing EMF DELETEOBJECT should render a passive PDF rectangle"
+    );
+    for forbidden in [
+        b"/Subtype /Image".as_slice(),
+        b"emfblip",
+        emf_hex.as_bytes(),
+        b"EMF-MISSING-DELETEOBJECT",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "missing EMF DELETEOBJECT payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
