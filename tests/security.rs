@@ -43173,9 +43173,9 @@ fn emf_mm_text_setmapmode_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
-fn non_default_emf_setmapmode_stays_partial_without_payload_leakage() {
+fn anisotropic_emf_setmapmode_is_passive_state_without_payload_leakage() {
     let mut mode = emf_u32_record(17, 8);
-    mode.extend_from_slice(b"EMF-SETMAPMODE-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
+    mode.extend_from_slice(b"EMF-SETMAPMODE-ANISOTROPIC /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(4), 0);
     let mode_len = mode.len() as u32;
     write_test_le_u32(&mut mode, 4, mode_len);
@@ -43183,6 +43183,41 @@ fn non_default_emf_setmapmode_stays_partial_without_payload_leakage() {
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
     let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF anisotropic map mode vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "EMF-SETMAPMODE-ANISOTROPIC",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF anisotropic SETMAPMODE payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
@@ -43191,15 +43226,11 @@ fn non_default_emf_setmapmode_stays_partial_without_payload_leakage() {
         },
     )
     .unwrap();
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("1 unsupported record(s) skipped")
-    }));
+    assert!(output.diagnostics.is_empty());
     for forbidden in [
         b"emfblip".as_slice(),
         emf_hex.as_bytes(),
-        b"EMF-SETMAPMODE-UNSUPPORTED",
+        b"EMF-SETMAPMODE-ANISOTROPIC",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Subtype /Image",
@@ -43212,7 +43243,7 @@ fn non_default_emf_setmapmode_stays_partial_without_payload_leakage() {
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "unsupported EMF SETMAPMODE payload leaked to PDF: {:?}",
+            "EMF anisotropic SETMAPMODE payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

@@ -20878,7 +20878,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETMAPMODE => {
-                if read_le_u32(data, 0)? != 1 {
+                if !matches!(
+                    read_le_u32(data, 0)?,
+                    value if value == u32::from(WMF_MAPMODE_TEXT)
+                        || value == u32::from(WMF_MAPMODE_ISOTROPIC)
+                        || value == u32::from(WMF_MAPMODE_ANISOTROPIC)
+                ) {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
