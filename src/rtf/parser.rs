@@ -27486,6 +27486,18 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
+            0x0412 => {
+                let y_denom = read_le_i16(data, 0)?;
+                let y_num = read_le_i16(data, 2)?;
+                let x_denom = read_le_i16(data, 4)?;
+                let x_num = read_le_i16(data, 6)?;
+                if x_denom == 0 || y_denom == 0 {
+                    return None;
+                }
+                if x_num != x_denom || y_num != y_denom {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
             0x01f0 => {
                 let handle = usize::from(read_le_u16(data, 0)?);
                 if let Some(object) = objects.get_mut(handle) {
