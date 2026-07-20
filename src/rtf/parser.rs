@@ -20947,7 +20947,10 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 state.background_color = Some(color_from_colorref(data, 0)?);
             }
             EMR_SETTEXTJUSTIFICATION => {
-                state.text_word_extra = parse_emf_text_justification(data, &header, &coordinates)?;
+                match parse_emf_text_justification(data, &header, &coordinates)? {
+                    Some(extra) => state.text_word_extra = extra,
+                    None => skipped_record_count = skipped_record_count.checked_add(1)?,
+                }
             }
             EMR_SETLAYOUT => {
                 if read_le_u32(data, 0)? != 0 {
@@ -23363,23 +23366,35 @@ fn parse_emf_text_justification(
     data: &[u8],
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
-) -> Option<f32> {
+) -> Option<Option<f32>> {
     if data.len() < 8 {
         return None;
     }
     let break_extra = read_le_i32(data, 0)?;
     let break_count = read_le_i32(data, 4)?;
-    if break_count <= 0 || break_extra == 0 {
-        return Some(0.0);
+    if break_count < 0 {
+        return Some(None);
+    }
+    if break_count == 0 || break_extra == 0 {
+        return Some(Some(0.0));
     }
     let extra_per_break = break_extra.checked_div(break_count)?;
+    let max_axis = i32::try_from(header.width_px.max(1)).ok()?;
+    let max = map_emf_length_axis(
+        max_axis,
+        coordinates.window_extent_x,
+        coordinates.viewport_extent_x,
+        header.width_px,
+    )
+    .abs()
+    .max(1.0);
     let extra = map_emf_length_axis(
         extra_per_break,
         coordinates.window_extent_x,
         coordinates.viewport_extent_x,
         header.width_px,
     );
-    Some(extra)
+    Some(Some(extra.clamp(-max, max)))
 }
 
 fn parse_emf_arc_direction(data: &[u8]) -> Option<Option<bool>> {

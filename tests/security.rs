@@ -41331,6 +41331,140 @@ fn emf_settextjustification_renders_passive_word_spacing_without_payload_leakage
 }
 
 #[test]
+fn invalid_emf_settextjustification_stays_partial_without_payload_leakage() {
+    let mut justification = emf_i32_pair_record(120, 40, -2);
+    justification
+        .extend_from_slice(b"EMF-SETTEXTJUSTIFICATION-INVALID /JavaScript /EmbeddedFile /Launch");
+    justification.resize(justification.len().next_multiple_of(4), 0);
+    let justification_len = justification.len() as u32;
+    write_test_le_u32(&mut justification, 4, justification_len);
+    let records = [
+        justification,
+        emf_exttextoutw_record(40, 20, "A B C", 0, None, false),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(rendered_text.contains("A B C"));
+    assert!(
+        !content.operations.iter().any(|operation| {
+            operation.operator == "Tw"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_f32().ok())
+                    .is_some_and(|value| value.abs() > 0.01)
+        }),
+        "invalid EMF SETTEXTJUSTIFICATION should not mutate passive PDF word spacing"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EMF-SETTEXTJUSTIFICATION-INVALID",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid EMF SETTEXTJUSTIFICATION payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn huge_emf_settextjustification_is_clamped_passively() {
+    let records = [
+        emf_i32_pair_record(120, i32::MAX, 1),
+        emf_exttextoutw_record(40, 20, "A B C", 0, None, false),
+    ];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("clamped EMF text justification vector image");
+
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Text {
+            word_extra,
+            ..
+        } if (word_extra - 160.0).abs() < 0.01
+    ));
+}
+
+#[test]
+fn malformed_emf_settextjustification_becomes_passive_placeholder() {
+    let mut justification = emf_unknown_record(120);
+    write_test_le_u32(&mut justification, 4, 8);
+    let records = [
+        justification,
+        emf_exttextoutw_record(40, 20, "A B C", 0, None, false),
+    ];
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
+        bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF text justification placeholder");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert!(image.bytes.is_empty());
+    assert!(image.vector_commands.is_empty());
+    assert!(!text.contains("A B C"));
+}
+
+#[test]
 fn emf_comment_records_are_ignored_without_payload_leakage() {
     let records = [
         emf_comment_record(b"EMF-COMMENT /JavaScript /EmbeddedFile /Launch"),
