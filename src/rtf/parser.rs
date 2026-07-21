@@ -810,19 +810,24 @@ impl Default for PictureBuilder {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShapePolygonPreset {
+    Diamond,
+    IsoscelesTriangle,
+    RightTriangle,
+    Trapezoid,
+    Parallelogram,
+    Octagon,
+    Hexagon,
+    Pentagon,
+}
+
 #[derive(Debug, Clone)]
 struct ShapeBuilder {
     owner_destination: Destination,
     kind: Option<StaticShapeKind>,
     rounded_rectangle: bool,
-    diamond: bool,
-    isosceles_triangle: bool,
-    right_triangle: bool,
-    trapezoid: bool,
-    parallelogram: bool,
-    octagon: bool,
-    hexagon: bool,
-    pentagon: bool,
+    polygon_preset: Option<ShapePolygonPreset>,
     base_x_twips: i32,
     base_y_twips: i32,
     left_twips: i32,
@@ -864,14 +869,7 @@ impl Default for ShapeBuilder {
             owner_destination: Destination::Body,
             kind: None,
             rounded_rectangle: false,
-            diamond: false,
-            isosceles_triangle: false,
-            right_triangle: false,
-            trapezoid: false,
-            parallelogram: false,
-            octagon: false,
-            hexagon: false,
-            pentagon: false,
+            polygon_preset: None,
             base_x_twips: 0,
             base_y_twips: 0,
             left_twips: 0,
@@ -11933,29 +11931,10 @@ impl Parser {
             kind = StaticShapeKind::RoundedRectangle;
         }
         let mut points = shape.points.clone();
-        if kind == StaticShapeKind::Polygon && shape.diamond && points.is_empty() {
-            points = diamond_shape_points(shape.width_twips, shape.height_twips);
-        }
-        if kind == StaticShapeKind::Polygon && shape.isosceles_triangle && points.is_empty() {
-            points = isosceles_triangle_shape_points(shape.width_twips, shape.height_twips);
-        }
-        if kind == StaticShapeKind::Polygon && shape.right_triangle && points.is_empty() {
-            points = right_triangle_shape_points(shape.width_twips, shape.height_twips);
-        }
-        if kind == StaticShapeKind::Polygon && shape.trapezoid && points.is_empty() {
-            points = trapezoid_shape_points(shape.width_twips, shape.height_twips);
-        }
-        if kind == StaticShapeKind::Polygon && shape.parallelogram && points.is_empty() {
-            points = parallelogram_shape_points(shape.width_twips, shape.height_twips);
-        }
-        if kind == StaticShapeKind::Polygon && shape.octagon && points.is_empty() {
-            points = octagon_shape_points(shape.width_twips, shape.height_twips);
-        }
-        if kind == StaticShapeKind::Polygon && shape.hexagon && points.is_empty() {
-            points = hexagon_shape_points(shape.width_twips, shape.height_twips);
-        }
-        if kind == StaticShapeKind::Polygon && shape.pentagon && points.is_empty() {
-            points = pentagon_shape_points(shape.width_twips, shape.height_twips);
+        if kind == StaticShapeKind::Polygon && points.is_empty() {
+            if let Some(preset) = shape.polygon_preset {
+                points = polygon_preset_shape_points(preset, shape.width_twips, shape.height_twips);
+            }
         }
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
@@ -12285,6 +12264,8 @@ impl Parser {
     fn set_current_shape_kind(&mut self, kind: StaticShapeKind) {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.kind = Some(kind);
+            shape.rounded_rectangle = false;
+            shape.polygon_preset = None;
         }
     }
 
@@ -12292,62 +12273,15 @@ impl Parser {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.kind = Some(StaticShapeKind::Rectangle);
             shape.rounded_rectangle = true;
+            shape.polygon_preset = None;
         }
     }
 
-    fn set_current_shape_diamond(&mut self) {
+    fn set_current_shape_polygon_preset(&mut self, preset: ShapePolygonPreset) {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.kind = Some(StaticShapeKind::Polygon);
-            shape.diamond = true;
-        }
-    }
-
-    fn set_current_shape_isosceles_triangle(&mut self) {
-        if let Some(shape) = self.current_shape.as_mut() {
-            shape.kind = Some(StaticShapeKind::Polygon);
-            shape.isosceles_triangle = true;
-        }
-    }
-
-    fn set_current_shape_right_triangle(&mut self) {
-        if let Some(shape) = self.current_shape.as_mut() {
-            shape.kind = Some(StaticShapeKind::Polygon);
-            shape.right_triangle = true;
-        }
-    }
-
-    fn set_current_shape_trapezoid(&mut self) {
-        if let Some(shape) = self.current_shape.as_mut() {
-            shape.kind = Some(StaticShapeKind::Polygon);
-            shape.trapezoid = true;
-        }
-    }
-
-    fn set_current_shape_parallelogram(&mut self) {
-        if let Some(shape) = self.current_shape.as_mut() {
-            shape.kind = Some(StaticShapeKind::Polygon);
-            shape.parallelogram = true;
-        }
-    }
-
-    fn set_current_shape_octagon(&mut self) {
-        if let Some(shape) = self.current_shape.as_mut() {
-            shape.kind = Some(StaticShapeKind::Polygon);
-            shape.octagon = true;
-        }
-    }
-
-    fn set_current_shape_hexagon(&mut self) {
-        if let Some(shape) = self.current_shape.as_mut() {
-            shape.kind = Some(StaticShapeKind::Polygon);
-            shape.hexagon = true;
-        }
-    }
-
-    fn set_current_shape_pentagon(&mut self) {
-        if let Some(shape) = self.current_shape.as_mut() {
-            shape.kind = Some(StaticShapeKind::Polygon);
-            shape.pentagon = true;
+            shape.rounded_rectangle = false;
+            shape.polygon_preset = Some(preset);
         }
     }
 
@@ -12920,15 +12854,15 @@ impl Parser {
                 true
             }
             2 => {
-                self.set_current_shape_parallelogram();
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Parallelogram);
                 true
             }
             3 => {
-                self.set_current_shape_trapezoid();
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Trapezoid);
                 true
             }
             4 => {
-                self.set_current_shape_diamond();
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Diamond);
                 true
             }
             5 => {
@@ -12936,7 +12870,7 @@ impl Parser {
                 true
             }
             6 => {
-                self.set_current_shape_octagon();
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Octagon);
                 true
             }
             9 => {
@@ -12944,19 +12878,19 @@ impl Parser {
                 true
             }
             7 => {
-                self.set_current_shape_isosceles_triangle();
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::IsoscelesTriangle);
                 true
             }
             8 => {
-                self.set_current_shape_right_triangle();
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::RightTriangle);
                 true
             }
             10 => {
-                self.set_current_shape_hexagon();
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Hexagon);
                 true
             }
             12 => {
-                self.set_current_shape_pentagon();
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
             }
             20 => {
@@ -14832,6 +14766,25 @@ fn rotated_shape_line_points(
         .into_iter()
         .map(|(x, y)| rotated_shape_point(x, y, width_twips, height_twips, rotation_units))
         .collect()
+}
+
+fn polygon_preset_shape_points(
+    preset: ShapePolygonPreset,
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    match preset {
+        ShapePolygonPreset::Diamond => diamond_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::IsoscelesTriangle => {
+            isosceles_triangle_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::RightTriangle => right_triangle_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Trapezoid => trapezoid_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Parallelogram => parallelogram_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Octagon => octagon_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Hexagon => hexagon_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Pentagon => pentagon_shape_points(width_twips, height_twips),
+    }
 }
 
 fn diamond_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
