@@ -843,6 +843,7 @@ struct ShapeBuilder {
     rotation_units: i32,
     start_arrowhead: StaticShapeArrowhead,
     end_arrowhead: StaticShapeArrowhead,
+    stroke_enabled: bool,
     stroke_width_twips: i32,
     stroke_color: Color,
     stroke_style: BorderStyle,
@@ -885,6 +886,7 @@ impl Default for ShapeBuilder {
             rotation_units: 0,
             start_arrowhead: StaticShapeArrowhead::None,
             end_arrowhead: StaticShapeArrowhead::None,
+            stroke_enabled: true,
             stroke_width_twips: 15,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
@@ -12051,6 +12053,13 @@ impl Parser {
                 Some(offset),
             ));
         }
+        let stroke_width_twips = if shape.stroke_enabled {
+            shape
+                .stroke_width_twips
+                .clamp(0, self.limits().max_shape_stroke_width_twips.max(1))
+        } else {
+            0
+        };
         self.push_static_shape(
             shape.owner_destination,
             StaticShape {
@@ -12065,9 +12074,7 @@ impl Parser {
                 flip_vertical: shape.flip_vertical,
                 start_arrowhead: shape.start_arrowhead,
                 end_arrowhead: shape.end_arrowhead,
-                stroke_width_twips: shape
-                    .stroke_width_twips
-                    .clamp(0, self.limits().max_shape_stroke_width_twips.max(1)),
+                stroke_width_twips,
                 stroke_color: shape.stroke_color,
                 stroke_style: shape.stroke_style,
                 fill_color: shape.fill_color,
@@ -12691,9 +12698,8 @@ impl Parser {
                 if let Some(enabled) = parse_shape_property_i64(value)
                     && let Some(shape) = self.current_shape.as_mut()
                 {
-                    if enabled == 0 {
-                        shape.stroke_width_twips = 0;
-                    } else if shape.stroke_width_twips == 0 {
+                    shape.stroke_enabled = enabled != 0;
+                    if enabled != 0 && shape.stroke_width_twips == 0 {
                         shape.stroke_width_twips = 15;
                     }
                 } else if parse_shape_property_i64(value).is_none() {
