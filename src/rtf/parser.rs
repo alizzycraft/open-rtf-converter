@@ -908,12 +908,17 @@ enum ShapePolygonPreset {
     RoundedRectangularCallout,
     OvalCallout,
     CloudCallout,
+    LineCalloutBorder,
     DownTriangle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShapePolylinePreset {
     Arc,
+    LineCalloutHorizontal,
+    LineCalloutDiagonal,
+    LineCalloutAngled,
+    LineCalloutUShape,
 }
 
 #[derive(Debug, Clone)]
@@ -13430,6 +13435,42 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::CloudCallout);
                 true
             }
+            109 | 110 | 111 | 112 | 121 | 122 | 123 | 124 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LineCalloutBorder);
+                true
+            }
+            113 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutHorizontal);
+                true
+            }
+            114 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutDiagonal);
+                true
+            }
+            115 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutAngled);
+                true
+            }
+            116 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutUShape);
+                true
+            }
+            117 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutHorizontal);
+                true
+            }
+            118 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutDiagonal);
+                true
+            }
+            119 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutAngled);
+                true
+            }
+            120 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutUShape);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15626,6 +15667,9 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::OvalCallout => oval_callout_shape_points(width_twips, height_twips),
         ShapePolygonPreset::CloudCallout => cloud_callout_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::LineCalloutBorder => {
+            line_callout_border_shape_points(width_twips, height_twips)
+        }
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -15637,6 +15681,18 @@ fn polyline_preset_shape_points(
 ) -> Vec<StaticShapePoint> {
     match preset {
         ShapePolylinePreset::Arc => arc_shape_points(width_twips, height_twips),
+        ShapePolylinePreset::LineCalloutHorizontal => {
+            line_callout_horizontal_shape_points(width_twips, height_twips)
+        }
+        ShapePolylinePreset::LineCalloutDiagonal => {
+            line_callout_diagonal_shape_points(width_twips, height_twips)
+        }
+        ShapePolylinePreset::LineCalloutAngled => {
+            line_callout_angled_shape_points(width_twips, height_twips)
+        }
+        ShapePolylinePreset::LineCalloutUShape => {
+            line_callout_ushape_points(width_twips, height_twips)
+        }
     }
 }
 
@@ -16162,6 +16218,52 @@ fn cloud_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<Static
             (200, 700),
             (80, 600),
         ],
+    )
+}
+
+fn line_callout_border_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (1000, 0),
+            (1000, 620),
+            (740, 620),
+            (520, 1000),
+            (560, 620),
+            (0, 620),
+        ],
+    )
+}
+
+fn line_callout_horizontal_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(width_twips, height_twips, &[(0, 500), (1000, 500)])
+}
+
+fn line_callout_diagonal_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(width_twips, height_twips, &[(0, 1000), (1000, 0)])
+}
+
+fn line_callout_angled_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(0, 1000), (450, 500), (1000, 500)],
+    )
+}
+
+fn line_callout_ushape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(0, 1000), (0, 500), (1000, 500), (1000, 0)],
     )
 }
 

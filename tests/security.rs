@@ -73613,6 +73613,260 @@ fn office_callout_shapes_render_passively_without_payload_leakage() {
 }
 
 #[test]
+fn office_line_callout_shapes_render_passively_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (109, "office-line-callout-1-payload"),
+        (110, "office-line-callout-2-payload"),
+        (111, "office-line-callout-3-payload"),
+        (112, "office-line-callout-4-payload"),
+        (121, "office-line-callout-1-accent-bar-payload"),
+        (122, "office-line-callout-2-accent-bar-payload"),
+        (123, "office-line-callout-3-accent-bar-payload"),
+        (124, "office-line-callout-4-accent-bar-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 8);
+    for shape in &shapes {
+        assert_eq!(shape.kind, StaticShapeKind::Polygon);
+        assert_eq!(shape.points.len(), 7);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "line callout shape points must stay inside passive frame: {shape:?}"
+        );
+    }
+    assert_eq!(shapes[0].points[4].y_twips, shapes[0].height_twips);
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "office-line-callout-1-payload",
+        "office-line-callout-2-payload",
+        "office-line-callout-3-payload",
+        "office-line-callout-4-payload",
+        "office-line-callout-1-accent-bar-payload",
+        "office-line-callout-2-accent-bar-payload",
+        "office-line-callout-3-accent-bar-payload",
+        "office-line-callout-4-accent-bar-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "line callout metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 8,
+        "bordered line callouts should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"office-line-callout-1-payload",
+        b"office-line-callout-2-payload",
+        b"office-line-callout-3-payload",
+        b"office-line-callout-4-payload",
+        b"office-line-callout-1-accent-bar-payload",
+        b"office-line-callout-2-accent-bar-payload",
+        b"office-line-callout-3-accent-bar-payload",
+        b"office-line-callout-4-accent-bar-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "line callout metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn office_no_border_line_callouts_render_as_passive_polylines_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (113, "office-line-callout-1-no-border-payload"),
+        (114, "office-line-callout-2-no-border-payload"),
+        (115, "office-line-callout-3-no-border-payload"),
+        (116, "office-line-callout-4-no-border-payload"),
+        (117, "office-line-callout-1-accent-bar-no-border-payload"),
+        (118, "office-line-callout-2-accent-bar-no-border-payload"),
+        (119, "office-line-callout-3-accent-bar-no-border-payload"),
+        (120, "office-line-callout-4-accent-bar-no-border-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 8);
+    let expected_point_counts = [2, 2, 3, 4, 2, 2, 3, 4];
+    for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
+        assert_eq!(shape.kind, StaticShapeKind::Polyline);
+        assert_eq!(shape.points.len(), expected_point_count);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "no-border line callout points must stay inside passive frame: {shape:?}"
+        );
+    }
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "office-line-callout-1-no-border-payload",
+        "office-line-callout-2-no-border-payload",
+        "office-line-callout-3-no-border-payload",
+        "office-line-callout-4-no-border-payload",
+        "office-line-callout-1-accent-bar-no-border-payload",
+        "office-line-callout-2-accent-bar-no-border-payload",
+        "office-line-callout-3-accent-bar-no-border-payload",
+        "office-line-callout-4-accent-bar-no-border-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "no-border line callout metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_strokes = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_strokes >= 8,
+        "no-border line callouts should render passive stroked polylines"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"office-line-callout-1-no-border-payload",
+        b"office-line-callout-2-no-border-payload",
+        b"office-line-callout-3-no-border-payload",
+        b"office-line-callout-4-no-border-payload",
+        b"office-line-callout-1-accent-bar-no-border-payload",
+        b"office-line-callout-2-accent-bar-no-border-payload",
+        b"office-line-callout-3-accent-bar-no-border-payload",
+        b"office-line-callout-4-accent-bar-no-border-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "no-border line callout metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_right_arrows_render_as_passive_polygon_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 33}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn lineColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-right-arrow-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
