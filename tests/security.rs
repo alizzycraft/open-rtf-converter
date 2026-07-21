@@ -74454,6 +74454,32 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     }
     assert!(shapes[0].points.iter().any(|point| point.y_twips == 0));
     assert_eq!(shapes[1].points[0].x_twips, 0);
+    assert_eq!(
+        shapes[5].point_paths.len(),
+        3,
+        "division sign should keep separate passive dot/bar paths"
+    );
+    assert_eq!(
+        shapes[6].point_paths.len(),
+        2,
+        "equals sign should keep separate passive bar paths"
+    );
+    assert_eq!(
+        shapes[7].point_paths.len(),
+        3,
+        "not-equals sign should keep separate passive bar/slash paths"
+    );
+    for shape in [&shapes[5], &shapes[6], &shapes[7]] {
+        assert!(
+            shape.point_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "compound math shape paths must stay inside passive frame: {shape:?}"
+        );
+    }
     assert!(shapes[11].points.iter().any(|point| point.x_twips == 0));
     assert!(
         shapes[12]
@@ -74498,6 +74524,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_path_moves = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -74506,6 +74533,11 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_path_moves += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "m")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -74513,6 +74545,10 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert!(
         passive_shape_paints >= 13,
         "chord/math/tab/gear shapes should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_path_moves >= 21,
+        "compound math shapes should emit separate passive PDF subpaths"
     );
     for forbidden in [
         b"shapeType".as_slice(),

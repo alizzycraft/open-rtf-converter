@@ -1030,14 +1030,16 @@ fn draw_layout_item(
             }
             LayoutItem::Polygon {
                 points,
+                paths,
                 stroke_width,
                 stroke_color,
                 stroke_style,
                 fill_color,
             } => {
-                draw_passive_polygon(
+                draw_passive_compound_polygon(
                     content,
                     points,
+                    paths,
                     *stroke_width,
                     *stroke_color,
                     *stroke_style,
@@ -4114,6 +4116,66 @@ fn draw_passive_polygon(
     content.restore_state();
 }
 
+fn draw_passive_compound_polygon(
+    content: &mut Content,
+    points: &[crate::layout::LayoutPoint],
+    paths: &[Vec<crate::layout::LayoutPoint>],
+    stroke_width: f32,
+    stroke_color: PdfColor,
+    stroke_style: LineStyle,
+    fill_rule: StaticImageVectorFillRule,
+    fill_color: Option<PdfColor>,
+) {
+    if paths.is_empty() {
+        draw_passive_polygon(
+            content,
+            points,
+            stroke_width,
+            stroke_color,
+            stroke_style,
+            fill_rule,
+            fill_color,
+        );
+        return;
+    }
+    if stroke_width <= 0.0 && fill_color.is_none() {
+        return;
+    }
+
+    let has_stroke = stroke_width > 0.0;
+    content.save_state();
+    if has_stroke {
+        content.set_line_width(stroke_width.max(0.25));
+        set_stroke_color(content, stroke_color);
+        set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    }
+    if let Some(fill_color) = fill_color {
+        set_fill_color(content, fill_color);
+    }
+    if points.len() >= 3 {
+        append_passive_polygon_path(content, points);
+    }
+    for path in paths {
+        if path.len() >= 3 {
+            append_passive_polygon_path(content, path);
+        }
+    }
+    if fill_color.is_some() && has_stroke {
+        match fill_rule {
+            StaticImageVectorFillRule::Alternate => content.fill_even_odd_and_stroke(),
+            StaticImageVectorFillRule::Winding => content.fill_nonzero_and_stroke(),
+        };
+    } else if fill_color.is_some() {
+        match fill_rule {
+            StaticImageVectorFillRule::Alternate => content.fill_even_odd(),
+            StaticImageVectorFillRule::Winding => content.fill_nonzero(),
+        };
+    } else {
+        content.stroke();
+    }
+    content.restore_state();
+}
+
 fn draw_passive_text_overlays(content: &mut Content, fragment: &TextFragment) {
     draw_passive_emphasis_marks(content, fragment);
     draw_passive_checkbox_overlays(content, fragment);
@@ -6475,6 +6537,7 @@ endstream
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -6566,6 +6629,7 @@ endstream
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);

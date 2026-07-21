@@ -12129,6 +12129,16 @@ impl Parser {
                 points = polygon_preset_shape_points(preset, shape.width_twips, shape.height_twips);
             }
         }
+        let mut point_paths = if kind == StaticShapeKind::Polygon {
+            shape
+                .polygon_preset
+                .map(|preset| {
+                    polygon_preset_shape_point_paths(preset, shape.width_twips, shape.height_twips)
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         if kind == StaticShapeKind::Polyline && points.is_empty() {
             if let Some(preset) = shape.polyline_preset {
                 points =
@@ -12171,6 +12181,22 @@ impl Parser {
                             )
                         })
                         .collect();
+                    point_paths = point_paths
+                        .into_iter()
+                        .map(|path| {
+                            path.into_iter()
+                                .map(|point| {
+                                    rotated_shape_point(
+                                        point.x_twips,
+                                        point.y_twips,
+                                        shape.width_twips,
+                                        shape.height_twips,
+                                        shape.rotation_units,
+                                    )
+                                })
+                                .collect()
+                        })
+                        .collect();
                 }
                 _ => unsupported_or_active_property_stripped = true,
             }
@@ -12194,7 +12220,7 @@ impl Parser {
             }
             _ => {}
         }
-        let (left_twips, top_twips, width_twips, height_twips, points) =
+        let (left_twips, top_twips, width_twips, height_twips, points, point_paths) =
             if matches!(kind, StaticShapeKind::Polyline | StaticShapeKind::Polygon) {
                 let base_x = shape.base_x_twips.saturating_add(shape.left_twips);
                 let base_y = shape.base_y_twips.saturating_add(shape.top_twips);
@@ -12205,11 +12231,28 @@ impl Parser {
                         y_twips: base_y.saturating_add(point.y_twips),
                     })
                     .collect::<Vec<_>>();
-                normalize_shape_points(
+                let (left, top, width, height, normalized_points) = normalize_shape_points(
                     &absolute_points,
                     self.limits().max_shape_dimension_twips.max(1),
                 )
-                .unwrap_or((0, 0, 0, 0, Vec::new()))
+                .unwrap_or((0, 0, 0, 0, Vec::new()));
+                let normalized_paths = normalize_shape_point_paths(
+                    &point_paths,
+                    base_x,
+                    base_y,
+                    left,
+                    top,
+                    width,
+                    height,
+                );
+                (
+                    left,
+                    top,
+                    width,
+                    height,
+                    normalized_points,
+                    normalized_paths,
+                )
             } else {
                 (
                     shape
@@ -12226,6 +12269,7 @@ impl Parser {
                     shape
                         .height_twips
                         .clamp(1, self.limits().max_shape_dimension_twips.max(1)),
+                    Vec::new(),
                     Vec::new(),
                 )
             };
@@ -12288,6 +12332,7 @@ impl Parser {
                 text_horizontal_anchor_centered: shape.text_horizontal_anchor_centered,
                 text: shape.text,
                 points,
+                point_paths,
                 horizontal_anchor: shape.horizontal_anchor,
                 vertical_anchor: shape.vertical_anchor,
             },
@@ -15722,6 +15767,35 @@ fn normalize_shape_points(
     Some((min_x, min_y, width_twips, height_twips, normalized))
 }
 
+fn normalize_shape_point_paths(
+    paths: &[Vec<StaticShapePoint>],
+    base_x_twips: i32,
+    base_y_twips: i32,
+    left_twips: i32,
+    top_twips: i32,
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    paths
+        .iter()
+        .filter(|path| path.len() >= 3)
+        .map(|path| {
+            path.iter()
+                .map(|point| StaticShapePoint {
+                    x_twips: base_x_twips
+                        .saturating_add(point.x_twips)
+                        .saturating_sub(left_twips)
+                        .clamp(0, width_twips),
+                    y_twips: base_y_twips
+                        .saturating_add(point.y_twips)
+                        .saturating_sub(top_twips)
+                        .clamp(0, height_twips),
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn rotated_shape_rectangle_points(
     width_twips: i32,
     height_twips: i32,
@@ -16054,6 +16128,21 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::ChartStar => chart_star_shape_points(width_twips, height_twips),
         ShapePolygonPreset::ChartPlus => chart_plus_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
+    }
+}
+
+fn polygon_preset_shape_point_paths(
+    preset: ShapePolygonPreset,
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    match preset {
+        ShapePolygonPreset::MathDivide => math_divide_shape_point_paths(width_twips, height_twips),
+        ShapePolygonPreset::MathEqual => math_equal_shape_point_paths(width_twips, height_twips),
+        ShapePolygonPreset::MathNotEqual => {
+            math_not_equal_shape_point_paths(width_twips, height_twips)
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -17221,6 +17310,57 @@ fn math_not_equal_shape_points(width_twips: i32, height_twips: i32) -> Vec<Stati
             (120, 430),
         ],
     )
+}
+
+fn math_divide_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(430, 120), (570, 120), (570, 260), (430, 260)],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(120, 410), (880, 410), (880, 590), (120, 590)],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(430, 740), (570, 740), (570, 880), (430, 880)],
+        ),
+    ]
+}
+
+fn math_equal_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(120, 270), (880, 270), (880, 430), (120, 430)],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(120, 570), (880, 570), (880, 730), (120, 730)],
+        ),
+    ]
+}
+
+fn math_not_equal_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let mut paths = math_equal_shape_point_paths(width_twips, height_twips);
+    paths.push(scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(670, 80), (800, 80), (320, 920), (190, 920)],
+    ));
+    paths
 }
 
 fn corner_tabs_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

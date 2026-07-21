@@ -107,6 +107,7 @@ pub enum LayoutItem {
     },
     Polygon {
         points: Vec<LayoutPoint>,
+        paths: Vec<Vec<LayoutPoint>>,
         stroke_width: f32,
         stroke_color: PdfColor,
         stroke_style: LineStyle,
@@ -2478,8 +2479,32 @@ fn layout_shape(
                     ),
                 })
                 .collect::<Vec<_>>();
+            let paths = shape
+                .point_paths
+                .iter()
+                .filter(|path| path.len() >= 3)
+                .map(|path| {
+                    path.iter()
+                        .map(|point| LayoutPoint {
+                            x: shape_point_x(
+                                x,
+                                width,
+                                twips_to_points(point.x_twips) * scale_x,
+                                shape.flip_horizontal,
+                            ),
+                            y: shape_point_y(
+                                top_y,
+                                height,
+                                twips_to_points(point.y_twips) * scale_y,
+                                shape.flip_vertical,
+                            ),
+                        })
+                        .collect()
+                })
+                .collect::<Vec<_>>();
             page.items.push(LayoutItem::Polygon {
                 points,
+                paths,
                 stroke_width: stroke_width_points.unwrap_or(0.0),
                 stroke_color: color,
                 stroke_style,
@@ -2788,6 +2813,7 @@ fn push_static_shape_arrowhead(
         StaticShapeArrowhead::Triangle => {
             page.items.push(LayoutItem::Polygon {
                 points: vec![tip, wing_a, wing_b],
+                paths: Vec::new(),
                 stroke_width,
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
@@ -3217,21 +3243,22 @@ fn layout_item_vertical_bounds(item: &LayoutItem) -> Option<VerticalBounds> {
         }
         LayoutItem::Polygon {
             points,
+            paths,
             stroke_width,
             ..
         } => {
-            if points.is_empty() {
+            if points.is_empty() && paths.iter().all(Vec::is_empty) {
                 return None;
             }
             let half_width = *stroke_width / 2.0;
+            let all_points = points.iter().chain(paths.iter().flatten());
             Some(VerticalBounds {
-                top: points
-                    .iter()
+                top: all_points
+                    .clone()
                     .map(|point| point.y)
                     .fold(f32::NEG_INFINITY, f32::max)
                     + half_width,
-                bottom: points
-                    .iter()
+                bottom: all_points
                     .map(|point| point.y)
                     .fold(f32::INFINITY, f32::min)
                     - half_width,
@@ -3266,9 +3293,14 @@ fn translate_layout_item_y(item: &mut LayoutItem, delta_y: f32) {
             }
             LayoutItem::Ellipse { y, .. } => *y += delta_y,
             LayoutItem::RoundedRectangle { y, .. } => *y += delta_y,
-            LayoutItem::Polygon { points, .. } => {
+            LayoutItem::Polygon { points, paths, .. } => {
                 for point in points {
                     point.y += delta_y;
+                }
+                for path in paths {
+                    for point in path {
+                        point.y += delta_y;
+                    }
                 }
             }
             LayoutItem::Image(image) => image.y += delta_y,
@@ -10932,6 +10964,7 @@ mod tests {
                 text_horizontal_anchor_centered: false,
                 text: Vec::new(),
                 points: Vec::new(),
+                point_paths: Vec::new(),
             }),
         ];
 
@@ -10988,6 +11021,7 @@ mod tests {
                 }],
             }],
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11103,6 +11137,7 @@ mod tests {
                 text_horizontal_anchor_centered: false,
                 text: Vec::new(),
                 points: Vec::new(),
+                point_paths: Vec::new(),
             }),
         ];
 
@@ -11159,6 +11194,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
         let page_layout = LayoutEngine::layout(&page_document);
         let page_fill = page_layout.pages[0]
@@ -11225,6 +11261,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11294,6 +11331,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11370,6 +11408,7 @@ mod tests {
                 }],
             }],
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11457,6 +11496,7 @@ mod tests {
                 }],
             }],
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11515,6 +11555,7 @@ mod tests {
                 }],
             }],
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let centered_layout = LayoutEngine::layout(&document);
@@ -11577,6 +11618,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11622,6 +11664,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11673,6 +11716,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11743,6 +11787,7 @@ mod tests {
                     y_twips: 0,
                 },
             ],
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11823,6 +11868,7 @@ mod tests {
                     y_twips: 0,
                 },
             ],
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11886,6 +11932,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11949,6 +11996,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -12030,6 +12078,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -19041,6 +19090,7 @@ mod tests {
             text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
+            point_paths: Vec::new(),
         }];
         document.blocks.clear();
         for _ in 0..120 {

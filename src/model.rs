@@ -656,6 +656,7 @@ pub struct StaticShape {
     pub text_horizontal_anchor_centered: bool,
     pub text: Vec<Paragraph>,
     pub points: Vec<StaticShapePoint>,
+    pub point_paths: Vec<Vec<StaticShapePoint>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
