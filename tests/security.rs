@@ -74376,7 +74376,7 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 10);
-    let expected_point_counts = [5, 6, 6, 7, 5, 6, 6, 4, 6, 14];
+    let expected_point_counts = [5, 6, 6, 7, 5, 6, 6, 4, 6, 28];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
