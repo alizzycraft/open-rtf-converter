@@ -70223,6 +70223,178 @@ fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_
 }
 
 #[test]
+fn invalid_office_shape_fill_color_is_stripped_without_becoming_visible_black() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv -1}}{\sp{\sn pFragments}{\sv hidden-invalid-fill-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with invalid fill color");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.fill_color, None,
+        "invalid Office fillColor should not clamp into a visible fill"
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "pFragments",
+        "hidden-invalid-fill-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid fill color metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert_eq!(
+        fill_count, 0,
+        "invalid Office fillColor should not emit a passive fill"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"pFragments",
+        b"hidden-invalid-fill-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid fill color metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn oversized_office_shape_line_color_is_stripped_without_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineColor}{\sv 4294967295}}{\sp{\sn pFragments}{\sv hidden-invalid-line-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with invalid line color");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.stroke_color,
+        open_rtf_converter::model::Color::default()
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    for forbidden in [
+        "shapeType",
+        "lineColor",
+        "pFragments",
+        "hidden-invalid-line-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid line color metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "shape outline should still render with default passive stroke color"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"lineColor",
+        b"pFragments",
+        b"hidden-invalid-line-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid line color metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn styled_shape_text_renders_passively_without_style_control_leakage() {
     let input = br#"{\rtf1{\colortbl;\red240\green240\blue0;\red255\green0\blue0;}{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}}{\shptxt\cbpat1\brdrb\brdrs\brdrw40\brdrcf2 Styled box text\par}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

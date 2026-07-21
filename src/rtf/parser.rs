@@ -16475,7 +16475,10 @@ fn parse_shape_property_emu_twips(value: &str) -> Option<i64> {
 }
 
 fn parse_office_shape_color(value: &str) -> Option<Color> {
-    let value = parse_shape_property_i64(value)?.clamp(0, 0x00ff_ffff) as u32;
+    let value = u32::try_from(parse_shape_property_i64(value)?).ok()?;
+    if value > 0x00ff_ffff {
+        return None;
+    }
     Some(Color {
         red: (value & 0xff) as u8,
         green: ((value >> 8) & 0xff) as u8,
