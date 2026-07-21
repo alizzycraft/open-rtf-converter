@@ -26691,7 +26691,9 @@ const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
 const WMF_ETO_GLYPH_INDEX: u16 = 0x0010;
 const WMF_ETO_NO_RECT: u16 = 0x0100;
-const WMF_ETO_SUPPORTED_MASK: u16 = WMF_ETO_OPAQUE | WMF_ETO_CLIPPED | WMF_ETO_NO_RECT;
+const WMF_ETO_PDY: u16 = 0x2000;
+const WMF_ETO_SUPPORTED_MASK: u16 =
+    WMF_ETO_OPAQUE | WMF_ETO_CLIPPED | WMF_ETO_NO_RECT | WMF_ETO_PDY;
 const WMF_BKMODE_TRANSPARENT: u16 = 1;
 const WMF_BKMODE_OPAQUE: u16 = 2;
 const WMF_POLYFILLMODE_ALTERNATE: u16 = 1;
@@ -26801,6 +26803,16 @@ impl WmfCoordinateMap {
         let logical_extent = self.window_width.max(1);
         let image_extent = self.image_width.max(1);
         let viewport_extent = self.viewport_width.clamp(-image_extent, image_extent);
+        let scaled = i128::from(value)
+            .saturating_mul(i128::from(viewport_extent))
+            .saturating_div(i128::from(logical_extent));
+        scaled.clamp(-i128::from(image_extent), i128::from(image_extent)) as f32
+    }
+
+    fn normalized_y_distance(self, value: i32) -> f32 {
+        let logical_extent = self.window_height.max(1);
+        let image_extent = self.image_height.max(1);
+        let viewport_extent = self.viewport_height.clamp(-image_extent, image_extent);
         let scaled = i128::from(value)
             .saturating_mul(i128::from(viewport_extent))
             .saturating_div(i128::from(logical_extent));
@@ -30697,11 +30709,14 @@ fn parse_wmf_exttextout(
     if text.text.is_empty() {
         return Some(vec![text]);
     }
-    let dx_bytes = byte_count.checked_mul(2)?;
+    let has_pdy = flags & WMF_ETO_PDY != 0;
+    let spacing_values_per_char = if has_pdy { 2usize } else { 1usize };
+    let spacing_stride = spacing_values_per_char.checked_mul(2)?;
+    let dx_bytes = byte_count.checked_mul(spacing_stride)?;
     if data.len().checked_sub(text_data_end)? != dx_bytes {
         return Some(vec![text]);
     }
-    split_wmf_exttextout_by_dx(data, text_data_end, byte_count, text, coordinates)
+    split_wmf_exttextout_by_dx(data, text_data_end, byte_count, text, has_pdy, coordinates)
 }
 
 fn split_wmf_exttextout_by_dx(
@@ -30709,6 +30724,7 @@ fn split_wmf_exttextout_by_dx(
     dx_offset: usize,
     byte_count: usize,
     text: ParsedWmfExtTextOut,
+    has_pdy: bool,
     coordinates: WmfCoordinateMap,
 ) -> Option<Vec<ParsedWmfExtTextOut>> {
     if byte_count > MAX_PASSIVE_WMF_POINTS_PER_RECORD {
@@ -30718,26 +30734,32 @@ fn split_wmf_exttextout_by_dx(
     if chars.len() != byte_count {
         return None;
     }
-    let dx_end = dx_offset.checked_add(byte_count.checked_mul(2)?)?;
+    let spacing_values_per_char = if has_pdy { 2usize } else { 1usize };
+    let spacing_stride = spacing_values_per_char.checked_mul(2)?;
+    let dx_end = dx_offset.checked_add(byte_count.checked_mul(spacing_stride)?)?;
     if dx_end != data.len() {
         return None;
     }
     let mut x = text.x;
+    let mut y = text.y;
     let mut items = Vec::with_capacity(byte_count);
     for (index, ch) in chars.into_iter().enumerate() {
         let mut item = text.clone();
         item.x = x;
+        item.y = y;
         item.text.clear();
         item.text.push(ch);
         if index != 0 {
             item.opaque_bounds = None;
         }
         items.push(item);
-        let dx = i32::from(read_le_i16(
-            data,
-            dx_offset.checked_add(index.checked_mul(2)?)?,
-        )?);
+        let spacing_offset = dx_offset.checked_add(index.checked_mul(spacing_stride)?)?;
+        let dx = i32::from(read_le_i16(data, spacing_offset)?);
         x += coordinates.normalized_x_distance(dx);
+        if has_pdy {
+            let dy = i32::from(read_le_i16(data, spacing_offset.checked_add(2)?)?);
+            y += coordinates.normalized_y_distance(dy);
+        }
     }
     Some(items)
 }

@@ -36943,6 +36943,101 @@ fn wmf_exttextout_dx_records_render_positioned_passive_text_without_payload_leak
 }
 
 #[test]
+fn wmf_exttextout_pdy_records_render_positioned_passive_text_without_payload_leakage() {
+    let text_record =
+        wmf_exttextout_pdy_record(40, 20, "ABC", 0x2000, None, &[(10, 5), (20, -3), (30, 0)]);
+    let wmf = minimal_wmf_with_records(160, 80, &[text_record]);
+    let wmf_hex = bytes_to_hex(&wmf);
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("WMF EXTTEXTOUT PDY vector preview image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("ABC"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(image.palette.is_empty());
+    let text_commands: Vec<_> = image
+        .vector_commands
+        .iter()
+        .filter_map(|command| match command {
+            StaticImageVectorCommand::Text { x, y, text, .. } => Some((*x, *y, text.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        text_commands,
+        vec![(40.0, 20.0, "A"), (50.0, 25.0, "B"), (70.0, 22.0, "C")]
+    );
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in ["wmetafile", "0a32", "JavaScript", "EmbeddedFile", "Launch"] {
+        assert!(
+            !text.contains(forbidden),
+            "WMF EXTTEXTOUT PDY internals leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(rendered_text.contains("ABC"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "Tj")
+            .count()
+            >= 3,
+        "WMF EXTTEXTOUT PDY should render through positioned passive text operations"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        wmf_hex.as_bytes(),
+        b"0a32",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "WMF EXTTEXTOUT PDY payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn wmf_exttextout_clips_passive_text_without_flag_leakage() {
     let wmf_hex = concat!(
         "010009000003360000000100100000000000",
@@ -37273,8 +37368,8 @@ fn wmf_exttextout_opaque_background_renders_as_passive_fill() {
 
 #[test]
 fn unsupported_wmf_exttextout_options_stay_partial_without_payload_leakage() {
-    let mut text_record = wmf_exttextout_record(40, 20, "Hidden", 0x2000, None);
-    text_record.extend_from_slice(b"WMF-EXTTEXTOUT-PDY /JavaScript /EmbeddedFile /Launch");
+    let mut text_record = wmf_exttextout_record(40, 20, "Hidden", 0x4000, None);
+    text_record.extend_from_slice(b"WMF-EXTTEXTOUT-UNSUPPORTED /JavaScript /EmbeddedFile /Launch");
     text_record.resize(text_record.len().next_multiple_of(2), 0);
     let text_words = (text_record.len() / 2) as u32;
     write_test_le_u32(&mut text_record, 0, text_words);
@@ -37304,7 +37399,7 @@ fn unsupported_wmf_exttextout_options_stay_partial_without_payload_leakage() {
     assert!(image.vector_commands.is_empty());
     for forbidden in [
         "wmetafile",
-        "WMF-EXTTEXTOUT-PDY",
+        "WMF-EXTTEXTOUT-UNSUPPORTED",
         "JavaScript",
         "EmbeddedFile",
         "Launch",
@@ -37339,7 +37434,7 @@ fn unsupported_wmf_exttextout_options_stay_partial_without_payload_leakage() {
     for forbidden in [
         b"wmetafile".as_slice(),
         wmf_hex.as_bytes(),
-        b"WMF-EXTTEXTOUT-PDY",
+        b"WMF-EXTTEXTOUT-UNSUPPORTED",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Subtype /Image",
@@ -71174,6 +71269,47 @@ fn wmf_exttextout_dx_record(
     let dx_offset = text_offset + text_bytes.len().next_multiple_of(2);
     for (index, advance) in dx.iter().enumerate() {
         write_test_le_i16(&mut record, dx_offset + index * 2, *advance);
+    }
+    record
+}
+
+fn wmf_exttextout_pdy_record(
+    x: i16,
+    y: i16,
+    text: &str,
+    flags: u16,
+    bounds: Option<(i16, i16, i16, i16)>,
+    advances: &[(i16, i16)],
+) -> Vec<u8> {
+    let text_bytes = text.as_bytes();
+    assert_eq!(text_bytes.len(), advances.len());
+    let has_bounds = flags & 0x0006 != 0;
+    let bounds_words = if has_bounds { 4usize } else { 0usize };
+    let text_words = text_bytes.len().next_multiple_of(2) / 2;
+    let size_words = 7 + bounds_words + text_words + (advances.len() * 2);
+    let mut record = vec![0; size_words * 2];
+    write_test_le_u32(&mut record, 0, size_words as u32);
+    write_test_le_u16(&mut record, 4, 0x0a32);
+    write_test_le_i16(&mut record, 6, y);
+    write_test_le_i16(&mut record, 8, x);
+    write_test_le_i16(&mut record, 10, text_bytes.len() as i16);
+    write_test_le_u16(&mut record, 12, flags);
+    let text_offset = if has_bounds {
+        let (left, top, right, bottom) = bounds.unwrap_or((0, 0, 0, 0));
+        write_test_le_i16(&mut record, 14, bottom);
+        write_test_le_i16(&mut record, 16, right);
+        write_test_le_i16(&mut record, 18, top);
+        write_test_le_i16(&mut record, 20, left);
+        22usize
+    } else {
+        14usize
+    };
+    record[text_offset..text_offset + text_bytes.len()].copy_from_slice(text_bytes);
+    let dx_offset = text_offset + text_bytes.len().next_multiple_of(2);
+    for (index, (dx, dy)) in advances.iter().enumerate() {
+        let offset = dx_offset + index * 4;
+        write_test_le_i16(&mut record, offset, *dx);
+        write_test_le_i16(&mut record, offset + 2, *dy);
     }
     record
 }
