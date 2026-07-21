@@ -70743,6 +70743,175 @@ fn oversized_office_shape_line_color_is_stripped_without_payload_leakage() {
 }
 
 #[test]
+fn office_shape_line_fore_color_renders_passively_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineForeColor}{\sv 255}}{\sp{\sn pFragments}{\sv hidden-line-fore-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with lineForeColor");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.stroke_color,
+        open_rtf_converter::model::Color {
+            red: 255,
+            green: 0,
+            blue: 0,
+        }
+    );
+    for forbidden in [
+        "shapeType",
+        "lineForeColor",
+        "pFragments",
+        "hidden-line-fore-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "lineForeColor metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "lineForeColor should render a passive stroked shape"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"lineForeColor",
+        b"pFragments",
+        b"hidden-line-fore-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "lineForeColor metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_office_shape_line_fore_color_is_stripped_without_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineForeColor}{\sv 4294967295}}{\sp{\sn pFragments}{\sv hidden-invalid-line-fore-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with invalid lineForeColor");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.stroke_color,
+        open_rtf_converter::model::Color::default()
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    for forbidden in [
+        "shapeType",
+        "lineForeColor",
+        "pFragments",
+        "hidden-invalid-line-fore-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid lineForeColor metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "shape outline should still render with default passive stroke color"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"lineForeColor",
+        b"pFragments",
+        b"hidden-invalid-line-fore-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid lineForeColor metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn styled_shape_text_renders_passively_without_style_control_leakage() {
     let input = br#"{\rtf1{\colortbl;\red240\green240\blue0;\red255\green0\blue0;}{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}}{\shptxt\cbpat1\brdrb\brdrs\brdrw40\brdrcf2 Styled box text\par}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -76182,6 +76351,94 @@ fn flipped_old_drawing_line_renders_passively_without_property_leakage() {
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden flipped drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn disabled_office_shape_line_remains_hidden_after_line_fore_color_metadata_without_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fLine}{\sv 0}}{\sp{\sn lineForeColor}{\sv 255}}{\sp{\sn pFragments}{\sv hidden-disabled-line-fore-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with disabled line and lineForeColor metadata");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.stroke_width_twips, 0,
+        "lineForeColor metadata must not resurrect a disabled passive outline"
+    );
+    assert_eq!(
+        shape.stroke_color,
+        open_rtf_converter::model::Color {
+            red: 255,
+            green: 0,
+            blue: 0,
+        },
+        "safe stroke color can be normalized, but final fLine state keeps it invisible"
+    );
+    for forbidden in [
+        "shapeType",
+        "fLine",
+        "lineForeColor",
+        "pFragments",
+        "hidden-disabled-line-fore-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "disabled lineForeColor metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+
+    assert!(
+        !content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "disabled outline should not emit passive stroke"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fLine",
+        b"lineForeColor",
+        b"pFragments",
+        b"hidden-disabled-line-fore-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "disabled lineForeColor metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

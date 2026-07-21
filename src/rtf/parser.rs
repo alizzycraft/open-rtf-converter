@@ -12652,7 +12652,7 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
-            "lineColor" => {
+            "lineColor" | "lineForeColor" => {
                 if let Some(color) = parse_office_shape_color(value)
                     && let Some(shape) = self.current_shape.as_mut()
                 {
