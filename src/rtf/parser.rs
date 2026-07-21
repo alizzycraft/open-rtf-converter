@@ -820,6 +820,7 @@ struct ShapeBuilder {
     right_triangle: bool,
     trapezoid: bool,
     parallelogram: bool,
+    octagon: bool,
     base_x_twips: i32,
     base_y_twips: i32,
     left_twips: i32,
@@ -866,6 +867,7 @@ impl Default for ShapeBuilder {
             right_triangle: false,
             trapezoid: false,
             parallelogram: false,
+            octagon: false,
             base_x_twips: 0,
             base_y_twips: 0,
             left_twips: 0,
@@ -11942,6 +11944,9 @@ impl Parser {
         if kind == StaticShapeKind::Polygon && shape.parallelogram && points.is_empty() {
             points = parallelogram_shape_points(shape.width_twips, shape.height_twips);
         }
+        if kind == StaticShapeKind::Polygon && shape.octagon && points.is_empty() {
+            points = octagon_shape_points(shape.width_twips, shape.height_twips);
+        }
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
         if shape.rotation_units != 0 {
@@ -12312,6 +12317,13 @@ impl Parser {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.kind = Some(StaticShapeKind::Polygon);
             shape.parallelogram = true;
+        }
+    }
+
+    fn set_current_shape_octagon(&mut self) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.kind = Some(StaticShapeKind::Polygon);
+            shape.octagon = true;
         }
     }
 
@@ -12883,8 +12895,8 @@ impl Parser {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
             }
-            2 | 5 => {
-                self.set_current_shape_rounded_rectangle();
+            2 => {
+                self.set_current_shape_parallelogram();
                 true
             }
             3 => {
@@ -12895,8 +12907,12 @@ impl Parser {
                 self.set_current_shape_diamond();
                 true
             }
+            5 => {
+                self.set_current_shape_rounded_rectangle();
+                true
+            }
             6 => {
-                self.set_current_shape_parallelogram();
+                self.set_current_shape_octagon();
                 true
             }
             9 => {
@@ -14847,6 +14863,27 @@ fn parallelogram_shape_points(width_twips: i32, height_twips: i32) -> Vec<Static
         (width_twips, 0),
         (width_twips.saturating_sub(inset), height_twips),
         (0, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn octagon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let inset_x = width_twips / 4;
+    let inset_y = height_twips / 4;
+    [
+        (inset_x, 0),
+        (width_twips.saturating_sub(inset_x), 0),
+        (width_twips, inset_y),
+        (width_twips, height_twips.saturating_sub(inset_y)),
+        (width_twips.saturating_sub(inset_x), height_twips),
+        (inset_x, height_twips),
+        (0, height_twips.saturating_sub(inset_y)),
+        (0, inset_y),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
