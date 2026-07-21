@@ -70310,6 +70310,166 @@ fn invalid_office_shape_fill_color_is_stripped_without_becoming_visible_black() 
 }
 
 #[test]
+fn hidden_office_shape_text_is_stripped_without_placeholder_or_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fHidden}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-shape-text-payload}}}{\shptxt Invisible box text\par}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(!text.contains("Invisible box text"));
+    assert!(
+        !parsed
+            .document
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Shape(_))),
+        "hidden shape should not enter the normalized visible shape model"
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("hidden shape stripped before safe model normalization")
+    }));
+    for forbidden in [
+        "shapeType",
+        "fHidden",
+        "pFragments",
+        "hidden-shape-text-payload",
+        "Invisible box text",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "hidden shape text metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(!rendered_text.contains("Invisible box text"));
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fHidden",
+        b"pFragments",
+        b"hidden-shape-text-payload",
+        b"Invisible box text",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "hidden shape text metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn hidden_office_shape_picture_is_stripped_without_image_or_payload_leakage() {
+    let png_hex = bytes_to_hex(&minimal_rgba_png(&[[255, 0, 0, 255]]));
+    let input = rtf(&[
+        r"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fHidden}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-shape-picture-payload}}}{\*\shppict{\pict\pngblip\picwgoal720\pichgoal720 ",
+        &png_hex,
+        r"}}}After\par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(
+        !parsed
+            .document
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Shape(_) | Block::Image(_))),
+        "hidden shape picture should not enter the normalized visible model"
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("hidden shape picture stripped before safe model normalization")
+    }));
+    for forbidden in [
+        "shapeType",
+        "fHidden",
+        "pFragments",
+        "hidden-shape-picture-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "hidden shape picture metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        !content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "hidden shape picture should not render a passive image XObject"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fHidden",
+        b"pFragments",
+        b"hidden-shape-picture-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "hidden shape picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn oversized_office_shape_line_color_is_stripped_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineColor}{\sv 4294967295}}{\sp{\sn pFragments}{\sv hidden-invalid-line-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

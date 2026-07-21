@@ -835,6 +835,7 @@ struct ShapeBuilder {
     width_twips: i32,
     height_twips: i32,
     z_order: i32,
+    hidden: bool,
     below_text: bool,
     horizontal_anchor: StaticShapeHorizontalAnchor,
     vertical_anchor: StaticShapeVerticalAnchor,
@@ -879,6 +880,7 @@ impl Default for ShapeBuilder {
             width_twips: 0,
             height_twips: 0,
             z_order: 0,
+            hidden: false,
             below_text: false,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
@@ -11775,6 +11777,18 @@ impl Parser {
         image: StaticImage,
         offset: usize,
     ) -> Result<(), ParseError> {
+        if self
+            .current_shape
+            .as_ref()
+            .is_some_and(|shape| shape.hidden)
+            && self.state.inside_shape
+        {
+            self.diagnostics.push(Diagnostic::warning(
+                "hidden shape picture stripped before safe model normalization",
+                Some(offset),
+            ));
+            return Ok(());
+        }
         let image = self.apply_current_shape_image_placement(image, offset);
         self.mark_object_result_visible_content();
         self.mark_field_result_visible_content();
@@ -11923,6 +11937,13 @@ impl Parser {
         let Some(shape) = self.current_shape.take() else {
             return Ok(false);
         };
+        if shape.hidden {
+            self.diagnostics.push(Diagnostic::warning(
+                "hidden shape stripped before safe model normalization",
+                Some(offset),
+            ));
+            return Ok(true);
+        }
         let Some(mut kind) = shape.kind else {
             return self.push_shape_text_fallback(
                 shape.owner_destination,
@@ -12725,6 +12746,15 @@ impl Parser {
                             blue: 255,
                         });
                     }
+                } else if parse_shape_property_i64(value).is_none() {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "fHidden" => {
+                if let Some(enabled) = parse_shape_property_i64(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.hidden = enabled != 0;
                 } else if parse_shape_property_i64(value).is_none() {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
