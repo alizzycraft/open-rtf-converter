@@ -29166,6 +29166,109 @@ fn malformed_wmf_offsetwindoworg_becomes_passive_placeholder() {
 }
 
 #[test]
+fn malformed_wmf_coordinate_state_counts_as_partial_without_payload_leakage() {
+    for (function, label) in [
+        (0x020b, "WMF-SETWINDOWORG-MALFORMED"),
+        (0x020c, "WMF-SETWINDOWEXT-MALFORMED"),
+        (0x020d, "WMF-SETVIEWPORTORG-MALFORMED"),
+        (0x020e, "WMF-SETVIEWPORTEXT-MALFORMED"),
+        (0x020f, "WMF-OFFSETWINDOWORG-MALFORMED"),
+        (0x0211, "WMF-OFFSETVIEWPORTORG-MALFORMED"),
+        (0x0410, "WMF-SCALEWINDOWEXT-MALFORMED"),
+        (0x0412, "WMF-SCALEVIEWPORTEXT-MALFORMED"),
+    ] {
+        let records = [
+            wmf_function_record(function),
+            wmf_bounds_record(0x041b, 20, 10, 80, 50),
+        ];
+        let wmf = minimal_wmf_with_records(160, 80, &records);
+        let wmf_hex = bytes_to_hex(&wmf);
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed WMF coordinate state partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector, "{label}");
+        assert!(image.bytes.is_empty(), "{label}");
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["wmetafile", "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed WMF coordinate state payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"wmetafile".as_slice(),
+            wmf_hex.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "malformed WMF coordinate state payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn wmf_identity_scalewindowext_is_passive_state_without_payload_leakage() {
     let mut mode = wmf_scale_record(0x0410, 1, 1, 1, 1);
     mode.extend_from_slice(b"WMF-SCALEWINDOWEXT-IDENTITY /JavaScript /EmbeddedFile /Launch");

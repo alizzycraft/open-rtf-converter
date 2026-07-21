@@ -28103,67 +28103,99 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     replaceable_clip_command_start = None;
                 }
             }
-            0x020b => {
-                let y = read_le_i16(data, 0)?;
-                let x = read_le_i16(data, 2)?;
-                window_origin_x = i32::from(x);
-                window_origin_y = i32::from(y);
-            }
-            0x020c => {
-                let height = read_le_i16(data, 0)?;
-                let width = read_le_i16(data, 2)?;
-                window_width = i32::from(width.unsigned_abs().max(1));
-                window_height = i32::from(height.unsigned_abs().max(1));
-                image_width = window_width;
-                image_height = window_height;
-                if !viewport_extent_explicit {
-                    viewport_width = window_width;
-                    viewport_height = window_height;
+            0x020b => match (read_le_i16(data, 0), read_le_i16(data, 2)) {
+                (Some(y), Some(x)) => {
+                    window_origin_x = i32::from(x);
+                    window_origin_y = i32::from(y);
                 }
-            }
-            0x020e => {
-                let height = read_le_i16(data, 0)?;
-                let width = read_le_i16(data, 2)?;
-                viewport_width = i32::from(width).clamp(-image_width, image_width);
-                viewport_height = i32::from(height).clamp(-image_height, image_height);
-                if viewport_width == 0 || viewport_height == 0 {
-                    return None;
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            0x020c => match (read_le_i16(data, 0), read_le_i16(data, 2)) {
+                (Some(height), Some(width)) => {
+                    window_width = i32::from(width.unsigned_abs().max(1));
+                    window_height = i32::from(height.unsigned_abs().max(1));
+                    image_width = window_width;
+                    image_height = window_height;
+                    if !viewport_extent_explicit {
+                        viewport_width = window_width;
+                        viewport_height = window_height;
+                    }
                 }
-                viewport_extent_explicit = true;
-            }
-            0x020f => {
-                let y_offset = i32::from(read_le_i16(data, 0)?);
-                let x_offset = i32::from(read_le_i16(data, 2)?);
-                window_origin_x = window_origin_x.checked_add(x_offset)?;
-                window_origin_y = window_origin_y.checked_add(y_offset)?;
-            }
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            0x020e => match (read_le_i16(data, 0), read_le_i16(data, 2)) {
+                (Some(height), Some(width)) => {
+                    let next_width = i32::from(width).clamp(-image_width, image_width);
+                    let next_height = i32::from(height).clamp(-image_height, image_height);
+                    if next_width == 0 || next_height == 0 {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    } else {
+                        viewport_width = next_width;
+                        viewport_height = next_height;
+                        viewport_extent_explicit = true;
+                    }
+                }
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            0x020f => match (read_le_i16(data, 0), read_le_i16(data, 2)) {
+                (Some(y), Some(x)) => {
+                    let y_offset = i32::from(y);
+                    let x_offset = i32::from(x);
+                    window_origin_x = window_origin_x.checked_add(x_offset)?;
+                    window_origin_y = window_origin_y.checked_add(y_offset)?;
+                }
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             0x0410 => {
-                let y_denom = read_le_i16(data, 0)?;
-                let y_num = read_le_i16(data, 2)?;
-                let x_denom = read_le_i16(data, 4)?;
-                let x_num = read_le_i16(data, 6)?;
-                if x_denom == 0 || y_denom == 0 {
-                    return None;
-                }
-                window_width = scale_wmf_logical_extent(window_width, x_num, x_denom, image_width)?;
-                window_height =
-                    scale_wmf_logical_extent(window_height, y_num, y_denom, image_height)?;
-                if !viewport_extent_explicit {
-                    viewport_width = image_width;
-                    viewport_height = image_height;
+                match (
+                    read_le_i16(data, 0),
+                    read_le_i16(data, 2),
+                    read_le_i16(data, 4),
+                    read_le_i16(data, 6),
+                ) {
+                    (Some(y_denom), Some(y_num), Some(x_denom), Some(x_num))
+                        if x_denom != 0 && y_denom != 0 =>
+                    {
+                        if let (Some(width), Some(height)) = (
+                            scale_wmf_logical_extent(window_width, x_num, x_denom, image_width),
+                            scale_wmf_logical_extent(window_height, y_num, y_denom, image_height),
+                        ) {
+                            window_width = width;
+                            window_height = height;
+                            if !viewport_extent_explicit {
+                                viewport_width = image_width;
+                                viewport_height = image_height;
+                            }
+                        } else {
+                            skipped_record_count = skipped_record_count.checked_add(1)?;
+                        }
+                    }
+                    _ => skipped_record_count = skipped_record_count.checked_add(1)?,
                 }
             }
             0x0412 => {
-                let y_denom = read_le_i16(data, 0)?;
-                let y_num = read_le_i16(data, 2)?;
-                let x_denom = read_le_i16(data, 4)?;
-                let x_num = read_le_i16(data, 6)?;
-                if x_denom == 0 || y_denom == 0 {
-                    return None;
+                match (
+                    read_le_i16(data, 0),
+                    read_le_i16(data, 2),
+                    read_le_i16(data, 4),
+                    read_le_i16(data, 6),
+                ) {
+                    (Some(y_denom), Some(y_num), Some(x_denom), Some(x_num))
+                        if x_denom != 0 && y_denom != 0 =>
+                    {
+                        if let (Some(width), Some(height)) = (
+                            scale_wmf_extent(viewport_width, x_num, x_denom, image_width),
+                            scale_wmf_extent(viewport_height, y_num, y_denom, image_height),
+                        ) {
+                            viewport_width = width;
+                            viewport_height = height;
+                            viewport_extent_explicit = true;
+                        } else {
+                            skipped_record_count = skipped_record_count.checked_add(1)?;
+                        }
+                    }
+                    _ => skipped_record_count = skipped_record_count.checked_add(1)?,
                 }
-                viewport_width = scale_wmf_extent(viewport_width, x_num, x_denom, image_width)?;
-                viewport_height = scale_wmf_extent(viewport_height, y_num, y_denom, image_height)?;
-                viewport_extent_explicit = true;
             }
             0x01f0 => {
                 let handle = usize::from(read_le_u16(data, 0)?);
@@ -28253,22 +28285,28 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 ) => {}
                 Some(_) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
-            0x020d => {
-                viewport_origin_y = i32::from(read_le_i16(data, 0)?)
-                    .clamp(-window_height.max(1), window_height.max(1));
-                viewport_origin_x = i32::from(read_le_i16(data, 2)?)
-                    .clamp(-window_width.max(1), window_width.max(1));
-            }
-            0x0211 => {
-                let y_offset = i32::from(read_le_i16(data, 0)?);
-                let x_offset = i32::from(read_le_i16(data, 2)?);
-                viewport_origin_y = viewport_origin_y
-                    .checked_add(y_offset)?
-                    .clamp(-window_height.max(1), window_height.max(1));
-                viewport_origin_x = viewport_origin_x
-                    .checked_add(x_offset)?
-                    .clamp(-window_width.max(1), window_width.max(1));
-            }
+            0x020d => match (read_le_i16(data, 0), read_le_i16(data, 2)) {
+                (Some(y), Some(x)) => {
+                    viewport_origin_y =
+                        i32::from(y).clamp(-window_height.max(1), window_height.max(1));
+                    viewport_origin_x =
+                        i32::from(x).clamp(-window_width.max(1), window_width.max(1));
+                }
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            0x0211 => match (read_le_i16(data, 0), read_le_i16(data, 2)) {
+                (Some(y), Some(x)) => {
+                    let y_offset = i32::from(y);
+                    let x_offset = i32::from(x);
+                    viewport_origin_y = viewport_origin_y
+                        .checked_add(y_offset)?
+                        .clamp(-window_height.max(1), window_height.max(1));
+                    viewport_origin_x = viewport_origin_x
+                        .checked_add(x_offset)?
+                        .clamp(-window_width.max(1), window_width.max(1));
+                }
+                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             0x0102 => match read_le_u16(data, 0) {
                 Some(WMF_BKMODE_TRANSPARENT) => {
                     state.text_background_mode = WmfTextBackgroundMode::Transparent
