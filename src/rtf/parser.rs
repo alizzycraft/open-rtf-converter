@@ -12139,6 +12139,14 @@ impl Parser {
         } else {
             Vec::new()
         };
+        let fill_rule = if point_paths.is_empty() {
+            StaticImageVectorFillRule::Winding
+        } else {
+            shape
+                .polygon_preset
+                .map(polygon_preset_shape_fill_rule)
+                .unwrap_or(StaticImageVectorFillRule::Winding)
+        };
         if kind == StaticShapeKind::Polyline && points.is_empty() {
             if let Some(preset) = shape.polyline_preset {
                 points =
@@ -12333,6 +12341,7 @@ impl Parser {
                 text: shape.text,
                 points,
                 point_paths,
+                fill_rule,
                 horizontal_anchor: shape.horizontal_anchor,
                 vertical_anchor: shape.vertical_anchor,
             },
@@ -15847,7 +15856,7 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::SmileyFace => {
             regular_polygon_shape_points(width_twips, height_twips, 24)
         }
-        ShapePolygonPreset::Donut => regular_polygon_shape_points(width_twips, height_twips, 32),
+        ShapePolygonPreset::Donut => donut_shape_points(width_twips, height_twips),
         ShapePolygonPreset::NoSymbol => regular_polygon_shape_points(width_twips, height_twips, 32),
         ShapePolygonPreset::Plaque => plaque_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DoubleBrace => double_brace_shape_points(width_twips, height_twips),
@@ -16137,6 +16146,7 @@ fn polygon_preset_shape_point_paths(
     height_twips: i32,
 ) -> Vec<Vec<StaticShapePoint>> {
     match preset {
+        ShapePolygonPreset::Donut => donut_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::MathDivide => math_divide_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::MathEqual => math_equal_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::MathNotEqual => {
@@ -16146,6 +16156,13 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::ChartStar => chart_star_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::ChartPlus => chart_plus_shape_point_paths(width_twips, height_twips),
         _ => Vec::new(),
+    }
+}
+
+fn polygon_preset_shape_fill_rule(preset: ShapePolygonPreset) -> StaticImageVectorFillRule {
+    match preset {
+        ShapePolygonPreset::Donut => StaticImageVectorFillRule::Alternate,
+        _ => StaticImageVectorFillRule::Winding,
     }
 }
 
@@ -18704,14 +18721,37 @@ fn regular_polygon_shape_points(
     height_twips: i32,
     points: usize,
 ) -> Vec<StaticShapePoint> {
+    regular_polygon_inset_shape_points(width_twips, height_twips, points, 1000)
+}
+
+fn donut_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    regular_polygon_shape_points(width_twips, height_twips, 32)
+}
+
+fn donut_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![regular_polygon_inset_shape_points(
+        width_twips,
+        height_twips,
+        32,
+        460,
+    )]
+}
+
+fn regular_polygon_inset_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+    points: usize,
+    radius_per_mille: i32,
+) -> Vec<StaticShapePoint> {
     if points < 3 {
         return Vec::new();
     }
 
     let center_x = f64::from(width_twips) / 2.0;
     let center_y = f64::from(height_twips) / 2.0;
-    let radius_x = center_x;
-    let radius_y = center_y;
+    let radius_scale = f64::from(radius_per_mille.clamp(1, 1000)) / 1000.0;
+    let radius_x = center_x * radius_scale;
+    let radius_y = center_y * radius_scale;
 
     (0..points)
         .map(|index| {

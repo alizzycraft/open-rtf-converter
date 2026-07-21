@@ -1031,6 +1031,7 @@ fn draw_layout_item(
             LayoutItem::Polygon {
                 points,
                 paths,
+                fill_rule,
                 stroke_width,
                 stroke_color,
                 stroke_style,
@@ -1043,7 +1044,7 @@ fn draw_layout_item(
                     *stroke_width,
                     *stroke_color,
                     *stroke_style,
-                    StaticImageVectorFillRule::Winding,
+                    *fill_rule,
                     *fill_color,
                 );
                 return;
@@ -6538,6 +6539,7 @@ endstream
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -6630,6 +6632,7 @@ endstream
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);

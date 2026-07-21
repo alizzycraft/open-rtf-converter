@@ -10,9 +10,9 @@ use crate::model::{
     FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
     NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
     PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand, StaticShape,
-    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind,
-    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
+    StaticShapeKind, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
     Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
@@ -108,6 +108,7 @@ pub enum LayoutItem {
     Polygon {
         points: Vec<LayoutPoint>,
         paths: Vec<Vec<LayoutPoint>>,
+        fill_rule: StaticImageVectorFillRule,
         stroke_width: f32,
         stroke_color: PdfColor,
         stroke_style: LineStyle,
@@ -2505,6 +2506,7 @@ fn layout_shape(
             page.items.push(LayoutItem::Polygon {
                 points,
                 paths,
+                fill_rule: shape.fill_rule,
                 stroke_width: stroke_width_points.unwrap_or(0.0),
                 stroke_color: color,
                 stroke_style,
@@ -2814,6 +2816,7 @@ fn push_static_shape_arrowhead(
             page.items.push(LayoutItem::Polygon {
                 points: vec![tip, wing_a, wing_b],
                 paths: Vec::new(),
+                fill_rule: StaticImageVectorFillRule::Winding,
                 stroke_width,
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
@@ -10965,6 +10968,7 @@ mod tests {
                 text: Vec::new(),
                 points: Vec::new(),
                 point_paths: Vec::new(),
+                fill_rule: StaticImageVectorFillRule::Winding,
             }),
         ];
 
@@ -11022,6 +11026,7 @@ mod tests {
             }],
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11138,6 +11143,7 @@ mod tests {
                 text: Vec::new(),
                 points: Vec::new(),
                 point_paths: Vec::new(),
+                fill_rule: StaticImageVectorFillRule::Winding,
             }),
         ];
 
@@ -11195,6 +11201,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
         let page_layout = LayoutEngine::layout(&page_document);
         let page_fill = page_layout.pages[0]
@@ -11262,6 +11269,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11332,6 +11340,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11409,6 +11418,7 @@ mod tests {
             }],
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11497,6 +11507,7 @@ mod tests {
             }],
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11556,6 +11567,7 @@ mod tests {
             }],
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let centered_layout = LayoutEngine::layout(&document);
@@ -11619,6 +11631,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11665,6 +11678,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11717,6 +11731,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11788,6 +11803,7 @@ mod tests {
                 },
             ],
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11869,6 +11885,7 @@ mod tests {
                 },
             ],
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11933,6 +11950,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -11997,6 +12015,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -12079,6 +12098,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
         let layout = LayoutEngine::layout(&document);
@@ -19091,6 +19111,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            fill_rule: StaticImageVectorFillRule::Winding,
         }];
         document.blocks.clear();
         for _ in 0..120 {

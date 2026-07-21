@@ -657,6 +657,7 @@ pub struct StaticShape {
     pub text: Vec<Paragraph>,
     pub points: Vec<StaticShapePoint>,
     pub point_paths: Vec<Vec<StaticShapePoint>>,
+    pub fill_rule: StaticImageVectorFillRule,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

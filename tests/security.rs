@@ -72422,6 +72422,24 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
             "symbol shape points must stay inside the passive shape frame"
         );
     }
+    assert_eq!(
+        shapes[1].fill_rule,
+        StaticImageVectorFillRule::Alternate,
+        "donut should use even-odd fill so the passive PDF keeps the center open"
+    );
+    assert_eq!(shapes[1].point_paths.len(), 1);
+    assert_eq!(shapes[1].point_paths[0].len(), 32);
+    assert!(
+        shapes[1].point_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[1].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[1].height_twips
+        }),
+        "donut inner path must stay inside the passive shape frame"
+    );
+    assert_eq!(shapes[0].fill_rule, StaticImageVectorFillRule::Winding);
+    assert_eq!(shapes[2].fill_rule, StaticImageVectorFillRule::Winding);
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -72449,13 +72467,25 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0;
+    let mut passive_even_odd_shape_paints = 0;
+    let mut passive_path_moves = 0;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
         passive_shape_paints += content
             .operations
             .iter()
-            .filter(|operation| operation.operator == "B")
+            .filter(|operation| operation.operator == "B" || operation.operator == "B*")
+            .count();
+        passive_even_odd_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B*")
+            .count();
+        passive_path_moves += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "m")
             .count();
     }
 
@@ -72464,6 +72494,14 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
     assert!(
         passive_shape_paints >= 3,
         "symbol shapes should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_even_odd_shape_paints >= 1,
+        "donut should render as a passive even-odd compound path"
+    );
+    assert!(
+        passive_path_moves >= 4,
+        "compound donut should emit separate bounded outer/inner passive paths"
     );
     for forbidden in [
         b"shapeType".as_slice(),
