@@ -21165,14 +21165,20 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 clip_scope_command_start = commands.len().checked_sub(1);
             }
             EMR_RESTOREDC => {
-                if saved_states.is_empty() {
-                    if data.len() < 4 {
-                        return None;
-                    }
+                if data.len() < 4 {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                     pos = record_end;
                     continue;
                 }
-                let restored = restore_emf_saved_state(data, &mut saved_states)?;
+                if saved_states.is_empty() {
+                    pos = record_end;
+                    continue;
+                }
+                let Some(restored) = restore_emf_saved_state(data, &mut saved_states) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if commands.len().checked_add(restored.restore_count)? > MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
@@ -28376,7 +28382,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 clip_scope_command_start = commands.len().checked_sub(1);
             }
             0x0127 => {
-                let restore_index = read_le_i16(data, 0)?;
+                let Some(restore_index) = read_le_i16(data, 0) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if let Some(restored) = restore_wmf_saved_state(&mut saved_states, restore_index) {
                     if commands.len().checked_add(restored.restore_count)?
                         > MAX_PASSIVE_WMF_COMMANDS
