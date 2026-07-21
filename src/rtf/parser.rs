@@ -17020,10 +17020,13 @@ fn parse_shape_line_dashing_property(value: &str) -> Option<BorderStyle> {
         .flat_map(char::to_lowercase)
         .collect::<String>();
     match normalized.as_str() {
-        "0" | "solid" | "single" => Some(BorderStyle::Single),
-        "1" | "dot" | "sysdot" => Some(BorderStyle::Dotted),
-        "2" | "3" | "4" | "dash" | "sysdash" | "lgdash" | "longdash" | "dashdot" | "lgdashdot"
-        | "dashdotdot" | "lgdashdotdot" => Some(BorderStyle::Dashed),
+        "0" | "1" | "solid" | "single" => Some(BorderStyle::Single),
+        "2" | "3" | "dot" | "sysdot" | "squaredot" | "rounddot" | "linestyle2" | "linestyle3" => {
+            Some(BorderStyle::Dotted)
+        }
+        "4" | "5" | "6" | "7" | "8" | "9" | "10" | "12" | "dash" | "sysdash" | "lgdash"
+        | "longdash" | "dashdot" | "lgdashdot" | "dashdotdot" | "lgdashdotdot" | "longdashdot"
+        | "longdashdotdot" | "sysdashdot" => Some(BorderStyle::Dashed),
         _ => None,
     }
 }
