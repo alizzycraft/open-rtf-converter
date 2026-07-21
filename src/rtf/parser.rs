@@ -20740,8 +20740,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
-                let (offset_x, offset_y) =
-                    parse_emf_offset_clip_region(data, &header, &coordinates)?;
+                let Some((offset_x, offset_y)) =
+                    parse_emf_offset_clip_region(data, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if let Some(clip_start) = replaceable_clip_command_start
                     && vector_commands_are_only_clip_updates(&commands[clip_start..])
                 {
@@ -20787,18 +20792,23 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     replaceable_clip_command_start = Some(commands.len());
                     commands.extend(clip_commands);
                 } else {
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             EMR_EXCLUDECLIPRECT => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let (left, top, right, bottom) =
-                    parse_emf_record_rect_including_degenerate(data, &header, &coordinates)?;
+                let Some((left, top, right, bottom)) =
+                    parse_emf_record_rect_including_degenerate(data, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if !bounds_is_visible((left, top, right, bottom)) {
                     pos = record_end;
                     continue;
+                }
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
                 }
                 if let Some(clip_start) = replaceable_clip_command_start {
                     if let Some(command) = vector_diff_from_unpainted_clip_rect_command(
@@ -20820,11 +20830,16 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 clip_active = true;
             }
             EMR_INTERSECTCLIPRECT => {
+                let Some((left, top, right, bottom)) =
+                    parse_emf_record_rect_including_degenerate(data, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let (left, top, right, bottom) =
-                    parse_emf_record_rect_including_degenerate(data, &header, &coordinates)?;
                 commands.push(StaticImageVectorCommand::ClipRect {
                     left,
                     top,
@@ -20837,10 +20852,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 clip_active = true;
             }
             EMR_EXTSELECTCLIPRGN => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let region_mode = read_le_u32(data, 4)?;
+                let Some(region_mode) = read_le_u32(data, 4) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if is_passive_empty_emf_clip_combine_noop(region_mode)
                     && is_passive_empty_emf_region(data, 0, 8)
                 {
@@ -20872,12 +20888,20 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     continue;
                 }
                 if region_mode == EMF_RGN_OR && !clip_active {
-                    let _ = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
+                    if parse_emf_region_data_rects(data, 0, 8, &header, &coordinates).is_none() {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                     pos = record_end;
                     continue;
                 }
                 if region_mode == EMF_RGN_OR && clip_active {
-                    let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
+                    let Some(rects) =
+                        parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)
+                    else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     if let Some(clip_start) = replaceable_clip_command_start {
                         if let Some(command) = vector_region_or_unpainted_clip_rect_command(
                             &commands, clip_start, &rects,
@@ -20888,11 +20912,22 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         pos = record_end;
                         continue;
                     }
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 if region_mode == EMF_RGN_DIFF && !clip_active {
-                    let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
+                    let Some(rects) =
+                        parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)
+                    else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     let command = emf_exclude_clip_region_command(&header, rects)?;
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(command);
                     if replaceable_clip_command_start.is_none() {
                         replaceable_clip_command_start = commands.len().checked_sub(1);
@@ -20902,7 +20937,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     continue;
                 }
                 if region_mode == EMF_RGN_DIFF && clip_active {
-                    let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
+                    let Some(rects) =
+                        parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)
+                    else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     if let Some(clip_start) = replaceable_clip_command_start {
                         if let Some(command) = vector_diff_from_unpainted_clip_rect_command(
                             &commands, clip_start, rects,
@@ -20913,11 +20954,22 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         pos = record_end;
                         continue;
                     }
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 if region_mode == EMF_RGN_XOR && !clip_active {
-                    let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
+                    let Some(rects) =
+                        parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)
+                    else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     let command = emf_exclude_clip_region_command(&header, rects)?;
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(command);
                     if replaceable_clip_command_start.is_none() {
                         replaceable_clip_command_start = commands.len().checked_sub(1);
@@ -20927,7 +20979,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     continue;
                 }
                 if region_mode == EMF_RGN_XOR && clip_active {
-                    let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
+                    let Some(rects) =
+                        parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)
+                    else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     if let Some(clip_start) = replaceable_clip_command_start {
                         if let Some(command) = vector_xor_inside_unpainted_clip_rect_command(
                             &commands, clip_start, rects,
@@ -20938,7 +20996,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         pos = record_end;
                         continue;
                     }
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 if region_mode == EMF_RGN_COPY && clip_active {
                     replace_emf_clip_scope(
@@ -20947,10 +21007,20 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         &mut clip_scope_command_start,
                     )?;
                 } else if region_mode != EMF_RGN_AND && region_mode != EMF_RGN_COPY {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                }
+                let Some(rects) = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                let command = emf_region_clip_path_command(rects)?;
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let rects = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)?;
-                let command = emf_region_clip_path_command(rects)?;
                 commands.push(command);
                 if replaceable_clip_command_start.is_none() {
                     replaceable_clip_command_start = commands.len().checked_sub(1);
@@ -21375,7 +21445,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
-                let handle = read_le_u32(data, 20)?;
+                let Some(handle) = read_le_u32(data, 20) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 let Some(EmfObject::Brush { color, pattern }) =
                     emf_stock_object(handle).or_else(|| {
                         usize::try_from(handle)
@@ -21391,7 +21465,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 };
-                let rects = parse_emf_region_data_rects(data, 16, 24, &header, &coordinates)?;
+                let Some(rects) = parse_emf_region_data_rects(data, 16, 24, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 push_emf_region_rectangles(&mut commands, rects, fill_color, pattern)?;
             }
             EMR_FRAMERGN => {
@@ -21399,7 +21478,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
-                let handle = read_le_u32(data, 20)?;
+                let Some(handle) = read_le_u32(data, 20) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 let Some(EmfObject::Brush { color, pattern }) =
                     emf_stock_object(handle).or_else(|| {
                         usize::try_from(handle)
@@ -21415,11 +21498,26 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 };
-                let stroke_width =
-                    normalized_emf_extent_width(read_le_i32(data, 24)?, &header, &coordinates)?;
-                let stroke_height =
-                    normalized_emf_extent_height(read_le_i32(data, 28)?, &header, &coordinates)?;
-                let rects = parse_emf_region_data_rects(data, 16, 32, &header, &coordinates)?;
+                let Some(stroke_width) = read_le_i32(data, 24)
+                    .and_then(|width| normalized_emf_extent_width(width, &header, &coordinates))
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                let Some(stroke_height) = read_le_i32(data, 28)
+                    .and_then(|height| normalized_emf_extent_height(height, &header, &coordinates))
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                let Some(rects) = parse_emf_region_data_rects(data, 16, 32, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 push_emf_region_frame_rectangles(
                     &mut commands,
                     rects,
@@ -21434,7 +21532,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
-                let rects = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)?;
+                let Some(rects) = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if emf_commands_are_unpainted_clip_scope(&commands) {
                     push_emf_region_rectangles(
                         &mut commands,
@@ -21460,11 +21563,16 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     pos = record_end;
                     continue;
                 }
+                let Some(rects) = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 let Some(fill_color) = state.fill_color else {
                     pos = record_end;
                     continue;
                 };
-                let rects = parse_emf_region_data_rects(data, 16, 20, &header, &coordinates)?;
                 push_emf_region_rectangles(&mut commands, rects, fill_color, state.fill_pattern)?;
             }
             EMR_SELECTCLIPPATH => {
@@ -45065,7 +45173,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_extselectcliprgn_with_malformed_region_data_becomes_passive_placeholder() {
+    fn emf_extselectcliprgn_with_malformed_region_data_keeps_later_safe_drawing() {
         let mut record = emf_extselectcliprgn_record(1, &[(20, 10, 90, 50)]);
         write_test_le_u32(&mut record, 8, 31);
         let records = [record, emf_rect_record(43, 0, 0, 160, 80)];
@@ -45078,9 +45186,12 @@ After\par}"#;
         assert!(matches!(
             &output.document.blocks[0],
             Block::Image(image)
-                if image.format == ImageFormat::Placeholder
+                if image.format == ImageFormat::WmfVector
                     && image.bytes.is_empty()
-                    && image.vector_commands.is_empty()
+                    && image.vector_commands.iter().any(|command| matches!(
+                        command,
+                        StaticImageVectorCommand::Rectangle { .. }
+                    ))
         ));
     }
 
