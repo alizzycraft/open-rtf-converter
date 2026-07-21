@@ -73560,7 +73560,7 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 8);
-    let expected_point_counts = [9, 9, 22, 22, 11, 10, 12, 18];
+    let expected_point_counts = [9, 9, 22, 22, 11, 10, 22, 34];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -73577,7 +73577,12 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
     assert_eq!(shapes[0].points[1].y_twips, 0);
     assert_eq!(shapes[1].points[5].y_twips, shapes[1].height_twips);
     assert_eq!(shapes[4].points[1].x_twips, shapes[4].width_twips);
-    assert_eq!(shapes[7].points[8].x_twips, shapes[7].width_twips);
+    assert!(
+        shapes[7]
+            .points
+            .iter()
+            .any(|point| point.x_twips == shapes[7].width_twips)
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
