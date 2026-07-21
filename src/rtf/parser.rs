@@ -840,6 +840,7 @@ enum ShapePolygonPreset {
     QuadArrow,
     LeftRightUpArrow,
     LeftUpArrow,
+    BentUpArrow,
     ManualInput,
     ManualOperation,
     DownTriangle,
@@ -13133,6 +13134,10 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftUpArrow);
                 true
             }
+            44 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::BentUpArrow);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15119,6 +15124,7 @@ fn polygon_preset_shape_points(
             left_right_up_arrow_shape_points(width_twips, height_twips)
         }
         ShapePolygonPreset::LeftUpArrow => left_up_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::BentUpArrow => bent_up_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::ManualInput => manual_input_shape_points(width_twips, height_twips),
         ShapePolygonPreset::ManualOperation => {
             manual_operation_shape_points(width_twips, height_twips)
@@ -15749,6 +15755,31 @@ fn left_up_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<Static
         (0, mid_y),
         (arm_left, arm_top),
         (arm_left, 0),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn bent_up_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let mid_x = width_twips / 2;
+    let shaft_left = width_twips / 3;
+    let shaft_right = width_twips.saturating_sub(width_twips / 4);
+    let arrow_base_y = height_twips / 3;
+    let shaft_top = height_twips / 2;
+    [
+        (mid_x, 0),
+        (width_twips, arrow_base_y),
+        (shaft_right, arrow_base_y),
+        (shaft_right, height_twips),
+        (0, height_twips),
+        (0, shaft_top),
+        (shaft_left, shaft_top),
+        (shaft_left, arrow_base_y),
+        (mid_x, arrow_base_y),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
