@@ -842,6 +842,7 @@ enum ShapePolygonPreset {
     LeftUpArrow,
     BentUpArrow,
     FivePointStar,
+    EightPointStar,
     ManualInput,
     ManualOperation,
     DownTriangle,
@@ -13143,6 +13144,10 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::FivePointStar);
                 true
             }
+            93 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::EightPointStar);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15133,6 +15138,9 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::FivePointStar => {
             five_point_star_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::EightPointStar => {
+            eight_point_star_shape_points(width_twips, height_twips)
+        }
         ShapePolygonPreset::ManualInput => manual_input_shape_points(width_twips, height_twips),
         ShapePolygonPreset::ManualOperation => {
             manual_operation_shape_points(width_twips, height_twips)
@@ -15809,6 +15817,33 @@ fn five_point_star_shape_points(width_twips: i32, height_twips: i32) -> Vec<Stat
         ((width_twips * 32) / 100, (height_twips * 58) / 100),
         (0, (height_twips * 38) / 100),
         ((width_twips * 39) / 100, (height_twips * 35) / 100),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn eight_point_star_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    [
+        (width_twips / 2, 0),
+        ((width_twips * 60) / 100, (height_twips * 30) / 100),
+        (width_twips, 0),
+        ((width_twips * 70) / 100, (height_twips * 40) / 100),
+        (width_twips, height_twips / 2),
+        ((width_twips * 70) / 100, (height_twips * 60) / 100),
+        (width_twips, height_twips),
+        ((width_twips * 60) / 100, (height_twips * 70) / 100),
+        (width_twips / 2, height_twips),
+        ((width_twips * 40) / 100, (height_twips * 70) / 100),
+        (0, height_twips),
+        ((width_twips * 30) / 100, (height_twips * 60) / 100),
+        (0, height_twips / 2),
+        ((width_twips * 30) / 100, (height_twips * 40) / 100),
+        (0, 0),
+        ((width_twips * 40) / 100, (height_twips * 30) / 100),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
