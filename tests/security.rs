@@ -74512,7 +74512,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 13);
-    let expected_point_counts = [11, 6, 12, 4, 12, 16, 8, 20, 13, 20, 28, 12, 18];
+    let expected_point_counts = [11, 6, 12, 4, 12, 16, 8, 20, 6, 20, 28, 12, 18];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -74579,6 +74579,21 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
             "gear hole paths must stay inside passive frame: {shape:?}"
         );
     }
+    assert_eq!(
+        shapes[8].point_paths.len(),
+        1,
+        "corner tabs should keep the disconnected tab as a separate passive subpath"
+    );
+    assert_eq!(shapes[8].point_paths[0].len(), 6);
+    assert!(
+        shapes[8].point_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[8].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[8].height_twips
+        }),
+        "corner tab subpath must stay inside passive frame"
+    );
     assert!(shapes[11].points.iter().any(|point| point.x_twips == 0));
     assert!(
         shapes[12]
@@ -74656,8 +74671,8 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         "gear shapes should render as passive even-odd compound paths"
     );
     assert!(
-        passive_path_moves >= 23,
-        "compound math and gear shapes should emit separate passive PDF subpaths"
+        passive_path_moves >= 24,
+        "compound math, tab, and gear shapes should emit separate passive PDF subpaths"
     );
     for forbidden in [
         b"shapeType".as_slice(),
