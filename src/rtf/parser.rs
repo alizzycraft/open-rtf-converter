@@ -816,6 +816,7 @@ struct ShapeBuilder {
     kind: Option<StaticShapeKind>,
     rounded_rectangle: bool,
     diamond: bool,
+    isosceles_triangle: bool,
     base_x_twips: i32,
     base_y_twips: i32,
     left_twips: i32,
@@ -858,6 +859,7 @@ impl Default for ShapeBuilder {
             kind: None,
             rounded_rectangle: false,
             diamond: false,
+            isosceles_triangle: false,
             base_x_twips: 0,
             base_y_twips: 0,
             left_twips: 0,
@@ -11922,6 +11924,9 @@ impl Parser {
         if kind == StaticShapeKind::Polygon && shape.diamond && points.is_empty() {
             points = diamond_shape_points(shape.width_twips, shape.height_twips);
         }
+        if kind == StaticShapeKind::Polygon && shape.isosceles_triangle && points.is_empty() {
+            points = isosceles_triangle_shape_points(shape.width_twips, shape.height_twips);
+        }
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
         if shape.rotation_units != 0 {
@@ -12264,6 +12269,13 @@ impl Parser {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.kind = Some(StaticShapeKind::Polygon);
             shape.diamond = true;
+        }
+    }
+
+    fn set_current_shape_isosceles_triangle(&mut self) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.kind = Some(StaticShapeKind::Polygon);
+            shape.isosceles_triangle = true;
         }
     }
 
@@ -12835,7 +12847,7 @@ impl Parser {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
             }
-            2 => {
+            2 | 5 => {
                 self.set_current_shape_rounded_rectangle();
                 true
             }
@@ -12845,6 +12857,10 @@ impl Parser {
             }
             9 => {
                 self.set_current_shape_kind(StaticShapeKind::Ellipse);
+                true
+            }
+            7 => {
+                self.set_current_shape_isosceles_triangle();
                 true
             }
             20 => {
@@ -14737,6 +14753,17 @@ fn diamond_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapeP
         y_twips: y,
     })
     .collect()
+}
+
+fn isosceles_triangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let mid_x = width_twips / 2;
+    [(mid_x, 0), (width_twips, height_twips), (0, height_twips)]
+        .into_iter()
+        .map(|(x, y)| StaticShapePoint {
+            x_twips: x,
+            y_twips: y,
+        })
+        .collect()
 }
 
 fn rotated_shape_point(
