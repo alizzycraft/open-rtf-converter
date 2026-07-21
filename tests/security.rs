@@ -73215,6 +73215,166 @@ fn office_right_arrow_callouts_render_as_passive_polygon_without_payload_leakage
 }
 
 #[test]
+fn office_cardinal_arrow_callouts_render_as_passive_polygons_without_payload_leakage() {
+    for (shape_type, label, expected_tip, expected_body_corner) in [
+        (54, "left", (0, 540), (2880, 0)),
+        (55, "up", (1440, 0), (2880, 1080)),
+        (56, "down", (1440, 1080), (2880, 0)),
+    ] {
+        let payload = format!("hidden-{label}-arrow-callout-payload");
+        let shape_type = shape_type.to_string();
+        let input = rtf(&[
+            "{",
+            "\\",
+            "rtf1 Before",
+            "\\",
+            "par{",
+            "\\",
+            "shp{",
+            "\\",
+            "*",
+            "\\",
+            "shpinst",
+            "\\",
+            "shpleft720",
+            "\\",
+            "shptop720",
+            "\\",
+            "shpright3600",
+            "\\",
+            "shpbottom1800{",
+            "\\",
+            "sp{",
+            "\\",
+            "sn shapeType}{",
+            "\\",
+            "sv ",
+            shape_type.as_str(),
+            "}}{",
+            "\\",
+            "sp{",
+            "\\",
+            "sn fillColor}{",
+            "\\",
+            "sv 10040064}}{",
+            "\\",
+            "sp{",
+            "\\",
+            "sn lineColor}{",
+            "\\",
+            "sv 16711680}}{",
+            "\\",
+            "sp{",
+            "\\",
+            "sn pFragments}{",
+            "\\",
+            "sv ",
+            payload.as_str(),
+            "}}}}After",
+            "\\",
+            "par}",
+        ]);
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let shape = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("passive {label} arrow callout shape"));
+
+        assert!(text.contains("Before"));
+        assert!(text.contains("After"));
+        assert_eq!(shape.kind, StaticShapeKind::Polygon);
+        assert_eq!(shape.points.len(), 7);
+        assert!(
+            shape
+                .points
+                .iter()
+                .any(|point| point.x_twips == expected_tip.0 && point.y_twips == expected_tip.1),
+            "{label} arrow callout should keep passive arrow-tip point"
+        );
+        assert!(
+            shape
+                .points
+                .iter()
+                .any(|point| point.x_twips == expected_body_corner.0
+                    && point.y_twips == expected_body_corner.1),
+            "{label} arrow callout should preserve a passive body corner"
+        );
+        assert_eq!(
+            shape.fill_color,
+            Some(open_rtf_converter::model::Color {
+                red: 0,
+                green: 51,
+                blue: 153,
+            })
+        );
+        for forbidden in [
+            "shapeType",
+            "fillColor",
+            "lineColor",
+            "pFragments",
+            payload.as_str(),
+            "[Shape skipped",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "{label} arrow callout metadata leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("Before"));
+        assert!(rendered_text.contains("After"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "B"),
+            "{label} arrow callout fill/stroke should render passively"
+        );
+        for forbidden in [
+            b"shapeType".as_slice(),
+            b"fillColor",
+            b"lineColor",
+            b"pFragments",
+            payload.as_bytes(),
+            b"[Shape skipped",
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "{label} arrow callout metadata leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn repeated_office_shape_type_uses_last_passive_preset_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 4}}{\sp{\sn shapeType}{\sv 12}}{\sp{\sn fillColor}{\sv 10040064}}{\sp{\sn pFragments}{\sv hidden-repeated-shapetype-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

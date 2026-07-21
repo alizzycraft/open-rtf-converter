@@ -825,6 +825,9 @@ enum ShapePolygonPreset {
     Chevron,
     NotchedRightArrow,
     RightArrowCallout,
+    LeftArrowCallout,
+    UpArrowCallout,
+    DownArrowCallout,
     RightArrow,
     LeftArrow,
     UpArrow,
@@ -13066,6 +13069,18 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::RightArrowCallout);
                 true
             }
+            54 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftArrowCallout);
+                true
+            }
+            55 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::UpArrowCallout);
+                true
+            }
+            56 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DownArrowCallout);
+                true
+            }
             33 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::RightArrow);
                 true
@@ -15053,6 +15068,15 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::RightArrowCallout => {
             right_arrow_callout_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::LeftArrowCallout => {
+            left_arrow_callout_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::UpArrowCallout => {
+            up_arrow_callout_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::DownArrowCallout => {
+            down_arrow_callout_shape_points(width_twips, height_twips)
+        }
         ShapePolygonPreset::RightArrow => right_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LeftArrow => left_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::UpArrow => up_arrow_shape_points(width_twips, height_twips),
@@ -15346,6 +15370,72 @@ fn right_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<
         (body_right, shaft_bottom),
         (body_right, height_twips),
         (0, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn left_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let body_left = width_twips / 3;
+    let mid_y = height_twips / 2;
+    let shaft_top = height_twips / 4;
+    let shaft_bottom = height_twips.saturating_sub(shaft_top);
+    [
+        (body_left, 0),
+        (width_twips, 0),
+        (width_twips, height_twips),
+        (body_left, height_twips),
+        (body_left, shaft_bottom),
+        (0, mid_y),
+        (body_left, shaft_top),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn up_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let body_top = height_twips / 3;
+    let mid_x = width_twips / 2;
+    let shaft_left = width_twips / 4;
+    let shaft_right = width_twips.saturating_sub(shaft_left);
+    [
+        (0, body_top),
+        (shaft_left, body_top),
+        (mid_x, 0),
+        (shaft_right, body_top),
+        (width_twips, body_top),
+        (width_twips, height_twips),
+        (0, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn down_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let body_bottom = (height_twips * 2) / 3;
+    let mid_x = width_twips / 2;
+    let shaft_left = width_twips / 4;
+    let shaft_right = width_twips.saturating_sub(shaft_left);
+    [
+        (0, 0),
+        (width_twips, 0),
+        (width_twips, body_bottom),
+        (shaft_right, body_bottom),
+        (mid_x, height_twips),
+        (shaft_left, body_bottom),
+        (0, body_bottom),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
