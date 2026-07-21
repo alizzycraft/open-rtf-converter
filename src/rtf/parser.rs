@@ -21042,12 +21042,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
-            EMR_SETTEXTCOLOR => {
-                state.text_color = Some(color_from_colorref(data, 0)?);
-            }
-            EMR_SETBKCOLOR => {
-                state.background_color = Some(color_from_colorref(data, 0)?);
-            }
+            EMR_SETTEXTCOLOR => match color_from_colorref(data, 0) {
+                Some(color) => state.text_color = Some(color),
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            EMR_SETBKCOLOR => match color_from_colorref(data, 0) {
+                Some(color) => state.background_color = Some(color),
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_SETTEXTCHAREXTRA => {
                 match normalized_emf_text_character_extra(data, &header, &coordinates) {
                     Some(extra) => state.text_character_extra = extra,
@@ -28223,12 +28225,14 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
-            0x0209 => {
-                state.text_color = Some(color_from_colorref(data, 0)?);
-            }
-            0x0201 => {
-                state.background_color = Some(color_from_colorref(data, 0)?);
-            }
+            0x0209 => match color_from_colorref(data, 0) {
+                Some(color) => state.text_color = Some(color),
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            0x0201 => match color_from_colorref(data, 0) {
+                Some(color) => state.background_color = Some(color),
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             0x0103 => {
                 if !matches!(
                     read_le_u16(data, 0)?,
