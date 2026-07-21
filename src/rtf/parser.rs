@@ -31,6 +31,7 @@ const DEFAULT_SCRIPT_FONT_SCALE_PERCENT: i32 = 65;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 60;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
+const DEFAULT_SHAPE_TEXT_MARGIN_TWIPS: i32 = 80;
 const DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS: i32 = DEFAULT_SHAPE_WRAP_MARGIN_TWIPS;
 const MAX_PASSIVE_SHAPE_Z_ORDER: i32 = 65_535;
 const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
@@ -866,6 +867,10 @@ struct ShapeBuilder {
     wrap_margin_right_twips: i32,
     wrap_margin_top_twips: i32,
     wrap_margin_bottom_twips: i32,
+    text_margin_left_twips: i32,
+    text_margin_right_twips: i32,
+    text_margin_top_twips: i32,
+    text_margin_bottom_twips: i32,
     text: Vec<Paragraph>,
     current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
@@ -911,6 +916,10 @@ impl Default for ShapeBuilder {
             wrap_margin_right_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
             wrap_margin_top_twips: 0,
             wrap_margin_bottom_twips: 0,
+            text_margin_left_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
+            text_margin_right_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
+            text_margin_top_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
+            text_margin_bottom_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
             text: Vec::new(),
             current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
@@ -12115,6 +12124,10 @@ impl Parser {
                 stroke_color: shape.stroke_color,
                 stroke_style: shape.stroke_style,
                 fill_color,
+                text_margin_left_twips: shape.text_margin_left_twips,
+                text_margin_right_twips: shape.text_margin_right_twips,
+                text_margin_top_twips: shape.text_margin_top_twips,
+                text_margin_bottom_twips: shape.text_margin_bottom_twips,
                 text: shape.text,
                 points,
                 horizontal_anchor: shape.horizontal_anchor,
@@ -12704,6 +12717,59 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
+            "dxTextLeft" => {
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
+                    let margin = self.clamp_shape_text_margin(
+                        twips as i32,
+                        "shape left text margin",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.text_margin_left_twips = margin;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "dxTextRight" => {
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
+                    let margin = self.clamp_shape_text_margin(
+                        twips as i32,
+                        "shape right text margin",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.text_margin_right_twips = margin;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "dyTextTop" => {
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
+                    let margin =
+                        self.clamp_shape_text_margin(twips as i32, "shape top text margin", offset);
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.text_margin_top_twips = margin;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "dyTextBottom" => {
+                if let Some(twips) = parse_shape_property_emu_twips(value) {
+                    let margin = self.clamp_shape_text_margin(
+                        twips as i32,
+                        "shape bottom text margin",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.text_margin_bottom_twips = margin;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "lineDashing" => {
                 if let Some(style) = parse_shape_line_dashing_property(value)
                     && let Some(shape) = self.current_shape.as_mut()
@@ -13033,6 +13099,18 @@ impl Parser {
     }
 
     fn clamp_shape_wrap_margin(&mut self, value: i32, label: &str, offset: usize) -> i32 {
+        let max = self.limits().max_shape_dimension_twips.max(0);
+        let clamped = value.clamp(0, max);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("{label} clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        clamped
+    }
+
+    fn clamp_shape_text_margin(&mut self, value: i32, label: &str, offset: usize) -> i32 {
         let max = self.limits().max_shape_dimension_twips.max(0);
         let clamped = value.clamp(0, max);
         if clamped != value {

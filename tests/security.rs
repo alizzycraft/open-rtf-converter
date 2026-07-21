@@ -70109,7 +70109,7 @@ fn modern_shape_text_renders_passively_without_property_or_field_leakage() {
 
 #[test]
 fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_leakage() {
-    let input = br#"{\rtf1{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn pFragments}{\sv hostile-shape-text-payload}}}{\shptxt Box text {\field{\*\fldinst HYPERLINK "https://example.com/shape-text"}{\fldrslt safe link}}\par}}After\par}"#.to_vec();
+    let input = br#"{\rtf1{\shp{\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn dxTextLeft}{\sv 127000}}{\sp{\sn dxTextRight}{\sv 63500}}{\sp{\sn dyTextTop}{\sv 190500}}{\sp{\sn dyTextBottom}{\sv 63500}}{\sp{\sn pFragments}{\sv hostile-shape-text-payload}}}{\shptxt Box text {\field{\*\fldinst HYPERLINK "https://example.com/shape-text"}{\fldrslt safe link}}\par}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     let shape = parsed
@@ -70123,6 +70123,10 @@ fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_
         .expect("shape block");
 
     assert_eq!(shape.text.len(), 1);
+    assert_eq!(shape.text_margin_left_twips, 200);
+    assert_eq!(shape.text_margin_right_twips, 100);
+    assert_eq!(shape.text_margin_top_twips, 300);
+    assert_eq!(shape.text_margin_bottom_twips, 100);
     assert!(text.contains("Box text safe link"));
     assert!(text.contains("After"));
     assert!(
@@ -70135,6 +70139,10 @@ fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_
         "shpinst",
         "shapeType",
         "fillColor",
+        "dxTextLeft",
+        "dxTextRight",
+        "dyTextTop",
+        "dyTextBottom",
         "pFragments",
         "hostile-shape-text-payload",
         "HYPERLINK",
@@ -70197,6 +70205,10 @@ fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_
         b"shpinst".as_slice(),
         b"shapeType",
         b"fillColor",
+        b"dxTextLeft",
+        b"dxTextRight",
+        b"dyTextTop",
+        b"dyTextBottom",
         b"pFragments",
         b"hostile-shape-text-payload",
         b"HYPERLINK",

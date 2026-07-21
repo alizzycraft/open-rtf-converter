@@ -2810,10 +2810,14 @@ fn layout_shape_text(
     if shape.text.is_empty() {
         return;
     }
-    let padding = 4.0;
-    let content_width = (width - padding * 2.0).max(1.0);
-    let mut cursor_y = top_y - padding;
-    let min_y = bottom_y + padding;
+    let margin_left = twips_to_points(shape.text_margin_left_twips.max(0));
+    let margin_right = twips_to_points(shape.text_margin_right_twips.max(0));
+    let margin_top = twips_to_points(shape.text_margin_top_twips.max(0));
+    let margin_bottom = twips_to_points(shape.text_margin_bottom_twips.max(0));
+    let content_x = x + margin_left;
+    let content_width = (width - margin_left - margin_right).max(1.0);
+    let mut cursor_y = top_y - margin_top;
+    let min_y = bottom_y + margin_bottom;
     let markers = current_marker_context(pages, document_stats);
 
     for paragraph in &shape.text {
@@ -2845,7 +2849,7 @@ fn layout_shape_text(
                 push_shading_rect(
                     pages,
                     document,
-                    x + padding + line_left_indent,
+                    content_x + line_left_indent,
                     cursor_y - line.height,
                     paragraph_line_width(content_width, &paragraph.style, is_first_line),
                     line.height,
@@ -2855,7 +2859,7 @@ fn layout_shape_text(
                 );
             }
             let text_x = aligned_x(
-                x + padding,
+                content_x,
                 content_width,
                 line.width,
                 &paragraph.style,
@@ -2871,7 +2875,7 @@ fn layout_shape_text(
                 paragraph_border_line_position(is_first_line, is_last_line);
             push_paragraph_borders(
                 pages,
-                x + padding,
+                content_x,
                 content_width,
                 &paragraph.style,
                 border_line_idx,
@@ -10899,6 +10903,10 @@ mod tests {
                     green: 20,
                     blue: 20,
                 }),
+                text_margin_left_twips: 80,
+                text_margin_right_twips: 80,
+                text_margin_top_twips: 80,
+                text_margin_bottom_twips: 80,
                 text: Vec::new(),
                 points: Vec::new(),
             }),
@@ -10943,6 +10951,10 @@ mod tests {
                 green: 20,
                 blue: 20,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: vec![Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
@@ -11058,6 +11070,10 @@ mod tests {
                     green: 20,
                     blue: 20,
                 }),
+                text_margin_left_twips: 80,
+                text_margin_right_twips: 80,
+                text_margin_top_twips: 80,
+                text_margin_bottom_twips: 80,
                 text: Vec::new(),
                 points: Vec::new(),
             }),
@@ -11108,6 +11124,10 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11168,6 +11188,10 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11231,6 +11255,10 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11295,6 +11323,10 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            text_margin_left_twips: 360,
+            text_margin_right_twips: 180,
+            text_margin_top_twips: 240,
+            text_margin_bottom_twips: 120,
             text: vec![Paragraph {
                 style: paragraph_style,
                 runs: vec![Run {
@@ -11311,8 +11343,10 @@ mod tests {
         let shape_right = 216.0;
         let shape_bottom = 648.0;
         let shape_top = 684.0;
-        let content_left = shape_left + 4.0;
-        let content_right = shape_right - 4.0;
+        let content_left = shape_left + 18.0;
+        let content_right = shape_right - 9.0;
+        let content_bottom = shape_bottom + 6.0;
+        let content_top = shape_top - 12.0;
         let text = page
             .items
             .iter()
@@ -11323,14 +11357,14 @@ mod tests {
             .expect("shape text fragment");
 
         assert!(text.x >= content_left && text.x < content_right);
-        assert!(text.baseline_y > shape_bottom && text.baseline_y < shape_top);
+        assert!(text.baseline_y > content_bottom && text.baseline_y < content_top);
         assert!(page.items.iter().any(|item| matches!(
             item,
             LayoutItem::Highlight { x, y, width, height, color }
                 if *x >= content_left
                     && *x + *width <= content_right + 0.01
-                    && *y >= shape_bottom
-                    && *y + *height <= shape_top
+                    && *y >= content_bottom
+                    && *y + *height <= content_top
                     && *color == PdfColor {
                         red: 240.0 / 255.0,
                         green: 240.0 / 255.0,
@@ -11343,8 +11377,8 @@ mod tests {
                 if *x1 >= content_left
                     && *x2 <= content_right + 0.01
                     && (*y1 - *y2).abs() < 0.01
-                    && *y1 >= shape_bottom
-                    && *y1 <= shape_top
+                    && *y1 >= content_bottom
+                    && *y1 <= content_top
                     && *color == PdfColor {
                         red: 1.0,
                         green: 0.0,
@@ -11374,6 +11408,10 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dashed,
             fill_color: None,
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11413,6 +11451,10 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11458,6 +11500,10 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11509,6 +11555,10 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
             fill_color: None,
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: vec![
                 StaticShapePoint {
@@ -11583,6 +11633,10 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: vec![
                 StaticShapePoint {
@@ -11653,6 +11707,10 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11710,6 +11768,10 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11785,6 +11847,10 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -18790,6 +18856,10 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         }];

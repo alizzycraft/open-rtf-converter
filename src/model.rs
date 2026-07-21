@@ -648,6 +648,10 @@ pub struct StaticShape {
     pub stroke_color: Color,
     pub stroke_style: BorderStyle,
     pub fill_color: Option<Color>,
+    pub text_margin_left_twips: i32,
+    pub text_margin_right_twips: i32,
+    pub text_margin_top_twips: i32,
+    pub text_margin_bottom_twips: i32,
     pub text: Vec<Paragraph>,
     pub points: Vec<StaticShapePoint>,
 }

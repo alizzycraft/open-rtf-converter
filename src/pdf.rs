@@ -6467,6 +6467,10 @@ endstream
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -6552,6 +6556,10 @@ endstream
                 green: 20,
                 blue: 30,
             }),
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
             text: Vec::new(),
             points: Vec::new(),
         })];
