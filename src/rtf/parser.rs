@@ -21007,7 +21007,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         &mut clip_scope_command_start,
                     )?;
                 } else if region_mode != EMF_RGN_AND && region_mode != EMF_RGN_COPY {
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 let Some(rects) = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)
                 else {
