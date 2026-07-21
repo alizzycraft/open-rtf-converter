@@ -72581,7 +72581,7 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 3);
     assert_eq!(shapes[0].kind, StaticShapeKind::Polyline);
-    assert_eq!(shapes[0].points.len(), 13);
+    assert_eq!(shapes[0].points.len(), 25);
     assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[1].points.len(), 12);
     assert_eq!(shapes[2].kind, StaticShapeKind::Polygon);

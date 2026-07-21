@@ -16259,9 +16259,9 @@ fn arc_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint
     let radius_x = center_x;
     let radius_y = center_y;
 
-    (0..=12)
+    (0..=24)
         .map(|index| {
-            let angle = std::f64::consts::PI + (index as f64 * std::f64::consts::PI / 12.0);
+            let angle = std::f64::consts::PI + (index as f64 * std::f64::consts::PI / 24.0);
             let x = (center_x + radius_x * angle.cos())
                 .round()
                 .clamp(0.0, f64::from(width_twips)) as i32;
