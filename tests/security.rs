@@ -71843,6 +71843,121 @@ fn office_pentagons_render_as_passive_polygon_without_payload_leakage() {
 }
 
 #[test]
+fn office_flowchart_primitives_render_passively_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (61, "flowchart-process-payload"),
+        (62, "flowchart-alternate-process-payload"),
+        (63, "flowchart-decision-payload"),
+        (64, "flowchart-data-payload"),
+        (69, "flowchart-terminator-payload"),
+        (70, "flowchart-preparation-payload"),
+        (73, "flowchart-connector-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright2880\\shpbottom1440{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 7);
+    assert_eq!(shapes[0].kind, StaticShapeKind::Rectangle);
+    assert_eq!(shapes[1].kind, StaticShapeKind::RoundedRectangle);
+    assert_eq!(shapes[2].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[2].points.len(), 4);
+    assert_eq!(shapes[3].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[3].points.len(), 4);
+    assert_eq!(shapes[4].kind, StaticShapeKind::RoundedRectangle);
+    assert_eq!(shapes[5].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[5].points.len(), 6);
+    assert_eq!(shapes[6].kind, StaticShapeKind::Ellipse);
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "flowchart-process-payload",
+        "flowchart-alternate-process-payload",
+        "flowchart-decision-payload",
+        "flowchart-data-payload",
+        "flowchart-terminator-payload",
+        "flowchart-preparation-payload",
+        "flowchart-connector-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "flowchart metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "B"),
+        "flowchart primitives should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"flowchart-process-payload",
+        b"flowchart-alternate-process-payload",
+        b"flowchart-decision-payload",
+        b"flowchart-data-payload",
+        b"flowchart-terminator-payload",
+        b"flowchart-preparation-payload",
+        b"flowchart-connector-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "flowchart metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_right_arrows_render_as_passive_polygon_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 33}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn lineColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-right-arrow-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

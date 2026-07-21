@@ -13064,6 +13064,30 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftRightUpArrow);
                 true
             }
+            61 => {
+                self.set_current_shape_kind(StaticShapeKind::Rectangle);
+                true
+            }
+            62 | 69 => {
+                self.set_current_shape_rounded_rectangle();
+                true
+            }
+            63 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Diamond);
+                true
+            }
+            64 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Parallelogram);
+                true
+            }
+            70 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Hexagon);
+                true
+            }
+            73 => {
+                self.set_current_shape_kind(StaticShapeKind::Ellipse);
+                true
+            }
             20 => {
                 self.set_current_shape_kind(StaticShapeKind::Line);
                 true
