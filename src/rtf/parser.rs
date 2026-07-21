@@ -815,6 +815,7 @@ struct ShapeBuilder {
     owner_destination: Destination,
     kind: Option<StaticShapeKind>,
     rounded_rectangle: bool,
+    diamond: bool,
     base_x_twips: i32,
     base_y_twips: i32,
     left_twips: i32,
@@ -856,6 +857,7 @@ impl Default for ShapeBuilder {
             owner_destination: Destination::Body,
             kind: None,
             rounded_rectangle: false,
+            diamond: false,
             base_x_twips: 0,
             base_y_twips: 0,
             left_twips: 0,
@@ -11917,6 +11919,9 @@ impl Parser {
             kind = StaticShapeKind::RoundedRectangle;
         }
         let mut points = shape.points.clone();
+        if kind == StaticShapeKind::Polygon && shape.diamond && points.is_empty() {
+            points = diamond_shape_points(shape.width_twips, shape.height_twips);
+        }
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
         if shape.rotation_units != 0 {
@@ -11939,6 +11944,20 @@ impl Parser {
                         shape.height_twips,
                         shape.rotation_units,
                     );
+                }
+                StaticShapeKind::Polygon => {
+                    points = points
+                        .iter()
+                        .map(|point| {
+                            rotated_shape_point(
+                                point.x_twips,
+                                point.y_twips,
+                                shape.width_twips,
+                                shape.height_twips,
+                                shape.rotation_units,
+                            )
+                        })
+                        .collect();
                 }
                 _ => unsupported_or_active_property_stripped = true,
             }
@@ -12238,6 +12257,13 @@ impl Parser {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.kind = Some(StaticShapeKind::Rectangle);
             shape.rounded_rectangle = true;
+        }
+    }
+
+    fn set_current_shape_diamond(&mut self) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.kind = Some(StaticShapeKind::Polygon);
+            shape.diamond = true;
         }
     }
 
@@ -12811,6 +12837,10 @@ impl Parser {
             }
             2 => {
                 self.set_current_shape_rounded_rectangle();
+                true
+            }
+            4 => {
+                self.set_current_shape_diamond();
                 true
             }
             9 => {
@@ -14690,6 +14720,23 @@ fn rotated_shape_line_points(
         .into_iter()
         .map(|(x, y)| rotated_shape_point(x, y, width_twips, height_twips, rotation_units))
         .collect()
+}
+
+fn diamond_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let mid_x = width_twips / 2;
+    let mid_y = height_twips / 2;
+    [
+        (mid_x, 0),
+        (width_twips, mid_y),
+        (mid_x, height_twips),
+        (0, mid_y),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
 }
 
 fn rotated_shape_point(
