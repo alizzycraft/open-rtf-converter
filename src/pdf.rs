@@ -5114,8 +5114,8 @@ mod tests {
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
         FontPitch, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER, PageSettings, Paragraph,
         ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticImageAlphaMask, StaticShape,
-        StaticShapeArrowhead, StaticShapeKind, TOTAL_PAGES_MARKER, Table, TableCell,
-        TableCellBorder, TableRow, TableRowWrapMargins, UnderlineStyle,
+        StaticShapeArrowhead, StaticShapeKind, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER,
+        Table, TableCell, TableCellBorder, TableRow, TableRowWrapMargins, UnderlineStyle,
     };
     use lopdf::{Dictionary, Object};
 
@@ -6471,6 +6471,7 @@ endstream
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -6560,6 +6561,7 @@ endstream
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];

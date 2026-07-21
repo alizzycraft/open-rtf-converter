@@ -652,6 +652,7 @@ pub struct StaticShape {
     pub text_margin_right_twips: i32,
     pub text_margin_top_twips: i32,
     pub text_margin_bottom_twips: i32,
+    pub text_vertical_anchor: StaticShapeTextVerticalAnchor,
     pub text: Vec<Paragraph>,
     pub points: Vec<StaticShapePoint>,
 }
@@ -664,6 +665,14 @@ pub enum StaticShapeKind {
     Ellipse,
     Polyline,
     Polygon,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum StaticShapeTextVerticalAnchor {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

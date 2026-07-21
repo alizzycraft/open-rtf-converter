@@ -15,7 +15,7 @@ use crate::model::{
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
     StaticImageVectorPathSegment, StaticImageVectorRaster, StaticImageVectorTextBounds,
     StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapePoint, StaticShapeVerticalAnchor,
+    StaticShapeKind, StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
     TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
@@ -871,6 +871,7 @@ struct ShapeBuilder {
     text_margin_right_twips: i32,
     text_margin_top_twips: i32,
     text_margin_bottom_twips: i32,
+    text_vertical_anchor: StaticShapeTextVerticalAnchor,
     text: Vec<Paragraph>,
     current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
@@ -920,6 +921,7 @@ impl Default for ShapeBuilder {
             text_margin_right_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
             text_margin_top_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
             text_margin_bottom_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
@@ -12128,6 +12130,7 @@ impl Parser {
                 text_margin_right_twips: shape.text_margin_right_twips,
                 text_margin_top_twips: shape.text_margin_top_twips,
                 text_margin_bottom_twips: shape.text_margin_bottom_twips,
+                text_vertical_anchor: shape.text_vertical_anchor,
                 text: shape.text,
                 points,
                 horizontal_anchor: shape.horizontal_anchor,
@@ -12766,6 +12769,15 @@ impl Parser {
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.text_margin_bottom_twips = margin;
                     }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "anchorText" => {
+                if let Some(anchor) = parse_shape_text_vertical_anchor_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.text_vertical_anchor = anchor;
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
@@ -16885,6 +16897,21 @@ fn parse_shape_line_dashing_property(value: &str) -> Option<BorderStyle> {
         "1" | "dot" | "sysdot" => Some(BorderStyle::Dotted),
         "2" | "3" | "4" | "dash" | "sysdash" | "lgdash" | "longdash" | "dashdot" | "lgdashdot"
         | "dashdotdot" | "lgdashdotdot" => Some(BorderStyle::Dashed),
+        _ => None,
+    }
+}
+
+fn parse_shape_text_vertical_anchor_property(value: &str) -> Option<StaticShapeTextVerticalAnchor> {
+    let normalized = value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "top" | "t" => Some(StaticShapeTextVerticalAnchor::Top),
+        "middle" | "center" | "ctr" | "mid" => Some(StaticShapeTextVerticalAnchor::Middle),
+        "bottom" | "b" => Some(StaticShapeTextVerticalAnchor::Bottom),
         _ => None,
     }
 }

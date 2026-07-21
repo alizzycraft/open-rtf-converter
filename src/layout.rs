@@ -11,7 +11,8 @@ use crate::model::{
     NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
     PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand, StaticShape,
-    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeVerticalAnchor,
+    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
     Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
@@ -2816,12 +2817,13 @@ fn layout_shape_text(
     let margin_bottom = twips_to_points(shape.text_margin_bottom_twips.max(0));
     let content_x = x + margin_left;
     let content_width = (width - margin_left - margin_right).max(1.0);
-    let mut cursor_y = top_y - margin_top;
     let min_y = bottom_y + margin_bottom;
     let markers = current_marker_context(pages, document_stats);
-
+    let mut prepared = Vec::new();
+    let mut text_height = 0.0;
     for paragraph in &shape.text {
-        cursor_y -= twips_to_points(effective_space_before_twips(&paragraph.style));
+        let space_before = twips_to_points(effective_space_before_twips(&paragraph.style));
+        text_height += space_before;
         let mut lines = wrap_paragraph_with_font_provider(
             paragraph,
             content_width,
@@ -2832,6 +2834,21 @@ fn layout_shape_text(
         for line in &mut lines {
             line.height = apply_line_spacing(line.height, &paragraph.style);
         }
+        text_height += lines.iter().map(|line| line.height).sum::<f32>();
+        let space_after = twips_to_points(effective_space_after_twips(&paragraph.style));
+        text_height += space_after;
+        prepared.push((paragraph, lines, space_before, space_after));
+    }
+    let available_height = (top_y - margin_top - min_y).max(0.0);
+    let vertical_offset = match shape.text_vertical_anchor {
+        StaticShapeTextVerticalAnchor::Top => 0.0,
+        StaticShapeTextVerticalAnchor::Middle => ((available_height - text_height) / 2.0).max(0.0),
+        StaticShapeTextVerticalAnchor::Bottom => (available_height - text_height).max(0.0),
+    };
+    let mut cursor_y = top_y - margin_top - vertical_offset;
+
+    for (paragraph, lines, space_before, space_after) in prepared {
+        cursor_y -= space_before;
         let line_count = lines.len();
         for (line_idx, line) in lines.iter().enumerate() {
             if cursor_y - line.height < min_y {
@@ -2889,7 +2906,7 @@ fn layout_shape_text(
             push_line(pages, line, text_x, cursor_y, document, word_spacing);
             cursor_y -= line.height;
         }
-        cursor_y -= twips_to_points(effective_space_after_twips(&paragraph.style));
+        cursor_y -= space_after;
         if cursor_y < min_y {
             return;
         }
@@ -10907,6 +10924,7 @@ mod tests {
                 text_margin_right_twips: 80,
                 text_margin_top_twips: 80,
                 text_margin_bottom_twips: 80,
+                text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
                 text: Vec::new(),
                 points: Vec::new(),
             }),
@@ -10955,6 +10973,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: vec![Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
@@ -11074,6 +11093,7 @@ mod tests {
                 text_margin_right_twips: 80,
                 text_margin_top_twips: 80,
                 text_margin_bottom_twips: 80,
+                text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
                 text: Vec::new(),
                 points: Vec::new(),
             }),
@@ -11128,6 +11148,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11192,6 +11213,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11259,6 +11281,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11327,6 +11350,7 @@ mod tests {
             text_margin_right_twips: 180,
             text_margin_top_twips: 240,
             text_margin_bottom_twips: 120,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: vec![Paragraph {
                 style: paragraph_style,
                 runs: vec![Run {
@@ -11388,6 +11412,63 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_bottom_anchored_shape_text_inside_passive_shape_bounds() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Shape(StaticShape {
+            kind: StaticShapeKind::Rectangle,
+            left_twips: 720,
+            top_twips: 720,
+            width_twips: 2160,
+            height_twips: 1440,
+            z_order: 0,
+            below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
+            flip_horizontal: false,
+            flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
+            stroke_width_twips: 0,
+            stroke_color: Color::default(),
+            stroke_style: BorderStyle::Single,
+            fill_color: None,
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Bottom,
+            text: vec![Paragraph {
+                style: ParagraphStyle::default(),
+                runs: vec![Run {
+                    text: "Bottom anchored".to_string(),
+                    style: Default::default(),
+                }],
+            }],
+            points: Vec::new(),
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragment = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("Bottom") => Some(fragment),
+                _ => None,
+            })
+            .expect("bottom anchored shape text");
+        let shape_bottom = 612.0;
+        let shape_top = 684.0;
+
+        assert!(fragment.baseline_y > shape_bottom + 4.0);
+        assert!(fragment.baseline_y < shape_top - 4.0);
+        assert!(
+            fragment.baseline_y < shape_bottom + 28.0,
+            "bottom anchored text should move toward the lower content edge: {:?}",
+            fragment
+        );
+    }
+
+    #[test]
     fn lays_out_legacy_static_drawing_line_styles_as_passive_line_styles() {
         let mut document = Document::default();
         document.blocks = vec![Block::Shape(StaticShape {
@@ -11412,6 +11493,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11455,6 +11537,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11504,6 +11587,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11559,6 +11643,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: vec![
                 StaticShapePoint {
@@ -11637,6 +11722,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: vec![
                 StaticShapePoint {
@@ -11711,6 +11797,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11772,6 +11859,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11851,6 +11939,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -18860,6 +18949,7 @@ mod tests {
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
             text: Vec::new(),
             points: Vec::new(),
         }];
