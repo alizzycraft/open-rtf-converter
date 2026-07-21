@@ -12655,10 +12655,18 @@ impl Parser {
             }
             "fFilled" => {
                 if let Some(enabled) = parse_shape_property_i64(value)
-                    && enabled == 0
                     && let Some(shape) = self.current_shape.as_mut()
                 {
-                    shape.fill_color = None;
+                    if enabled == 0 {
+                        shape.fill_color = None;
+                        shape.fill_color_from_foreground = false;
+                    } else {
+                        shape.fill_color.get_or_insert(Color {
+                            red: 255,
+                            green: 255,
+                            blue: 255,
+                        });
+                    }
                 } else if parse_shape_property_i64(value).is_none() {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
