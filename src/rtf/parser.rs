@@ -11921,13 +11921,16 @@ impl Parser {
             shape.unsupported_or_active_property_stripped;
         if shape.rotation_units != 0 {
             match kind {
-                StaticShapeKind::Rectangle => {
+                StaticShapeKind::Rectangle | StaticShapeKind::RoundedRectangle => {
                     kind = StaticShapeKind::Polygon;
                     points = rotated_shape_rectangle_points(
                         shape.width_twips,
                         shape.height_twips,
                         shape.rotation_units,
                     );
+                    if shape.rounded_rectangle {
+                        unsupported_or_active_property_stripped = true;
+                    }
                 }
                 StaticShapeKind::Line => {
                     kind = StaticShapeKind::Polyline;
@@ -12233,6 +12236,7 @@ impl Parser {
 
     fn set_current_shape_rounded_rectangle(&mut self) {
         if let Some(shape) = self.current_shape.as_mut() {
+            shape.kind = Some(StaticShapeKind::Rectangle);
             shape.rounded_rectangle = true;
         }
     }
