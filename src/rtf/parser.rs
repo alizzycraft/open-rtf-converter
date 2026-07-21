@@ -909,6 +909,18 @@ enum ShapePolygonPreset {
     OvalCallout,
     CloudCallout,
     LineCalloutBorder,
+    ActionButtonBlank,
+    ActionButtonHome,
+    ActionButtonHelp,
+    ActionButtonInformation,
+    ActionButtonBackPrevious,
+    ActionButtonForwardNext,
+    ActionButtonBeginning,
+    ActionButtonEnd,
+    ActionButtonReturn,
+    ActionButtonDocument,
+    ActionButtonSound,
+    ActionButtonMovie,
     DownTriangle,
 }
 
@@ -13471,6 +13483,54 @@ impl Parser {
                 self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutUShape);
                 true
             }
+            125 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonBlank);
+                true
+            }
+            126 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonHome);
+                true
+            }
+            127 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonHelp);
+                true
+            }
+            128 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonInformation);
+                true
+            }
+            129 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonBackPrevious);
+                true
+            }
+            130 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonForwardNext);
+                true
+            }
+            131 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonBeginning);
+                true
+            }
+            132 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonEnd);
+                true
+            }
+            133 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonReturn);
+                true
+            }
+            134 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonDocument);
+                true
+            }
+            135 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonSound);
+                true
+            }
+            136 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonMovie);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15670,6 +15730,42 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::LineCalloutBorder => {
             line_callout_border_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::ActionButtonBlank => {
+            action_button_blank_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonHome => {
+            action_button_home_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonHelp => {
+            action_button_help_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonInformation => {
+            action_button_information_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonBackPrevious => {
+            action_button_back_previous_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonForwardNext => {
+            action_button_forward_next_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonBeginning => {
+            action_button_beginning_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonEnd => {
+            action_button_end_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonReturn => {
+            action_button_return_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonDocument => {
+            action_button_document_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonSound => {
+            action_button_sound_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonMovie => {
+            action_button_movie_shape_points(width_twips, height_twips)
+        }
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -16264,6 +16360,183 @@ fn line_callout_ushape_points(width_twips: i32, height_twips: i32) -> Vec<Static
         width_twips,
         height_twips,
         &[(0, 1000), (0, 500), (1000, 500), (1000, 0)],
+    )
+}
+
+fn action_button_blank_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    bevel_shape_points(width_twips, height_twips)
+}
+
+fn action_button_home_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (80, 500),
+            (500, 120),
+            (920, 500),
+            (780, 500),
+            (780, 880),
+            (580, 880),
+            (580, 650),
+            (420, 650),
+            (420, 880),
+            (220, 880),
+            (220, 500),
+        ],
+    )
+}
+
+fn action_button_help_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (500, 120),
+            (700, 160),
+            (820, 310),
+            (780, 480),
+            (610, 610),
+            (610, 710),
+            (430, 710),
+            (430, 560),
+            (600, 440),
+            (620, 330),
+            (500, 280),
+            (380, 330),
+            (300, 460),
+            (180, 350),
+            (300, 190),
+        ],
+    )
+}
+
+fn action_button_information_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (420, 270),
+            (580, 270),
+            (580, 820),
+            (700, 820),
+            (700, 900),
+            (300, 900),
+            (300, 820),
+            (420, 820),
+        ],
+    )
+}
+
+fn action_button_back_previous_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    left_arrow_shape_points(width_twips, height_twips)
+}
+
+fn action_button_forward_next_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    right_arrow_shape_points(width_twips, height_twips)
+}
+
+fn action_button_beginning_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (80, 180),
+            (220, 180),
+            (220, 820),
+            (80, 820),
+            (80, 180),
+            (920, 180),
+            (420, 500),
+            (920, 820),
+        ],
+    )
+}
+
+fn action_button_end_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (920, 180),
+            (780, 180),
+            (780, 820),
+            (920, 820),
+            (920, 180),
+            (80, 180),
+            (580, 500),
+            (80, 820),
+        ],
+    )
+}
+
+fn action_button_return_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (850, 180),
+            (850, 620),
+            (360, 620),
+            (360, 820),
+            (80, 500),
+            (360, 180),
+            (360, 380),
+            (650, 380),
+            (650, 180),
+        ],
+    )
+}
+
+fn action_button_document_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    folded_corner_shape_points(width_twips, height_twips)
+}
+
+fn action_button_sound_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (100, 420),
+            (300, 420),
+            (560, 220),
+            (560, 780),
+            (300, 580),
+            (100, 580),
+        ],
+    )
+}
+
+fn action_button_movie_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (100, 200),
+            (900, 200),
+            (900, 800),
+            (100, 800),
+            (100, 200),
+            (240, 200),
+            (240, 800),
+            (760, 800),
+            (760, 200),
+        ],
     )
 }
 

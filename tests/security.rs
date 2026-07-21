@@ -73867,6 +73867,160 @@ fn office_no_border_line_callouts_render_as_passive_polylines_without_payload_le
 }
 
 #[test]
+fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (125, "office-action-button-custom-payload"),
+        (126, "office-action-button-home-payload"),
+        (127, "office-action-button-help-payload"),
+        (128, "office-action-button-information-payload"),
+        (129, "office-action-button-back-previous-payload"),
+        (130, "office-action-button-forward-next-payload"),
+        (131, "office-action-button-beginning-payload"),
+        (132, "office-action-button-end-payload"),
+        (133, "office-action-button-return-payload"),
+        (134, "office-action-button-document-payload"),
+        (135, "office-action-button-sound-payload"),
+        (136, "office-action-button-movie-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn hlinkClick}}{{\\sv https://example.invalid/action-{shape_type}}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 12);
+    let expected_point_counts = [8, 11, 15, 8, 7, 7, 8, 8, 9, 5, 6, 9];
+    for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
+        assert_eq!(shape.kind, StaticShapeKind::Polygon);
+        assert_eq!(shape.points.len(), expected_point_count);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "action button points must stay inside passive frame: {shape:?}"
+        );
+    }
+    assert_eq!(shapes[1].points[1].y_twips, 0);
+    assert!(shapes[4].points.iter().any(|point| point.x_twips == 0));
+    assert!(
+        shapes[5]
+            .points
+            .iter()
+            .any(|point| point.x_twips == shapes[5].width_twips)
+    );
+    assert_eq!(shapes[9].points[3].y_twips, shapes[9].height_twips);
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "hlinkClick",
+        "https://example.invalid",
+        "pFragments",
+        "office-action-button-custom-payload",
+        "office-action-button-home-payload",
+        "office-action-button-help-payload",
+        "office-action-button-information-payload",
+        "office-action-button-back-previous-payload",
+        "office-action-button-forward-next-payload",
+        "office-action-button-beginning-payload",
+        "office-action-button-end-payload",
+        "office-action-button-return-payload",
+        "office-action-button-document-payload",
+        "office-action-button-sound-payload",
+        "office-action-button-movie-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "action button metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 12,
+        "action buttons should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"hlinkClick",
+        b"https://example.invalid",
+        b"pFragments",
+        b"office-action-button-custom-payload",
+        b"office-action-button-home-payload",
+        b"office-action-button-help-payload",
+        b"office-action-button-information-payload",
+        b"office-action-button-back-previous-payload",
+        b"office-action-button-forward-next-payload",
+        b"office-action-button-beginning-payload",
+        b"office-action-button-end-payload",
+        b"office-action-button-return-payload",
+        b"office-action-button-document-payload",
+        b"office-action-button-sound-payload",
+        b"office-action-button-movie-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/Annots",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "action button metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_right_arrows_render_as_passive_polygon_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 33}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn lineColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-right-arrow-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
