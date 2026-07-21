@@ -46253,6 +46253,86 @@ fn malformed_emf_clip_path_state_records_count_as_partial_without_payload_leakag
 }
 
 #[test]
+fn invalid_emf_selectclippath_mode_counts_as_partial_without_payload_leakage() {
+    let mode = emf_u32_record(67, 99);
+    let records = [mode, emf_rect_record(43, 20, 10, 80, 50)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("invalid EMF SELECTCLIPPATH mode partial vector preview");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+        "safe drawing after invalid EMF SELECTCLIPPATH mode should stay visible"
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")),
+        "invalid EMF SELECTCLIPPATH mode should produce skipped-record diagnostics: {:?}",
+        output.diagnostics
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "safe drawing after invalid EMF SELECTCLIPPATH mode should render passively"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid EMF SELECTCLIPPATH mode payload/control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn malformed_emf_restore_state_records_count_as_partial_without_payload_leakage() {
     for (records, label) in [
         (
@@ -47413,6 +47493,96 @@ fn malformed_emf_setrop2_becomes_passive_placeholder() {
     assert_eq!(image.format, ImageFormat::Placeholder);
     assert!(image.bytes.is_empty());
     assert!(image.vector_commands.is_empty());
+}
+
+#[test]
+fn malformed_emf_raster_op_records_count_as_partial_without_payload_leakage() {
+    let mut malformed_bitblt = vec![0; 40];
+    write_test_le_u32(&mut malformed_bitblt, 0, 76);
+    write_test_le_u32(&mut malformed_bitblt, 4, 40);
+    write_test_le_i32(&mut malformed_bitblt, 8, 10);
+    write_test_le_i32(&mut malformed_bitblt, 12, 10);
+    write_test_le_i32(&mut malformed_bitblt, 16, 50);
+    write_test_le_i32(&mut malformed_bitblt, 20, 50);
+    write_test_le_i32(&mut malformed_bitblt, 24, 10);
+    write_test_le_i32(&mut malformed_bitblt, 28, 10);
+    write_test_le_i32(&mut malformed_bitblt, 32, 40);
+    write_test_le_i32(&mut malformed_bitblt, 36, 40);
+    let records = [malformed_bitblt, emf_rect_record(43, 20, 10, 80, 50)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("malformed EMF raster-op partial vector preview");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+        "safe drawing after malformed EMF raster-op record should stay visible"
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")),
+        "malformed EMF raster-op record should produce skipped-record diagnostics: {:?}",
+        output.diagnostics
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "safe drawing after malformed EMF raster-op record should render passively"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "malformed EMF raster-op payload/control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
 }
 
 #[test]

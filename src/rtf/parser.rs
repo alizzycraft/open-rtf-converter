@@ -21730,8 +21730,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         &mut replaceable_clip_command_start,
                         &mut clip_scope_command_start,
                     )?;
-                } else if region_mode != EMF_RGN_AND && region_mode != EMF_RGN_COPY {
+                } else if matches!(region_mode, EMF_RGN_OR | EMF_RGN_DIFF | EMF_RGN_XOR) {
                     return None;
+                } else if region_mode != EMF_RGN_AND && region_mode != EMF_RGN_COPY {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 let Some(path) = active_path.take() else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -21867,17 +21871,20 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         });
                     } else {
                         let raster_transfer = raster_transfer?;
-                        if let Some(bounds) = parse_emf_raster_destination_bounds(
-                            data,
-                            raster_transfer.0,
-                            raster_transfer.2,
-                            raster_transfer.3,
-                            &header,
-                            &coordinates,
+                        if let (Some(bounds), Some(raster_op)) = (
+                            parse_emf_raster_destination_bounds(
+                                data,
+                                raster_transfer.0,
+                                raster_transfer.2,
+                                raster_transfer.3,
+                                &header,
+                                &coordinates,
+                            ),
+                            read_le_u32(data, raster_transfer.1),
                         ) && apply_passive_solid_backdrop_raster_transfer(
                             &mut commands,
                             bounds,
-                            read_le_u32(data, raster_transfer.1)?,
+                            raster_op,
                             state.fill_color,
                         ) {
                         } else if is_passive_noop_raster_transfer(
@@ -21928,18 +21935,21 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         fill_color: Some(fill_color),
                     });
                 } else if let Some(raster_transfer) = raster_transfer
-                    && let Some(bounds) = parse_emf_raster_destination_bounds(
-                        data,
-                        raster_transfer.0,
-                        raster_transfer.2,
-                        raster_transfer.3,
-                        &header,
-                        &coordinates,
+                    && let (Some(bounds), Some(raster_op)) = (
+                        parse_emf_raster_destination_bounds(
+                            data,
+                            raster_transfer.0,
+                            raster_transfer.2,
+                            raster_transfer.3,
+                            &header,
+                            &coordinates,
+                        ),
+                        read_le_u32(data, raster_transfer.1),
                     )
                     && apply_passive_solid_backdrop_raster_transfer(
                         &mut commands,
                         bounds,
-                        read_le_u32(data, raster_transfer.1)?,
+                        raster_op,
                         state.fill_color,
                     )
                 {
