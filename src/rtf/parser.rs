@@ -17097,11 +17097,9 @@ fn parse_shape_arrowhead_property(value: &str) -> Option<StaticShapeArrowhead> {
         .flat_map(char::to_lowercase)
         .collect::<String>();
     match normalized.as_str() {
-        "0" | "none" | "noarrow" => Some(StaticShapeArrowhead::None),
-        "open" | "arrow" | "1" => Some(StaticShapeArrowhead::Open),
-        "triangle" | "stealth" | "diamond" | "oval" | "2" | "3" | "4" | "5" => {
-            Some(StaticShapeArrowhead::Triangle)
-        }
+        "0" | "1" | "none" | "noarrow" => Some(StaticShapeArrowhead::None),
+        "3" | "open" | "arrow" => Some(StaticShapeArrowhead::Open),
+        "2" | "triangle" => Some(StaticShapeArrowhead::Triangle),
         _ => None,
     }
 }

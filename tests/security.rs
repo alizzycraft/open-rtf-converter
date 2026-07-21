@@ -76347,6 +76347,294 @@ fn office_shape_arrowheads_render_passively_without_property_leakage() {
 }
 
 #[test]
+fn office_shape_numeric_arrowhead_styles_render_passively_without_property_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineStartArrowhead}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineEndArrowhead}{",
+        "\\",
+        "sv 3}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-numeric-open-arrow-payload}}}{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy1320",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineStartArrowhead}{",
+        "\\",
+        "sv 2}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineEndArrowhead}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-numeric-triangle-arrow-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shapes: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shapes.len(), 2);
+    assert_eq!(shapes[0].start_arrowhead, StaticShapeArrowhead::None);
+    assert_eq!(shapes[0].end_arrowhead, StaticShapeArrowhead::Open);
+    assert_eq!(shapes[1].start_arrowhead, StaticShapeArrowhead::Triangle);
+    assert_eq!(shapes[1].end_arrowhead, StaticShapeArrowhead::None);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "lineStartArrowhead",
+        "lineEndArrowhead",
+        "pFragments",
+        "hostile-numeric-open-arrow-payload",
+        "hostile-numeric-triangle-arrow-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden numeric arrowhead drawing content leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("office-shape-numeric-arrowheads.rtf");
+    let output_path = dir.path().join("office-shape-numeric-arrowheads.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count()
+            >= 4
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "B")
+    );
+    for forbidden in [
+        b"lineStartArrowhead".as_slice(),
+        b"lineEndArrowhead",
+        b"pFragments",
+        b"hostile-numeric-open-arrow-payload",
+        b"hostile-numeric-triangle-arrow-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden numeric arrowhead drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn unsupported_office_shape_arrowheads_are_stripped_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineStartArrowhead}{",
+        "\\",
+        "sv diamond}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineEndArrowhead}{",
+        "\\",
+        "sv oval}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-unsupported-arrow-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("line shape with unsupported arrowheads");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.start_arrowhead, StaticShapeArrowhead::None);
+    assert_eq!(shape.end_arrowhead, StaticShapeArrowhead::None);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "lineStartArrowhead",
+        "lineEndArrowhead",
+        "diamond",
+        "oval",
+        "pFragments",
+        "hostile-unsupported-arrow-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden unsupported arrowhead drawing content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "line should still render without unsupported arrowheads"
+    );
+    assert!(
+        !content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "B"),
+        "unsupported filled arrowheads must not be approximated as triangles"
+    );
+    for forbidden in [
+        b"lineStartArrowhead".as_slice(),
+        b"lineEndArrowhead",
+        b"pFragments",
+        b"hostile-unsupported-arrow-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden unsupported arrowhead drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_drawing_polyline_renders_passively_without_coordinate_or_payload_leakage() {
     let input = rtf(&[
         "{",
