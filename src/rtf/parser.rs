@@ -830,6 +830,8 @@ enum ShapePolygonPreset {
     Donut,
     NoSymbol,
     Plaque,
+    DoubleBrace,
+    DoubleBracket,
     LeftBracket,
     RightBracket,
     LeftBrace,
@@ -874,12 +876,18 @@ enum ShapePolygonPreset {
     DownTriangle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShapePolylinePreset {
+    Arc,
+}
+
 #[derive(Debug, Clone)]
 struct ShapeBuilder {
     owner_destination: Destination,
     kind: Option<StaticShapeKind>,
     rounded_rectangle: bool,
     polygon_preset: Option<ShapePolygonPreset>,
+    polyline_preset: Option<ShapePolylinePreset>,
     base_x_twips: i32,
     base_y_twips: i32,
     left_twips: i32,
@@ -931,6 +939,7 @@ impl Default for ShapeBuilder {
             kind: None,
             rounded_rectangle: false,
             polygon_preset: None,
+            polyline_preset: None,
             base_x_twips: 0,
             base_y_twips: 0,
             left_twips: 0,
@@ -12025,6 +12034,12 @@ impl Parser {
                 points = polygon_preset_shape_points(preset, shape.width_twips, shape.height_twips);
             }
         }
+        if kind == StaticShapeKind::Polyline && points.is_empty() {
+            if let Some(preset) = shape.polyline_preset {
+                points =
+                    polyline_preset_shape_points(preset, shape.width_twips, shape.height_twips);
+            }
+        }
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
         if shape.rotation_units != 0 {
@@ -12371,6 +12386,7 @@ impl Parser {
             shape.kind = Some(kind);
             shape.rounded_rectangle = false;
             shape.polygon_preset = None;
+            shape.polyline_preset = None;
         }
     }
 
@@ -12379,6 +12395,7 @@ impl Parser {
             shape.kind = Some(StaticShapeKind::Rectangle);
             shape.rounded_rectangle = true;
             shape.polygon_preset = None;
+            shape.polyline_preset = None;
         }
     }
 
@@ -12387,6 +12404,16 @@ impl Parser {
             shape.kind = Some(StaticShapeKind::Polygon);
             shape.rounded_rectangle = false;
             shape.polygon_preset = Some(preset);
+            shape.polyline_preset = None;
+        }
+    }
+
+    fn set_current_shape_polyline_preset(&mut self, preset: ShapePolylinePreset) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.kind = Some(StaticShapeKind::Polyline);
+            shape.rounded_rectangle = false;
+            shape.polygon_preset = None;
+            shape.polyline_preset = Some(preset);
         }
     }
 
@@ -13128,6 +13155,18 @@ impl Parser {
             }
             24 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Moon);
+                true
+            }
+            25 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::Arc);
+                true
+            }
+            26 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DoubleBrace);
+                true
+            }
+            27 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DoubleBracket);
                 true
             }
             28 => {
@@ -15236,6 +15275,8 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Donut => regular_polygon_shape_points(width_twips, height_twips, 32),
         ShapePolygonPreset::NoSymbol => regular_polygon_shape_points(width_twips, height_twips, 32),
         ShapePolygonPreset::Plaque => plaque_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::DoubleBrace => double_brace_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::DoubleBracket => double_bracket_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LeftBracket => left_bracket_shape_points(width_twips, height_twips),
         ShapePolygonPreset::RightBracket => right_bracket_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LeftBrace => left_brace_shape_points(width_twips, height_twips),
@@ -15321,6 +15362,39 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
+}
+
+fn polyline_preset_shape_points(
+    preset: ShapePolylinePreset,
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    match preset {
+        ShapePolylinePreset::Arc => arc_shape_points(width_twips, height_twips),
+    }
+}
+
+fn arc_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let center_x = f64::from(width_twips) / 2.0;
+    let center_y = f64::from(height_twips) / 2.0;
+    let radius_x = center_x;
+    let radius_y = center_y;
+
+    (0..=12)
+        .map(|index| {
+            let angle = std::f64::consts::PI + (index as f64 * std::f64::consts::PI / 12.0);
+            let x = (center_x + radius_x * angle.cos())
+                .round()
+                .clamp(0.0, f64::from(width_twips)) as i32;
+            let y = (center_y + radius_y * angle.sin())
+                .round()
+                .clamp(0.0, f64::from(height_twips)) as i32;
+            StaticShapePoint {
+                x_twips: x,
+                y_twips: y,
+            }
+        })
+        .collect()
 }
 
 fn diamond_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
@@ -15620,6 +15694,72 @@ fn plaque_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePo
         y_twips: y,
     })
     .collect()
+}
+
+fn double_bracket_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let gap_top = height_twips / 5;
+    let gap_bottom = (height_twips * 4) / 5;
+    [
+        (0, 0),
+        (width_twips, 0),
+        (width_twips, gap_top),
+        ((width_twips * 2) / 3, gap_top),
+        ((width_twips * 2) / 3, gap_bottom),
+        (width_twips, gap_bottom),
+        (width_twips, height_twips),
+        (0, height_twips),
+        (0, gap_bottom),
+        (width_twips / 3, gap_bottom),
+        (width_twips / 3, gap_top),
+        (0, gap_top),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn double_brace_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (480, 0),
+            (240, 0),
+            (100, 110),
+            (100, 360),
+            (0, 500),
+            (100, 640),
+            (100, 890),
+            (240, 1000),
+            (480, 1000),
+            (480, 820),
+            (300, 820),
+            (300, 620),
+            (420, 500),
+            (300, 380),
+            (300, 180),
+            (480, 180),
+            (520, 180),
+            (700, 180),
+            (700, 380),
+            (580, 500),
+            (700, 620),
+            (700, 820),
+            (520, 820),
+            (520, 1000),
+            (760, 1000),
+            (900, 890),
+            (900, 640),
+            (1000, 500),
+            (900, 360),
+            (900, 110),
+            (760, 0),
+            (520, 0),
+        ],
+    )
 }
 
 fn left_bracket_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
