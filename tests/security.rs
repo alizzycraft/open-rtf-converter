@@ -72496,8 +72496,8 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
     let mut input = String::from("{\\rtf1 Before\\par");
     for (shape_type, payload) in [
         (25, "hidden-arc-payload"),
-        (26, "hidden-double-brace-payload"),
-        (27, "hidden-double-bracket-payload"),
+        (26, "hidden-double-bracket-payload"),
+        (27, "hidden-double-brace-payload"),
     ] {
         input.push_str(&format!(
             "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65535}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
@@ -72523,9 +72523,9 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
     assert_eq!(shapes[0].kind, StaticShapeKind::Polyline);
     assert_eq!(shapes[0].points.len(), 13);
     assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
-    assert_eq!(shapes[1].points.len(), 32);
+    assert_eq!(shapes[1].points.len(), 12);
     assert_eq!(shapes[2].kind, StaticShapeKind::Polygon);
-    assert_eq!(shapes[2].points.len(), 12);
+    assert_eq!(shapes[2].points.len(), 32);
     for shape in &shapes {
         assert!(
             shape.points.iter().all(|point| {
@@ -72543,8 +72543,8 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
         "lineColor",
         "pFragments",
         "hidden-arc-payload",
-        "hidden-double-brace-payload",
         "hidden-double-bracket-payload",
+        "hidden-double-brace-payload",
         "[Shape skipped",
     ] {
         assert!(
@@ -72595,8 +72595,8 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
         b"lineColor",
         b"pFragments",
         b"hidden-arc-payload",
-        b"hidden-double-brace-payload",
         b"hidden-double-bracket-payload",
+        b"hidden-double-brace-payload",
         b"[Shape skipped",
         b"/JavaScript",
         b"/EmbeddedFile",
@@ -72610,6 +72610,110 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "arc/double shape metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn office_circular_arrow_shape_renders_passively_without_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 60}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn lineColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-circular-arrow-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive circular arrow shape");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Polygon);
+    assert_eq!(shape.points.len(), 20);
+    assert!(
+        shape.points.iter().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shape.width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shape.height_twips
+        }),
+        "circular arrow points must stay inside passive frame: {shape:?}"
+    );
+    assert!(
+        shape.points.iter().any(|point| point.x_twips == 0),
+        "circular arrow should include a bounded arrow head at the left edge"
+    );
+    assert!(
+        shape
+            .points
+            .iter()
+            .any(|point| point.x_twips == shape.width_twips),
+        "circular arrow should include a bounded outer arc at the right edge"
+    );
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "hidden-circular-arrow-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "circular arrow metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 1,
+        "circular arrow should render as a passive fill/stroke path"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"hidden-circular-arrow-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "circular arrow metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

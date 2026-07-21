@@ -845,6 +845,7 @@ enum ShapePolygonPreset {
     LeftRightArrowCallout,
     UpDownArrowCallout,
     QuadArrowCallout,
+    CircularArrow,
     RightArrow,
     LeftArrow,
     UpArrow,
@@ -13256,11 +13257,11 @@ impl Parser {
                 true
             }
             26 => {
-                self.set_current_shape_polygon_preset(ShapePolygonPreset::DoubleBrace);
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DoubleBracket);
                 true
             }
             27 => {
-                self.set_current_shape_polygon_preset(ShapePolygonPreset::DoubleBracket);
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DoubleBrace);
                 true
             }
             28 => {
@@ -13321,6 +13322,10 @@ impl Parser {
             }
             59 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::QuadArrowCallout);
+                true
+            }
+            60 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CircularArrow);
                 true
             }
             33 => {
@@ -15802,6 +15807,7 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::QuadArrowCallout => {
             quad_arrow_callout_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::CircularArrow => circular_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::RightArrow => right_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LeftArrow => left_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::UpArrow => up_arrow_shape_points(width_twips, height_twips),
@@ -17361,6 +17367,13 @@ fn left_circular_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<
             (270, 500),
             (40, 300),
         ],
+    )
+}
+
+fn circular_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    mirror_shape_points_x(
+        width_twips,
+        left_circular_arrow_shape_points(width_twips, height_twips),
     )
 }
 
