@@ -821,6 +821,8 @@ struct ShapeBuilder {
     trapezoid: bool,
     parallelogram: bool,
     octagon: bool,
+    hexagon: bool,
+    pentagon: bool,
     base_x_twips: i32,
     base_y_twips: i32,
     left_twips: i32,
@@ -868,6 +870,8 @@ impl Default for ShapeBuilder {
             trapezoid: false,
             parallelogram: false,
             octagon: false,
+            hexagon: false,
+            pentagon: false,
             base_x_twips: 0,
             base_y_twips: 0,
             left_twips: 0,
@@ -11947,6 +11951,12 @@ impl Parser {
         if kind == StaticShapeKind::Polygon && shape.octagon && points.is_empty() {
             points = octagon_shape_points(shape.width_twips, shape.height_twips);
         }
+        if kind == StaticShapeKind::Polygon && shape.hexagon && points.is_empty() {
+            points = hexagon_shape_points(shape.width_twips, shape.height_twips);
+        }
+        if kind == StaticShapeKind::Polygon && shape.pentagon && points.is_empty() {
+            points = pentagon_shape_points(shape.width_twips, shape.height_twips);
+        }
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
         if shape.rotation_units != 0 {
@@ -12324,6 +12334,20 @@ impl Parser {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.kind = Some(StaticShapeKind::Polygon);
             shape.octagon = true;
+        }
+    }
+
+    fn set_current_shape_hexagon(&mut self) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.kind = Some(StaticShapeKind::Polygon);
+            shape.hexagon = true;
+        }
+    }
+
+    fn set_current_shape_pentagon(&mut self) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.kind = Some(StaticShapeKind::Polygon);
+            shape.pentagon = true;
         }
     }
 
@@ -12925,6 +12949,14 @@ impl Parser {
             }
             8 => {
                 self.set_current_shape_right_triangle();
+                true
+            }
+            10 => {
+                self.set_current_shape_hexagon();
+                true
+            }
+            12 => {
+                self.set_current_shape_pentagon();
                 true
             }
             20 => {
@@ -14884,6 +14916,41 @@ fn octagon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapeP
         (inset_x, height_twips),
         (0, height_twips.saturating_sub(inset_y)),
         (0, inset_y),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn hexagon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let inset = width_twips / 4;
+    let mid_y = height_twips / 2;
+    [
+        (inset, 0),
+        (width_twips.saturating_sub(inset), 0),
+        (width_twips, mid_y),
+        (width_twips.saturating_sub(inset), height_twips),
+        (inset, height_twips),
+        (0, mid_y),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn pentagon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    [
+        (width_twips / 2, 0),
+        (width_twips, height_twips / 3),
+        ((width_twips * 4) / 5, height_twips),
+        (width_twips / 5, height_twips),
+        (0, height_twips / 3),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
