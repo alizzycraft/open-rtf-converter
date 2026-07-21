@@ -827,6 +827,7 @@ struct ShapeBuilder {
     vertical_anchor: StaticShapeVerticalAnchor,
     flip_horizontal: bool,
     flip_vertical: bool,
+    rotation_units: i32,
     start_arrowhead: StaticShapeArrowhead,
     end_arrowhead: StaticShapeArrowhead,
     stroke_width_twips: i32,
@@ -867,6 +868,7 @@ impl Default for ShapeBuilder {
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
             flip_vertical: false,
+            rotation_units: 0,
             start_arrowhead: StaticShapeArrowhead::None,
             end_arrowhead: StaticShapeArrowhead::None,
             stroke_width_twips: 15,
@@ -11914,20 +11916,44 @@ impl Parser {
         if kind == StaticShapeKind::Rectangle && shape.rounded_rectangle {
             kind = StaticShapeKind::RoundedRectangle;
         }
+        let mut points = shape.points.clone();
+        let mut unsupported_or_active_property_stripped =
+            shape.unsupported_or_active_property_stripped;
+        if shape.rotation_units != 0 {
+            match kind {
+                StaticShapeKind::Rectangle => {
+                    kind = StaticShapeKind::Polygon;
+                    points = rotated_shape_rectangle_points(
+                        shape.width_twips,
+                        shape.height_twips,
+                        shape.rotation_units,
+                    );
+                }
+                StaticShapeKind::Line => {
+                    kind = StaticShapeKind::Polyline;
+                    points = rotated_shape_line_points(
+                        shape.width_twips,
+                        shape.height_twips,
+                        shape.rotation_units,
+                    );
+                }
+                _ => unsupported_or_active_property_stripped = true,
+            }
+        }
         match kind {
-            StaticShapeKind::Polyline if shape.points.len() < 2 => {
+            StaticShapeKind::Polyline if points.len() < 2 => {
                 return self.push_shape_text_fallback(
                     shape.owner_destination,
                     shape.text,
-                    shape.unsupported_or_active_property_stripped,
+                    unsupported_or_active_property_stripped,
                     offset,
                 );
             }
-            StaticShapeKind::Polygon if shape.points.len() < 3 => {
+            StaticShapeKind::Polygon if points.len() < 3 => {
                 return self.push_shape_text_fallback(
                     shape.owner_destination,
                     shape.text,
-                    shape.unsupported_or_active_property_stripped,
+                    unsupported_or_active_property_stripped,
                     offset,
                 );
             }
@@ -11937,8 +11963,7 @@ impl Parser {
             if matches!(kind, StaticShapeKind::Polyline | StaticShapeKind::Polygon) {
                 let base_x = shape.base_x_twips.saturating_add(shape.left_twips);
                 let base_y = shape.base_y_twips.saturating_add(shape.top_twips);
-                let absolute_points = shape
-                    .points
+                let absolute_points = points
                     .iter()
                     .map(|point| StaticShapePoint {
                         x_twips: base_x.saturating_add(point.x_twips),
@@ -12017,7 +12042,7 @@ impl Parser {
             },
             offset,
         )?;
-        let shape_diagnostic = if shape.unsupported_or_active_property_stripped {
+        let shape_diagnostic = if unsupported_or_active_property_stripped {
             "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
         } else {
             "rendering bounded passive static drawing shape with normalized safe drawing properties"
@@ -12648,6 +12673,15 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.flip_vertical = enabled != 0;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "rotation" => {
+                if let Some(rotation_units) = parse_shape_rotation_units(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.rotation_units = rotation_units;
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
@@ -14619,6 +14653,59 @@ fn normalize_shape_points(
     Some((min_x, min_y, width_twips, height_twips, normalized))
 }
 
+fn rotated_shape_rectangle_points(
+    width_twips: i32,
+    height_twips: i32,
+    rotation_units: i32,
+) -> Vec<StaticShapePoint> {
+    [
+        (0, 0),
+        (width_twips, 0),
+        (width_twips, height_twips),
+        (0, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| rotated_shape_point(x, y, width_twips, height_twips, rotation_units))
+    .collect()
+}
+
+fn rotated_shape_line_points(
+    width_twips: i32,
+    height_twips: i32,
+    rotation_units: i32,
+) -> Vec<StaticShapePoint> {
+    [(0, 0), (width_twips, height_twips)]
+        .into_iter()
+        .map(|(x, y)| rotated_shape_point(x, y, width_twips, height_twips, rotation_units))
+        .collect()
+}
+
+fn rotated_shape_point(
+    x_twips: i32,
+    y_twips: i32,
+    width_twips: i32,
+    height_twips: i32,
+    rotation_units: i32,
+) -> StaticShapePoint {
+    let radians = (rotation_units as f64 / 60_000.0).to_radians();
+    let (sin, cos) = radians.sin_cos();
+    let center_x = width_twips as f64 / 2.0;
+    let center_y = height_twips as f64 / 2.0;
+    let dx = x_twips as f64 - center_x;
+    let dy = y_twips as f64 - center_y;
+    StaticShapePoint {
+        x_twips: bounded_rotated_shape_coordinate(center_x + (dx * cos) - (dy * sin)),
+        y_twips: bounded_rotated_shape_coordinate(center_y + (dx * sin) + (dy * cos)),
+    }
+}
+
+fn bounded_rotated_shape_coordinate(value: f64) -> i32 {
+    if !value.is_finite() {
+        return 0;
+    }
+    value.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32
+}
+
 fn paragraph_shading_pattern_control(name: &str) -> Option<ShadingPattern> {
     match name {
         "bghoriz" => Some(ShadingPattern::Horizontal),
@@ -16125,6 +16212,14 @@ fn append_shape_property_text(
 
 fn parse_shape_property_i64(value: &str) -> Option<i64> {
     value.trim().parse::<i64>().ok()
+}
+
+fn parse_shape_rotation_units(value: &str) -> Option<i32> {
+    const OFFICE_ROTATION_UNITS_PER_DEGREE: i64 = 60_000;
+    const FULL_ROTATION_UNITS: i64 = 360 * OFFICE_ROTATION_UNITS_PER_DEGREE;
+    let value = parse_shape_property_i64(value)?;
+    let normalized = value.rem_euclid(FULL_ROTATION_UNITS);
+    i32::try_from(normalized).ok()
 }
 
 fn parse_shape_property_emu_twips(value: &str) -> Option<i64> {

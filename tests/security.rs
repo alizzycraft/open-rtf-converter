@@ -14,7 +14,7 @@ use open_rtf_converter::model::{
     PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER,
     ShadingPattern, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
     StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
-    StaticImageWrapSide, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
+    StaticImageWrapSide, StaticShapeKind, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
     TableRowAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
@@ -70301,6 +70301,90 @@ fn styled_shape_text_renders_passively_without_style_control_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden styled shape-text content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn rotated_office_rectangles_lower_to_passive_polygon_without_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 65535}}{\sp{\sn rotation}{\sv 2700000}}{\sp{\sn pFragments}{\sv hidden-rotation-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("rotated passive shape");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Polygon);
+    assert_eq!(shape.points.len(), 4);
+    assert!(
+        shape.points.iter().any(|point| point.y_twips == 0)
+            && shape
+                .points
+                .iter()
+                .any(|point| point.y_twips == shape.height_twips)
+            && shape.points.iter().any(|point| point.x_twips > 0)
+            && shape
+                .points
+                .iter()
+                .any(|point| point.x_twips < shape.width_twips),
+        "rotated rectangle should normalize to non-axis-aligned passive polygon points: {:?}",
+        shape.points
+    );
+    for forbidden in ["rotation", "pFragments", "hidden-rotation-payload"] {
+        assert!(
+            !text.contains(forbidden),
+            "rotated shape metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "l")
+            .count()
+            >= 3,
+        "rotated rectangle should render through passive polygon line segments"
+    );
+    for forbidden in [
+        b"rotation".as_slice(),
+        b"pFragments",
+        b"hidden-rotation-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "rotated shape metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
