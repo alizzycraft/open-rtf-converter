@@ -72810,7 +72810,7 @@ fn office_plaque_bracket_and_brace_shapes_render_as_passive_polygons_without_pay
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 5);
-    for (shape, expected_points) in shapes.iter().zip([12, 8, 8, 16, 16]) {
+    for (shape, expected_points) in shapes.iter().zip([12, 8, 8, 26, 26]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
