@@ -21946,10 +21946,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_POLYBEZIER => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let raw_points = parse_emf_raw_poly_points(data)?;
+                let Some(raw_points) = parse_emf_raw_poly_points(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if !polybezier_point_count_is_valid(raw_points.len()) {
                     pos = record_end;
                     continue;
@@ -21959,6 +21960,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     .map(|(x, y)| normalized_emf_point(*x, *y, &header, &coordinates))
                     .collect();
                 if point_bounds_are_visible(&points) {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(StaticImageVectorCommand::Bezier {
                         points,
                         stroke_color: state.passive_stroke_color(),
@@ -21969,10 +21973,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = *raw_points.last()?;
             }
             EMR_POLYBEZIERTO => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let raw_points = parse_emf_raw_poly_points(data)?;
+                let Some(raw_points) = parse_emf_raw_poly_points(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if !polybezierto_point_count_is_valid(raw_points.len()) {
                     pos = record_end;
                     continue;
@@ -21991,6 +21996,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         points.push(normalized_emf_point(*x, *y, &header, &coordinates));
                     }
                     if point_bounds_are_visible(&points) {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(StaticImageVectorCommand::Bezier {
                             points,
                             stroke_color: state.passive_stroke_color(),
@@ -22002,14 +22010,16 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = *raw_points.last()?;
             }
             EMR_POLYGON | EMR_POLYLINE => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
                 let Some(points) = parse_emf_poly_points(data, &header, &coordinates) else {
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 };
                 if record_type == EMR_POLYGON {
                     if points.len() >= 3 {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
                             stroke_color: state.passive_stroke_color(),
@@ -22021,6 +22031,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         });
                     }
                 } else if points.len() >= 2 {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
                         stroke_color: state.passive_stroke_color(),
@@ -22030,10 +22043,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_POLYLINETO => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let raw_points = parse_emf_raw_poly_points(data)?;
+                let Some(raw_points) = parse_emf_raw_poly_points(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if raw_points.is_empty() {
                     pos = record_end;
                     continue;
@@ -22055,6 +22069,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         .windows(2)
                         .any(|pair| segment_is_visible(pair[0], pair[1]))
                     {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(StaticImageVectorCommand::Polyline {
                             points,
                             stroke_color: state.passive_stroke_color(),
@@ -22066,14 +22083,16 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = *raw_points.last()?;
             }
             EMR_POLYGON16 | EMR_POLYLINE16 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
                 let Some(points) = parse_emf_poly16_points(data, &header, &coordinates) else {
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 };
                 if record_type == EMR_POLYGON16 {
                     if points.len() >= 3 {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
                             stroke_color: state.passive_stroke_color(),
@@ -22085,6 +22104,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         });
                     }
                 } else if points.len() >= 2 {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
                         stroke_color: state.passive_stroke_color(),
@@ -22094,10 +22116,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_POLYBEZIER16 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let raw_points = parse_emf_raw_poly16_points(data)?;
+                let Some(raw_points) = parse_emf_raw_poly16_points(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if !polybezier_point_count_is_valid(raw_points.len()) {
                     pos = record_end;
                     continue;
@@ -22107,6 +22130,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     .map(|(x, y)| normalized_emf_point(*x, *y, &header, &coordinates))
                     .collect();
                 if point_bounds_are_visible(&points) {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(StaticImageVectorCommand::Bezier {
                         points,
                         stroke_color: state.passive_stroke_color(),
@@ -22117,10 +22143,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = *raw_points.last()?;
             }
             EMR_POLYBEZIERTO16 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let raw_points = parse_emf_raw_poly16_points(data)?;
+                let Some(raw_points) = parse_emf_raw_poly16_points(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if !polybezierto_point_count_is_valid(raw_points.len()) {
                     pos = record_end;
                     continue;
@@ -22139,6 +22166,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         points.push(normalized_emf_point(*x, *y, &header, &coordinates));
                     }
                     if point_bounds_are_visible(&points) {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(StaticImageVectorCommand::Bezier {
                             points,
                             stroke_color: state.passive_stroke_color(),
@@ -22150,10 +22180,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = *raw_points.last()?;
             }
             EMR_POLYLINETO16 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let raw_points = parse_emf_raw_poly16_points(data)?;
+                let Some(raw_points) = parse_emf_raw_poly16_points(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if raw_points.is_empty() {
                     pos = record_end;
                     continue;
@@ -22175,6 +22206,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         .windows(2)
                         .any(|pair| segment_is_visible(pair[0], pair[1]))
                     {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(StaticImageVectorCommand::Polyline {
                             points,
                             stroke_color: state.passive_stroke_color(),
@@ -22186,11 +22220,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = *raw_points.last()?;
             }
             EMR_POLYDRAW | EMR_POLYDRAW16 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
                 let parsed = if record_type == EMR_POLYDRAW {
-                    parse_emf_polydraw(
+                    let Some(parsed) = parse_emf_polydraw(
                         data,
                         &header,
                         &coordinates,
@@ -22198,9 +22229,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         state.passive_stroke_color(),
                         state.passive_stroke_width(&header, &coordinates),
                         state.stroke_style,
-                    )?
+                    ) else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
+                    parsed
                 } else {
-                    parse_emf_polydraw16(
+                    let Some(parsed) = parse_emf_polydraw16(
                         data,
                         &header,
                         &coordinates,
@@ -22208,7 +22244,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         state.passive_stroke_color(),
                         state.passive_stroke_width(&header, &coordinates),
                         state.stroke_style,
-                    )?
+                    ) else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
+                    parsed
                 };
                 if commands.len().checked_add(parsed.commands.len())? > MAX_PASSIVE_WMF_COMMANDS {
                     return None;
@@ -22217,11 +22258,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = parsed.end_position;
             }
             EMR_POLYPOLYGON | EMR_POLYPOLYLINE => {
-                let polygons = parse_emf_poly_poly_points(data, &header, &coordinates)?;
+                let Some(polygons) = parse_emf_poly_poly_points(data, &header, &coordinates) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if record_type == EMR_POLYPOLYGON {
-                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                        return None;
-                    }
                     if let Some(command) = emf_polypolygon_path_command(
                         polygons,
                         state.passive_stroke_color(),
@@ -22231,6 +22273,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         state.fill_pattern,
                         state.fill_color,
                     )? {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(command);
                     }
                 } else {
@@ -22253,11 +22298,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_POLYPOLYGON16 | EMR_POLYPOLYLINE16 => {
-                let polygons = parse_emf_poly_poly16_points(data, &header, &coordinates)?;
+                let Some(polygons) = parse_emf_poly_poly16_points(data, &header, &coordinates)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if record_type == EMR_POLYPOLYGON16 {
-                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                        return None;
-                    }
                     if let Some(command) = emf_polypolygon_path_command(
                         polygons,
                         state.passive_stroke_color(),
@@ -22267,6 +22314,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         state.fill_pattern,
                         state.fill_color,
                     )? {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(command);
                     }
                 } else {
@@ -28521,12 +28571,16 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0324 | 0x0325 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let points = parse_wmf_point_list(data, coordinates)?;
+                let Some(points) = parse_wmf_point_list(data, coordinates) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if function == 0x0324 {
                     if points.len() >= 3 && point_bounds_are_visible(&points) {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
                         commands.push(StaticImageVectorCommand::Polygon {
                             points,
                             stroke_color: state.passive_stroke_color(),
@@ -28541,6 +28595,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     .windows(2)
                     .any(|pair| segment_is_visible(pair[0], pair[1]))
                 {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
                         stroke_color: state.passive_stroke_color(),
@@ -28550,7 +28607,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0538 => {
-                let polygons = parse_wmf_polypolygon_list(data, coordinates)?;
+                let Some(polygons) = parse_wmf_polypolygon_list(data, coordinates) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if let Some(command) = wmf_polypolygon_command(
                     polygons,
                     state.passive_stroke_color(),
@@ -28567,10 +28628,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x1005 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let points = parse_wmf_point_list(data, coordinates)?;
+                let Some(points) = parse_wmf_point_list(data, coordinates) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if !polybezier_point_count_is_valid(points.len()) {
                     pos = record_end;
                     continue;
@@ -28579,6 +28641,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     .windows(2)
                     .any(|pair| segment_is_visible(pair[0], pair[1]))
                 {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(StaticImageVectorCommand::Bezier {
                         points,
                         stroke_color: state.passive_stroke_color(),
@@ -28588,10 +28653,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x1004 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let control_points = parse_wmf_point_list(data, coordinates)?;
+                let Some(control_points) = parse_wmf_point_list(data, coordinates) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if !polybezierto_point_count_is_valid(control_points.len()) {
                     pos = record_end;
                     continue;
@@ -28604,6 +28670,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     .windows(2)
                     .any(|pair| segment_is_visible(pair[0], pair[1]))
                 {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(StaticImageVectorCommand::Bezier {
                         points,
                         stroke_color: state.passive_stroke_color(),

@@ -29464,6 +29464,106 @@ fn malformed_wmf_arc_records_count_as_partial_without_payload_leakage() {
 }
 
 #[test]
+fn malformed_wmf_point_list_records_count_as_partial_without_payload_leakage() {
+    for (function, label) in [
+        (0x0324, "WMF-POLYGON-MALFORMED"),
+        (0x0325, "WMF-POLYLINE-MALFORMED"),
+        (0x0538, "WMF-POLYPOLYGON-MALFORMED"),
+        (0x1005, "WMF-POLYBEZIER-MALFORMED"),
+        (0x1004, "WMF-POLYBEZIERTO-MALFORMED"),
+    ] {
+        let records = [
+            wmf_function_record(function),
+            wmf_bounds_record(0x041b, 20, 10, 80, 50),
+        ];
+        let wmf = minimal_wmf_with_records(160, 80, &records);
+        let wmf_hex = bytes_to_hex(&wmf);
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed WMF point-list partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector, "{label}");
+        assert!(image.bytes.is_empty(), "{label}");
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["wmetafile", "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed WMF point-list payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"wmetafile".as_slice(),
+            wmf_hex.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "malformed WMF point-list payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn malformed_wmf_shape_bounds_count_as_partial_without_payload_leakage() {
     for (function, label) in [
         (0x041b, "WMF-RECTANGLE-MALFORMED"),
@@ -59961,6 +60061,114 @@ fn malformed_emf_arc_records_count_as_partial_without_payload_leakage() {
                     .windows(forbidden.len())
                     .any(|window| window == forbidden),
                 "malformed EMF arc payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
+fn malformed_emf_point_list_records_count_as_partial_without_payload_leakage() {
+    for (record_type, label) in [
+        (2, "EMF-POLYBEZIER-MALFORMED"),
+        (3, "EMF-POLYGON-MALFORMED"),
+        (4, "EMF-POLYLINE-MALFORMED"),
+        (5, "EMF-POLYBEZIERTO-MALFORMED"),
+        (6, "EMF-POLYLINETO-MALFORMED"),
+        (7, "EMF-POLYPOLYLINE-MALFORMED"),
+        (8, "EMF-POLYPOLYGON-MALFORMED"),
+        (56, "EMF-POLYDRAW-MALFORMED"),
+        (85, "EMF-POLYBEZIER16-MALFORMED"),
+        (86, "EMF-POLYGON16-MALFORMED"),
+        (87, "EMF-POLYLINE16-MALFORMED"),
+        (88, "EMF-POLYBEZIERTO16-MALFORMED"),
+        (89, "EMF-POLYLINETO16-MALFORMED"),
+        (90, "EMF-POLYPOLYLINE16-MALFORMED"),
+        (91, "EMF-POLYPOLYGON16-MALFORMED"),
+        (92, "EMF-POLYDRAW16-MALFORMED"),
+    ] {
+        let mut point_record = emf_unknown_record(record_type);
+        write_test_le_u32(&mut point_record, 4, 8);
+        let records = [point_record, emf_rect_record(43, 20, 10, 80, 50)];
+        let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        let emf_hex = bytes_to_hex(&emf);
+        let input =
+            format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed EMF point-list partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector, "{label}");
+        assert!(image.bytes.is_empty(), "{label}");
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["emfblip", "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed EMF point-list payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"emfblip".as_slice(),
+            emf_hex.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "malformed EMF point-list payload leaked to PDF: {:?}",
                 String::from_utf8_lossy(forbidden)
             );
         }
