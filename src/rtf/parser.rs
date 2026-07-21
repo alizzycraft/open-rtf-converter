@@ -844,6 +844,7 @@ enum ShapePolygonPreset {
     FivePointStar,
     EightPointStar,
     SixteenPointStar,
+    TwentyFourPointStar,
     ManualInput,
     ManualOperation,
     DownTriangle,
@@ -13153,6 +13154,10 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::SixteenPointStar);
                 true
             }
+            95 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::TwentyFourPointStar);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15148,6 +15153,9 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::SixteenPointStar => {
             regular_star_shape_points(width_twips, height_twips, 16, 650)
+        }
+        ShapePolygonPreset::TwentyFourPointStar => {
+            regular_star_shape_points(width_twips, height_twips, 24, 700)
         }
         ShapePolygonPreset::ManualInput => manual_input_shape_points(width_twips, height_twips),
         ShapePolygonPreset::ManualOperation => {
