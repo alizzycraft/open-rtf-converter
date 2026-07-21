@@ -72381,6 +72381,117 @@ fn office_3d_and_folded_shapes_render_as_passive_polygons_without_payload_leakag
 }
 
 #[test]
+fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (17, "hidden-smiley-payload"),
+        (18, "hidden-donut-payload"),
+        (19, "hidden-no-symbol-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 33023}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 3);
+    for (shape, expected_points) in shapes.iter().zip([24, 32, 32]) {
+        assert_eq!(shape.kind, StaticShapeKind::Polygon);
+        assert_eq!(shape.points.len(), expected_points);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "symbol shape points must stay inside the passive shape frame"
+        );
+    }
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "hidden-smiley-payload",
+        "hidden-donut-payload",
+        "hidden-no-symbol-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "symbol shape metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 3,
+        "symbol shapes should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"hidden-smiley-payload",
+        b"hidden-donut-payload",
+        b"hidden-no-symbol-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "symbol shape metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_heart_and_lightning_shapes_render_as_passive_polygons_without_payload_leakage() {
     let mut input = String::from("{\\rtf1 Before\\par");
     for (shape_type, payload) in [

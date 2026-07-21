@@ -826,6 +826,9 @@ enum ShapePolygonPreset {
     Cube,
     Bevel,
     FoldedCorner,
+    SmileyFace,
+    Donut,
+    NoSymbol,
     Chevron,
     NotchedRightArrow,
     RightArrowCallout,
@@ -13094,6 +13097,18 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::FoldedCorner);
                 true
             }
+            17 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SmileyFace);
+                true
+            }
+            18 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Donut);
+                true
+            }
+            19 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::NoSymbol);
+                true
+            }
             21 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Heart);
                 true
@@ -15190,6 +15205,11 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Cube => cube_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Bevel => bevel_shape_points(width_twips, height_twips),
         ShapePolygonPreset::FoldedCorner => folded_corner_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::SmileyFace => {
+            regular_polygon_shape_points(width_twips, height_twips, 24)
+        }
+        ShapePolygonPreset::Donut => regular_polygon_shape_points(width_twips, height_twips, 32),
+        ShapePolygonPreset::NoSymbol => regular_polygon_shape_points(width_twips, height_twips, 32),
         ShapePolygonPreset::Chevron => chevron_shape_points(width_twips, height_twips),
         ShapePolygonPreset::NotchedRightArrow => {
             notched_right_arrow_shape_points(width_twips, height_twips)
@@ -16015,6 +16035,38 @@ fn scaled_shape_points(
         .map(|&(x, y)| StaticShapePoint {
             x_twips: ((i64::from(width_twips) * i64::from(x)) / 1000) as i32,
             y_twips: ((i64::from(height_twips) * i64::from(y)) / 1000) as i32,
+        })
+        .collect()
+}
+
+fn regular_polygon_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+    points: usize,
+) -> Vec<StaticShapePoint> {
+    if points < 3 {
+        return Vec::new();
+    }
+
+    let center_x = f64::from(width_twips) / 2.0;
+    let center_y = f64::from(height_twips) / 2.0;
+    let radius_x = center_x;
+    let radius_y = center_y;
+
+    (0..points)
+        .map(|index| {
+            let angle = -std::f64::consts::FRAC_PI_2
+                + (index as f64 * std::f64::consts::TAU / points as f64);
+            let x = (center_x + radius_x * angle.cos())
+                .round()
+                .clamp(0.0, f64::from(width_twips)) as i32;
+            let y = (center_y + radius_y * angle.sin())
+                .round()
+                .clamp(0.0, f64::from(height_twips)) as i32;
+            StaticShapePoint {
+                x_twips: x,
+                y_twips: y,
+            }
         })
         .collect()
 }
