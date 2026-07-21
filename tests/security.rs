@@ -30628,6 +30628,114 @@ fn malformed_wmf_setpalentries_becomes_passive_placeholder() {
 }
 
 #[test]
+fn malformed_wmf_object_state_records_count_as_partial_without_payload_leakage() {
+    for (function, label) in [
+        (0x00f7, "WMF-CREATEPALETTE-MALFORMED"),
+        (0x012d, "WMF-SELECTOBJECT-MALFORMED"),
+        (0x0139, "WMF-RESIZEPALETTE-MALFORMED"),
+        (0x01f0, "WMF-DELETEOBJECT-MALFORMED"),
+        (0x01f9, "WMF-CREATEPATTERNBRUSH-MALFORMED"),
+        (0x0231, "WMF-SETMAPPERFLAGS-MALFORMED"),
+        (0x0234, "WMF-SELECTPALETTE-MALFORMED"),
+        (0x02fa, "WMF-CREATEPENINDIRECT-MALFORMED"),
+        (0x02fb, "WMF-CREATEFONTINDIRECT-MALFORMED"),
+        (0x02fc, "WMF-CREATEBRUSHINDIRECT-MALFORMED"),
+        (0x0037, "WMF-SETPALENTRIES-MALFORMED"),
+        (0x0436, "WMF-ANIMATEPALETTE-MALFORMED"),
+        (0x0142, "WMF-DIBCREATEPATTERNBRUSH-MALFORMED"),
+    ] {
+        let records = [
+            wmf_function_record(function),
+            wmf_bounds_record(0x041b, 20, 10, 80, 50),
+        ];
+        let wmf = minimal_wmf_with_records(160, 80, &records);
+        let wmf_hex = bytes_to_hex(&wmf);
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed WMF object/state partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector, "{label}");
+        assert!(image.bytes.is_empty(), "{label}");
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["wmetafile", "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed WMF object/state payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"wmetafile".as_slice(),
+            wmf_hex.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "malformed WMF object/state payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn wmf_setmapperflags_is_passive_noop_without_payload_leakage() {
     let mut mapper = wmf_u32_record(0x0231, 1);
     mapper.extend_from_slice(b"WMF-SETMAPPERFLAGS /JavaScript /EmbeddedFile /Launch");
@@ -31248,7 +31356,7 @@ fn malformed_wmf_pattern_brushes_become_passive_placeholders() {
 }
 
 #[test]
-fn malformed_wmf_pen_and_brush_objects_become_passive_placeholders() {
+fn malformed_wmf_pen_and_brush_objects_keep_later_safe_drawing() {
     for (function, name) in [
         (0x02fa, "CREATEPENINDIRECT"),
         (0x02fc, "CREATEBRUSHINDIRECT"),
@@ -31270,19 +31378,25 @@ fn malformed_wmf_pen_and_brush_objects_become_passive_placeholders() {
                 Block::Image(image) => Some(image),
                 _ => None,
             })
-            .expect("malformed WMF pen/brush object placeholder");
+            .expect("malformed WMF pen/brush object partial vector preview");
 
         assert!(text.contains("before"));
         assert!(text.contains("after"));
-        assert_eq!(image.format, ImageFormat::Placeholder);
+        assert_eq!(image.format, ImageFormat::WmfVector);
         assert!(image.bytes.is_empty());
-        assert!(image.vector_commands.is_empty());
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after malformed WMF {name} should stay visible"
+        );
         assert!(!text.contains(name));
     }
 }
 
 #[test]
-fn malformed_wmf_font_object_becomes_passive_placeholder() {
+fn malformed_wmf_font_object_keeps_later_safe_text() {
     let records = [
         wmf_function_record(0x02fb),
         wmf_exttextout_record(30, 20, "Font", 0, None),
@@ -31302,13 +31416,19 @@ fn malformed_wmf_font_object_becomes_passive_placeholder() {
             Block::Image(image) => Some(image),
             _ => None,
         })
-        .expect("malformed WMF font object placeholder");
+        .expect("malformed WMF font object partial vector preview");
 
     assert!(text.contains("before"));
     assert!(text.contains("after"));
-    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert!(image.vector_commands.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| matches!(command, StaticImageVectorCommand::Text { text, .. } if text == "Font")),
+        "safe text after malformed WMF font object should stay visible"
+    );
     assert!(!text.contains("Font"));
 }
 

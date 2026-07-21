@@ -28456,57 +28456,108 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x01f0 => {
-                let handle = usize::from(read_le_u16(data, 0)?);
-                if let Some(object) = objects.get_mut(handle) {
-                    *object = None;
+                if let Some(handle) = read_le_u16(data, 0).map(usize::from) {
+                    if let Some(object) = objects.get_mut(handle) {
+                        *object = None;
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             0x0035 => {}
             0x0037 | 0x0436 => {
-                validate_wmf_palette_entries(data)?;
+                if validate_wmf_palette_entries(data).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             0x0139 => {
-                read_le_u16(data, 0)?;
+                if read_le_u16(data, 0).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             0x0234 => {
-                read_le_u16(data, 0)?;
+                if read_le_u16(data, 0).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             0x0231 => {
-                read_le_u32(data, 0)?;
+                if read_le_u32(data, 0).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
-            0x00f7 => store_wmf_object(&mut objects, parse_wmf_palette_object(data)?)?,
-            0x02fa => store_wmf_object(&mut objects, parse_wmf_pen_object(data)?)?,
-            0x02fc => store_wmf_object(&mut objects, parse_wmf_brush_object(data)?)?,
-            0x02fb => store_wmf_object(&mut objects, parse_wmf_font_object(data)?)?,
+            0x00f7 => {
+                if let Some(object) = parse_wmf_palette_object(data) {
+                    store_wmf_object(&mut objects, object)?;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
+            0x02fa => {
+                if let Some(object) = parse_wmf_pen_object(data) {
+                    store_wmf_object(&mut objects, object)?;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
+            0x02fc => {
+                if let Some(object) = parse_wmf_brush_object(data) {
+                    store_wmf_object(&mut objects, object)?;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
+            0x02fb => {
+                if let Some(object) = parse_wmf_font_object(data) {
+                    store_wmf_object(&mut objects, object)?;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
             0x02fd => store_wmf_object(&mut objects, WmfObject::Other)?,
-            0x01f9 => store_wmf_object(&mut objects, parse_wmf_pattern_brush_object(data)?)?,
-            0x0142 => store_wmf_object(&mut objects, parse_wmf_dib_pattern_brush_object(data)?)?,
+            0x01f9 => {
+                if let Some(object) = parse_wmf_pattern_brush_object(data) {
+                    store_wmf_object(&mut objects, object)?;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
+            0x0142 => {
+                if let Some(object) = parse_wmf_dib_pattern_brush_object(data) {
+                    store_wmf_object(&mut objects, object)?;
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
+            }
             0x012d => {
-                let handle = usize::from(read_le_u16(data, 0)?);
-                if let Some(object) = objects.get(handle).and_then(|object| *object) {
-                    match object {
-                        WmfObject::Pen {
-                            color,
-                            width,
-                            style,
-                        } => {
-                            state.stroke_color = color;
-                            state.stroke_width = normalized_wmf_stroke_width(width, window_width);
-                            state.stroke_style = style;
+                if let Some(handle) = read_le_u16(data, 0).map(usize::from) {
+                    if let Some(object) = objects.get(handle).and_then(|object| *object) {
+                        match object {
+                            WmfObject::Pen {
+                                color,
+                                width,
+                                style,
+                            } => {
+                                state.stroke_color = color;
+                                state.stroke_width =
+                                    normalized_wmf_stroke_width(width, window_width);
+                                state.stroke_style = style;
+                            }
+                            WmfObject::Brush { color, pattern } => {
+                                state.fill_color = color;
+                                state.fill_pattern = pattern;
+                            }
+                            WmfObject::Font { height, charset } => {
+                                state.font_height = Some(height);
+                                state.font_charset = charset;
+                            }
+                            WmfObject::Other => {
+                                skipped_record_count = skipped_record_count.checked_add(1)?
+                            }
                         }
-                        WmfObject::Brush { color, pattern } => {
-                            state.fill_color = color;
-                            state.fill_pattern = pattern;
-                        }
-                        WmfObject::Font { height, charset } => {
-                            state.font_height = Some(height);
-                            state.font_charset = charset;
-                        }
-                        WmfObject::Other => {
-                            skipped_record_count = skipped_record_count.checked_add(1)?
-                        }
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
