@@ -822,6 +822,10 @@ enum ShapePolygonPreset {
     Hexagon,
     Cross,
     Pentagon,
+    Can,
+    Cube,
+    Bevel,
+    FoldedCorner,
     Chevron,
     NotchedRightArrow,
     RightArrowCallout,
@@ -13074,6 +13078,22 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
             }
+            13 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Can);
+                true
+            }
+            14 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Cube);
+                true
+            }
+            15 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Bevel);
+                true
+            }
+            16 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FoldedCorner);
+                true
+            }
             21 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Heart);
                 true
@@ -15166,6 +15186,10 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Hexagon => hexagon_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Cross => cross_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Pentagon => pentagon_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Can => can_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Cube => cube_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Bevel => bevel_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::FoldedCorner => folded_corner_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Chevron => chevron_shape_points(width_twips, height_twips),
         ShapePolygonPreset::NotchedRightArrow => {
             notched_right_arrow_shape_points(width_twips, height_twips)
@@ -15435,6 +15459,82 @@ fn pentagon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShape
         ((width_twips * 4) / 5, height_twips),
         (width_twips / 5, height_twips),
         (0, height_twips / 3),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn can_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let inset_y = height_twips / 8;
+    [
+        (width_twips / 2, 0),
+        (width_twips, inset_y),
+        (width_twips, height_twips.saturating_sub(inset_y)),
+        (width_twips / 2, height_twips),
+        (0, height_twips.saturating_sub(inset_y)),
+        (0, inset_y),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn cube_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let inset_x = width_twips / 4;
+    let inset_y = height_twips / 4;
+    [
+        (inset_x, 0),
+        (width_twips, 0),
+        (width_twips, height_twips.saturating_sub(inset_y)),
+        (width_twips.saturating_sub(inset_x), height_twips),
+        (0, height_twips),
+        (0, inset_y),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn bevel_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let inset_x = width_twips / 6;
+    let inset_y = height_twips / 6;
+    [
+        (inset_x, 0),
+        (width_twips.saturating_sub(inset_x), 0),
+        (width_twips, inset_y),
+        (width_twips, height_twips.saturating_sub(inset_y)),
+        (width_twips.saturating_sub(inset_x), height_twips),
+        (inset_x, height_twips),
+        (0, height_twips.saturating_sub(inset_y)),
+        (0, inset_y),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn folded_corner_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let fold_x = (width_twips * 3) / 4;
+    let fold_y = height_twips / 4;
+    [
+        (0, 0),
+        (fold_x, 0),
+        (width_twips, fold_y),
+        (width_twips, height_twips),
+        (0, height_twips),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
