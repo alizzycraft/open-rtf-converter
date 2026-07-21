@@ -16156,15 +16156,18 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::ChartX => chart_x_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::ChartStar => chart_star_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::ChartPlus => chart_plus_shape_point_paths(width_twips, height_twips),
+        ShapePolygonPreset::Gear6 => gear_shape_point_paths(width_twips, height_twips, 6),
+        ShapePolygonPreset::Gear9 => gear_shape_point_paths(width_twips, height_twips, 9),
         _ => Vec::new(),
     }
 }
 
 fn polygon_preset_shape_fill_rule(preset: ShapePolygonPreset) -> StaticImageVectorFillRule {
     match preset {
-        ShapePolygonPreset::Donut | ShapePolygonPreset::Frame => {
-            StaticImageVectorFillRule::Alternate
-        }
+        ShapePolygonPreset::Donut
+        | ShapePolygonPreset::Frame
+        | ShapePolygonPreset::Gear6
+        | ShapePolygonPreset::Gear9 => StaticImageVectorFillRule::Alternate,
         _ => StaticImageVectorFillRule::Winding,
     }
 }
@@ -17373,6 +17376,19 @@ fn math_not_equal_shape_point_paths(
         &[(670, 80), (800, 80), (320, 920), (190, 920)],
     ));
     paths
+}
+
+fn gear_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+    points: usize,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![regular_polygon_inset_shape_points(
+        width_twips,
+        height_twips,
+        points.max(3) * 2,
+        310,
+    )]
 }
 
 fn corner_tabs_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

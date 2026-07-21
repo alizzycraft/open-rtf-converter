@@ -74554,6 +74554,31 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
             "compound math shape paths must stay inside passive frame: {shape:?}"
         );
     }
+    assert_eq!(
+        shapes[11].fill_rule,
+        StaticImageVectorFillRule::Alternate,
+        "gear 6 should use even-odd fill for its passive center hole"
+    );
+    assert_eq!(
+        shapes[12].fill_rule,
+        StaticImageVectorFillRule::Alternate,
+        "gear 9 should use even-odd fill for its passive center hole"
+    );
+    assert_eq!(shapes[11].point_paths.len(), 1);
+    assert_eq!(shapes[11].point_paths[0].len(), 12);
+    assert_eq!(shapes[12].point_paths.len(), 1);
+    assert_eq!(shapes[12].point_paths[0].len(), 18);
+    for shape in [&shapes[11], &shapes[12]] {
+        assert!(
+            shape.point_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "gear hole paths must stay inside passive frame: {shape:?}"
+        );
+    }
     assert!(shapes[11].points.iter().any(|point| point.x_twips == 0));
     assert!(
         shapes[12]
@@ -74598,6 +74623,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_even_odd_shape_paints = 0usize;
     let mut passive_path_moves = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
@@ -74605,7 +74631,12 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         passive_shape_paints += content
             .operations
             .iter()
-            .filter(|operation| operation.operator == "B")
+            .filter(|operation| operation.operator == "B" || operation.operator == "B*")
+            .count();
+        passive_even_odd_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B*")
             .count();
         passive_path_moves += content
             .operations
@@ -74621,8 +74652,12 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         "chord/math/tab/gear shapes should render passive fill/stroke paths"
     );
     assert!(
-        passive_path_moves >= 21,
-        "compound math shapes should emit separate passive PDF subpaths"
+        passive_even_odd_shape_paints >= 2,
+        "gear shapes should render as passive even-odd compound paths"
+    );
+    assert!(
+        passive_path_moves >= 23,
+        "compound math and gear shapes should emit separate passive PDF subpaths"
     );
     for forbidden in [
         b"shapeType".as_slice(),
