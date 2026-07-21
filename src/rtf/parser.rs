@@ -16155,6 +16155,7 @@ fn polygon_preset_shape_point_paths(
         }
         ShapePolygonPreset::CornerTabs => corner_tabs_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::SquareTabs => square_tabs_shape_point_paths(width_twips, height_twips),
+        ShapePolygonPreset::PlaqueTabs => plaque_tabs_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::ChartX => chart_x_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::ChartStar => chart_star_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::ChartPlus => chart_plus_shape_point_paths(width_twips, height_twips),
@@ -17498,28 +17499,58 @@ fn plaque_tabs_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSh
             (830, 0),
             (830, 170),
             (1000, 170),
-            (1000, 380),
-            (840, 380),
-            (840, 620),
-            (1000, 620),
-            (1000, 830),
-            (830, 830),
-            (830, 1000),
-            (620, 1000),
-            (620, 840),
-            (380, 840),
-            (380, 1000),
-            (170, 1000),
-            (170, 830),
-            (0, 830),
-            (0, 620),
-            (160, 620),
-            (160, 380),
-            (0, 380),
-            (0, 170),
-            (170, 170),
         ],
     )
+}
+
+fn plaque_tabs_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[
+                (1000, 170),
+                (1000, 380),
+                (840, 380),
+                (840, 620),
+                (1000, 620),
+                (1000, 830),
+            ],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[
+                (1000, 830),
+                (830, 830),
+                (830, 1000),
+                (620, 1000),
+                (620, 840),
+                (380, 840),
+                (380, 1000),
+                (170, 1000),
+                (170, 830),
+                (0, 830),
+            ],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[
+                (0, 830),
+                (0, 620),
+                (160, 620),
+                (160, 380),
+                (0, 380),
+                (0, 170),
+                (170, 170),
+                (170, 0),
+            ],
+        ),
+    ]
 }
 
 fn funnel_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

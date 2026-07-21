@@ -74512,7 +74512,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 13);
-    let expected_point_counts = [11, 6, 12, 4, 12, 16, 8, 20, 6, 6, 28, 12, 18];
+    let expected_point_counts = [11, 6, 12, 4, 12, 16, 8, 20, 6, 6, 8, 12, 18];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -74612,6 +74612,28 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         }),
         "square tab subpaths must stay inside passive frame"
     );
+    assert_eq!(
+        shapes[10].point_paths.len(),
+        3,
+        "plaque tabs should keep side tab runs as separate passive subpaths"
+    );
+    assert_eq!(
+        shapes[10]
+            .point_paths
+            .iter()
+            .map(Vec::len)
+            .collect::<Vec<_>>(),
+        vec![6, 10, 8]
+    );
+    assert!(
+        shapes[10].point_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[10].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[10].height_twips
+        }),
+        "plaque tab subpaths must stay inside passive frame"
+    );
     assert!(shapes[11].points.iter().any(|point| point.x_twips == 0));
     assert!(
         shapes[12]
@@ -74689,7 +74711,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         "gear shapes should render as passive even-odd compound paths"
     );
     assert!(
-        passive_path_moves >= 27,
+        passive_path_moves >= 30,
         "compound math, tab, and gear shapes should emit separate passive PDF subpaths"
     );
     for forbidden in [
