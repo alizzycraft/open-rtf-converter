@@ -21007,9 +21007,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         &mut clip_scope_command_start,
                     )?;
                 } else if region_mode != EMF_RGN_AND && region_mode != EMF_RGN_COPY {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
-                    pos = record_end;
-                    continue;
+                    return None;
                 }
                 let Some(rects) = parse_emf_region_data_rects(data, 0, 8, &header, &coordinates)
                 else {
@@ -21576,17 +21574,24 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 push_emf_region_rectangles(&mut commands, rects, fill_color, state.fill_pattern)?;
             }
             EMR_SELECTCLIPPATH => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let region_mode = read_le_u32(data, 0)?;
+                let Some(region_mode) = read_le_u32(data, 0) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if region_mode == EMF_RGN_OR && !clip_active {
-                    active_path.take()?;
+                    if active_path.take().is_none() {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                     pos = record_end;
                     continue;
                 }
                 if region_mode == EMF_RGN_OR && clip_active {
-                    let path = active_path.take()?;
+                    let Some(path) = active_path.take() else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     if let Some(clip_start) = replaceable_clip_command_start {
                         if let Some(command) = vector_path_or_unpainted_clip_rect_command(
                             &commands, clip_start, &path,
@@ -21597,14 +21602,23 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         pos = record_end;
                         continue;
                     }
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 if region_mode == EMF_RGN_DIFF
                     && !clip_active
                     && state.fill_rule == StaticImageVectorFillRule::Alternate
                 {
-                    let path = active_path.take()?;
+                    let Some(path) = active_path.take() else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     let command = emf_exclude_clip_path_command(&header, path)?;
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(command);
                     if replaceable_clip_command_start.is_none() {
                         replaceable_clip_command_start = commands.len().checked_sub(1);
@@ -21617,7 +21631,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     && clip_active
                     && state.fill_rule == StaticImageVectorFillRule::Alternate
                 {
-                    let path = active_path.take()?;
+                    let Some(path) = active_path.take() else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     if let Some(clip_start) = replaceable_clip_command_start {
                         if let Some(command) = vector_diff_path_from_unpainted_clip_rect_command(
                             &commands, clip_start, path,
@@ -21628,14 +21646,23 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         pos = record_end;
                         continue;
                     }
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 if region_mode == EMF_RGN_XOR
                     && !clip_active
                     && state.fill_rule == StaticImageVectorFillRule::Alternate
                 {
-                    let path = active_path.take()?;
+                    let Some(path) = active_path.take() else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     let command = emf_exclude_clip_path_command(&header, path)?;
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(command);
                     if replaceable_clip_command_start.is_none() {
                         replaceable_clip_command_start = commands.len().checked_sub(1);
@@ -21648,7 +21675,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     && clip_active
                     && state.fill_rule == StaticImageVectorFillRule::Alternate
                 {
-                    let path = active_path.take()?;
+                    let Some(path) = active_path.take() else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    };
                     if let Some(clip_start) = replaceable_clip_command_start {
                         if let Some(command) = vector_diff_path_from_unpainted_clip_rect_command(
                             &commands, clip_start, path,
@@ -21659,7 +21690,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         pos = record_end;
                         continue;
                     }
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 if region_mode == EMF_RGN_COPY && clip_active {
                     replace_emf_clip_scope(
@@ -21670,8 +21703,15 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 } else if region_mode != EMF_RGN_AND && region_mode != EMF_RGN_COPY {
                     return None;
                 }
-                let path = active_path.take()?;
+                let Some(path) = active_path.take() else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 let command = path.clip_command(state.fill_rule)?;
+                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                    return None;
+                }
                 commands.push(command);
                 if replaceable_clip_command_start.is_none() {
                     replaceable_clip_command_start = commands.len().checked_sub(1);
@@ -21710,7 +21750,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETICMMODE => {
-                if !matches!(read_le_u32(data, 0)?, 1 | 3 | 4) {
+                if !matches!(read_le_u32(data, 0), Some(1 | 3 | 4)) {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
