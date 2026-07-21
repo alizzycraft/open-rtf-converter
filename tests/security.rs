@@ -30874,10 +30874,7 @@ fn invalid_wmf_modes_stay_partial_without_payload_leakage() {
 #[test]
 fn malformed_wmf_modes_become_passive_placeholders() {
     for (function, name) in [(0x0102, "SETBKMODE"), (0x0106, "SETPOLYFILLMODE")] {
-        let records = [
-            wmf_function_record(function),
-            wmf_bounds_record(0x041b, 20, 10, 80, 50),
-        ];
+        let records = [wmf_function_record(function)];
         let input = format!(
             "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
             bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
@@ -30900,6 +30897,106 @@ fn malformed_wmf_modes_become_passive_placeholders() {
         assert_eq!(image.format, ImageFormat::Placeholder, "{name}");
         assert!(image.bytes.is_empty());
         assert!(image.vector_commands.is_empty());
+    }
+}
+
+#[test]
+fn malformed_wmf_scalar_modes_count_as_partial_without_payload_leakage() {
+    for (function, label) in [
+        (0x0103, "WMF-SETMAPMODE-MALFORMED"),
+        (0x0104, "WMF-SETROP2-MALFORMED"),
+        (0x0107, "WMF-SETSTRETCHBLTMODE-MALFORMED"),
+        (0x0102, "WMF-SETBKMODE-MALFORMED"),
+        (0x0106, "WMF-SETPOLYFILLMODE-MALFORMED"),
+    ] {
+        let records = [
+            wmf_function_record(function),
+            wmf_bounds_record(0x041b, 20, 10, 80, 50),
+        ];
+        let wmf = minimal_wmf_with_records(160, 80, &records);
+        let wmf_hex = bytes_to_hex(&wmf);
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed WMF scalar mode partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector, "{label}");
+        assert!(image.bytes.is_empty(), "{label}");
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["wmetafile", "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed WMF scalar mode payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"wmetafile".as_slice(),
+            wmf_hex.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "malformed WMF scalar mode payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
     }
 }
 
@@ -48030,6 +48127,103 @@ fn malformed_emf_setstretchbltmode_becomes_passive_placeholder() {
     assert_eq!(image.format, ImageFormat::Placeholder);
     assert!(image.bytes.is_empty());
     assert!(image.vector_commands.is_empty());
+}
+
+#[test]
+fn malformed_emf_scalar_modes_count_as_partial_without_payload_leakage() {
+    for (record_type, label) in [
+        (17, "EMF-SETMAPMODE-MALFORMED"),
+        (18, "EMF-SETBKMODE-MALFORMED"),
+        (19, "EMF-SETPOLYFILLMODE-MALFORMED"),
+        (20, "EMF-SETROP2-MALFORMED"),
+        (21, "EMF-SETSTRETCHBLTMODE-MALFORMED"),
+    ] {
+        let mut mode = emf_unknown_record(record_type);
+        write_test_le_u32(&mut mode, 4, 8);
+        let records = [mode, emf_rect_record(43, 20, 10, 80, 50)];
+        let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        let emf_hex = bytes_to_hex(&emf);
+        let input =
+            format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed EMF scalar mode partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector, "{label}");
+        assert!(image.bytes.is_empty(), "{label}");
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["emfblip", "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed EMF scalar mode payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"emfblip".as_slice(),
+            emf_hex.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "malformed EMF scalar mode payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
 }
 
 #[test]
