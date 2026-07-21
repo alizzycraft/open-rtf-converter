@@ -74630,9 +74630,9 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         (StaticShapeKind::Polygon, 26),
         (StaticShapeKind::Polygon, 12),
         (StaticShapeKind::Polygon, 20),
-        (StaticShapeKind::Polygon, 17),
-        (StaticShapeKind::Polygon, 15),
-        (StaticShapeKind::Polygon, 17),
+        (StaticShapeKind::Polygon, 4),
+        (StaticShapeKind::Polygon, 4),
+        (StaticShapeKind::Polygon, 4),
         (StaticShapeKind::Polyline, 2),
     ];
     for (shape, (expected_kind, expected_point_count)) in shapes.iter().zip(expected) {
@@ -74656,6 +74656,22 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
             .iter()
             .any(|point| point.x_twips == shapes[5].width_twips)
     );
+    for shape in [&shapes[6], &shapes[7], &shapes[8]] {
+        assert_eq!(
+            shape.point_paths.len(),
+            1,
+            "chart symbol should keep its glyph as a separate passive subpath"
+        );
+        assert!(
+            shape.point_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "chart symbol subpaths must stay inside passive frame: {shape:?}"
+        );
+    }
     assert_eq!(shapes[9].points[0].x_twips, shapes[9].width_twips);
     assert_eq!(shapes[9].points[1].y_twips, shapes[9].height_twips);
     for forbidden in [
@@ -74693,6 +74709,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
     let mut passive_line_strokes = 0usize;
+    let mut passive_path_moves = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -74702,6 +74719,9 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
             }
             if operation.operator == "S" {
                 passive_line_strokes += 1;
+            }
+            if operation.operator == "m" {
+                passive_path_moves += 1;
             }
         }
     }
@@ -74715,6 +74735,10 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     assert!(
         passive_line_strokes >= 1,
         "inverse line should render as a passive stroked path"
+    );
+    assert!(
+        passive_path_moves >= 12,
+        "chart symbols should emit separate passive PDF subpaths"
     );
     for forbidden in [
         b"shapeType".as_slice(),

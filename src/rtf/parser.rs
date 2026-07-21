@@ -16142,6 +16142,9 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::MathNotEqual => {
             math_not_equal_shape_point_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::ChartX => chart_x_shape_point_paths(width_twips, height_twips),
+        ShapePolygonPreset::ChartStar => chart_star_shape_point_paths(width_twips, height_twips),
+        ShapePolygonPreset::ChartPlus => chart_plus_shape_point_paths(width_twips, height_twips),
         _ => Vec::new(),
     }
 }
@@ -17606,15 +17609,22 @@ fn cloud_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoi
 }
 
 fn chart_x_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    scaled_shape_points(
+    rectangle_polygon_shape_points(width_twips, height_twips)
+}
+
+fn chart_star_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    rectangle_polygon_shape_points(width_twips, height_twips)
+}
+
+fn chart_plus_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    rectangle_polygon_shape_points(width_twips, height_twips)
+}
+
+fn chart_x_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
         width_twips,
         height_twips,
         &[
-            (0, 1000),
-            (0, 0),
-            (1000, 0),
-            (1000, 1000),
-            (0, 1000),
             (220, 220),
             (370, 220),
             (500, 380),
@@ -17628,19 +17638,14 @@ fn chart_x_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapeP
             (220, 780),
             (410, 500),
         ],
-    )
+    )]
 }
 
-fn chart_star_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    scaled_shape_points(
+fn chart_star_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
         width_twips,
         height_twips,
         &[
-            (0, 1000),
-            (0, 0),
-            (1000, 0),
-            (1000, 1000),
-            (0, 1000),
             (500, 160),
             (580, 390),
             (820, 390),
@@ -17652,19 +17657,14 @@ fn chart_star_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSha
             (180, 390),
             (420, 390),
         ],
-    )
+    )]
 }
 
-fn chart_plus_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    scaled_shape_points(
+fn chart_plus_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
         width_twips,
         height_twips,
         &[
-            (0, 1000),
-            (0, 0),
-            (1000, 0),
-            (1000, 1000),
-            (0, 1000),
             (420, 220),
             (580, 220),
             (580, 420),
@@ -17678,7 +17678,7 @@ fn chart_plus_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSha
             (220, 420),
             (420, 420),
         ],
-    )
+    )]
 }
 
 fn line_inverse_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
