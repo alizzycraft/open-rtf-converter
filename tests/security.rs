@@ -51157,6 +51157,105 @@ fn emf_empty_paint_regions_are_noops_without_payload_leakage() {
 }
 
 #[test]
+fn invalid_emf_extselectcliprgn_mode_counts_as_partial_without_payload_leakage() {
+    let mut clip = emf_extselectcliprgn_record(99, &[(20, 10, 80, 50)]);
+    clip.extend_from_slice(b"INVALID-EMF-EXTSELECTCLIPRGN /JavaScript /EmbeddedFile /Launch");
+    clip.resize(clip.len().next_multiple_of(4), 0);
+    let clip_len = clip.len() as u32;
+    write_test_le_u32(&mut clip, 4, clip_len);
+    let records = [clip, emf_rect_record(43, 20, 10, 80, 50)];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("invalid EMF EXTSELECTCLIPRGN mode partial vector preview");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+        "safe drawing after invalid EMF EXTSELECTCLIPRGN mode should stay visible"
+    );
+    for forbidden in [
+        "emfblip",
+        "EXTSELECTCLIPRGN",
+        "INVALID-EMF-EXTSELECTCLIPRGN",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid EMF EXTSELECTCLIPRGN mode payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")),
+        "invalid EMF EXTSELECTCLIPRGN mode should produce skipped-record diagnostics: {:?}",
+        output.diagnostics
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "safe drawing after invalid EMF EXTSELECTCLIPRGN mode should render passively"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"EXTSELECTCLIPRGN",
+        b"INVALID-EMF-EXTSELECTCLIPRGN",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid EMF EXTSELECTCLIPRGN mode payload/control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_extselectcliprgn_records_render_passively_without_payload_leakage() {
     let records = [
         emf_extselectcliprgn_record(1, &[(20, 10, 90, 50), (100, 20, 140, 70)]),
