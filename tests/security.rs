@@ -73036,7 +73036,7 @@ fn office_sun_and_moon_shapes_render_as_passive_polygons_without_payload_leakage
     assert_eq!(shapes[0].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[0].points.len(), 32);
     assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
-    assert_eq!(shapes[1].points.len(), 19);
+    assert_eq!(shapes[1].points.len(), 36);
     for shape in &shapes {
         assert!(
             shape.points.iter().all(|point| {
