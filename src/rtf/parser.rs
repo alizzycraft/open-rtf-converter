@@ -829,6 +829,11 @@ enum ShapePolygonPreset {
     SmileyFace,
     Donut,
     NoSymbol,
+    Plaque,
+    LeftBracket,
+    RightBracket,
+    LeftBrace,
+    RightBrace,
     Chevron,
     NotchedRightArrow,
     RightArrowCallout,
@@ -13125,6 +13130,26 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Moon);
                 true
             }
+            28 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Plaque);
+                true
+            }
+            29 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftBracket);
+                true
+            }
+            30 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::RightBracket);
+                true
+            }
+            31 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftBrace);
+                true
+            }
+            32 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::RightBrace);
+                true
+            }
             51 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
@@ -15210,6 +15235,11 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::Donut => regular_polygon_shape_points(width_twips, height_twips, 32),
         ShapePolygonPreset::NoSymbol => regular_polygon_shape_points(width_twips, height_twips, 32),
+        ShapePolygonPreset::Plaque => plaque_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::LeftBracket => left_bracket_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::RightBracket => right_bracket_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::LeftBrace => left_brace_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::RightBrace => right_brace_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Chevron => chevron_shape_points(width_twips, height_twips),
         ShapePolygonPreset::NotchedRightArrow => {
             notched_right_arrow_shape_points(width_twips, height_twips)
@@ -15562,6 +15592,99 @@ fn folded_corner_shape_points(width_twips: i32, height_twips: i32) -> Vec<Static
         y_twips: y,
     })
     .collect()
+}
+
+fn plaque_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let inset_x = width_twips / 6;
+    let inset_y = height_twips / 6;
+    [
+        (inset_x, 0),
+        (width_twips.saturating_sub(inset_x), 0),
+        (width_twips.saturating_sub(inset_x), inset_y),
+        (width_twips, inset_y),
+        (width_twips, height_twips.saturating_sub(inset_y)),
+        (
+            width_twips.saturating_sub(inset_x),
+            height_twips.saturating_sub(inset_y),
+        ),
+        (width_twips.saturating_sub(inset_x), height_twips),
+        (inset_x, height_twips),
+        (inset_x, height_twips.saturating_sub(inset_y)),
+        (0, height_twips.saturating_sub(inset_y)),
+        (0, inset_y),
+        (inset_x, inset_y),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn left_bracket_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let arm = width_twips / 3;
+    [
+        (width_twips, 0),
+        (0, 0),
+        (0, height_twips),
+        (width_twips, height_twips),
+        (width_twips, (height_twips * 4) / 5),
+        (arm, (height_twips * 4) / 5),
+        (arm, height_twips / 5),
+        (width_twips, height_twips / 5),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn right_bracket_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    left_bracket_shape_points(width_twips, height_twips)
+        .into_iter()
+        .map(|point| StaticShapePoint {
+            x_twips: width_twips.saturating_sub(point.x_twips),
+            y_twips: point.y_twips,
+        })
+        .collect()
+}
+
+fn left_brace_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (1000, 0),
+            (500, 0),
+            (250, 125),
+            (250, 350),
+            (0, 500),
+            (250, 650),
+            (250, 875),
+            (500, 1000),
+            (1000, 1000),
+            (1000, 800),
+            (600, 800),
+            (600, 620),
+            (780, 500),
+            (600, 380),
+            (600, 200),
+            (1000, 200),
+        ],
+    )
+}
+
+fn right_brace_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    left_brace_shape_points(width_twips, height_twips)
+        .into_iter()
+        .map(|point| StaticShapePoint {
+            x_twips: width_twips.saturating_sub(point.x_twips),
+            y_twips: point.y_twips,
+        })
+        .collect()
 }
 
 fn chevron_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
