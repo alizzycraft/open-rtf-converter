@@ -73305,14 +73305,19 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
     }
     assert_eq!(shapes[0].points.len(), 4);
     assert_eq!(shapes[1].points.len(), 4);
-    assert_eq!(shapes[2].points.len(), 7);
-    assert_eq!(shapes[3].points.len(), 12);
+    assert_eq!(shapes[2].points.len(), 11);
+    assert_eq!(shapes[3].points.len(), 17);
     assert_eq!(
         shapes[2].points[2].y_twips,
         (shapes[2].height_twips * 4) / 5
     );
-    assert_eq!(shapes[3].points[8].x_twips, shapes[3].width_twips / 6);
-    assert_eq!(shapes[3].points[8].y_twips, shapes[3].height_twips / 5);
+    assert!(
+        shapes[3].points.iter().any(|point| {
+            point.x_twips == shapes[3].width_twips / 6
+                && point.y_twips == shapes[3].height_twips / 5
+        }),
+        "flowchart multidocument should preserve the stacked-page offset corner"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",

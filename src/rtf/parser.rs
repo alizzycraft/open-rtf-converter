@@ -16341,13 +16341,18 @@ fn rectangle_polygon_shape_points(width_twips: i32, height_twips: i32) -> Vec<St
 
 fn flowchart_document_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     let wave_top = (height_twips * 4) / 5;
+    let wave_mid = (height_twips * 9) / 10;
     [
         (0, 0),
         (width_twips, 0),
         (width_twips, wave_top),
+        ((width_twips * 7) / 8, wave_mid),
         ((width_twips * 3) / 4, height_twips),
+        ((width_twips * 5) / 8, wave_mid),
         (width_twips / 2, wave_top),
+        ((width_twips * 3) / 8, wave_mid),
         (width_twips / 4, height_twips),
+        (width_twips / 8, wave_mid),
         (0, wave_top),
     ]
     .into_iter()
@@ -16365,14 +16370,20 @@ fn flowchart_multidocument_shape_points(
     let offset_x = width_twips / 6;
     let offset_y = height_twips / 5;
     let wave_top = (height_twips * 4) / 5;
+    let wave_mid = (height_twips * 9) / 10;
     [
         (offset_x, 0),
         (width_twips, 0),
         (width_twips, wave_top),
+        ((width_twips * 11) / 12, wave_mid),
         ((width_twips * 5) / 6, height_twips),
+        ((width_twips * 3) / 4, wave_mid),
         ((width_twips * 2) / 3, wave_top),
+        ((width_twips * 7) / 12, wave_mid),
         (width_twips / 2, height_twips),
+        ((width_twips * 5) / 12, wave_mid),
         (width_twips / 3, wave_top),
+        (width_twips / 4, wave_mid),
         (offset_x, wave_top),
         (offset_x, offset_y),
         (0, offset_y),
