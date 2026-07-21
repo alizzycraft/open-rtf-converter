@@ -822,6 +822,7 @@ enum ShapePolygonPreset {
     Hexagon,
     Cross,
     Pentagon,
+    Chevron,
     RightArrow,
     LeftArrow,
     UpArrow,
@@ -13035,6 +13036,14 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
             }
+            51 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
+                true
+            }
+            52 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Chevron);
+                true
+            }
             33 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::RightArrow);
                 true
@@ -15015,6 +15024,7 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Hexagon => hexagon_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Cross => cross_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Pentagon => pentagon_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Chevron => chevron_shape_points(width_twips, height_twips),
         ShapePolygonPreset::RightArrow => right_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LeftArrow => left_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::UpArrow => up_arrow_shape_points(width_twips, height_twips),
@@ -15221,6 +15231,25 @@ fn pentagon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShape
         ((width_twips * 4) / 5, height_twips),
         (width_twips / 5, height_twips),
         (0, height_twips / 3),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn chevron_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let mid_y = height_twips / 2;
+    let inset = width_twips / 3;
+    [
+        (0, 0),
+        (width_twips.saturating_sub(inset), 0),
+        (width_twips, mid_y),
+        (width_twips.saturating_sub(inset), height_twips),
+        (0, height_twips),
+        (inset, mid_y),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
