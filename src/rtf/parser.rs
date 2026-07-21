@@ -28647,6 +28647,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         horizontal_align: state.text_horizontal_align,
                         vertical_align: state.text_vertical_align,
                     });
+                } else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             0x0a32 => {
