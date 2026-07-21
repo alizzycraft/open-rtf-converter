@@ -28288,13 +28288,14 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 WMF_POLYFILLMODE_WINDING => state.fill_rule = StaticImageVectorFillRule::Winding,
                 _ => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
-            0x0108 => {
-                state.text_character_extra =
-                    normalized_wmf_text_character_extra(data, 0, window_width)?;
-            }
-            0x020a => {
-                state.text_word_extra = normalized_wmf_text_justification(data, window_width)?;
-            }
+            0x0108 => match normalized_wmf_text_character_extra(data, 0, window_width) {
+                Some(extra) => state.text_character_extra = extra,
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            0x020a => match normalized_wmf_text_justification(data, window_width) {
+                Some(extra) => state.text_word_extra = extra,
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             0x012e => {
                 let mode = u32::from(read_le_u16(data, 0)?);
                 if let Some(mode) = supported_wmf_text_align_mode(mode) {
