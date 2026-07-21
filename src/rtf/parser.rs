@@ -904,6 +904,10 @@ enum ShapePolygonPreset {
     HorizontalScroll,
     Wave,
     DoubleWave,
+    RectangularCallout,
+    RoundedRectangularCallout,
+    OvalCallout,
+    CloudCallout,
     DownTriangle,
 }
 
@@ -13408,6 +13412,24 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::DoubleWave);
                 true
             }
+            105 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::RectangularCallout);
+                true
+            }
+            106 => {
+                self.set_current_shape_polygon_preset(
+                    ShapePolygonPreset::RoundedRectangularCallout,
+                );
+                true
+            }
+            107 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::OvalCallout);
+                true
+            }
+            108 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CloudCallout);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15596,6 +15618,14 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::Wave => wave_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DoubleWave => double_wave_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::RectangularCallout => {
+            rectangular_callout_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::RoundedRectangularCallout => {
+            rounded_rectangular_callout_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::OvalCallout => oval_callout_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::CloudCallout => cloud_callout_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -16041,6 +16071,96 @@ fn double_wave_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSh
             (250, 760),
             (120, 760),
             (0, 640),
+        ],
+    )
+}
+
+fn rectangular_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (1000, 0),
+            (1000, 720),
+            (620, 720),
+            (430, 1000),
+            (460, 720),
+            (0, 720),
+        ],
+    )
+}
+
+fn rounded_rectangular_callout_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (120, 0),
+            (880, 0),
+            (1000, 120),
+            (1000, 600),
+            (880, 720),
+            (620, 720),
+            (430, 1000),
+            (460, 720),
+            (120, 720),
+            (0, 600),
+            (0, 120),
+        ],
+    )
+}
+
+fn oval_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (500, 0),
+            (720, 60),
+            (900, 210),
+            (1000, 420),
+            (960, 600),
+            (820, 720),
+            (620, 760),
+            (430, 1000),
+            (460, 740),
+            (250, 680),
+            (80, 520),
+            (0, 330),
+            (90, 150),
+            (280, 40),
+        ],
+    )
+}
+
+fn cloud_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (140, 440),
+            (40, 320),
+            (120, 170),
+            (280, 150),
+            (340, 40),
+            (520, 0),
+            (660, 90),
+            (820, 80),
+            (950, 210),
+            (920, 360),
+            (1000, 500),
+            (900, 640),
+            (720, 660),
+            (620, 760),
+            (470, 720),
+            (350, 1000),
+            (380, 720),
+            (200, 700),
+            (80, 600),
         ],
     )
 }
