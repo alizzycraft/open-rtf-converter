@@ -72296,7 +72296,7 @@ fn office_3d_and_folded_shapes_render_as_passive_polygons_without_payload_leakag
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 4);
-    for (shape, expected_points) in shapes.iter().zip([6, 6, 8, 5]) {
+    for (shape, expected_points) in shapes.iter().zip([10, 6, 8, 5]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
@@ -73422,7 +73422,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 12);
-    let expected_point_counts = [5, 10, 24, 24, 6, 4, 6, 9, 32, 6, 6, 8];
+    let expected_point_counts = [5, 10, 24, 24, 6, 4, 10, 9, 32, 10, 6, 8];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);

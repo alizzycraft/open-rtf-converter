@@ -18187,13 +18187,21 @@ fn pentagon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShape
 
 fn can_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     let inset_y = height_twips / 8;
+    let quarter_x = width_twips / 4;
+    let three_quarter_x = width_twips.saturating_sub(quarter_x);
+    let half_inset_y = inset_y / 2;
+    let bottom_y = height_twips.saturating_sub(inset_y);
     [
         (width_twips / 2, 0),
+        (three_quarter_x, half_inset_y),
         (width_twips, inset_y),
-        (width_twips, height_twips.saturating_sub(inset_y)),
+        (width_twips, bottom_y),
+        (three_quarter_x, height_twips.saturating_sub(half_inset_y)),
         (width_twips / 2, height_twips),
-        (0, height_twips.saturating_sub(inset_y)),
+        (quarter_x, height_twips.saturating_sub(half_inset_y)),
+        (0, bottom_y),
         (0, inset_y),
+        (quarter_x, half_inset_y),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
