@@ -823,6 +823,7 @@ enum ShapePolygonPreset {
     Cross,
     Pentagon,
     Chevron,
+    NotchedRightArrow,
     RightArrow,
     LeftArrow,
     UpArrow,
@@ -13056,6 +13057,10 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Chevron);
                 true
             }
+            50 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::NotchedRightArrow);
+                true
+            }
             33 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::RightArrow);
                 true
@@ -15037,6 +15042,9 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Cross => cross_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Pentagon => pentagon_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Chevron => chevron_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::NotchedRightArrow => {
+            notched_right_arrow_shape_points(width_twips, height_twips)
+        }
         ShapePolygonPreset::RightArrow => right_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LeftArrow => left_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::UpArrow => up_arrow_shape_points(width_twips, height_twips),
@@ -15284,6 +15292,30 @@ fn right_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSh
         (shaft_right, height_twips),
         (shaft_right, shaft_bottom),
         (0, shaft_bottom),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn notched_right_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let shaft_right = (width_twips * 2) / 3;
+    let mid_y = height_twips / 2;
+    let shaft_top = height_twips / 4;
+    let shaft_bottom = height_twips.saturating_sub(shaft_top);
+    let notch_right = width_twips / 5;
+    [
+        (0, shaft_top),
+        (shaft_right, shaft_top),
+        (shaft_right, 0),
+        (width_twips, mid_y),
+        (shaft_right, height_twips),
+        (shaft_right, shaft_bottom),
+        (0, shaft_bottom),
+        (notch_right, mid_y),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
