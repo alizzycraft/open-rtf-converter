@@ -17203,10 +17203,12 @@ fn round_two_same_rectangle_shape_points(
         &[
             (160, 0),
             (840, 0),
+            (930, 30),
             (1000, 160),
             (1000, 1000),
             (0, 1000),
             (0, 160),
+            (70, 30),
         ],
     )
 }
@@ -17215,7 +17217,14 @@ fn round_one_rectangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<
     scaled_shape_points(
         width_twips,
         height_twips,
-        &[(160, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 160)],
+        &[
+            (160, 0),
+            (1000, 0),
+            (1000, 1000),
+            (0, 1000),
+            (0, 160),
+            (70, 30),
+        ],
     )
 }
 
@@ -17230,9 +17239,11 @@ fn round_two_diagonal_rectangle_shape_points(
             (160, 0),
             (1000, 0),
             (1000, 840),
+            (970, 930),
             (840, 1000),
             (0, 1000),
             (0, 160),
+            (30, 70),
         ],
     )
 }
@@ -17244,11 +17255,13 @@ fn snip_round_rectangle_shape_points(width_twips: i32, height_twips: i32) -> Vec
         &[
             (160, 0),
             (840, 0),
+            (930, 30),
             (1000, 160),
             (1000, 760),
             (760, 1000),
             (0, 1000),
             (0, 160),
+            (70, 30),
         ],
     )
 }
