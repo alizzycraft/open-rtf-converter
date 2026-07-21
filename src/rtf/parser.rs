@@ -12799,6 +12799,18 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
+            "lineStyle" => {
+                if let Some((style, approximated)) = parse_shape_line_style_property(value) {
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.stroke_style = style;
+                    }
+                    if approximated {
+                        self.mark_current_shape_unsupported_or_active_property_stripped();
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "lineStartArrowhead" => {
                 if let Some(arrowhead) = parse_shape_arrowhead_property(value)
                     && let Some(shape) = self.current_shape.as_mut()
@@ -17027,6 +17039,22 @@ fn parse_shape_line_dashing_property(value: &str) -> Option<BorderStyle> {
         "4" | "5" | "6" | "7" | "8" | "9" | "10" | "12" | "dash" | "sysdash" | "lgdash"
         | "longdash" | "dashdot" | "lgdashdot" | "dashdotdot" | "lgdashdotdot" | "longdashdot"
         | "longdashdotdot" | "sysdashdot" => Some(BorderStyle::Dashed),
+        _ => None,
+    }
+}
+
+fn parse_shape_line_style_property(value: &str) -> Option<(BorderStyle, bool)> {
+    let normalized = value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "0" | "1" | "single" | "msolinesingle" => Some((BorderStyle::Single, false)),
+        "2" | "3" | "4" | "thinthin" | "thinthick" | "thickthin" | "msolinethinthin"
+        | "msolinethinthick" | "msolinethickthin" => Some((BorderStyle::Double, false)),
+        "5" | "thickbetweenthin" | "msolinethickbetweenthin" => Some((BorderStyle::Double, true)),
         _ => None,
     }
 }
