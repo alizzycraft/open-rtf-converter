@@ -73203,6 +73203,116 @@ fn office_bent_up_arrows_render_as_passive_polygon_without_payload_leakage() {
 }
 
 #[test]
+fn office_explosion_shapes_render_as_passive_polygons_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (89, "hidden-explosion-one-payload"),
+        (90, "hidden-explosion-two-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65535}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 2);
+    assert_eq!(shapes[0].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[0].points.len(), 16);
+    assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[1].points.len(), 18);
+    for shape in &shapes {
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "explosion points must stay inside the passive shape frame"
+        );
+    }
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "hidden-explosion-one-payload",
+        "hidden-explosion-two-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "explosion metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 2,
+        "explosion shapes should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"hidden-explosion-one-payload",
+        b"hidden-explosion-two-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "explosion metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_four_point_stars_render_as_passive_polygon_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 91}}{\sp{\sn fillColor}{\sv 16744448}}{\sp{\sn lineColor}{\sv 255}}{\sp{\sn pFragments}{\sv hidden-four-point-star-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
