@@ -21374,15 +21374,28 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 active_path = Some(EmfPathBuilder::new(current_position));
             }
             EMR_ENDPATH => {
-                active_path.as_mut()?.end()?;
+                let Some(path) = active_path.as_mut() else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                path.end()?;
             }
             EMR_CLOSEFIGURE => {
-                let path = active_path.as_mut()?;
+                let Some(path) = active_path.as_mut() else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 path.close_figure(&header, &coordinates)?;
                 current_position = path.current_position;
             }
             EMR_STROKEPATH => {
-                let path = active_path.take()?;
+                let Some(path) = active_path.take() else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if path.is_passive_empty() {
                     pos = record_end;
                     continue;
@@ -21406,7 +21419,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let path = active_path.take()?;
+                let Some(path) = active_path.take() else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if path.is_passive_empty() {
                     pos = record_end;
                     continue;

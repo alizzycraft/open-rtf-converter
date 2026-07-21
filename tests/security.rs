@@ -43309,6 +43309,109 @@ fn emf_empty_ended_path_paint_records_are_noops_without_payload_leakage() {
 }
 
 #[test]
+fn unmatched_emf_path_records_count_as_partial_without_payload_leakage() {
+    for (record_type, label) in [
+        (60, "EMF-ENDPATH-UNMATCHED"),
+        (61, "EMF-CLOSEFIGURE-UNMATCHED"),
+        (62, "EMF-FILLPATH-UNMATCHED"),
+        (64, "EMF-STROKEPATH-UNMATCHED"),
+        (63, "EMF-STROKEANDFILLPATH-UNMATCHED"),
+    ] {
+        let mut path_record = emf_unknown_record(record_type);
+        path_record.extend_from_slice(label.as_bytes());
+        path_record.extend_from_slice(b" /JavaScript /EmbeddedFile /Launch");
+        path_record.resize(path_record.len().next_multiple_of(4), 0);
+        let path_len = path_record.len() as u32;
+        write_test_le_u32(&mut path_record, 4, path_len);
+
+        let records = [path_record, emf_rect_record(43, 20, 10, 80, 50)];
+        let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        let emf_hex = bytes_to_hex(&emf);
+        let input =
+            format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("unmatched EMF path partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector, "{label}");
+        assert!(image.bytes.is_empty(), "{label}");
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["emfblip", label, "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "unmatched EMF path payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"emfblip".as_slice(),
+            emf_hex.as_bytes(),
+            label.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "unmatched EMF path payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn emf_abortpath_discards_path_without_payload_leakage() {
     let mut abort = emf_unknown_record(68);
     abort.extend_from_slice(b"ABORT-EMF-PATH /JavaScript /EmbeddedFile");
