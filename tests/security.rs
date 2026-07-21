@@ -43412,6 +43412,109 @@ fn unmatched_emf_path_records_count_as_partial_without_payload_leakage() {
 }
 
 #[test]
+fn duplicate_emf_beginpath_counts_as_partial_without_payload_leakage() {
+    let mut duplicate_begin = emf_unknown_record(59);
+    duplicate_begin.extend_from_slice(b"DUPLICATE-EMF-BEGINPATH /JavaScript /EmbeddedFile");
+    duplicate_begin.resize(duplicate_begin.len().next_multiple_of(4), 0);
+    let duplicate_begin_len = duplicate_begin.len() as u32;
+    write_test_le_u32(&mut duplicate_begin, 4, duplicate_begin_len);
+
+    let records = [
+        emf_unknown_record(59),
+        emf_point_record(27, 10, 10),
+        duplicate_begin,
+        emf_rect_record(43, 20, 10, 80, 50),
+    ];
+    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("duplicate EMF BEGINPATH partial vector preview");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert!(
+        image
+            .vector_commands
+            .iter()
+            .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+        "safe drawing after duplicate EMF BEGINPATH should stay visible"
+    );
+    for forbidden in [
+        "emfblip",
+        "BEGINPATH",
+        "DUPLICATE-EMF-BEGINPATH",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "duplicate EMF BEGINPATH payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("1 unsupported record(s) skipped")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "safe drawing after duplicate EMF BEGINPATH should render passively"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"DUPLICATE-EMF-BEGINPATH",
+        b"BEGINPATH",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "duplicate EMF BEGINPATH payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_abortpath_discards_path_without_payload_leakage() {
     let mut abort = emf_unknown_record(68);
     abort.extend_from_slice(b"ABORT-EMF-PATH /JavaScript /EmbeddedFile");

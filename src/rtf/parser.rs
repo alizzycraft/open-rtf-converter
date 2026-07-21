@@ -21369,7 +21369,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
             },
             EMR_BEGINPATH => {
                 if active_path.is_some() {
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 }
                 active_path = Some(EmfPathBuilder::new(current_position));
             }
