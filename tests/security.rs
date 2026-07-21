@@ -74447,6 +74447,169 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
 }
 
 #[test]
+fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_without_payload_leakage()
+ {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (174, "office-funnel-payload"),
+        (175, "office-pie-wedge-payload"),
+        (176, "office-left-circular-arrow-payload"),
+        (177, "office-left-right-circular-arrow-payload"),
+        (178, "office-swoosh-arrow-payload"),
+        (179, "office-cloud-payload"),
+        (180, "office-chart-x-payload"),
+        (181, "office-chart-star-payload"),
+        (182, "office-chart-plus-payload"),
+        (183, "office-line-inverse-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 10);
+    let expected = [
+        (StaticShapeKind::Polygon, 6),
+        (StaticShapeKind::Polygon, 6),
+        (StaticShapeKind::Polygon, 20),
+        (StaticShapeKind::Polygon, 26),
+        (StaticShapeKind::Polygon, 12),
+        (StaticShapeKind::Polygon, 20),
+        (StaticShapeKind::Polygon, 17),
+        (StaticShapeKind::Polygon, 15),
+        (StaticShapeKind::Polygon, 17),
+        (StaticShapeKind::Polyline, 2),
+    ];
+    for (shape, (expected_kind, expected_point_count)) in shapes.iter().zip(expected) {
+        assert_eq!(shape.kind, expected_kind);
+        assert_eq!(shape.points.len(), expected_point_count);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "funnel/arrow/cloud/chart/line points must stay inside passive frame: {shape:?}"
+        );
+    }
+    assert_eq!(shapes[0].points[0].x_twips, 0);
+    assert!(shapes[3].points.iter().any(|point| point.x_twips == 0));
+    assert!(
+        shapes[5]
+            .points
+            .iter()
+            .any(|point| point.x_twips == shapes[5].width_twips)
+    );
+    assert_eq!(shapes[9].points[0].x_twips, shapes[9].width_twips);
+    assert_eq!(shapes[9].points[1].y_twips, shapes[9].height_twips);
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "office-funnel-payload",
+        "office-pie-wedge-payload",
+        "office-left-circular-arrow-payload",
+        "office-left-right-circular-arrow-payload",
+        "office-swoosh-arrow-payload",
+        "office-cloud-payload",
+        "office-chart-x-payload",
+        "office-chart-star-payload",
+        "office-chart-plus-payload",
+        "office-line-inverse-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "funnel/arrow/cloud/chart/line metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0usize;
+    let mut passive_line_strokes = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        for operation in &content.operations {
+            if operation.operator == "B" {
+                passive_shape_paints += 1;
+            }
+            if operation.operator == "S" {
+                passive_line_strokes += 1;
+            }
+        }
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 9,
+        "funnel/arrow/cloud/chart shapes should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_line_strokes >= 1,
+        "inverse line should render as a passive stroked path"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"office-funnel-payload",
+        b"office-pie-wedge-payload",
+        b"office-left-circular-arrow-payload",
+        b"office-left-right-circular-arrow-payload",
+        b"office-swoosh-arrow-payload",
+        b"office-cloud-payload",
+        b"office-chart-x-payload",
+        b"office-chart-star-payload",
+        b"office-chart-plus-payload",
+        b"office-line-inverse-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "funnel/arrow/cloud/chart/line metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unsupported_office_shape_type_138_does_not_cross_pdf_boundary() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 138}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv unsupported-shape-138-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

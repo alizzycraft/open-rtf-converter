@@ -952,6 +952,15 @@ enum ShapePolygonPreset {
     PlaqueTabs,
     Gear6,
     Gear9,
+    Funnel,
+    PieWedge,
+    LeftCircularArrow,
+    LeftRightCircularArrow,
+    SwooshArrow,
+    Cloud,
+    ChartX,
+    ChartStar,
+    ChartPlus,
     RoundOneRectangle,
     DownTriangle,
 }
@@ -963,6 +972,7 @@ enum ShapePolylinePreset {
     LineCalloutDiagonal,
     LineCalloutAngled,
     LineCalloutUShape,
+    LineInverse,
 }
 
 #[derive(Debug, Clone)]
@@ -13693,6 +13703,46 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Gear9);
                 true
             }
+            174 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Funnel);
+                true
+            }
+            175 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::PieWedge);
+                true
+            }
+            176 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftCircularArrow);
+                true
+            }
+            177 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftRightCircularArrow);
+                true
+            }
+            178 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SwooshArrow);
+                true
+            }
+            179 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Cloud);
+                true
+            }
+            180 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ChartX);
+                true
+            }
+            181 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ChartStar);
+                true
+            }
+            182 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ChartPlus);
+                true
+            }
+            183 => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineInverse);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15984,6 +16034,19 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::PlaqueTabs => plaque_tabs_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Gear6 => regular_star_shape_points(width_twips, height_twips, 6, 620),
         ShapePolygonPreset::Gear9 => regular_star_shape_points(width_twips, height_twips, 9, 650),
+        ShapePolygonPreset::Funnel => funnel_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::PieWedge => pie_wedge_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::LeftCircularArrow => {
+            left_circular_arrow_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::LeftRightCircularArrow => {
+            left_right_circular_arrow_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::SwooshArrow => swoosh_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Cloud => cloud_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::ChartX => chart_x_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::ChartStar => chart_star_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::ChartPlus => chart_plus_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -16007,6 +16070,7 @@ fn polyline_preset_shape_points(
         ShapePolylinePreset::LineCalloutUShape => {
             line_callout_ushape_points(width_twips, height_twips)
         }
+        ShapePolylinePreset::LineInverse => line_inverse_shape_points(width_twips, height_twips),
     }
 }
 
@@ -17239,6 +17303,239 @@ fn plaque_tabs_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSh
             (170, 170),
         ],
     )
+}
+
+fn funnel_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 120),
+            (1000, 120),
+            (660, 520),
+            (660, 1000),
+            (340, 1000),
+            (340, 520),
+        ],
+    )
+}
+
+fn pie_wedge_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (500, 500),
+            (500, 0),
+            (690, 40),
+            (850, 150),
+            (960, 310),
+            (1000, 500),
+        ],
+    )
+}
+
+fn left_circular_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (270, 180),
+            (480, 60),
+            (740, 80),
+            (920, 250),
+            (960, 520),
+            (820, 760),
+            (570, 880),
+            (320, 820),
+            (170, 660),
+            (320, 660),
+            (430, 720),
+            (610, 720),
+            (760, 610),
+            (810, 430),
+            (730, 270),
+            (560, 210),
+            (400, 250),
+            (270, 360),
+            (270, 500),
+            (40, 300),
+        ],
+    )
+}
+
+fn left_right_circular_arrow_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (250, 190),
+            (470, 60),
+            (700, 90),
+            (860, 240),
+            (960, 200),
+            (900, 500),
+            (650, 330),
+            (770, 330),
+            (710, 240),
+            (560, 190),
+            (390, 240),
+            (290, 360),
+            (220, 520),
+            (290, 680),
+            (440, 770),
+            (610, 750),
+            (720, 650),
+            (590, 650),
+            (840, 500),
+            (930, 790),
+            (820, 750),
+            (640, 900),
+            (390, 930),
+            (170, 800),
+            (50, 570),
+            (90, 330),
+        ],
+    )
+}
+
+fn swoosh_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (40, 760),
+            (160, 610),
+            (320, 500),
+            (520, 430),
+            (720, 390),
+            (720, 240),
+            (1000, 500),
+            (720, 760),
+            (720, 600),
+            (540, 620),
+            (340, 690),
+            (160, 840),
+        ],
+    )
+}
+
+fn cloud_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (130, 610),
+            (40, 560),
+            (0, 450),
+            (70, 340),
+            (190, 330),
+            (230, 200),
+            (370, 120),
+            (520, 170),
+            (600, 60),
+            (790, 70),
+            (900, 220),
+            (1000, 290),
+            (980, 450),
+            (880, 540),
+            (850, 680),
+            (690, 780),
+            (540, 730),
+            (420, 860),
+            (230, 830),
+            (120, 720),
+        ],
+    )
+}
+
+fn chart_x_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 1000),
+            (0, 0),
+            (1000, 0),
+            (1000, 1000),
+            (0, 1000),
+            (220, 220),
+            (370, 220),
+            (500, 380),
+            (630, 220),
+            (780, 220),
+            (590, 500),
+            (780, 780),
+            (630, 780),
+            (500, 620),
+            (370, 780),
+            (220, 780),
+            (410, 500),
+        ],
+    )
+}
+
+fn chart_star_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 1000),
+            (0, 0),
+            (1000, 0),
+            (1000, 1000),
+            (0, 1000),
+            (500, 160),
+            (580, 390),
+            (820, 390),
+            (630, 540),
+            (710, 780),
+            (500, 640),
+            (290, 780),
+            (370, 540),
+            (180, 390),
+            (420, 390),
+        ],
+    )
+}
+
+fn chart_plus_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 1000),
+            (0, 0),
+            (1000, 0),
+            (1000, 1000),
+            (0, 1000),
+            (420, 220),
+            (580, 220),
+            (580, 420),
+            (780, 420),
+            (780, 580),
+            (580, 580),
+            (580, 780),
+            (420, 780),
+            (420, 580),
+            (220, 580),
+            (220, 420),
+            (420, 420),
+        ],
+    )
+}
+
+fn line_inverse_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    [(width_twips, 0), (0, height_twips)]
+        .into_iter()
+        .map(|(x, y)| StaticShapePoint {
+            x_twips: x,
+            y_twips: y,
+        })
+        .collect()
 }
 
 fn trapezoid_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
