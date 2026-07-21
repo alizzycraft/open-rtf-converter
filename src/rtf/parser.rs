@@ -21143,7 +21143,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETLAYOUT => {
-                if !emf_layout_is_supported_passive_noop(read_le_u32(data, 0)?) {
+                let Some(layout) = read_le_u32(data, 0) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                if !emf_layout_is_supported_passive_noop(layout) {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
@@ -21192,17 +21197,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     commands.push(StaticImageVectorCommand::RestoreState);
                 }
             }
-            EMR_SETWORLDTRANSFORM => {
-                if let Some(transform) = parse_passive_emf_world_transform(data, 0)? {
-                    coordinates.set_world_transform(transform);
-                } else {
-                    skipped_record_count = skipped_record_count.checked_add(1)?;
-                }
-            }
-            EMR_MODIFYWORLDTRANSFORM => match read_le_u32(data, 24)? {
-                1 => coordinates.reset_world_transform(),
-                2 => {
-                    if let Some(transform) = parse_passive_emf_world_transform(data, 0)?
+            EMR_SETWORLDTRANSFORM => match parse_passive_emf_world_transform(data, 0) {
+                Some(Some(transform)) => coordinates.set_world_transform(transform),
+                Some(None) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            EMR_MODIFYWORLDTRANSFORM => match read_le_u32(data, 24) {
+                Some(1) => coordinates.reset_world_transform(),
+                Some(2) => {
+                    if let Some(transform) = parse_passive_emf_world_transform(data, 0).flatten()
                         && coordinates
                             .left_multiply_world_transform(transform)
                             .is_some()
@@ -21211,8 +21213,8 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
                 }
-                3 => {
-                    if let Some(transform) = parse_passive_emf_world_transform(data, 0)?
+                Some(3) => {
+                    if let Some(transform) = parse_passive_emf_world_transform(data, 0).flatten()
                         && coordinates
                             .right_multiply_world_transform(transform)
                             .is_some()
@@ -21221,14 +21223,14 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
                 }
-                4 => {
-                    if let Some(transform) = parse_passive_emf_world_transform(data, 0)? {
+                Some(4) => {
+                    if let Some(transform) = parse_passive_emf_world_transform(data, 0).flatten() {
                         coordinates.set_world_transform(transform);
                     } else {
                         skipped_record_count = skipped_record_count.checked_add(1)?;
                     }
                 }
-                _ => skipped_record_count = skipped_record_count.checked_add(1)?,
+                Some(_) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
             EMR_CREATEPEN => {
                 let Some((handle, object)) = parse_emf_pen_object(data) else {
