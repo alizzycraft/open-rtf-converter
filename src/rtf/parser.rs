@@ -844,6 +844,7 @@ enum ShapePolygonPreset {
     FourPointStar,
     FivePointStar,
     SixPointStar,
+    SevenPointStar,
     EightPointStar,
     SixteenPointStar,
     TwentyFourPointStar,
@@ -13157,6 +13158,10 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::SixPointStar);
                 true
             }
+            148 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SevenPointStar);
+                true
+            }
             93 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::EightPointStar);
                 true
@@ -15168,6 +15173,9 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::SixPointStar => {
             regular_star_shape_points(width_twips, height_twips, 6, 500)
+        }
+        ShapePolygonPreset::SevenPointStar => {
+            regular_star_shape_points(width_twips, height_twips, 7, 520)
         }
         ShapePolygonPreset::EightPointStar => {
             eight_point_star_shape_points(width_twips, height_twips)
