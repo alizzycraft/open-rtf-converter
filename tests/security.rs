@@ -29366,6 +29366,105 @@ fn malformed_wmf_line_position_records_count_as_partial_without_payload_leakage(
 }
 
 #[test]
+fn malformed_wmf_clip_state_records_count_as_partial_without_payload_leakage() {
+    for (function, label) in [
+        (0x012e, "WMF-SETTEXTALIGN-MALFORMED"),
+        (0x0220, "WMF-OFFSETCLIPRGN-MALFORMED"),
+        (0x0415, "WMF-EXCLUDECLIPRECT-MALFORMED"),
+        (0x0416, "WMF-INTERSECTCLIPRECT-MALFORMED"),
+    ] {
+        let records = [
+            wmf_function_record(function),
+            wmf_bounds_record(0x041b, 20, 10, 80, 50),
+        ];
+        let wmf = minimal_wmf_with_records(160, 80, &records);
+        let wmf_hex = bytes_to_hex(&wmf);
+        let input = format!(
+            "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed WMF clip/state partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector, "{label}");
+        assert!(image.bytes.is_empty(), "{label}");
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["wmetafile", "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed WMF clip/state payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"wmetafile".as_slice(),
+            wmf_hex.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "malformed WMF clip/state payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn malformed_wmf_arc_records_count_as_partial_without_payload_leakage() {
     for (function, label) in [
         (0x0817, "WMF-ARC-MALFORMED"),
@@ -38863,7 +38962,7 @@ fn invalid_wmf_settextalign_stays_partial_without_payload_leakage() {
 }
 
 #[test]
-fn malformed_wmf_settextalign_becomes_passive_placeholder() {
+fn malformed_wmf_settextalign_keeps_later_safe_text() {
     let records = [
         wmf_function_record(0x012e),
         wmf_exttextout_record(40, 20, "Hi", 0, None),
@@ -38883,13 +38982,18 @@ fn malformed_wmf_settextalign_becomes_passive_placeholder() {
             Block::Image(image) => Some(image),
             _ => None,
         })
-        .expect("malformed WMF SETTEXTALIGN placeholder");
+        .expect("malformed WMF SETTEXTALIGN partial vector preview");
 
     assert!(text.contains("before"));
     assert!(text.contains("after"));
-    assert_eq!(image.format, ImageFormat::Placeholder);
+    assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert!(image.vector_commands.is_empty());
+    assert!(
+        image.vector_commands.iter().any(
+            |command| matches!(command, StaticImageVectorCommand::Text { text, .. } if text == "Hi")
+        ),
+        "safe text after malformed WMF SETTEXTALIGN should stay visible"
+    );
     assert!(!text.contains("Hi"));
 }
 

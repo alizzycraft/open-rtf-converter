@@ -28643,10 +28643,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 None => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
             0x012e => {
-                let mode = u32::from(read_le_u16(data, 0)?);
-                if let Some(mode) = supported_wmf_text_align_mode(mode) {
-                    state.text_horizontal_align = wmf_text_horizontal_align(mode);
-                    state.text_vertical_align = wmf_text_vertical_align(mode);
+                if let Some(mode) = read_le_u16(data, 0).map(u32::from) {
+                    if let Some(mode) = supported_wmf_text_align_mode(mode) {
+                        state.text_horizontal_align = wmf_text_horizontal_align(mode);
+                        state.text_vertical_align = wmf_text_vertical_align(mode);
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -28680,7 +28683,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     return None;
                 }
                 let Some((left, top, right, bottom)) = parse_wmf_bounds(data, coordinates) else {
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 };
                 if function != 0x0416 && !bounds_is_visible((left, top, right, bottom)) {
                     if function == 0x0415 {
@@ -28726,8 +28731,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     pos = record_end;
                     continue;
                 }
-                let (offset_x, offset_y) =
-                    parse_wmf_offset_clip_region(data, window_width, window_height)?;
+                let Some((offset_x, offset_y)) =
+                    parse_wmf_offset_clip_region(data, window_width, window_height)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if let Some(clip_start) = replaceable_clip_command_start
                     && vector_commands_are_only_clip_updates(&commands[clip_start..])
                 {
@@ -28773,7 +28783,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     replaceable_clip_command_start = Some(commands.len());
                     commands.extend(clip_commands);
                 } else {
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             0x0324 | 0x0325 => {
