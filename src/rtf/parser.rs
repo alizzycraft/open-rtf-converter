@@ -28411,6 +28411,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     pos = record_end;
                     continue;
                 };
+                let had_saved_states = !saved_states.is_empty();
                 if let Some(restored) = restore_wmf_saved_state(&mut saved_states, restore_index) {
                     if commands.len().checked_add(restored.restore_count)?
                         > MAX_PASSIVE_WMF_COMMANDS
@@ -28433,6 +28434,8 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         commands.push(StaticImageVectorCommand::RestoreState);
                     }
                     replaceable_clip_command_start = None;
+                } else if had_saved_states {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             0x020b => match (read_le_i16(data, 0), read_le_i16(data, 2)) {

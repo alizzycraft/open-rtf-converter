@@ -29466,6 +29466,12 @@ fn malformed_wmf_clip_state_records_count_as_partial_without_payload_leakage() {
 
 #[test]
 fn malformed_wmf_restore_state_records_count_as_partial_without_payload_leakage() {
+    let mut out_of_range_restore = wmf_u16_record(0x0127, 0xfffe);
+    out_of_range_restore.extend_from_slice(b"WMF-RESTOREDC-OUT-OF-RANGE /JavaScript");
+    out_of_range_restore.resize(out_of_range_restore.len().next_multiple_of(2), 0);
+    let out_of_range_restore_len = (out_of_range_restore.len() / 2) as u32;
+    write_test_le_u32(&mut out_of_range_restore, 0, out_of_range_restore_len);
+
     for (records, label) in [
         (
             vec![
@@ -29481,6 +29487,14 @@ fn malformed_wmf_restore_state_records_count_as_partial_without_payload_leakage(
                 wmf_bounds_record(0x041b, 20, 10, 80, 50),
             ],
             "WMF-SAVEDC-RESTOREDC-MALFORMED",
+        ),
+        (
+            vec![
+                wmf_function_record(0x001e),
+                out_of_range_restore,
+                wmf_bounds_record(0x041b, 20, 10, 80, 50),
+            ],
+            "WMF-SAVEDC-RESTOREDC-OUT-OF-RANGE",
         ),
     ] {
         let wmf = minimal_wmf_with_records(160, 80, &records);
