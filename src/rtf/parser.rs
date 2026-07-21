@@ -880,6 +880,10 @@ enum ShapePolygonPreset {
     ThirtyTwoPointStar,
     ManualInput,
     ManualOperation,
+    FlowchartPredefinedProcess,
+    FlowchartInternalStorage,
+    FlowchartDocument,
+    FlowchartMultidocument,
     DownTriangle,
 }
 
@@ -13368,6 +13372,24 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Parallelogram);
                 true
             }
+            65 => {
+                self.set_current_shape_polygon_preset(
+                    ShapePolygonPreset::FlowchartPredefinedProcess,
+                );
+                true
+            }
+            66 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartInternalStorage);
+                true
+            }
+            67 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartDocument);
+                true
+            }
+            68 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartMultidocument);
+                true
+            }
             70 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Hexagon);
                 true
@@ -15412,6 +15434,18 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::ManualOperation => {
             manual_operation_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::FlowchartPredefinedProcess => {
+            rectangle_polygon_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartInternalStorage => {
+            rectangle_polygon_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartDocument => {
+            flowchart_document_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartMultidocument => {
+            flowchart_multidocument_shape_points(width_twips, height_twips)
+        }
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -15495,6 +15529,69 @@ fn down_triangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<Static
             y_twips: y,
         })
         .collect()
+}
+
+fn rectangle_polygon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    [
+        (0, 0),
+        (width_twips, 0),
+        (width_twips, height_twips),
+        (0, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn flowchart_document_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let wave_top = (height_twips * 4) / 5;
+    [
+        (0, 0),
+        (width_twips, 0),
+        (width_twips, wave_top),
+        ((width_twips * 3) / 4, height_twips),
+        (width_twips / 2, wave_top),
+        (width_twips / 4, height_twips),
+        (0, wave_top),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn flowchart_multidocument_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    let offset_x = width_twips / 6;
+    let offset_y = height_twips / 5;
+    let wave_top = (height_twips * 4) / 5;
+    [
+        (offset_x, 0),
+        (width_twips, 0),
+        (width_twips, wave_top),
+        ((width_twips * 5) / 6, height_twips),
+        ((width_twips * 2) / 3, wave_top),
+        (width_twips / 2, height_twips),
+        (width_twips / 3, wave_top),
+        (offset_x, wave_top),
+        (offset_x, offset_y),
+        (0, offset_y),
+        (0, height_twips),
+        (offset_x, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
 }
 
 fn trapezoid_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
