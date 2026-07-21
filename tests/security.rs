@@ -73221,6 +73221,148 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
 }
 
 #[test]
+fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (75, "flowchart-punched-card-payload"),
+        (76, "flowchart-punched-tape-payload"),
+        (77, "flowchart-summing-junction-payload"),
+        (78, "flowchart-or-payload"),
+        (79, "flowchart-collate-payload"),
+        (80, "flowchart-sort-payload"),
+        (83, "flowchart-stored-data-payload"),
+        (84, "flowchart-delay-payload"),
+        (85, "flowchart-sequential-access-storage-payload"),
+        (86, "flowchart-magnetic-disk-payload"),
+        (87, "flowchart-direct-access-storage-payload"),
+        (88, "flowchart-display-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright2880\\shpbottom1440{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 12);
+    let expected_point_counts = [5, 10, 24, 24, 6, 4, 6, 9, 32, 6, 6, 8];
+    for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
+        assert_eq!(shape.kind, StaticShapeKind::Polygon);
+        assert_eq!(shape.points.len(), expected_point_count);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "flowchart storage/io shape points must stay inside passive frame: {shape:?}"
+        );
+    }
+    assert_eq!(shapes[0].points[0].x_twips, shapes[0].width_twips / 5);
+    assert_eq!(shapes[7].points[4].x_twips, shapes[7].width_twips);
+    assert_eq!(shapes[11].points[3].x_twips, shapes[11].width_twips);
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "flowchart-punched-card-payload",
+        "flowchart-punched-tape-payload",
+        "flowchart-summing-junction-payload",
+        "flowchart-or-payload",
+        "flowchart-collate-payload",
+        "flowchart-sort-payload",
+        "flowchart-stored-data-payload",
+        "flowchart-delay-payload",
+        "flowchart-sequential-access-storage-payload",
+        "flowchart-magnetic-disk-payload",
+        "flowchart-direct-access-storage-payload",
+        "flowchart-display-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "flowchart storage/io metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 12,
+        "flowchart storage/io shapes should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"flowchart-punched-card-payload",
+        b"flowchart-punched-tape-payload",
+        b"flowchart-summing-junction-payload",
+        b"flowchart-or-payload",
+        b"flowchart-collate-payload",
+        b"flowchart-sort-payload",
+        b"flowchart-stored-data-payload",
+        b"flowchart-delay-payload",
+        b"flowchart-sequential-access-storage-payload",
+        b"flowchart-magnetic-disk-payload",
+        b"flowchart-direct-access-storage-payload",
+        b"flowchart-display-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "flowchart storage/io metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_right_arrows_render_as_passive_polygon_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 33}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn lineColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-right-arrow-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

@@ -884,6 +884,18 @@ enum ShapePolygonPreset {
     FlowchartInternalStorage,
     FlowchartDocument,
     FlowchartMultidocument,
+    FlowchartPunchedCard,
+    FlowchartPunchedTape,
+    FlowchartSummingJunction,
+    FlowchartOr,
+    FlowchartCollate,
+    FlowchartSort,
+    FlowchartStoredData,
+    FlowchartDelay,
+    FlowchartSequentialAccessStorage,
+    FlowchartMagneticDisk,
+    FlowchartDirectAccessStorage,
+    FlowchartDisplay,
     DownTriangle,
 }
 
@@ -13410,12 +13422,64 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
             }
+            75 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartPunchedCard);
+                true
+            }
+            76 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartPunchedTape);
+                true
+            }
+            77 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartSummingJunction);
+                true
+            }
+            78 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartOr);
+                true
+            }
+            79 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartCollate);
+                true
+            }
+            80 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartSort);
+                true
+            }
             81 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::IsoscelesTriangle);
                 true
             }
             82 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::DownTriangle);
+                true
+            }
+            83 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartStoredData);
+                true
+            }
+            84 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartDelay);
+                true
+            }
+            85 => {
+                self.set_current_shape_polygon_preset(
+                    ShapePolygonPreset::FlowchartSequentialAccessStorage,
+                );
+                true
+            }
+            86 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartMagneticDisk);
+                true
+            }
+            87 => {
+                self.set_current_shape_polygon_preset(
+                    ShapePolygonPreset::FlowchartDirectAccessStorage,
+                );
+                true
+            }
+            88 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartDisplay);
                 true
             }
             20 => {
@@ -15446,6 +15510,36 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::FlowchartMultidocument => {
             flowchart_multidocument_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::FlowchartPunchedCard => {
+            flowchart_punched_card_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartPunchedTape => {
+            flowchart_punched_tape_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartSummingJunction => {
+            regular_polygon_shape_points(width_twips, height_twips, 24)
+        }
+        ShapePolygonPreset::FlowchartOr => {
+            regular_polygon_shape_points(width_twips, height_twips, 24)
+        }
+        ShapePolygonPreset::FlowchartCollate => {
+            flowchart_collate_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartSort => flowchart_sort_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::FlowchartStoredData => can_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::FlowchartDelay => {
+            flowchart_delay_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartSequentialAccessStorage => {
+            flowchart_sequential_access_storage_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartMagneticDisk => can_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::FlowchartDirectAccessStorage => {
+            flowchart_direct_access_storage_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartDisplay => {
+            flowchart_display_shape_points(width_twips, height_twips)
+        }
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -15592,6 +15686,140 @@ fn flowchart_multidocument_shape_points(
         y_twips: y,
     })
     .collect()
+}
+
+fn flowchart_punched_card_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    let cut = width_twips / 5;
+    [
+        (cut, 0),
+        (width_twips, 0),
+        (width_twips, height_twips),
+        (0, height_twips),
+        (0, cut.min(height_twips)),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn flowchart_punched_tape_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 120),
+            (250, 0),
+            (500, 120),
+            (750, 0),
+            (1000, 120),
+            (1000, 880),
+            (750, 1000),
+            (500, 880),
+            (250, 1000),
+            (0, 880),
+        ],
+    )
+}
+
+fn flowchart_collate_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    [
+        (0, 0),
+        (width_twips, 0),
+        (width_twips / 2, height_twips / 2),
+        (width_twips, height_twips),
+        (0, height_twips),
+        (width_twips / 2, height_twips / 2),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn flowchart_sort_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    [
+        (width_twips / 2, 0),
+        (width_twips, height_twips / 2),
+        (width_twips / 2, height_twips),
+        (0, height_twips / 2),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn flowchart_delay_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (500, 0),
+            (720, 60),
+            (890, 230),
+            (1000, 500),
+            (890, 770),
+            (720, 940),
+            (500, 1000),
+            (0, 1000),
+        ],
+    )
+}
+
+fn flowchart_sequential_access_storage_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    regular_polygon_shape_points(width_twips, height_twips, 32)
+}
+
+fn flowchart_direct_access_storage_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (180, 0),
+            (820, 0),
+            (1000, 500),
+            (820, 1000),
+            (180, 1000),
+            (0, 500),
+        ],
+    )
+}
+
+fn flowchart_display_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (720, 0),
+            (930, 120),
+            (1000, 500),
+            (930, 880),
+            (720, 1000),
+            (0, 1000),
+            (120, 500),
+        ],
+    )
 }
 
 fn trapezoid_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
