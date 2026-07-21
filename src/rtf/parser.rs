@@ -20957,12 +20957,15 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
                 clip_active = true;
             }
-            EMR_MOVETOEX => {
-                current_position = parse_emf_raw_point_record(data)?;
-                if let Some(path) = active_path.as_mut() {
-                    path.move_to(current_position, &header, &coordinates)?;
+            EMR_MOVETOEX => match parse_emf_raw_point_record(data) {
+                Some(point) => {
+                    current_position = point;
+                    if let Some(path) = active_path.as_mut() {
+                        path.move_to(current_position, &header, &coordinates)?;
+                    }
                 }
-            }
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_SETMAPMODE => match read_le_u32(data, 0) {
                 Some(value)
                     if value == u32::from(WMF_MAPMODE_TEXT)
@@ -21208,36 +21211,38 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
-            EMR_LINETO => {
-                let endpoint = parse_emf_raw_point_record(data)?;
-                if let Some(path) = active_path.as_mut() {
-                    path.line_to(endpoint, &header, &coordinates)?;
-                } else {
-                    let start = normalized_emf_point(
-                        current_position.0,
-                        current_position.1,
-                        &header,
-                        &coordinates,
-                    );
-                    let endpoint_normalized =
-                        normalized_emf_point(endpoint.0, endpoint.1, &header, &coordinates);
-                    if segment_is_visible(start, endpoint_normalized) {
-                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                            return None;
+            EMR_LINETO => match parse_emf_raw_point_record(data) {
+                Some(endpoint) => {
+                    if let Some(path) = active_path.as_mut() {
+                        path.line_to(endpoint, &header, &coordinates)?;
+                    } else {
+                        let start = normalized_emf_point(
+                            current_position.0,
+                            current_position.1,
+                            &header,
+                            &coordinates,
+                        );
+                        let endpoint_normalized =
+                            normalized_emf_point(endpoint.0, endpoint.1, &header, &coordinates);
+                        if segment_is_visible(start, endpoint_normalized) {
+                            if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                                return None;
+                            }
+                            commands.push(StaticImageVectorCommand::Line {
+                                x1: start.0,
+                                y1: start.1,
+                                x2: endpoint_normalized.0,
+                                y2: endpoint_normalized.1,
+                                stroke_color: state.passive_stroke_color(),
+                                stroke_width: state.passive_stroke_width(&header, &coordinates),
+                                stroke_style: state.stroke_style,
+                            });
                         }
-                        commands.push(StaticImageVectorCommand::Line {
-                            x1: start.0,
-                            y1: start.1,
-                            x2: endpoint_normalized.0,
-                            y2: endpoint_normalized.1,
-                            stroke_color: state.passive_stroke_color(),
-                            stroke_width: state.passive_stroke_width(&header, &coordinates),
-                            stroke_style: state.stroke_style,
-                        });
                     }
+                    current_position = endpoint;
                 }
-                current_position = endpoint;
-            }
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_BEGINPATH => {
                 if active_path.is_some() {
                     return None;
@@ -28352,27 +28357,30 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
-            0x0214 => {
-                current_point = parse_wmf_yx_point(data, 0, coordinates)?;
-            }
-            0x0213 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
+            0x0214 => match parse_wmf_yx_point(data, 0, coordinates) {
+                Some(point) => current_point = point,
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            0x0213 => match parse_wmf_yx_point(data, 0, coordinates) {
+                Some(end) => {
+                    if segment_is_visible(current_point, end) {
+                        if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                            return None;
+                        }
+                        commands.push(StaticImageVectorCommand::Line {
+                            x1: current_point.0,
+                            y1: current_point.1,
+                            x2: end.0,
+                            y2: end.1,
+                            stroke_color: state.passive_stroke_color(),
+                            stroke_width: state.stroke_width,
+                            stroke_style: state.stroke_style,
+                        });
+                    }
+                    current_point = end;
                 }
-                let end = parse_wmf_yx_point(data, 0, coordinates)?;
-                if segment_is_visible(current_point, end) {
-                    commands.push(StaticImageVectorCommand::Line {
-                        x1: current_point.0,
-                        y1: current_point.1,
-                        x2: end.0,
-                        y2: end.1,
-                        stroke_color: state.passive_stroke_color(),
-                        stroke_width: state.stroke_width,
-                        stroke_style: state.stroke_style,
-                    });
-                }
-                current_point = end;
-            }
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             0x0415 | 0x0416 => {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
