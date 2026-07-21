@@ -72178,6 +72178,88 @@ fn office_shape_filled_flag_renders_default_passive_fill_without_property_leakag
 }
 
 #[test]
+fn repeated_office_shape_line_flag_restores_passive_outline_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fLine}{\sv 0}}{\sp{\sn fLine}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-repeated-line-flag-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape from repeated line flags");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.stroke_width_twips, 15,
+        "last enabled fLine flag should restore the bounded default outline"
+    );
+    for forbidden in [
+        "shapeType",
+        "fLine",
+        "pFragments",
+        "hidden-repeated-line-flag-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "repeated line flag shape metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let stroke_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "S")
+        .count();
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        stroke_count >= 4,
+        "enabled fLine should render a passive rectangle outline"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fLine",
+        b"pFragments",
+        b"hidden-repeated-line-flag-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "repeated line flag shape metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn neutral_shape_layout_metadata_is_consumed_without_false_approximation_warning() {
     let input = rtf(&[
         "{",

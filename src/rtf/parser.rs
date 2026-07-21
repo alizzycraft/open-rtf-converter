@@ -12689,10 +12689,13 @@ impl Parser {
             }
             "fLine" => {
                 if let Some(enabled) = parse_shape_property_i64(value)
-                    && enabled == 0
                     && let Some(shape) = self.current_shape.as_mut()
                 {
-                    shape.stroke_width_twips = 0;
+                    if enabled == 0 {
+                        shape.stroke_width_twips = 0;
+                    } else if shape.stroke_width_twips == 0 {
+                        shape.stroke_width_twips = 15;
+                    }
                 } else if parse_shape_property_i64(value).is_none() {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
