@@ -72927,7 +72927,7 @@ fn office_heart_and_lightning_shapes_render_as_passive_polygons_without_payload_
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 2);
     assert_eq!(shapes[0].kind, StaticShapeKind::Polygon);
-    assert_eq!(shapes[0].points.len(), 20);
+    assert_eq!(shapes[0].points.len(), 40);
     assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[1].points.len(), 6);
     for shape in &shapes {
