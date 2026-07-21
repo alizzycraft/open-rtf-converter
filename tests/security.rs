@@ -44524,6 +44524,101 @@ fn malformed_emf_settextcharextra_becomes_passive_placeholder() {
 }
 
 #[test]
+fn malformed_emf_text_spacing_state_counts_as_partial_without_payload_leakage() {
+    for (record_type, label) in [
+        (106, "EMF-SETTEXTCHAREXTRA-MALFORMED"),
+        (120, "EMF-SETTEXTJUSTIFICATION-MALFORMED"),
+    ] {
+        let mut malformed_state = vec![0; 8];
+        write_test_le_u32(&mut malformed_state, 0, record_type);
+        write_test_le_u32(&mut malformed_state, 4, 8);
+        let records = [malformed_state, emf_rect_record(43, 20, 10, 80, 50)];
+        let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        let emf_hex = bytes_to_hex(&emf);
+        let input =
+            format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let image = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("malformed EMF text spacing state partial vector preview");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert!(
+            image
+                .vector_commands
+                .iter()
+                .any(|command| matches!(command, StaticImageVectorCommand::Rectangle { .. })),
+            "safe drawing after {label} should stay visible"
+        );
+        for forbidden in ["emfblip", "JavaScript", "EmbeddedFile", "Launch"] {
+            assert!(
+                !text.contains(forbidden),
+                "malformed EMF text spacing payload/control leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("1 unsupported record(s) skipped")),
+            "{label} should produce skipped-record diagnostics: {:?}",
+            output.diagnostics
+        );
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        let rendered_text = decoded_pdf_text(&content);
+
+        assert!(rendered_text.contains("before"));
+        assert!(rendered_text.contains("after"));
+        assert!(
+            content
+                .operations
+                .iter()
+                .any(|operation| operation.operator == "re"),
+            "safe drawing after {label} should render passively"
+        );
+        for forbidden in [
+            b"emfblip".as_slice(),
+            emf_hex.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Subtype /Image",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "malformed EMF text spacing payload leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn emf_settextjustification_renders_passive_word_spacing_without_payload_leakage() {
     let records = [
         emf_size_record(9, 320, 160),
@@ -44719,10 +44814,7 @@ fn huge_emf_settextjustification_is_clamped_passively() {
 fn malformed_emf_settextjustification_becomes_passive_placeholder() {
     let mut justification = emf_unknown_record(120);
     write_test_le_u32(&mut justification, 4, 8);
-    let records = [
-        justification,
-        emf_exttextoutw_record(40, 20, "A B C", 0, None, false),
-    ];
+    let records = [justification];
     let input = format!(
         "{{\\rtf1 before {{\\pict\\emfblip\\picw160\\pich80\\picwgoal1600\\pichgoal800 {}}} after\\par}}",
         bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
@@ -44745,7 +44837,6 @@ fn malformed_emf_settextjustification_becomes_passive_placeholder() {
     assert_eq!(image.format, ImageFormat::Placeholder);
     assert!(image.bytes.is_empty());
     assert!(image.vector_commands.is_empty());
-    assert!(!text.contains("A B C"));
 }
 
 #[test]

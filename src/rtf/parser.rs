@@ -21055,9 +21055,11 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETTEXTJUSTIFICATION => {
-                match parse_emf_text_justification(data, &header, &coordinates)? {
-                    Some(extra) => state.text_word_extra = extra,
-                    None => skipped_record_count = skipped_record_count.checked_add(1)?,
+                match parse_emf_text_justification(data, &header, &coordinates) {
+                    Some(Some(extra)) => state.text_word_extra = extra,
+                    Some(None) | None => {
+                        skipped_record_count = skipped_record_count.checked_add(1)?
+                    }
                 }
             }
             EMR_SETLAYOUT => {
