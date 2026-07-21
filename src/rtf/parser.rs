@@ -921,6 +921,15 @@ enum ShapePolygonPreset {
     ActionButtonDocument,
     ActionButtonSound,
     ActionButtonMovie,
+    Balloon,
+    FlowchartOfflineStorage,
+    LeftRightRibbon,
+    DiagonalStripe,
+    Pie,
+    NonIsoscelesTrapezoid,
+    Decagon,
+    Heptagon,
+    Dodecagon,
     DownTriangle,
 }
 
@@ -13531,6 +13540,42 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::ActionButtonMovie);
                 true
             }
+            137 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Balloon);
+                true
+            }
+            139 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FlowchartOfflineStorage);
+                true
+            }
+            140 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftRightRibbon);
+                true
+            }
+            141 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DiagonalStripe);
+                true
+            }
+            142 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Pie);
+                true
+            }
+            143 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::NonIsoscelesTrapezoid);
+                true
+            }
+            144 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Decagon);
+                true
+            }
+            145 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Heptagon);
+                true
+            }
+            146 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Dodecagon);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15766,6 +15811,25 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::ActionButtonMovie => {
             action_button_movie_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::Balloon => balloon_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::FlowchartOfflineStorage => {
+            flowchart_offline_storage_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::LeftRightRibbon => {
+            left_right_ribbon_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::DiagonalStripe => {
+            diagonal_stripe_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::Pie => pie_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::NonIsoscelesTrapezoid => {
+            non_isosceles_trapezoid_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::Decagon => regular_polygon_shape_points(width_twips, height_twips, 10),
+        ShapePolygonPreset::Heptagon => regular_polygon_shape_points(width_twips, height_twips, 7),
+        ShapePolygonPreset::Dodecagon => {
+            regular_polygon_shape_points(width_twips, height_twips, 12)
+        }
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -16537,6 +16601,101 @@ fn action_button_movie_shape_points(width_twips: i32, height_twips: i32) -> Vec<
             (760, 800),
             (760, 200),
         ],
+    )
+}
+
+fn balloon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (500, 0),
+            (720, 60),
+            (900, 220),
+            (1000, 450),
+            (940, 640),
+            (760, 780),
+            (560, 820),
+            (420, 1000),
+            (430, 800),
+            (220, 720),
+            (60, 560),
+            (0, 350),
+            (100, 150),
+            (280, 40),
+        ],
+    )
+}
+
+fn flowchart_offline_storage_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    [(0, 0), (width_twips, 0), (width_twips / 2, height_twips)]
+        .into_iter()
+        .map(|(x, y)| StaticShapePoint {
+            x_twips: x,
+            y_twips: y,
+        })
+        .collect()
+}
+
+fn left_right_ribbon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 260),
+            (180, 0),
+            (420, 160),
+            (580, 160),
+            (820, 0),
+            (1000, 260),
+            (840, 260),
+            (840, 900),
+            (580, 760),
+            (420, 760),
+            (160, 900),
+            (160, 260),
+        ],
+    )
+}
+
+fn diagonal_stripe_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(260, 0), (1000, 0), (740, 1000), (0, 1000)],
+    )
+}
+
+fn pie_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (500, 500),
+            (500, 0),
+            (690, 40),
+            (850, 150),
+            (960, 310),
+            (1000, 500),
+            (960, 690),
+            (850, 850),
+            (690, 960),
+            (500, 1000),
+        ],
+    )
+}
+
+fn non_isosceles_trapezoid_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(260, 0), (1000, 0), (800, 1000), (0, 1000)],
     )
 }
 

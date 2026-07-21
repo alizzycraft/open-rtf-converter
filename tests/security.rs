@@ -74021,6 +74021,182 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
 }
 
 #[test]
+fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (137, "office-balloon-payload"),
+        (139, "flowchart-offline-storage-payload"),
+        (140, "office-left-right-ribbon-payload"),
+        (141, "office-diagonal-stripe-payload"),
+        (142, "office-pie-payload"),
+        (143, "office-non-isosceles-trapezoid-payload"),
+        (144, "office-decagon-payload"),
+        (145, "office-heptagon-payload"),
+        (146, "office-dodecagon-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 9);
+    let expected_point_counts = [14, 3, 12, 4, 10, 4, 10, 7, 12];
+    for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
+        assert_eq!(shape.kind, StaticShapeKind::Polygon);
+        assert_eq!(shape.points.len(), expected_point_count);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "post-action shape points must stay inside passive frame: {shape:?}"
+        );
+    }
+    assert_eq!(shapes[1].points[2].y_twips, shapes[1].height_twips);
+    assert!(shapes[6].points.iter().any(|point| point.y_twips == 0));
+    assert!(shapes[7].points.iter().any(|point| point.x_twips == 0));
+    assert!(
+        shapes[8]
+            .points
+            .iter()
+            .any(|point| point.x_twips == shapes[8].width_twips)
+    );
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "office-balloon-payload",
+        "flowchart-offline-storage-payload",
+        "office-left-right-ribbon-payload",
+        "office-diagonal-stripe-payload",
+        "office-pie-payload",
+        "office-non-isosceles-trapezoid-payload",
+        "office-decagon-payload",
+        "office-heptagon-payload",
+        "office-dodecagon-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "post-action shape metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 9,
+        "post-action shape group should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"office-balloon-payload",
+        b"flowchart-offline-storage-payload",
+        b"office-left-right-ribbon-payload",
+        b"office-diagonal-stripe-payload",
+        b"office-pie-payload",
+        b"office-non-isosceles-trapezoid-payload",
+        b"office-decagon-payload",
+        b"office-heptagon-payload",
+        b"office-dodecagon-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "post-action shape metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn unsupported_office_shape_type_138_does_not_cross_pdf_boundary() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 138}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv unsupported-shape-138-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(!text.contains("unsupported-shape-138-payload"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"unsupported-shape-138-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsupported shapeType 138 metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_right_arrows_render_as_passive_polygon_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 33}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn lineColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-right-arrow-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
