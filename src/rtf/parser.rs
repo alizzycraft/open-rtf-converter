@@ -819,6 +819,7 @@ struct ShapeBuilder {
     isosceles_triangle: bool,
     right_triangle: bool,
     trapezoid: bool,
+    parallelogram: bool,
     base_x_twips: i32,
     base_y_twips: i32,
     left_twips: i32,
@@ -864,6 +865,7 @@ impl Default for ShapeBuilder {
             isosceles_triangle: false,
             right_triangle: false,
             trapezoid: false,
+            parallelogram: false,
             base_x_twips: 0,
             base_y_twips: 0,
             left_twips: 0,
@@ -11937,6 +11939,9 @@ impl Parser {
         if kind == StaticShapeKind::Polygon && shape.trapezoid && points.is_empty() {
             points = trapezoid_shape_points(shape.width_twips, shape.height_twips);
         }
+        if kind == StaticShapeKind::Polygon && shape.parallelogram && points.is_empty() {
+            points = parallelogram_shape_points(shape.width_twips, shape.height_twips);
+        }
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
         if shape.rotation_units != 0 {
@@ -12300,6 +12305,13 @@ impl Parser {
         if let Some(shape) = self.current_shape.as_mut() {
             shape.kind = Some(StaticShapeKind::Polygon);
             shape.trapezoid = true;
+        }
+    }
+
+    fn set_current_shape_parallelogram(&mut self) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.kind = Some(StaticShapeKind::Polygon);
+            shape.parallelogram = true;
         }
     }
 
@@ -12881,6 +12893,10 @@ impl Parser {
             }
             4 => {
                 self.set_current_shape_diamond();
+                true
+            }
+            6 => {
+                self.set_current_shape_parallelogram();
                 true
             }
             9 => {
@@ -14814,6 +14830,22 @@ fn trapezoid_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShap
         (inset, 0),
         (width_twips.saturating_sub(inset), 0),
         (width_twips, height_twips),
+        (0, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn parallelogram_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let inset = width_twips / 4;
+    [
+        (inset, 0),
+        (width_twips, 0),
+        (width_twips.saturating_sub(inset), height_twips),
         (0, height_twips),
     ]
     .into_iter()
