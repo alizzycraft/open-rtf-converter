@@ -841,6 +841,8 @@ enum ShapePolygonPreset {
     LeftRightUpArrow,
     LeftUpArrow,
     BentUpArrow,
+    Sun,
+    Moon,
     Explosion1,
     Explosion2,
     FourPointStar,
@@ -13070,6 +13072,14 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
             }
+            23 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Sun);
+                true
+            }
+            24 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Moon);
+                true
+            }
             51 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
@@ -15185,6 +15195,8 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::LeftUpArrow => left_up_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::BentUpArrow => bent_up_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Sun => regular_star_shape_points(width_twips, height_twips, 16, 620),
+        ShapePolygonPreset::Moon => moon_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Explosion1 => explosion1_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Explosion2 => explosion2_shape_points(width_twips, height_twips),
         ShapePolygonPreset::FourPointStar => {
@@ -15893,6 +15905,34 @@ fn scaled_shape_points(
             y_twips: ((i64::from(height_twips) * i64::from(y)) / 1000) as i32,
         })
         .collect()
+}
+
+fn moon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (775, 40),
+            (600, 95),
+            (455, 210),
+            (365, 365),
+            (335, 500),
+            (365, 635),
+            (455, 790),
+            (600, 905),
+            (775, 960),
+            (610, 995),
+            (435, 965),
+            (275, 875),
+            (145, 725),
+            (70, 545),
+            (70, 455),
+            (145, 275),
+            (275, 125),
+            (435, 35),
+            (610, 5),
+        ],
+    )
 }
 
 fn explosion1_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
