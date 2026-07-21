@@ -70330,6 +70330,174 @@ fn invalid_office_shape_fill_color_is_stripped_without_becoming_visible_black() 
 }
 
 #[test]
+fn office_shape_fill_fore_color_renders_passively_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillForeColor}{\sv 65535}}{\sp{\sn pFragments}{\sv hidden-fill-fore-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with fillForeColor");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.fill_color,
+        Some(open_rtf_converter::model::Color {
+            red: 255,
+            green: 255,
+            blue: 0,
+        })
+    );
+    for forbidden in [
+        "shapeType",
+        "fillForeColor",
+        "pFragments",
+        "hidden-fill-fore-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "fillForeColor metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "f" || operation.operator == "B"),
+        "fillForeColor should render a passive filled shape"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillForeColor",
+        b"pFragments",
+        b"hidden-fill-fore-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "fillForeColor metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_office_shape_fill_fore_color_is_stripped_without_becoming_visible_black() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillForeColor}{\sv -1}}{\sp{\sn pFragments}{\sv hidden-invalid-fill-fore-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with invalid fillForeColor");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.fill_color, None,
+        "invalid Office fillForeColor should not clamp into a visible fill"
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    for forbidden in [
+        "shapeType",
+        "fillForeColor",
+        "pFragments",
+        "hidden-invalid-fill-fore-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid fillForeColor metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+
+    assert_eq!(
+        fill_count, 0,
+        "invalid Office fillForeColor should not emit a passive fill"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillForeColor",
+        b"pFragments",
+        b"hidden-invalid-fill-fore-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid fillForeColor metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn hidden_office_shape_text_is_stripped_without_placeholder_or_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fHidden}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-shape-text-payload}}}{\shptxt Invisible box text\par}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -73530,6 +73698,84 @@ fn disabled_office_shape_fill_remains_hidden_after_color_metadata_without_leakag
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "disabled fill color metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn disabled_office_shape_fill_remains_hidden_after_fill_fore_color_metadata_without_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fFilled}{\sv 0}}{\sp{\sn fillForeColor}{\sv 65535}}{\sp{\sn pFragments}{\sv hidden-disabled-fill-fore-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with disabled fill");
+
+    assert_eq!(
+        shape.fill_color, None,
+        "fillForeColor metadata must not resurrect a disabled passive fill"
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "shapeType",
+        "fFilled",
+        "fillForeColor",
+        "pFragments",
+        "hidden-disabled-fill-fore-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "disabled fillForeColor metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+
+    assert!(
+        !content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "f"),
+        "disabled fill should not emit passive fill"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fFilled",
+        b"fillForeColor",
+        b"pFragments",
+        b"hidden-disabled-fill-fore-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "disabled fillForeColor metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
