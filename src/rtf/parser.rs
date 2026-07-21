@@ -847,6 +847,7 @@ struct ShapeBuilder {
     stroke_width_twips: i32,
     stroke_color: Color,
     stroke_style: BorderStyle,
+    fill_enabled: bool,
     fill_color: Option<Color>,
     fill_color_from_foreground: bool,
     text_wrap: bool,
@@ -890,6 +891,7 @@ impl Default for ShapeBuilder {
             stroke_width_twips: 15,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
+            fill_enabled: true,
             fill_color: None,
             fill_color_from_foreground: false,
             text_wrap: false,
@@ -12060,6 +12062,11 @@ impl Parser {
         } else {
             0
         };
+        let fill_color = if shape.fill_enabled {
+            shape.fill_color
+        } else {
+            None
+        };
         self.push_static_shape(
             shape.owner_destination,
             StaticShape {
@@ -12077,7 +12084,7 @@ impl Parser {
                 stroke_width_twips,
                 stroke_color: shape.stroke_color,
                 stroke_style: shape.stroke_style,
-                fill_color: shape.fill_color,
+                fill_color,
                 text: shape.text,
                 points,
                 horizontal_anchor: shape.horizontal_anchor,
@@ -12710,10 +12717,8 @@ impl Parser {
                 if let Some(enabled) = parse_shape_property_i64(value)
                     && let Some(shape) = self.current_shape.as_mut()
                 {
-                    if enabled == 0 {
-                        shape.fill_color = None;
-                        shape.fill_color_from_foreground = false;
-                    } else {
+                    shape.fill_enabled = enabled != 0;
+                    if enabled != 0 {
                         shape.fill_color.get_or_insert(Color {
                             red: 255,
                             green: 255,

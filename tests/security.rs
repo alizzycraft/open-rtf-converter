@@ -72178,6 +72178,177 @@ fn office_shape_filled_flag_renders_default_passive_fill_without_property_leakag
 }
 
 #[test]
+fn disabled_office_shape_fill_remains_hidden_after_color_metadata_without_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fFilled}{\sv 0}}{\sp{\sn fillColor}{\sv 65535}}{\sp{\sn pFragments}{\sv hidden-disabled-fill-color-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with disabled fill and color metadata");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.fill_color, None,
+        "fillColor metadata must not resurrect a disabled passive fill"
+    );
+    for forbidden in [
+        "shapeType",
+        "fFilled",
+        "fillColor",
+        "pFragments",
+        "hidden-disabled-fill-color-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "disabled fill color metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert_eq!(
+        fill_count, 0,
+        "disabled fill should not emit passive fill operators"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fFilled",
+        b"fillColor",
+        b"pFragments",
+        b"hidden-disabled-fill-color-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "disabled fill color metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn repeated_office_shape_fill_flag_restores_authored_color_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 65535}}{\sp{\sn fFilled}{\sv 0}}{\sp{\sn fFilled}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-repeated-fill-flag-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape from repeated fill flags");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.fill_color,
+        Some(open_rtf_converter::model::Color {
+            red: 255,
+            green: 255,
+            blue: 0,
+        }),
+        "later enabled fFilled flag should restore the authored passive fill color"
+    );
+    for forbidden in [
+        "shapeType",
+        "fFilled",
+        "fillColor",
+        "pFragments",
+        "hidden-repeated-fill-flag-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "repeated fill flag metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "f"),
+        "enabled fill should emit passive fill operators"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fFilled",
+        b"fillColor",
+        b"pFragments",
+        b"hidden-repeated-fill-flag-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "repeated fill flag metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn repeated_office_shape_line_flag_restores_passive_outline_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fLine}{\sv 0}}{\sp{\sn fLine}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-repeated-line-flag-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
