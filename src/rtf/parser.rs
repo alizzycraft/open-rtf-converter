@@ -20679,52 +20679,62 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 reached_eof = true;
                 break;
             }
-            EMR_SETWINDOWEXTEX => {
-                let (width, height) = parse_emf_size_record(data)?;
-                if width == 0 || height == 0 {
-                    pos = record_end;
-                    continue;
+            EMR_SETWINDOWEXTEX => match parse_emf_size_record(data) {
+                Some((width, height)) if width != 0 && height != 0 => {
+                    if coordinates.set_window_extent(width, height).is_none() {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 }
-                coordinates.set_window_extent(width, height)?;
-            }
-            EMR_SETWINDOWORGEX => {
-                let (x, y) = parse_emf_raw_point_record(data)?;
-                coordinates.set_window_origin(x, y);
-            }
-            EMR_SETVIEWPORTEXTEX => {
-                let (width, height) = parse_emf_size_record(data)?;
-                if width == 0 || height == 0 {
-                    pos = record_end;
-                    continue;
+                Some(_) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            EMR_SETWINDOWORGEX => match parse_emf_raw_point_record(data) {
+                Some((x, y)) => coordinates.set_window_origin(x, y),
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            EMR_SETVIEWPORTEXTEX => match parse_emf_size_record(data) {
+                Some((width, height)) if width != 0 && height != 0 => {
+                    if coordinates.set_viewport_extent(width, height).is_none() {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 }
-                coordinates.set_viewport_extent(width, height)?;
-            }
-            EMR_SETVIEWPORTORGEX => {
-                let (x, y) = parse_emf_raw_point_record(data)?;
-                coordinates.set_viewport_origin(x, y);
-            }
+                Some(_) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            EMR_SETVIEWPORTORGEX => match parse_emf_raw_point_record(data) {
+                Some((x, y)) => coordinates.set_viewport_origin(x, y),
+                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_SETBRUSHORGEX => {
-                let _ = parse_emf_raw_point_record(data)?;
+                if parse_emf_raw_point_record(data).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_SETMAPPERFLAGS => {
-                let _ = read_le_u32(data, 0)?;
-            }
-            EMR_SCALEVIEWPORTEXTEX => {
-                let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
-                if x_num == 0 || y_num == 0 {
-                    pos = record_end;
-                    continue;
+                if read_le_u32(data, 0).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
-                coordinates.scale_viewport_extent(x_num, x_denom, y_num, y_denom)?;
             }
-            EMR_SCALEWINDOWEXTEX => {
-                let (x_num, x_denom, y_num, y_denom) = parse_emf_scale_record(data)?;
-                if x_num == 0 || y_num == 0 {
-                    pos = record_end;
-                    continue;
+            EMR_SCALEVIEWPORTEXTEX => match parse_emf_scale_record(data) {
+                Some((x_num, x_denom, y_num, y_denom)) if x_num != 0 && y_num != 0 => {
+                    if coordinates
+                        .scale_viewport_extent(x_num, x_denom, y_num, y_denom)
+                        .is_none()
+                    {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 }
-                coordinates.scale_window_extent(x_num, x_denom, y_num, y_denom)?;
-            }
+                Some(_) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
+            EMR_SCALEWINDOWEXTEX => match parse_emf_scale_record(data) {
+                Some((x_num, x_denom, y_num, y_denom)) if x_num != 0 && y_num != 0 => {
+                    if coordinates
+                        .scale_window_extent(x_num, x_denom, y_num, y_denom)
+                        .is_none()
+                    {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
+                }
+                Some(_) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            },
             EMR_OFFSETCLIPRGN => {
                 if is_passive_zero_emf_offset_clip_region(data) {
                     pos = record_end;
