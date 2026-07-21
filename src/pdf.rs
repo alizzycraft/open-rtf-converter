@@ -1031,6 +1031,7 @@ fn draw_layout_item(
             LayoutItem::Polygon {
                 points,
                 paths,
+                overlay_paths,
                 fill_rule,
                 stroke_width,
                 stroke_color,
@@ -1046,6 +1047,7 @@ fn draw_layout_item(
                     *stroke_style,
                     *fill_rule,
                     *fill_color,
+                    overlay_paths,
                 );
                 return;
             }
@@ -4126,8 +4128,9 @@ fn draw_passive_compound_polygon(
     stroke_style: LineStyle,
     fill_rule: StaticImageVectorFillRule,
     fill_color: Option<PdfColor>,
+    overlay_paths: &[Vec<crate::layout::LayoutPoint>],
 ) {
-    if paths.is_empty() {
+    if paths.is_empty() && overlay_paths.is_empty() {
         draw_passive_polygon(
             content,
             points,
@@ -4173,6 +4176,15 @@ fn draw_passive_compound_polygon(
         };
     } else {
         content.stroke();
+    }
+    if let Some(fill_color) = fill_color {
+        for path in overlay_paths {
+            if path.len() >= 3 {
+                set_fill_color(content, fill_color);
+                append_passive_polygon_path(content, path);
+                content.fill_nonzero();
+            }
+        }
     }
     content.restore_state();
 }
@@ -6539,6 +6551,7 @@ endstream
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -6632,6 +6645,7 @@ endstream
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 

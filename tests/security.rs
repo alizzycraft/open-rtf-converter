@@ -72438,8 +72438,30 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
         }),
         "donut inner path must stay inside the passive shape frame"
     );
+    assert_eq!(
+        shapes[2].fill_rule,
+        StaticImageVectorFillRule::Alternate,
+        "no-symbol should use even-odd fill for its passive ring"
+    );
+    assert_eq!(shapes[2].point_paths.len(), 1);
+    assert_eq!(shapes[2].point_paths[0].len(), 32);
+    assert_eq!(shapes[2].overlay_paths.len(), 1);
+    assert_eq!(shapes[2].overlay_paths[0].len(), 4);
+    assert!(
+        shapes[2]
+            .point_paths
+            .iter()
+            .chain(shapes[2].overlay_paths.iter())
+            .flatten()
+            .all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shapes[2].width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shapes[2].height_twips
+            }),
+        "no-symbol ring and slash paths must stay inside the passive shape frame"
+    );
     assert_eq!(shapes[0].fill_rule, StaticImageVectorFillRule::Winding);
-    assert_eq!(shapes[2].fill_rule, StaticImageVectorFillRule::Winding);
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -72496,12 +72518,12 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
         "symbol shapes should render passive fill/stroke paths"
     );
     assert!(
-        passive_even_odd_shape_paints >= 1,
-        "donut should render as a passive even-odd compound path"
+        passive_even_odd_shape_paints >= 2,
+        "donut and no-symbol rings should render as passive even-odd compound paths"
     );
     assert!(
-        passive_path_moves >= 4,
-        "compound donut should emit separate bounded outer/inner passive paths"
+        passive_path_moves >= 6,
+        "compound symbols should emit separate bounded ring and slash passive paths"
     );
     for forbidden in [
         b"shapeType".as_slice(),

@@ -12147,6 +12147,20 @@ impl Parser {
                 .map(polygon_preset_shape_fill_rule)
                 .unwrap_or(StaticImageVectorFillRule::Winding)
         };
+        let mut overlay_paths = if kind == StaticShapeKind::Polygon {
+            shape
+                .polygon_preset
+                .map(|preset| {
+                    polygon_preset_shape_overlay_paths(
+                        preset,
+                        shape.width_twips,
+                        shape.height_twips,
+                    )
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         if kind == StaticShapeKind::Polyline && points.is_empty() {
             if let Some(preset) = shape.polyline_preset {
                 points =
@@ -12205,6 +12219,22 @@ impl Parser {
                                 .collect()
                         })
                         .collect();
+                    overlay_paths = overlay_paths
+                        .into_iter()
+                        .map(|path| {
+                            path.into_iter()
+                                .map(|point| {
+                                    rotated_shape_point(
+                                        point.x_twips,
+                                        point.y_twips,
+                                        shape.width_twips,
+                                        shape.height_twips,
+                                        shape.rotation_units,
+                                    )
+                                })
+                                .collect()
+                        })
+                        .collect();
                 }
                 _ => unsupported_or_active_property_stripped = true,
             }
@@ -12228,7 +12258,7 @@ impl Parser {
             }
             _ => {}
         }
-        let (left_twips, top_twips, width_twips, height_twips, points, point_paths) =
+        let (left_twips, top_twips, width_twips, height_twips, points, point_paths, overlay_paths) =
             if matches!(kind, StaticShapeKind::Polyline | StaticShapeKind::Polygon) {
                 let base_x = shape.base_x_twips.saturating_add(shape.left_twips);
                 let base_y = shape.base_y_twips.saturating_add(shape.top_twips);
@@ -12253,6 +12283,15 @@ impl Parser {
                     width,
                     height,
                 );
+                let normalized_overlay_paths = normalize_shape_point_paths(
+                    &overlay_paths,
+                    base_x,
+                    base_y,
+                    left,
+                    top,
+                    width,
+                    height,
+                );
                 (
                     left,
                     top,
@@ -12260,6 +12299,7 @@ impl Parser {
                     height,
                     normalized_points,
                     normalized_paths,
+                    normalized_overlay_paths,
                 )
             } else {
                 (
@@ -12277,6 +12317,7 @@ impl Parser {
                     shape
                         .height_twips
                         .clamp(1, self.limits().max_shape_dimension_twips.max(1)),
+                    Vec::new(),
                     Vec::new(),
                     Vec::new(),
                 )
@@ -12341,6 +12382,7 @@ impl Parser {
                 text: shape.text,
                 points,
                 point_paths,
+                overlay_paths,
                 fill_rule,
                 horizontal_anchor: shape.horizontal_anchor,
                 vertical_anchor: shape.vertical_anchor,
@@ -15857,7 +15899,7 @@ fn polygon_preset_shape_points(
             regular_polygon_shape_points(width_twips, height_twips, 24)
         }
         ShapePolygonPreset::Donut => donut_shape_points(width_twips, height_twips),
-        ShapePolygonPreset::NoSymbol => regular_polygon_shape_points(width_twips, height_twips, 32),
+        ShapePolygonPreset::NoSymbol => no_symbol_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Plaque => plaque_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DoubleBrace => double_brace_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DoubleBracket => double_bracket_shape_points(width_twips, height_twips),
@@ -16147,6 +16189,7 @@ fn polygon_preset_shape_point_paths(
 ) -> Vec<Vec<StaticShapePoint>> {
     match preset {
         ShapePolygonPreset::Donut => donut_shape_point_paths(width_twips, height_twips),
+        ShapePolygonPreset::NoSymbol => no_symbol_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::Frame => frame_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::MathDivide => math_divide_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::MathEqual => math_equal_shape_point_paths(width_twips, height_twips),
@@ -16168,10 +16211,22 @@ fn polygon_preset_shape_point_paths(
 fn polygon_preset_shape_fill_rule(preset: ShapePolygonPreset) -> StaticImageVectorFillRule {
     match preset {
         ShapePolygonPreset::Donut
+        | ShapePolygonPreset::NoSymbol
         | ShapePolygonPreset::Frame
         | ShapePolygonPreset::Gear6
         | ShapePolygonPreset::Gear9 => StaticImageVectorFillRule::Alternate,
         _ => StaticImageVectorFillRule::Winding,
+    }
+}
+
+fn polygon_preset_shape_overlay_paths(
+    preset: ShapePolygonPreset,
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    match preset {
+        ShapePolygonPreset::NoSymbol => no_symbol_shape_overlay_paths(width_twips, height_twips),
+        _ => Vec::new(),
     }
 }
 
@@ -18816,6 +18871,25 @@ fn donut_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<Stati
         height_twips,
         32,
         460,
+    )]
+}
+
+fn no_symbol_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    regular_polygon_shape_points(width_twips, height_twips, 32)
+}
+
+fn no_symbol_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    donut_shape_point_paths(width_twips, height_twips)
+}
+
+fn no_symbol_shape_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(230, 120), (880, 770), (770, 880), (120, 230)],
     )]
 }
 

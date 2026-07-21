@@ -108,6 +108,7 @@ pub enum LayoutItem {
     Polygon {
         points: Vec<LayoutPoint>,
         paths: Vec<Vec<LayoutPoint>>,
+        overlay_paths: Vec<Vec<LayoutPoint>>,
         fill_rule: StaticImageVectorFillRule,
         stroke_width: f32,
         stroke_color: PdfColor,
@@ -2503,9 +2504,33 @@ fn layout_shape(
                         .collect()
                 })
                 .collect::<Vec<_>>();
+            let overlay_paths = shape
+                .overlay_paths
+                .iter()
+                .filter(|path| path.len() >= 3)
+                .map(|path| {
+                    path.iter()
+                        .map(|point| LayoutPoint {
+                            x: shape_point_x(
+                                x,
+                                width,
+                                twips_to_points(point.x_twips) * scale_x,
+                                shape.flip_horizontal,
+                            ),
+                            y: shape_point_y(
+                                top_y,
+                                height,
+                                twips_to_points(point.y_twips) * scale_y,
+                                shape.flip_vertical,
+                            ),
+                        })
+                        .collect()
+                })
+                .collect::<Vec<_>>();
             page.items.push(LayoutItem::Polygon {
                 points,
                 paths,
+                overlay_paths,
                 fill_rule: shape.fill_rule,
                 stroke_width: stroke_width_points.unwrap_or(0.0),
                 stroke_color: color,
@@ -2816,6 +2841,7 @@ fn push_static_shape_arrowhead(
             page.items.push(LayoutItem::Polygon {
                 points: vec![tip, wing_a, wing_b],
                 paths: Vec::new(),
+                overlay_paths: Vec::new(),
                 fill_rule: StaticImageVectorFillRule::Winding,
                 stroke_width,
                 stroke_color: color,
@@ -3247,14 +3273,21 @@ fn layout_item_vertical_bounds(item: &LayoutItem) -> Option<VerticalBounds> {
         LayoutItem::Polygon {
             points,
             paths,
+            overlay_paths,
             stroke_width,
             ..
         } => {
-            if points.is_empty() && paths.iter().all(Vec::is_empty) {
+            if points.is_empty()
+                && paths.iter().all(Vec::is_empty)
+                && overlay_paths.iter().all(Vec::is_empty)
+            {
                 return None;
             }
             let half_width = *stroke_width / 2.0;
-            let all_points = points.iter().chain(paths.iter().flatten());
+            let all_points = points
+                .iter()
+                .chain(paths.iter().flatten())
+                .chain(overlay_paths.iter().flatten());
             Some(VerticalBounds {
                 top: all_points
                     .clone()
@@ -10968,6 +11001,7 @@ mod tests {
                 text: Vec::new(),
                 points: Vec::new(),
                 point_paths: Vec::new(),
+                overlay_paths: Vec::new(),
                 fill_rule: StaticImageVectorFillRule::Winding,
             }),
         ];
@@ -11026,6 +11060,7 @@ mod tests {
             }],
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11143,6 +11178,7 @@ mod tests {
                 text: Vec::new(),
                 points: Vec::new(),
                 point_paths: Vec::new(),
+                overlay_paths: Vec::new(),
                 fill_rule: StaticImageVectorFillRule::Winding,
             }),
         ];
@@ -11201,6 +11237,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
         let page_layout = LayoutEngine::layout(&page_document);
@@ -11269,6 +11306,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11340,6 +11378,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11418,6 +11457,7 @@ mod tests {
             }],
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11507,6 +11547,7 @@ mod tests {
             }],
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11567,6 +11608,7 @@ mod tests {
             }],
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11631,6 +11673,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11678,6 +11721,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11731,6 +11775,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11803,6 +11848,7 @@ mod tests {
                 },
             ],
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11885,6 +11931,7 @@ mod tests {
                 },
             ],
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -11950,6 +11997,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -12015,6 +12063,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -12098,6 +12147,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         })];
 
@@ -19111,6 +19161,7 @@ mod tests {
             text: Vec::new(),
             points: Vec::new(),
             point_paths: Vec::new(),
+            overlay_paths: Vec::new(),
             fill_rule: StaticImageVectorFillRule::Winding,
         }];
         document.blocks.clear();
