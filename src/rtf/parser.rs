@@ -21089,9 +21089,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     ) => {}
                 Some(_) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
-            EMR_SETARCDIRECTION => match parse_emf_arc_direction(data)? {
-                Some(clockwise) => state.arc_clockwise = clockwise,
-                None => skipped_record_count = skipped_record_count.checked_add(1)?,
+            EMR_SETARCDIRECTION => match parse_emf_arc_direction(data) {
+                Some(Some(clockwise)) => state.arc_clockwise = clockwise,
+                Some(None) | None => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
             EMR_SETMITERLIMIT => {
                 let Some(limit) = parse_passive_emf_miter_limit(data) else {
@@ -21107,16 +21107,19 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SETTEXTALIGN => {
-                let mode = read_le_u32(data, 0)?;
-                if let Some(mode) = supported_wmf_text_align_mode(mode) {
-                    state.text_horizontal_align = wmf_text_horizontal_align(mode);
-                    state.text_vertical_align = wmf_text_vertical_align(mode);
+                if let Some(mode) = read_le_u32(data, 0) {
+                    if let Some(mode) = supported_wmf_text_align_mode(mode) {
+                        state.text_horizontal_align = wmf_text_horizontal_align(mode);
+                        state.text_vertical_align = wmf_text_vertical_align(mode);
+                    } else {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                    }
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
             EMR_SETCOLORADJUSTMENT => {
-                if !is_neutral_emf_color_adjustment(data)? {
+                if !matches!(is_neutral_emf_color_adjustment(data), Some(true)) {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
             }
