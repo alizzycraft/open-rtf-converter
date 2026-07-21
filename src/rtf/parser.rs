@@ -819,6 +819,7 @@ enum ShapePolygonPreset {
     Parallelogram,
     Octagon,
     Hexagon,
+    Cross,
     Pentagon,
 }
 
@@ -12933,6 +12934,10 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Hexagon);
                 true
             }
+            11 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Cross);
+                true
+            }
             12 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
@@ -14827,6 +14832,7 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Parallelogram => parallelogram_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Octagon => octagon_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Hexagon => hexagon_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Cross => cross_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Pentagon => pentagon_shape_points(width_twips, height_twips),
     }
 }
@@ -14932,6 +14938,33 @@ fn hexagon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapeP
         (width_twips.saturating_sub(inset), height_twips),
         (inset, height_twips),
         (0, mid_y),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn cross_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let third_x = width_twips / 3;
+    let two_thirds_x = (width_twips * 2) / 3;
+    let third_y = height_twips / 3;
+    let two_thirds_y = (height_twips * 2) / 3;
+    [
+        (third_x, 0),
+        (two_thirds_x, 0),
+        (two_thirds_x, third_y),
+        (width_twips, third_y),
+        (width_twips, two_thirds_y),
+        (two_thirds_x, two_thirds_y),
+        (two_thirds_x, height_twips),
+        (third_x, height_twips),
+        (third_x, two_thirds_y),
+        (0, two_thirds_y),
+        (0, third_y),
+        (third_x, third_y),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
