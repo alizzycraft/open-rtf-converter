@@ -21822,17 +21822,22 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_ANGLEARC => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let (points, end_position) =
-                    parse_emf_anglearc_record(data, &header, &coordinates, current_position)?;
+                let Some((points, end_position)) =
+                    parse_emf_anglearc_record(data, &header, &coordinates, current_position)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if let Some(path) = active_path.as_mut() {
                     path.normalized_polyline_to(points, end_position)?;
                 } else if points
                     .windows(2)
                     .any(|pair| segment_is_visible(pair[0], pair[1]))
                 {
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(StaticImageVectorCommand::Polyline {
                         points,
                         stroke_color: state.passive_stroke_color(),
@@ -21843,14 +21848,25 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 current_position = end_position;
             }
             EMR_ARC | EMR_ARCTO | EMR_CHORD | EMR_PIE => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
+                match emf_arc_bounds_are_degenerate(data) {
+                    Some(true) => {
+                        pos = record_end;
+                        continue;
+                    }
+                    Some(false) => {}
+                    None => {
+                        skipped_record_count = skipped_record_count.checked_add(1)?;
+                        pos = record_end;
+                        continue;
+                    }
                 }
-                if emf_arc_bounds_are_degenerate(data)? {
+                let Some(arc) =
+                    parse_emf_arc_record(data, &header, &coordinates, state.arc_clockwise)
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
                     pos = record_end;
                     continue;
-                }
-                let arc = parse_emf_arc_record(data, &header, &coordinates, state.arc_clockwise)?;
+                };
                 match record_type {
                     EMR_ARC | EMR_ARCTO => {
                         if record_type == EMR_ARCTO
@@ -21871,6 +21887,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             .windows(2)
                             .any(|pair| segment_is_visible(pair[0], pair[1]))
                         {
+                            if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                                return None;
+                            }
                             commands.push(StaticImageVectorCommand::Polyline {
                                 points: arc.points,
                                 stroke_color: state.passive_stroke_color(),
@@ -21884,6 +21903,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     }
                     EMR_CHORD => {
                         if arc.points.len() >= 3 && point_bounds_are_visible(&arc.points) {
+                            if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                                return None;
+                            }
                             commands.push(StaticImageVectorCommand::Polygon {
                                 points: arc.points,
                                 stroke_color: state.passive_stroke_color(),
@@ -21897,9 +21919,18 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                     }
                     EMR_PIE => {
                         let mut points = Vec::with_capacity(arc.points.len().checked_add(1)?);
-                        points.push(normalized_emf_rect_center(data, &header, &coordinates)?);
+                        let Some(center) = normalized_emf_rect_center(data, &header, &coordinates)
+                        else {
+                            skipped_record_count = skipped_record_count.checked_add(1)?;
+                            pos = record_end;
+                            continue;
+                        };
+                        points.push(center);
                         points.extend(arc.points);
                         if points.len() >= 3 && point_bounds_are_visible(&points) {
+                            if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                                return None;
+                            }
                             commands.push(StaticImageVectorCommand::Polygon {
                                 points,
                                 stroke_color: state.passive_stroke_color(),
@@ -28648,16 +28679,20 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0817 | 0x081a | 0x0830 => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let (points, center) = parse_wmf_arc_record(data, coordinates)?;
+                let Some((points, center)) = parse_wmf_arc_record(data, coordinates) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 match function {
                     0x0817 => {
                         if points
                             .windows(2)
                             .any(|pair| segment_is_visible(pair[0], pair[1]))
                         {
+                            if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                                return None;
+                            }
                             commands.push(StaticImageVectorCommand::Polyline {
                                 points,
                                 stroke_color: state.passive_stroke_color(),
@@ -28671,6 +28706,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         pie_points.push(center);
                         pie_points.extend(points);
                         if pie_points.len() >= 3 && point_bounds_are_visible(&pie_points) {
+                            if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                                return None;
+                            }
                             commands.push(StaticImageVectorCommand::Polygon {
                                 points: pie_points,
                                 stroke_color: state.passive_stroke_color(),
@@ -28684,6 +28722,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     }
                     0x0830 => {
                         if points.len() >= 3 && point_bounds_are_visible(&points) {
+                            if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                                return None;
+                            }
                             commands.push(StaticImageVectorCommand::Polygon {
                                 points,
                                 stroke_color: state.passive_stroke_color(),
