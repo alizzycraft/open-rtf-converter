@@ -16107,7 +16107,7 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::SnipTwoDiagonalRectangle => {
             snip_two_diagonal_rectangle_shape_points(width_twips, height_twips)
         }
-        ShapePolygonPreset::Frame => frame_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Frame => rectangle_polygon_shape_points(width_twips, height_twips),
         ShapePolygonPreset::HalfFrame => half_frame_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Tear => tear_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Chord => chord_shape_points(width_twips, height_twips),
@@ -16147,6 +16147,7 @@ fn polygon_preset_shape_point_paths(
 ) -> Vec<Vec<StaticShapePoint>> {
     match preset {
         ShapePolygonPreset::Donut => donut_shape_point_paths(width_twips, height_twips),
+        ShapePolygonPreset::Frame => frame_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::MathDivide => math_divide_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::MathEqual => math_equal_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::MathNotEqual => {
@@ -16161,7 +16162,9 @@ fn polygon_preset_shape_point_paths(
 
 fn polygon_preset_shape_fill_rule(preset: ShapePolygonPreset) -> StaticImageVectorFillRule {
     match preset {
-        ShapePolygonPreset::Donut => StaticImageVectorFillRule::Alternate,
+        ShapePolygonPreset::Donut | ShapePolygonPreset::Frame => {
+            StaticImageVectorFillRule::Alternate
+        }
         _ => StaticImageVectorFillRule::Winding,
     }
 }
@@ -17136,23 +17139,12 @@ fn snip_two_diagonal_rectangle_shape_points(
     )
 }
 
-fn frame_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    scaled_shape_points(
+fn frame_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
         width_twips,
         height_twips,
-        &[
-            (0, 0),
-            (1000, 0),
-            (1000, 1000),
-            (0, 1000),
-            (0, 0),
-            (220, 220),
-            (220, 780),
-            (780, 780),
-            (780, 220),
-            (220, 220),
-        ],
-    )
+        &[(220, 220), (220, 780), (780, 780), (780, 220)],
+    )]
 }
 
 fn half_frame_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

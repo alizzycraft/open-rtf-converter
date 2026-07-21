@@ -74337,7 +74337,7 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 10);
-    let expected_point_counts = [5, 6, 6, 7, 5, 6, 6, 10, 6, 14];
+    let expected_point_counts = [5, 6, 6, 7, 5, 6, 6, 4, 6, 14];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -74352,6 +74352,22 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
         );
     }
     assert_eq!(shapes[7].points[0].x_twips, 0);
+    assert_eq!(
+        shapes[7].fill_rule,
+        StaticImageVectorFillRule::Alternate,
+        "frame should use even-odd fill so the passive PDF keeps the center open"
+    );
+    assert_eq!(shapes[7].point_paths.len(), 1);
+    assert_eq!(shapes[7].point_paths[0].len(), 4);
+    assert!(
+        shapes[7].point_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[7].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[7].height_twips
+        }),
+        "frame inner path must stay inside passive frame"
+    );
     assert_eq!(shapes[8].points[2].x_twips, shapes[8].width_twips);
     assert!(shapes[9].points.iter().any(|point| point.y_twips == 0));
     for forbidden in [
@@ -74388,13 +74404,25 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_even_odd_shape_paints = 0usize;
+    let mut passive_path_moves = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
         passive_shape_paints += content
             .operations
             .iter()
-            .filter(|operation| operation.operator == "B")
+            .filter(|operation| operation.operator == "B" || operation.operator == "B*")
+            .count();
+        passive_even_odd_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B*")
+            .count();
+        passive_path_moves += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "m")
             .count();
     }
 
@@ -74403,6 +74431,14 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
     assert!(
         passive_shape_paints >= 10,
         "round/snip/frame/tear shapes should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_even_odd_shape_paints >= 1,
+        "frame should render as a passive even-odd compound path"
+    );
+    assert!(
+        passive_path_moves >= 11,
+        "compound frame should emit separate bounded outer/inner passive paths"
     );
     for forbidden in [
         b"shapeType".as_slice(),
