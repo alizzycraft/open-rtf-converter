@@ -71853,9 +71853,10 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
         (69, "flowchart-terminator-payload"),
         (70, "flowchart-preparation-payload"),
         (73, "flowchart-connector-payload"),
+        (74, "flowchart-offpage-connector-payload"),
     ] {
         input.push_str(&format!(
-            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright2880\\shpbottom1440{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright2880\\shpbottom1080{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
         ));
     }
     input.push_str("After\\par}");
@@ -71874,7 +71875,7 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
 
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
-    assert_eq!(shapes.len(), 7);
+    assert_eq!(shapes.len(), 8);
     assert_eq!(shapes[0].kind, StaticShapeKind::Rectangle);
     assert_eq!(shapes[1].kind, StaticShapeKind::RoundedRectangle);
     assert_eq!(shapes[2].kind, StaticShapeKind::Polygon);
@@ -71885,6 +71886,8 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
     assert_eq!(shapes[5].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[5].points.len(), 6);
     assert_eq!(shapes[6].kind, StaticShapeKind::Ellipse);
+    assert_eq!(shapes[7].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[7].points.len(), 5);
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -71897,6 +71900,7 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
         "flowchart-terminator-payload",
         "flowchart-preparation-payload",
         "flowchart-connector-payload",
+        "flowchart-offpage-connector-payload",
         "[Shape skipped",
     ] {
         assert!(
@@ -71939,6 +71943,7 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
         b"flowchart-terminator-payload",
         b"flowchart-preparation-payload",
         b"flowchart-connector-payload",
+        b"flowchart-offpage-connector-payload",
         b"[Shape skipped",
         b"/JavaScript",
         b"/EmbeddedFile",

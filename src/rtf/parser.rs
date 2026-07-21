@@ -13088,6 +13088,10 @@ impl Parser {
                 self.set_current_shape_kind(StaticShapeKind::Ellipse);
                 true
             }
+            74 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
+                true
+            }
             20 => {
                 self.set_current_shape_kind(StaticShapeKind::Line);
                 true
