@@ -830,6 +830,9 @@ enum ShapePolygonPreset {
     UpDownArrow,
     QuadArrow,
     LeftRightUpArrow,
+    ManualInput,
+    ManualOperation,
+    DownTriangle,
 }
 
 #[derive(Debug, Clone)]
@@ -13084,12 +13087,28 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Hexagon);
                 true
             }
+            71 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ManualInput);
+                true
+            }
+            72 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::ManualOperation);
+                true
+            }
             73 => {
                 self.set_current_shape_kind(StaticShapeKind::Ellipse);
                 true
             }
             74 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
+                true
+            }
+            81 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::IsoscelesTriangle);
+                true
+            }
+            82 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DownTriangle);
                 true
             }
             20 => {
@@ -15008,6 +15027,11 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::LeftRightUpArrow => {
             left_right_up_arrow_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::ManualInput => manual_input_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::ManualOperation => {
+            manual_operation_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
 
@@ -15049,6 +15073,16 @@ fn right_triangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<Stati
         .collect()
 }
 
+fn down_triangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    [(0, 0), (width_twips, 0), (width_twips / 2, height_twips)]
+        .into_iter()
+        .map(|(x, y)| StaticShapePoint {
+            x_twips: x,
+            y_twips: y,
+        })
+        .collect()
+}
+
 fn trapezoid_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     let inset = width_twips / 4;
     [
@@ -15056,6 +15090,38 @@ fn trapezoid_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShap
         (width_twips.saturating_sub(inset), 0),
         (width_twips, height_twips),
         (0, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn manual_input_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let top_inset = height_twips / 4;
+    [
+        (0, top_inset),
+        (width_twips, 0),
+        (width_twips, height_twips),
+        (0, height_twips),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn manual_operation_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let inset = width_twips / 4;
+    [
+        (0, 0),
+        (width_twips, 0),
+        (width_twips.saturating_sub(inset), height_twips),
+        (inset, height_twips),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {

@@ -71852,8 +71852,12 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
         (64, "flowchart-data-payload"),
         (69, "flowchart-terminator-payload"),
         (70, "flowchart-preparation-payload"),
+        (71, "flowchart-manual-input-payload"),
+        (72, "flowchart-manual-operation-payload"),
         (73, "flowchart-connector-payload"),
         (74, "flowchart-offpage-connector-payload"),
+        (81, "flowchart-extract-payload"),
+        (82, "flowchart-merge-payload"),
     ] {
         input.push_str(&format!(
             "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright2880\\shpbottom1080{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
@@ -71875,7 +71879,7 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
 
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
-    assert_eq!(shapes.len(), 8);
+    assert_eq!(shapes.len(), 12);
     assert_eq!(shapes[0].kind, StaticShapeKind::Rectangle);
     assert_eq!(shapes[1].kind, StaticShapeKind::RoundedRectangle);
     assert_eq!(shapes[2].kind, StaticShapeKind::Polygon);
@@ -71885,9 +71889,19 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
     assert_eq!(shapes[4].kind, StaticShapeKind::RoundedRectangle);
     assert_eq!(shapes[5].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[5].points.len(), 6);
-    assert_eq!(shapes[6].kind, StaticShapeKind::Ellipse);
+    assert_eq!(shapes[6].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[6].points.len(), 4);
     assert_eq!(shapes[7].kind, StaticShapeKind::Polygon);
-    assert_eq!(shapes[7].points.len(), 5);
+    assert_eq!(shapes[7].points.len(), 4);
+    assert_eq!(shapes[8].kind, StaticShapeKind::Ellipse);
+    assert_eq!(shapes[9].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[9].points.len(), 5);
+    assert_eq!(shapes[10].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[10].points.len(), 3);
+    assert_eq!(shapes[11].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[11].points.len(), 3);
+    assert_eq!(shapes[10].points[0].x_twips, shapes[10].width_twips / 2);
+    assert_eq!(shapes[10].points[0].y_twips, 0);
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -71899,8 +71913,12 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
         "flowchart-data-payload",
         "flowchart-terminator-payload",
         "flowchart-preparation-payload",
+        "flowchart-manual-input-payload",
+        "flowchart-manual-operation-payload",
         "flowchart-connector-payload",
         "flowchart-offpage-connector-payload",
+        "flowchart-extract-payload",
+        "flowchart-merge-payload",
         "[Shape skipped",
     ] {
         assert!(
@@ -71918,17 +71936,21 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
     )
     .unwrap();
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
-    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
-    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let rendered_text = decoded_pdf_text(&content);
+    let mut rendered_text = String::new();
+    let mut saw_passive_shape_paint = false;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        saw_passive_shape_paint |= content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "B");
+    }
 
     assert!(rendered_text.contains("Before"));
     assert!(rendered_text.contains("After"));
     assert!(
-        content
-            .operations
-            .iter()
-            .any(|operation| operation.operator == "B"),
+        saw_passive_shape_paint,
         "flowchart primitives should render passive fill/stroke paths"
     );
     for forbidden in [
@@ -71942,8 +71964,12 @@ fn office_flowchart_primitives_render_passively_without_payload_leakage() {
         b"flowchart-data-payload",
         b"flowchart-terminator-payload",
         b"flowchart-preparation-payload",
+        b"flowchart-manual-input-payload",
+        b"flowchart-manual-operation-payload",
         b"flowchart-connector-payload",
         b"flowchart-offpage-connector-payload",
+        b"flowchart-extract-payload",
+        b"flowchart-merge-payload",
         b"[Shape skipped",
         b"/JavaScript",
         b"/EmbeddedFile",
