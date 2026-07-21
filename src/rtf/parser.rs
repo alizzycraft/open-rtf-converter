@@ -841,6 +841,8 @@ enum ShapePolygonPreset {
     LeftRightUpArrow,
     LeftUpArrow,
     BentUpArrow,
+    Heart,
+    LightningBolt,
     Sun,
     Moon,
     Explosion1,
@@ -13072,6 +13074,14 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Pentagon);
                 true
             }
+            21 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Heart);
+                true
+            }
+            22 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LightningBolt);
+                true
+            }
             23 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Sun);
                 true
@@ -15195,6 +15205,8 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::LeftUpArrow => left_up_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::BentUpArrow => bent_up_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Heart => heart_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::LightningBolt => lightning_bolt_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Sun => regular_star_shape_points(width_twips, height_twips, 16, 620),
         ShapePolygonPreset::Moon => moon_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Explosion1 => explosion1_shape_points(width_twips, height_twips),
@@ -15905,6 +15917,50 @@ fn scaled_shape_points(
             y_twips: ((i64::from(height_twips) * i64::from(y)) / 1000) as i32,
         })
         .collect()
+}
+
+fn heart_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (500, 965),
+            (405, 845),
+            (265, 710),
+            (130, 565),
+            (45, 430),
+            (20, 285),
+            (70, 150),
+            (185, 65),
+            (320, 55),
+            (430, 125),
+            (500, 235),
+            (570, 125),
+            (680, 55),
+            (815, 65),
+            (930, 150),
+            (980, 285),
+            (955, 430),
+            (870, 565),
+            (735, 710),
+            (595, 845),
+        ],
+    )
+}
+
+fn lightning_bolt_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (620, 0),
+            (215, 475),
+            (455, 475),
+            (320, 1000),
+            (785, 380),
+            (545, 380),
+        ],
+    )
 }
 
 fn moon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
