@@ -75751,7 +75751,7 @@ fn office_curved_and_striped_arrows_render_as_passive_polygons_without_payload_l
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 5);
-    for (shape, expected_points) in shapes.iter().zip([15, 15, 15, 15, 7]) {
+    for (shape, expected_points) in shapes.iter().zip([23, 23, 15, 15, 7]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
