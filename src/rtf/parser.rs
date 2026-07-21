@@ -857,6 +857,11 @@ enum ShapePolygonPreset {
     UTurnArrow,
     LeftUpArrow,
     BentUpArrow,
+    CurvedRightArrow,
+    CurvedLeftArrow,
+    CurvedUpArrow,
+    CurvedDownArrow,
+    StripedRightArrow,
     Heart,
     LightningBolt,
     Sun,
@@ -13279,6 +13284,26 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::BentUpArrow);
                 true
             }
+            45 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CurvedRightArrow);
+                true
+            }
+            46 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CurvedLeftArrow);
+                true
+            }
+            47 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CurvedUpArrow);
+                true
+            }
+            48 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CurvedDownArrow);
+                true
+            }
+            49 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::StripedRightArrow);
+                true
+            }
             89 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Explosion1);
                 true
@@ -15332,6 +15357,21 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::UTurnArrow => uturn_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LeftUpArrow => left_up_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::BentUpArrow => bent_up_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::CurvedRightArrow => {
+            curved_right_arrow_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::CurvedLeftArrow => {
+            curved_left_arrow_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::CurvedUpArrow => {
+            curved_up_arrow_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::CurvedDownArrow => {
+            curved_down_arrow_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::StripedRightArrow => {
+            striped_right_arrow_shape_points(width_twips, height_twips)
+        }
         ShapePolygonPreset::Heart => heart_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LightningBolt => lightning_bolt_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Sun => regular_star_shape_points(width_twips, height_twips, 16, 620),
@@ -16305,6 +16345,99 @@ fn uturn_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSh
         y_twips: y,
     })
     .collect()
+}
+
+fn mirror_shape_points_x(width_twips: i32, points: Vec<StaticShapePoint>) -> Vec<StaticShapePoint> {
+    points
+        .into_iter()
+        .map(|point| StaticShapePoint {
+            x_twips: width_twips.saturating_sub(point.x_twips),
+            y_twips: point.y_twips,
+        })
+        .collect()
+}
+
+fn curved_right_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (120, 1000),
+            (120, 620),
+            (190, 380),
+            (360, 205),
+            (610, 125),
+            (760, 125),
+            (760, 0),
+            (1000, 250),
+            (760, 500),
+            (760, 360),
+            (615, 360),
+            (455, 405),
+            (350, 515),
+            (310, 690),
+            (310, 1000),
+        ],
+    )
+}
+
+fn curved_left_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    mirror_shape_points_x(
+        width_twips,
+        curved_right_arrow_shape_points(width_twips, height_twips),
+    )
+}
+
+fn curved_down_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 120),
+            (380, 120),
+            (620, 190),
+            (795, 360),
+            (875, 610),
+            (875, 760),
+            (1000, 760),
+            (750, 1000),
+            (500, 760),
+            (640, 760),
+            (640, 615),
+            (595, 455),
+            (485, 350),
+            (310, 310),
+            (0, 310),
+        ],
+    )
+}
+
+fn curved_up_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 880),
+            (380, 880),
+            (620, 810),
+            (795, 640),
+            (875, 390),
+            (875, 240),
+            (1000, 240),
+            (750, 0),
+            (500, 240),
+            (640, 240),
+            (640, 385),
+            (595, 545),
+            (485, 650),
+            (310, 690),
+            (0, 690),
+        ],
+    )
+}
+
+fn striped_right_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    right_arrow_shape_points(width_twips, height_twips)
 }
 
 fn left_up_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
