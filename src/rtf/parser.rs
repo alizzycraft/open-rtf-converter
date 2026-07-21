@@ -896,6 +896,14 @@ enum ShapePolygonPreset {
     FlowchartMagneticDisk,
     FlowchartDirectAccessStorage,
     FlowchartDisplay,
+    UpRibbon,
+    DownRibbon,
+    CurvedUpRibbon,
+    CurvedDownRibbon,
+    VerticalScroll,
+    HorizontalScroll,
+    Wave,
+    DoubleWave,
     DownTriangle,
 }
 
@@ -13368,6 +13376,38 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::ThirtyTwoPointStar);
                 true
             }
+            97 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::UpRibbon);
+                true
+            }
+            98 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DownRibbon);
+                true
+            }
+            99 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CurvedUpRibbon);
+                true
+            }
+            100 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CurvedDownRibbon);
+                true
+            }
+            101 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::VerticalScroll);
+                true
+            }
+            102 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::HorizontalScroll);
+                true
+            }
+            103 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Wave);
+                true
+            }
+            104 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DoubleWave);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15540,6 +15580,22 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::FlowchartDisplay => {
             flowchart_display_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::UpRibbon => up_ribbon_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::DownRibbon => down_ribbon_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::CurvedUpRibbon => {
+            curved_up_ribbon_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::CurvedDownRibbon => {
+            curved_down_ribbon_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::VerticalScroll => {
+            vertical_scroll_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::HorizontalScroll => {
+            horizontal_scroll_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::Wave => wave_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::DoubleWave => double_wave_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -15818,6 +15874,173 @@ fn flowchart_display_shape_points(width_twips: i32, height_twips: i32) -> Vec<St
             (720, 1000),
             (0, 1000),
             (120, 500),
+        ],
+    )
+}
+
+fn up_ribbon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 280),
+            (180, 0),
+            (820, 0),
+            (1000, 280),
+            (860, 280),
+            (860, 1000),
+            (500, 820),
+            (140, 1000),
+            (140, 280),
+        ],
+    )
+}
+
+fn down_ribbon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (140, 0),
+            (500, 180),
+            (860, 0),
+            (860, 720),
+            (1000, 720),
+            (820, 1000),
+            (180, 1000),
+            (0, 720),
+            (140, 720),
+        ],
+    )
+}
+
+fn curved_up_ribbon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 340),
+            (160, 120),
+            (380, 20),
+            (620, 20),
+            (840, 120),
+            (1000, 340),
+            (840, 300),
+            (840, 940),
+            (620, 820),
+            (500, 780),
+            (380, 820),
+            (160, 940),
+            (160, 300),
+        ],
+    )
+}
+
+fn curved_down_ribbon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (160, 60),
+            (380, 180),
+            (500, 220),
+            (620, 180),
+            (840, 60),
+            (840, 700),
+            (1000, 660),
+            (840, 880),
+            (620, 980),
+            (380, 980),
+            (160, 880),
+            (0, 660),
+            (160, 700),
+        ],
+    )
+}
+
+fn vertical_scroll_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (280, 0),
+            (1000, 0),
+            (860, 160),
+            (1000, 320),
+            (760, 320),
+            (760, 1000),
+            (0, 1000),
+            (140, 840),
+            (0, 680),
+            (240, 680),
+            (240, 0),
+        ],
+    )
+}
+
+fn horizontal_scroll_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 240),
+            (680, 240),
+            (680, 0),
+            (840, 140),
+            (1000, 0),
+            (1000, 760),
+            (320, 760),
+            (320, 1000),
+            (160, 860),
+            (0, 1000),
+        ],
+    )
+}
+
+fn wave_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 360),
+            (160, 220),
+            (340, 220),
+            (520, 360),
+            (700, 500),
+            (1000, 500),
+            (1000, 760),
+            (820, 900),
+            (640, 900),
+            (460, 760),
+            (280, 620),
+            (0, 620),
+        ],
+    )
+}
+
+fn double_wave_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 360),
+            (120, 240),
+            (250, 240),
+            (380, 360),
+            (500, 480),
+            (620, 360),
+            (750, 240),
+            (880, 240),
+            (1000, 360),
+            (1000, 640),
+            (880, 760),
+            (750, 760),
+            (620, 640),
+            (500, 520),
+            (380, 640),
+            (250, 760),
+            (120, 760),
+            (0, 640),
         ],
     )
 }
