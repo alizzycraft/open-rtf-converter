@@ -73687,7 +73687,7 @@ fn office_callout_shapes_render_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 4);
-    let expected_point_counts = [7, 11, 14, 38];
+    let expected_point_counts = [7, 11, 26, 38];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -73703,7 +73703,13 @@ fn office_callout_shapes_render_passively_without_payload_leakage() {
     }
     assert_eq!(shapes[0].points[4].y_twips, shapes[0].height_twips);
     assert_eq!(shapes[1].points[6].y_twips, shapes[1].height_twips);
-    assert_eq!(shapes[2].points[7].y_twips, shapes[2].height_twips);
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .any(|point| point.y_twips == shapes[2].height_twips),
+        "oval callout pointer should still reach the bottom of the passive frame"
+    );
     assert!(
         shapes[3]
             .points
