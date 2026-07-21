@@ -939,6 +939,19 @@ enum ShapePolygonPreset {
     Frame,
     HalfFrame,
     Tear,
+    Chord,
+    Corner,
+    MathPlus,
+    MathMinus,
+    MathMultiply,
+    MathDivide,
+    MathEqual,
+    MathNotEqual,
+    CornerTabs,
+    SquareTabs,
+    PlaqueTabs,
+    Gear6,
+    Gear9,
     RoundOneRectangle,
     DownTriangle,
 }
@@ -13628,6 +13641,58 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Tear);
                 true
             }
+            161 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Chord);
+                true
+            }
+            162 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Corner);
+                true
+            }
+            163 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::MathPlus);
+                true
+            }
+            164 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::MathMinus);
+                true
+            }
+            165 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::MathMultiply);
+                true
+            }
+            166 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::MathDivide);
+                true
+            }
+            167 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::MathEqual);
+                true
+            }
+            168 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::MathNotEqual);
+                true
+            }
+            169 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::CornerTabs);
+                true
+            }
+            170 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SquareTabs);
+                true
+            }
+            171 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::PlaqueTabs);
+                true
+            }
+            172 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Gear6);
+                true
+            }
+            173 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Gear9);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15906,6 +15971,19 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Frame => frame_shape_points(width_twips, height_twips),
         ShapePolygonPreset::HalfFrame => half_frame_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Tear => tear_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Chord => chord_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Corner => corner_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::MathPlus => math_plus_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::MathMinus => math_minus_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::MathMultiply => math_multiply_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::MathDivide => math_divide_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::MathEqual => math_equal_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::MathNotEqual => math_not_equal_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::CornerTabs => corner_tabs_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::SquareTabs => square_tabs_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::PlaqueTabs => plaque_tabs_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Gear6 => regular_star_shape_points(width_twips, height_twips, 6, 620),
+        ShapePolygonPreset::Gear9 => regular_star_shape_points(width_twips, height_twips, 9, 650),
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -16932,6 +17010,233 @@ fn tear_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoin
             (40, 360),
             (120, 180),
             (280, 60),
+        ],
+    )
+}
+
+fn chord_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (160, 180),
+            (840, 180),
+            (960, 300),
+            (1000, 500),
+            (940, 700),
+            (780, 880),
+            (500, 1000),
+            (220, 880),
+            (60, 700),
+            (0, 500),
+            (40, 300),
+        ],
+    )
+}
+
+fn corner_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (1000, 0),
+            (1000, 220),
+            (220, 220),
+            (220, 1000),
+            (0, 1000),
+        ],
+    )
+}
+
+fn math_plus_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    cross_shape_points(width_twips, height_twips)
+}
+
+fn math_minus_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(120, 410), (880, 410), (880, 590), (120, 590)],
+    )
+}
+
+fn math_multiply_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (160, 0),
+            (500, 340),
+            (840, 0),
+            (1000, 160),
+            (660, 500),
+            (1000, 840),
+            (840, 1000),
+            (500, 660),
+            (160, 1000),
+            (0, 840),
+            (340, 500),
+            (0, 160),
+        ],
+    )
+}
+
+fn math_divide_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (430, 120),
+            (570, 120),
+            (570, 260),
+            (430, 260),
+            (430, 410),
+            (880, 410),
+            (880, 590),
+            (570, 590),
+            (570, 880),
+            (430, 880),
+            (430, 740),
+            (570, 740),
+            (570, 590),
+            (120, 590),
+            (120, 410),
+            (430, 410),
+        ],
+    )
+}
+
+fn math_equal_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (120, 270),
+            (880, 270),
+            (880, 430),
+            (120, 430),
+            (120, 570),
+            (880, 570),
+            (880, 730),
+            (120, 730),
+        ],
+    )
+}
+
+fn math_not_equal_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (120, 270),
+            (560, 270),
+            (670, 80),
+            (800, 80),
+            (690, 270),
+            (880, 270),
+            (880, 430),
+            (600, 430),
+            (520, 570),
+            (880, 570),
+            (880, 730),
+            (430, 730),
+            (320, 920),
+            (190, 920),
+            (300, 730),
+            (120, 730),
+            (120, 570),
+            (390, 570),
+            (470, 430),
+            (120, 430),
+        ],
+    )
+}
+
+fn corner_tabs_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (380, 0),
+            (380, 160),
+            (160, 160),
+            (160, 380),
+            (0, 380),
+            (0, 0),
+            (620, 620),
+            (840, 620),
+            (840, 840),
+            (1000, 840),
+            (1000, 1000),
+            (620, 1000),
+        ],
+    )
+}
+
+fn square_tabs_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (320, 0),
+            (320, 180),
+            (680, 180),
+            (680, 0),
+            (1000, 0),
+            (1000, 320),
+            (820, 320),
+            (820, 680),
+            (1000, 680),
+            (1000, 1000),
+            (680, 1000),
+            (680, 820),
+            (320, 820),
+            (320, 1000),
+            (0, 1000),
+            (0, 680),
+            (180, 680),
+            (180, 320),
+            (0, 320),
+        ],
+    )
+}
+
+fn plaque_tabs_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (170, 0),
+            (380, 0),
+            (380, 160),
+            (620, 160),
+            (620, 0),
+            (830, 0),
+            (830, 170),
+            (1000, 170),
+            (1000, 380),
+            (840, 380),
+            (840, 620),
+            (1000, 620),
+            (1000, 830),
+            (830, 830),
+            (830, 1000),
+            (620, 1000),
+            (620, 840),
+            (380, 840),
+            (380, 1000),
+            (170, 1000),
+            (170, 830),
+            (0, 830),
+            (0, 620),
+            (160, 620),
+            (160, 380),
+            (0, 380),
+            (0, 170),
+            (170, 170),
         ],
     )
 }

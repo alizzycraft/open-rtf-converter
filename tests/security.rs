@@ -74296,6 +74296,157 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
 }
 
 #[test]
+fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (161, "office-chord-payload"),
+        (162, "office-corner-payload"),
+        (163, "office-math-plus-payload"),
+        (164, "office-math-minus-payload"),
+        (165, "office-math-multiply-payload"),
+        (166, "office-math-divide-payload"),
+        (167, "office-math-equal-payload"),
+        (168, "office-math-not-equal-payload"),
+        (169, "office-corner-tabs-payload"),
+        (170, "office-square-tabs-payload"),
+        (171, "office-plaque-tabs-payload"),
+        (172, "office-gear-6-payload"),
+        (173, "office-gear-9-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 13);
+    let expected_point_counts = [11, 6, 12, 4, 12, 16, 8, 20, 13, 20, 28, 12, 18];
+    for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
+        assert_eq!(shape.kind, StaticShapeKind::Polygon);
+        assert_eq!(shape.points.len(), expected_point_count);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "chord/math/tab/gear points must stay inside passive frame: {shape:?}"
+        );
+    }
+    assert!(shapes[0].points.iter().any(|point| point.y_twips == 0));
+    assert_eq!(shapes[1].points[0].x_twips, 0);
+    assert!(shapes[11].points.iter().any(|point| point.x_twips == 0));
+    assert!(
+        shapes[12]
+            .points
+            .iter()
+            .any(|point| point.y_twips == shapes[12].height_twips)
+    );
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "office-chord-payload",
+        "office-corner-payload",
+        "office-math-plus-payload",
+        "office-math-minus-payload",
+        "office-math-multiply-payload",
+        "office-math-divide-payload",
+        "office-math-equal-payload",
+        "office-math-not-equal-payload",
+        "office-corner-tabs-payload",
+        "office-square-tabs-payload",
+        "office-plaque-tabs-payload",
+        "office-gear-6-payload",
+        "office-gear-9-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "chord/math/tab/gear metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 13,
+        "chord/math/tab/gear shapes should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"office-chord-payload",
+        b"office-corner-payload",
+        b"office-math-plus-payload",
+        b"office-math-minus-payload",
+        b"office-math-multiply-payload",
+        b"office-math-divide-payload",
+        b"office-math-equal-payload",
+        b"office-math-not-equal-payload",
+        b"office-corner-tabs-payload",
+        b"office-square-tabs-payload",
+        b"office-plaque-tabs-payload",
+        b"office-gear-6-payload",
+        b"office-gear-9-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "chord/math/tab/gear metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unsupported_office_shape_type_138_does_not_cross_pdf_boundary() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 138}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv unsupported-shape-138-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
