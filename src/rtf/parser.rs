@@ -843,6 +843,7 @@ enum ShapePolygonPreset {
     BentUpArrow,
     FivePointStar,
     EightPointStar,
+    SixteenPointStar,
     ManualInput,
     ManualOperation,
     DownTriangle,
@@ -13148,6 +13149,10 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::EightPointStar);
                 true
             }
+            94 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SixteenPointStar);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15141,6 +15146,9 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::EightPointStar => {
             eight_point_star_shape_points(width_twips, height_twips)
         }
+        ShapePolygonPreset::SixteenPointStar => {
+            regular_star_shape_points(width_twips, height_twips, 16, 650)
+        }
         ShapePolygonPreset::ManualInput => manual_input_shape_points(width_twips, height_twips),
         ShapePolygonPreset::ManualOperation => {
             manual_operation_shape_points(width_twips, height_twips)
@@ -15851,6 +15859,33 @@ fn eight_point_star_shape_points(width_twips: i32, height_twips: i32) -> Vec<Sta
         y_twips: y,
     })
     .collect()
+}
+
+fn regular_star_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+    outer_points: usize,
+    inner_radius_per_mille: i32,
+) -> Vec<StaticShapePoint> {
+    let center_x = f64::from(width_twips) / 2.0;
+    let center_y = f64::from(height_twips) / 2.0;
+    let radius_x = center_x;
+    let radius_y = center_y;
+    let inner_scale = f64::from(inner_radius_per_mille.clamp(0, 1000)) / 1000.0;
+    let total_points = outer_points.saturating_mul(2);
+    (0..total_points)
+        .map(|index| {
+            let angle = -std::f64::consts::FRAC_PI_2
+                + (index as f64 * std::f64::consts::PI) / outer_points as f64;
+            let scale = if index % 2 == 0 { 1.0 } else { inner_scale };
+            let x = (center_x + angle.cos() * radius_x * scale).round() as i32;
+            let y = (center_y + angle.sin() * radius_y * scale).round() as i32;
+            StaticShapePoint {
+                x_twips: x.clamp(0, width_twips),
+                y_twips: y.clamp(0, height_twips),
+            }
+        })
+        .collect()
 }
 
 fn rotated_shape_point(
