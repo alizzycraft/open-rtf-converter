@@ -930,6 +930,16 @@ enum ShapePolygonPreset {
     Decagon,
     Heptagon,
     Dodecagon,
+    RoundTwoSameRectangle,
+    RoundTwoDiagonalRectangle,
+    SnipRoundRectangle,
+    SnipOneRectangle,
+    SnipTwoSameRectangle,
+    SnipTwoDiagonalRectangle,
+    Frame,
+    HalfFrame,
+    Tear,
+    RoundOneRectangle,
     DownTriangle,
 }
 
@@ -13576,6 +13586,48 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::Dodecagon);
                 true
             }
+            151 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::RoundOneRectangle);
+                true
+            }
+            152 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::RoundTwoSameRectangle);
+                true
+            }
+            153 => {
+                self.set_current_shape_polygon_preset(
+                    ShapePolygonPreset::RoundTwoDiagonalRectangle,
+                );
+                true
+            }
+            154 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SnipRoundRectangle);
+                true
+            }
+            155 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SnipOneRectangle);
+                true
+            }
+            156 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SnipTwoSameRectangle);
+                true
+            }
+            157 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::SnipTwoDiagonalRectangle);
+                true
+            }
+            158 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Frame);
+                true
+            }
+            159 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::HalfFrame);
+                true
+            }
+            160 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::Tear);
+                true
+            }
             61 => {
                 self.set_current_shape_kind(StaticShapeKind::Rectangle);
                 true
@@ -15830,6 +15882,30 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Dodecagon => {
             regular_polygon_shape_points(width_twips, height_twips, 12)
         }
+        ShapePolygonPreset::RoundOneRectangle => {
+            round_one_rectangle_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::RoundTwoSameRectangle => {
+            round_two_same_rectangle_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::RoundTwoDiagonalRectangle => {
+            round_two_diagonal_rectangle_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::SnipRoundRectangle => {
+            snip_round_rectangle_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::SnipOneRectangle => {
+            snip_one_rectangle_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::SnipTwoSameRectangle => {
+            snip_two_same_rectangle_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::SnipTwoDiagonalRectangle => {
+            snip_two_diagonal_rectangle_shape_points(width_twips, height_twips)
+        }
+        ShapePolygonPreset::Frame => frame_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::HalfFrame => half_frame_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::Tear => tear_shape_points(width_twips, height_twips),
         ShapePolygonPreset::DownTriangle => down_triangle_shape_points(width_twips, height_twips),
     }
 }
@@ -16696,6 +16772,167 @@ fn non_isosceles_trapezoid_shape_points(
         width_twips,
         height_twips,
         &[(260, 0), (1000, 0), (800, 1000), (0, 1000)],
+    )
+}
+
+fn round_two_same_rectangle_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (160, 0),
+            (840, 0),
+            (1000, 160),
+            (1000, 1000),
+            (0, 1000),
+            (0, 160),
+        ],
+    )
+}
+
+fn round_one_rectangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(160, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 160)],
+    )
+}
+
+fn round_two_diagonal_rectangle_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (160, 0),
+            (1000, 0),
+            (1000, 840),
+            (840, 1000),
+            (0, 1000),
+            (0, 160),
+        ],
+    )
+}
+
+fn snip_round_rectangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (160, 0),
+            (840, 0),
+            (1000, 160),
+            (1000, 760),
+            (760, 1000),
+            (0, 1000),
+            (0, 160),
+        ],
+    )
+}
+
+fn snip_one_rectangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(0, 0), (1000, 0), (1000, 760), (760, 1000), (0, 1000)],
+    )
+}
+
+fn snip_two_same_rectangle_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (240, 0),
+            (760, 0),
+            (1000, 240),
+            (1000, 1000),
+            (0, 1000),
+            (0, 240),
+        ],
+    )
+}
+
+fn snip_two_diagonal_rectangle_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (760, 0),
+            (1000, 240),
+            (1000, 1000),
+            (240, 1000),
+            (0, 760),
+        ],
+    )
+}
+
+fn frame_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (1000, 0),
+            (1000, 1000),
+            (0, 1000),
+            (0, 0),
+            (220, 220),
+            (220, 780),
+            (780, 780),
+            (780, 220),
+            (220, 220),
+        ],
+    )
+}
+
+fn half_frame_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 0),
+            (1000, 0),
+            (1000, 220),
+            (220, 220),
+            (220, 1000),
+            (0, 1000),
+        ],
+    )
+}
+
+fn tear_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (500, 0),
+            (670, 120),
+            (820, 260),
+            (930, 430),
+            (1000, 640),
+            (930, 820),
+            (760, 960),
+            (520, 1000),
+            (300, 920),
+            (150, 760),
+            (60, 560),
+            (40, 360),
+            (120, 180),
+            (280, 60),
+        ],
     )
 }
 

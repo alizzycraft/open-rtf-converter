@@ -74160,6 +74160,142 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
 }
 
 #[test]
+fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leakage() {
+    let mut input = String::from("{\\rtf1 Before\\par");
+    for (shape_type, payload) in [
+        (151, "office-round-one-rectangle-payload"),
+        (152, "office-round-two-same-rectangle-payload"),
+        (153, "office-round-two-diagonal-rectangle-payload"),
+        (154, "office-snip-round-rectangle-payload"),
+        (155, "office-snip-one-rectangle-payload"),
+        (156, "office-snip-two-same-rectangle-payload"),
+        (157, "office-snip-two-diagonal-rectangle-payload"),
+        (158, "office-frame-payload"),
+        (159, "office-half-frame-payload"),
+        (160, "office-tear-payload"),
+    ] {
+        input.push_str(&format!(
+            "{{\\shp{{\\*\\shpinst\\shpleft720\\shptop720\\shpright3600\\shpbottom1800{{\\sp{{\\sn shapeType}}{{\\sv {shape_type}}}}}{{\\sp{{\\sn fillColor}}{{\\sv 65280}}}}{{\\sp{{\\sn lineColor}}{{\\sv 16711680}}}}{{\\sp{{\\sn pFragments}}{{\\sv {payload}}}}}}}}}"
+        ));
+    }
+    input.push_str("After\\par}");
+    let input = input.into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 10);
+    let expected_point_counts = [5, 6, 6, 7, 5, 6, 6, 10, 6, 14];
+    for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
+        assert_eq!(shape.kind, StaticShapeKind::Polygon);
+        assert_eq!(shape.points.len(), expected_point_count);
+        assert!(
+            shape.points.iter().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "round/snip/frame/tear points must stay inside passive frame: {shape:?}"
+        );
+    }
+    assert_eq!(shapes[7].points[0].x_twips, 0);
+    assert_eq!(shapes[8].points[2].x_twips, shapes[8].width_twips);
+    assert!(shapes[9].points.iter().any(|point| point.y_twips == 0));
+    for forbidden in [
+        "shapeType",
+        "fillColor",
+        "lineColor",
+        "pFragments",
+        "office-round-one-rectangle-payload",
+        "office-round-two-same-rectangle-payload",
+        "office-round-two-diagonal-rectangle-payload",
+        "office-snip-round-rectangle-payload",
+        "office-snip-one-rectangle-payload",
+        "office-snip-two-same-rectangle-payload",
+        "office-snip-two-diagonal-rectangle-payload",
+        "office-frame-payload",
+        "office-half-frame-payload",
+        "office-tear-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "round/snip/frame/tear metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let mut rendered_text = String::new();
+    let mut passive_shape_paints = 0usize;
+    for page_id in parsed_pdf.get_pages().values() {
+        let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+        rendered_text.push_str(&decoded_pdf_text(&content));
+        passive_shape_paints += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "B")
+            .count();
+    }
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        passive_shape_paints >= 10,
+        "round/snip/frame/tear shapes should render passive fill/stroke paths"
+    );
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fillColor",
+        b"lineColor",
+        b"pFragments",
+        b"office-round-one-rectangle-payload",
+        b"office-round-two-same-rectangle-payload",
+        b"office-round-two-diagonal-rectangle-payload",
+        b"office-snip-round-rectangle-payload",
+        b"office-snip-one-rectangle-payload",
+        b"office-snip-two-same-rectangle-payload",
+        b"office-snip-two-diagonal-rectangle-payload",
+        b"office-frame-payload",
+        b"office-half-frame-payload",
+        b"office-tear-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "round/snip/frame/tear metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn unsupported_office_shape_type_138_does_not_cross_pdf_boundary() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright3600\shpbottom1800{\sp{\sn shapeType}{\sv 138}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv unsupported-shape-138-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
