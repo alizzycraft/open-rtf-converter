@@ -841,6 +841,7 @@ enum ShapePolygonPreset {
     LeftRightUpArrow,
     LeftUpArrow,
     BentUpArrow,
+    FourPointStar,
     FivePointStar,
     EightPointStar,
     SixteenPointStar,
@@ -13143,6 +13144,10 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::BentUpArrow);
                 true
             }
+            91 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::FourPointStar);
+                true
+            }
             92 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::FivePointStar);
                 true
@@ -15150,6 +15155,9 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::LeftUpArrow => left_up_arrow_shape_points(width_twips, height_twips),
         ShapePolygonPreset::BentUpArrow => bent_up_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::FourPointStar => {
+            regular_star_shape_points(width_twips, height_twips, 4, 350)
+        }
         ShapePolygonPreset::FivePointStar => {
             five_point_star_shape_points(width_twips, height_twips)
         }
