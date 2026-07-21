@@ -14,8 +14,8 @@ use open_rtf_converter::model::{
     PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER,
     ShadingPattern, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
     StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
-    StaticImageWrapSide, StaticShapeKind, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
-    TableRowAlignment, TextRelief, UnderlineStyle,
+    StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind, TOTAL_PAGES_MARKER, TabAlignment,
+    TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -70385,6 +70385,88 @@ fn rotated_office_rectangles_lower_to_passive_polygon_without_payload_leakage() 
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "rotated shape metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn rotated_office_lines_lower_to_passive_polyline_without_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 20}}{\sp{\sn lineColor}{\sv 255}}{\sp{\sn lineStartArrowhead}{\sv open}}{\sp{\sn lineEndArrowhead}{\sv triangle}}{\sp{\sn rotation}{\sv 2700000}}{\sp{\sn pFragments}{\sv hidden-rotated-line-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("rotated passive line shape");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Polyline);
+    assert_eq!(shape.points.len(), 2);
+    assert_ne!(shape.points[0].x_twips, shape.points[1].x_twips);
+    assert_ne!(shape.points[0].y_twips, shape.points[1].y_twips);
+    assert_eq!(shape.start_arrowhead, StaticShapeArrowhead::Open);
+    assert_eq!(shape.end_arrowhead, StaticShapeArrowhead::Triangle);
+    for forbidden in [
+        "rotation",
+        "lineStartArrowhead",
+        "lineEndArrowhead",
+        "pFragments",
+        "hidden-rotated-line-payload",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "rotated line metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "l")
+            .count()
+            >= 3,
+        "rotated line and arrowheads should render through passive line segments"
+    );
+    for forbidden in [
+        b"rotation".as_slice(),
+        b"lineStartArrowhead",
+        b"lineEndArrowhead",
+        b"pFragments",
+        b"hidden-rotated-line-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "rotated line metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
