@@ -21760,13 +21760,12 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_RECTANGLE | EMR_ELLIPSE | EMR_ROUNDRECT => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
                 let Some((left, top, right, bottom)) =
                     parse_emf_record_rect(data, &header, &coordinates)
                 else {
-                    return None;
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 };
                 if bounds_is_visible((left, top, right, bottom)) {
                     let command = match record_type {
@@ -21793,8 +21792,13 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                             fill_color: state.fill_color,
                         },
                         EMR_ROUNDRECT => {
-                            let (corner_width, corner_height) =
-                                parse_emf_roundrect_corners(data, right - left, bottom - top)?;
+                            let Some((corner_width, corner_height)) =
+                                parse_emf_roundrect_corners(data, right - left, bottom - top)
+                            else {
+                                skipped_record_count = skipped_record_count.checked_add(1)?;
+                                pos = record_end;
+                                continue;
+                            };
                             StaticImageVectorCommand::RoundedRectangle {
                                 left,
                                 top,
@@ -21811,6 +21815,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         }
                         _ => return None,
                     };
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(command);
                 }
             }
@@ -28576,13 +28583,14 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 current_point = new_current_point;
             }
             0x041b | 0x0418 | 0x061c => {
-                if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
-                    return None;
-                }
-                let bounds = if function == 0x061c {
-                    parse_wmf_bounds_at(data, 4, coordinates)?
+                let Some(bounds) = (if function == 0x061c {
+                    parse_wmf_bounds_at(data, 4, coordinates)
                 } else {
-                    parse_wmf_bounds(data, coordinates)?
+                    parse_wmf_bounds(data, coordinates)
+                }) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
                 };
                 if bounds_is_visible(bounds) {
                     let (left, top, right, bottom) = bounds;
@@ -28611,8 +28619,14 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             fill_color: state.fill_color,
                         }
                     } else {
-                        let corner_width = normalized_wmf_size(data, 2, window_width)?;
-                        let corner_height = normalized_wmf_size(data, 0, window_height)?;
+                        let (Some(corner_width), Some(corner_height)) = (
+                            normalized_wmf_size(data, 2, window_width),
+                            normalized_wmf_size(data, 0, window_height),
+                        ) else {
+                            skipped_record_count = skipped_record_count.checked_add(1)?;
+                            pos = record_end;
+                            continue;
+                        };
                         StaticImageVectorCommand::RoundedRectangle {
                             left,
                             top,
@@ -28627,6 +28641,9 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             fill_color: state.fill_color,
                         }
                     };
+                    if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
+                        return None;
+                    }
                     commands.push(command);
                 }
             }
