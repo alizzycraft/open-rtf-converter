@@ -653,6 +653,7 @@ pub struct StaticShape {
     pub text_margin_top_twips: i32,
     pub text_margin_bottom_twips: i32,
     pub text_vertical_anchor: StaticShapeTextVerticalAnchor,
+    pub text_horizontal_anchor_centered: bool,
     pub text: Vec<Paragraph>,
     pub points: Vec<StaticShapePoint>,
 }

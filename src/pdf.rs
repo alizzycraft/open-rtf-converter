@@ -6472,6 +6472,7 @@ endstream
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -6562,6 +6563,7 @@ endstream
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];

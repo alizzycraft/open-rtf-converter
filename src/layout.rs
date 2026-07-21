@@ -2875,13 +2875,17 @@ fn layout_shape_text(
                     paragraph.style.shading_pattern,
                 );
             }
-            let text_x = aligned_x(
-                content_x,
-                content_width,
-                line.width,
-                &paragraph.style,
-                is_first_line,
-            );
+            let text_x = if shape.text_horizontal_anchor_centered {
+                content_x + ((content_width - line.width) / 2.0).max(0.0)
+            } else {
+                aligned_x(
+                    content_x,
+                    content_width,
+                    line.width,
+                    &paragraph.style,
+                    is_first_line,
+                )
+            };
             let word_spacing = justified_word_spacing(
                 line,
                 &paragraph.style,
@@ -10925,6 +10929,7 @@ mod tests {
                 text_margin_top_twips: 80,
                 text_margin_bottom_twips: 80,
                 text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+                text_horizontal_anchor_centered: false,
                 text: Vec::new(),
                 points: Vec::new(),
             }),
@@ -10974,6 +10979,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: vec![Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
@@ -11094,6 +11100,7 @@ mod tests {
                 text_margin_top_twips: 80,
                 text_margin_bottom_twips: 80,
                 text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+                text_horizontal_anchor_centered: false,
                 text: Vec::new(),
                 points: Vec::new(),
             }),
@@ -11149,6 +11156,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11214,6 +11222,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11282,6 +11291,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11351,6 +11361,7 @@ mod tests {
             text_margin_top_twips: 240,
             text_margin_bottom_twips: 120,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: vec![Paragraph {
                 style: paragraph_style,
                 runs: vec![Run {
@@ -11437,6 +11448,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Bottom,
+            text_horizontal_anchor_centered: false,
             text: vec![Paragraph {
                 style: ParagraphStyle::default(),
                 runs: vec![Run {
@@ -11469,6 +11481,74 @@ mod tests {
     }
 
     #[test]
+    fn lays_out_center_anchored_shape_text_horizontally_inside_passive_shape_bounds() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Shape(StaticShape {
+            kind: StaticShapeKind::Rectangle,
+            left_twips: 720,
+            top_twips: 720,
+            width_twips: 2880,
+            height_twips: 720,
+            z_order: 0,
+            below_text: false,
+            horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
+            flip_horizontal: false,
+            flip_vertical: false,
+            start_arrowhead: StaticShapeArrowhead::None,
+            end_arrowhead: StaticShapeArrowhead::None,
+            stroke_width_twips: 0,
+            stroke_color: Color::default(),
+            stroke_style: BorderStyle::Single,
+            fill_color: None,
+            text_margin_left_twips: 80,
+            text_margin_right_twips: 80,
+            text_margin_top_twips: 80,
+            text_margin_bottom_twips: 80,
+            text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: true,
+            text: vec![Paragraph {
+                style: ParagraphStyle::default(),
+                runs: vec![Run {
+                    text: "Centered".to_string(),
+                    style: Default::default(),
+                }],
+            }],
+            points: Vec::new(),
+        })];
+
+        let centered_layout = LayoutEngine::layout(&document);
+        let centered_fragment = centered_layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("Centered") => Some(fragment),
+                _ => None,
+            })
+            .expect("center anchored shape text");
+        let mut left_document = document.clone();
+        if let Block::Shape(shape) = &mut left_document.blocks[0] {
+            shape.text_horizontal_anchor_centered = false;
+        }
+        let left_layout = LayoutEngine::layout(&left_document);
+        let left_fragment = left_layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("Centered") => Some(fragment),
+                _ => None,
+            })
+            .expect("left anchored shape text");
+
+        assert!(
+            centered_fragment.x > left_fragment.x + 20.0,
+            "center anchored shape text should move right from normal left placement: centered={:?} left={:?}",
+            centered_fragment,
+            left_fragment
+        );
+    }
+
+    #[test]
     fn lays_out_legacy_static_drawing_line_styles_as_passive_line_styles() {
         let mut document = Document::default();
         document.blocks = vec![Block::Shape(StaticShape {
@@ -11494,6 +11574,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11538,6 +11619,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11588,6 +11670,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11644,6 +11727,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: vec![
                 StaticShapePoint {
@@ -11723,6 +11807,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: vec![
                 StaticShapePoint {
@@ -11798,6 +11883,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11860,6 +11946,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -11940,6 +12027,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         })];
@@ -18950,6 +19038,7 @@ mod tests {
             text_margin_top_twips: 80,
             text_margin_bottom_twips: 80,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             points: Vec::new(),
         }];

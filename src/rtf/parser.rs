@@ -872,6 +872,7 @@ struct ShapeBuilder {
     text_margin_top_twips: i32,
     text_margin_bottom_twips: i32,
     text_vertical_anchor: StaticShapeTextVerticalAnchor,
+    text_horizontal_anchor_centered: bool,
     text: Vec<Paragraph>,
     current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
@@ -922,6 +923,7 @@ impl Default for ShapeBuilder {
             text_margin_top_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
             text_margin_bottom_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
             text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+            text_horizontal_anchor_centered: false,
             text: Vec::new(),
             current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
@@ -12131,6 +12133,7 @@ impl Parser {
                 text_margin_top_twips: shape.text_margin_top_twips,
                 text_margin_bottom_twips: shape.text_margin_bottom_twips,
                 text_vertical_anchor: shape.text_vertical_anchor,
+                text_horizontal_anchor_centered: shape.text_horizontal_anchor_centered,
                 text: shape.text,
                 points,
                 horizontal_anchor: shape.horizontal_anchor,
@@ -12774,10 +12777,11 @@ impl Parser {
                 }
             }
             "anchorText" => {
-                if let Some(anchor) = parse_shape_text_vertical_anchor_property(value)
+                if let Some(anchor) = parse_shape_text_anchor_property(value)
                     && let Some(shape) = self.current_shape.as_mut()
                 {
-                    shape.text_vertical_anchor = anchor;
+                    shape.text_vertical_anchor = anchor.vertical;
+                    shape.text_horizontal_anchor_centered = anchor.center_horizontal;
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
@@ -16901,7 +16905,13 @@ fn parse_shape_line_dashing_property(value: &str) -> Option<BorderStyle> {
     }
 }
 
-fn parse_shape_text_vertical_anchor_property(value: &str) -> Option<StaticShapeTextVerticalAnchor> {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct ShapeTextAnchor {
+    vertical: StaticShapeTextVerticalAnchor,
+    center_horizontal: bool,
+}
+
+fn parse_shape_text_anchor_property(value: &str) -> Option<ShapeTextAnchor> {
     let normalized = value
         .trim()
         .chars()
@@ -16909,9 +16919,46 @@ fn parse_shape_text_vertical_anchor_property(value: &str) -> Option<StaticShapeT
         .flat_map(char::to_lowercase)
         .collect::<String>();
     match normalized.as_str() {
-        "top" | "t" => Some(StaticShapeTextVerticalAnchor::Top),
-        "middle" | "center" | "ctr" | "mid" => Some(StaticShapeTextVerticalAnchor::Middle),
-        "bottom" | "b" => Some(StaticShapeTextVerticalAnchor::Bottom),
+        "0" | "top" | "t" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Top,
+            center_horizontal: false,
+        }),
+        "1" | "middle" | "center" | "ctr" | "mid" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Middle,
+            center_horizontal: false,
+        }),
+        "2" | "bottom" | "b" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Bottom,
+            center_horizontal: false,
+        }),
+        "3" | "topcentered" | "centertop" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Top,
+            center_horizontal: true,
+        }),
+        "4" | "middlecentered" | "centermiddle" | "centercentered" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Middle,
+            center_horizontal: true,
+        }),
+        "5" | "bottomcentered" | "centerbottom" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Bottom,
+            center_horizontal: true,
+        }),
+        "6" | "baseline" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Top,
+            center_horizontal: false,
+        }),
+        "7" | "bottombaseline" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Bottom,
+            center_horizontal: false,
+        }),
+        "8" | "centerbaseline" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Top,
+            center_horizontal: true,
+        }),
+        "9" | "centerbottombaseline" => Some(ShapeTextAnchor {
+            vertical: StaticShapeTextVerticalAnchor::Bottom,
+            center_horizontal: true,
+        }),
         _ => None,
     }
 }
