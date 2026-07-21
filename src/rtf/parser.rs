@@ -822,6 +822,9 @@ enum ShapePolygonPreset {
     Cross,
     Pentagon,
     RightArrow,
+    LeftArrow,
+    UpArrow,
+    DownArrow,
 }
 
 #[derive(Debug, Clone)]
@@ -12947,6 +12950,18 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::RightArrow);
                 true
             }
+            34 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::LeftArrow);
+                true
+            }
+            35 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::UpArrow);
+                true
+            }
+            36 => {
+                self.set_current_shape_polygon_preset(ShapePolygonPreset::DownArrow);
+                true
+            }
             20 => {
                 self.set_current_shape_kind(StaticShapeKind::Line);
                 true
@@ -14840,6 +14855,9 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::Cross => cross_shape_points(width_twips, height_twips),
         ShapePolygonPreset::Pentagon => pentagon_shape_points(width_twips, height_twips),
         ShapePolygonPreset::RightArrow => right_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::LeftArrow => left_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::UpArrow => up_arrow_shape_points(width_twips, height_twips),
+        ShapePolygonPreset::DownArrow => down_arrow_shape_points(width_twips, height_twips),
     }
 }
 
@@ -15009,6 +15027,72 @@ fn right_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSh
         (shaft_right, height_twips),
         (shaft_right, shaft_bottom),
         (0, shaft_bottom),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn left_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let shaft_left = width_twips / 3;
+    let mid_y = height_twips / 2;
+    let shaft_top = height_twips / 4;
+    let shaft_bottom = height_twips.saturating_sub(shaft_top);
+    [
+        (width_twips, shaft_top),
+        (shaft_left, shaft_top),
+        (shaft_left, 0),
+        (0, mid_y),
+        (shaft_left, height_twips),
+        (shaft_left, shaft_bottom),
+        (width_twips, shaft_bottom),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn up_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let mid_x = width_twips / 2;
+    let shaft_left = width_twips / 4;
+    let shaft_right = width_twips.saturating_sub(shaft_left);
+    let shaft_top = height_twips / 3;
+    [
+        (mid_x, 0),
+        (width_twips, shaft_top),
+        (shaft_right, shaft_top),
+        (shaft_right, height_twips),
+        (shaft_left, height_twips),
+        (shaft_left, shaft_top),
+        (0, shaft_top),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
+}
+
+fn down_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
+    let mid_x = width_twips / 2;
+    let shaft_left = width_twips / 4;
+    let shaft_right = width_twips.saturating_sub(shaft_left);
+    let shaft_bottom = (height_twips * 2) / 3;
+    [
+        (shaft_left, 0),
+        (shaft_right, 0),
+        (shaft_right, shaft_bottom),
+        (width_twips, shaft_bottom),
+        (mid_x, height_twips),
+        (0, shaft_bottom),
+        (shaft_left, shaft_bottom),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
