@@ -21157,27 +21157,63 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 _ => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
             EMR_CREATEPEN => {
-                let (handle, object) = parse_emf_pen_object(data)?;
-                store_emf_object(&mut objects, handle, object)?;
+                let Some((handle, object)) = parse_emf_pen_object(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                if store_emf_object(&mut objects, handle, object).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_EXTCREATEPEN => {
-                let (handle, object) = parse_emf_ext_pen_object(data)?;
-                store_emf_object(&mut objects, handle, object)?;
+                let Some((handle, object)) = parse_emf_ext_pen_object(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                if store_emf_object(&mut objects, handle, object).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_EXTCREATEFONTINDIRECTW => {
-                let (handle, object) = parse_emf_ext_font_object(data)?;
-                store_emf_object(&mut objects, handle, object)?;
+                let Some((handle, object)) = parse_emf_ext_font_object(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                if store_emf_object(&mut objects, handle, object).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_CREATEBRUSHINDIRECT => {
-                let (handle, object) = parse_emf_brush_object(data)?;
-                store_emf_object(&mut objects, handle, object)?;
+                let Some((handle, object)) = parse_emf_brush_object(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                if store_emf_object(&mut objects, handle, object).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_CREATEPALETTE => {
-                let handle = parse_emf_palette_object(data)?;
-                store_emf_object(&mut objects, handle, EmfObject::Other)?;
+                let Some(handle) = parse_emf_palette_object(data) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
+                if store_emf_object(&mut objects, handle, EmfObject::Other).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_DELETEOBJECT => {
-                let handle = usize::try_from(read_le_u32(data, 0)?).ok()?;
+                let Some(handle) =
+                    read_le_u32(data, 0).and_then(|value| usize::try_from(value).ok())
+                else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if let Some(slot) = objects.get_mut(handle) {
                     *slot = None;
                 } else {
@@ -21185,18 +21221,27 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 }
             }
             EMR_SELECTPALETTE => {
-                read_le_u32(data, 0)?;
+                if read_le_u32(data, 0).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_SETPALETTEENTRIES => {
-                validate_emf_set_palette_entries(data)?;
+                if validate_emf_set_palette_entries(data).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_RESIZEPALETTE => {
-                read_le_u32(data, 0)?;
-                read_le_u32(data, 4)?;
+                if read_le_u32(data, 0).is_none() || read_le_u32(data, 4).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_REALIZEPALETTE => {}
             EMR_SELECTOBJECT => {
-                let handle = read_le_u32(data, 0)?;
+                let Some(handle) = read_le_u32(data, 0) else {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                    pos = record_end;
+                    continue;
+                };
                 if let Some(object) = emf_stock_object(handle).or_else(|| {
                     usize::try_from(handle)
                         .ok()
@@ -21320,7 +21365,9 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 active_path = None;
             }
             EMR_COMMENT => {
-                parse_emf_comment_record(data)?;
+                if parse_emf_comment_record(data).is_none() {
+                    skipped_record_count = skipped_record_count.checked_add(1)?;
+                }
             }
             EMR_FILLRGN => {
                 // `data` starts after the EMF record Type and Size fields.
