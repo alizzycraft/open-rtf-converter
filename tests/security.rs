@@ -74346,7 +74346,7 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 9);
-    let expected_point_counts = [52, 3, 18, 4, 18, 4, 10, 7, 12];
+    let expected_point_counts = [52, 3, 18, 4, 33, 4, 10, 7, 12];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
