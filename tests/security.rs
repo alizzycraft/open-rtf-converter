@@ -4695,7 +4695,7 @@ fn list_level_marker_underline_variants_render_passively_without_control_leakage
 
 #[test]
 fn list_level_marker_text_effects_render_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\outl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\shad{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\embo{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\impr{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\scaps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}}\pard\ls1\ilvl0 Outline marker\par\pard\ls2\ilvl0 Shadow marker\par\pard\ls3\ilvl0 Emboss marker\par\pard\ls4\ilvl0 Engrave marker\par\pard\ls5\ilvl0 Small caps marker\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\outl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\shad{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\embo{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\impr{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\scaps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\ol{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Outline marker\par\pard\ls2\ilvl0 Shadow marker\par\pard\ls3\ilvl0 Emboss marker\par\pard\ls4\ilvl0 Engrave marker\par\pard\ls5\ilvl0 Small caps marker\par\pard\ls6\ilvl0 Overline marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
 
     for (index, text) in [
@@ -4704,6 +4704,7 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
         "Emboss marker",
         "Engrave marker",
         "Small caps marker",
+        "Overline marker",
     ]
     .into_iter()
     .enumerate()
@@ -4717,6 +4718,7 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
         assert_eq!(paragraph.runs[1].text, text);
         assert!(!paragraph.runs[1].style.outline);
         assert!(!paragraph.runs[1].style.shadow);
+        assert!(!paragraph.runs[1].style.overline);
         assert_eq!(paragraph.runs[1].style.relief, TextRelief::None);
         assert!(!paragraph.runs[1].style.small_caps);
     }
@@ -4741,11 +4743,16 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected paragraph"),
     };
+    let sixth = match &parsed.document.blocks[5] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
     assert!(first.runs[0].style.outline);
     assert!(second.runs[0].style.shadow);
     assert_eq!(third.runs[0].style.relief, TextRelief::Emboss);
     assert_eq!(fourth.runs[0].style.relief, TextRelief::Engrave);
     assert!(fifth.runs[0].style.small_caps);
+    assert!(sixth.runs[0].style.overline);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -4765,6 +4772,7 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
         "1.Emboss marker",
         "1.Engrave marker",
         "1.Small caps marker",
+        "1.Overline marker",
     ] {
         assert!(
             rendered_text.contains(expected),
@@ -4778,6 +4786,7 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
         b"embo",
         b"impr",
         b"scaps",
+        b"ol",
         b"levelnfc",
         b"leveltext",
         b"levelnumbers",

@@ -3304,6 +3304,12 @@ impl Parser {
             "strikedl" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_double_strike(control.parameter.unwrap_or(1) != 0);
             }
+            "ol" | "aol" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_overline(control.parameter.unwrap_or(1) != 0);
+            }
+            "olnone" | "aolnone" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_overline(false);
+            }
             "outl" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_outline(control.parameter.unwrap_or(1) != 0);
             }
@@ -15125,6 +15131,10 @@ impl Parser {
             style.strike = enabled;
             style.double_strike = enabled;
         });
+    }
+
+    fn set_current_list_level_overline(&mut self, enabled: bool) {
+        self.update_current_list_level_character_style(|style| style.overline = enabled);
     }
 
     fn set_current_list_level_outline(&mut self, enabled: bool) {
