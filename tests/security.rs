@@ -16204,6 +16204,103 @@ fn ignorable_marker_before_associated_character_control_preserves_visible_text_w
 }
 
 #[test]
+fn ignorable_marker_before_passive_character_controls_preserves_visible_text_without_leakage() {
+    let input = br"{\rtf1{\colortbl;\red0\green0\blue0;\red255\green0\blue0;}{\*\uldb\ulc2\outl\shad\accdot\expndtw40\kerning2\charscalex125 Visible styled text{\object\objdata 414243}}\par After\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Visible styled text"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "uldb",
+        "ulc2",
+        "outl",
+        "shad",
+        "accdot",
+        "expndtw40",
+        "kerning2",
+        "charscalex125",
+        "objdata",
+        "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden passive character control leaked to text: {forbidden}"
+        );
+    }
+
+    let paragraph = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .expect("paragraph");
+    let visible = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.contains("Visible styled text"))
+        .expect("visible passive style run");
+    assert_eq!(visible.style.underline, UnderlineStyle::Double);
+    assert_eq!(visible.style.underline_color_index, Some(2));
+    assert!(visible.style.outline);
+    assert!(visible.style.shadow);
+    assert_eq!(
+        visible.style.emphasis_mark,
+        open_rtf_converter::model::CharacterEmphasisMark::Dot
+    );
+    assert_eq!(visible.style.character_spacing_twips, 40);
+    assert_eq!(visible.style.character_kerning_half_points, 2);
+    assert_eq!(visible.style.character_scaling_percent, 125);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        ["Visible", "styled", "text", "After"]
+            .into_iter()
+            .all(|expected| rendered_text.contains(expected)),
+        "decoded PDF text missing visible passive styled text: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"uldb".as_slice(),
+        b"ulc2",
+        b"outl",
+        b"shad",
+        b"accdot",
+        b"expndtw40",
+        b"kerning2",
+        b"charscalex125",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden passive character control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emphasis_mark_controls_render_passive_overlays_without_control_leakage() {
     let input = br"{\rtf1\accdot Dot text \acccomma Comma text \accnone Plain text{\object\objdata 414243}\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
