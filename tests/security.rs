@@ -73709,7 +73709,7 @@ fn office_callout_shapes_render_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 4);
-    let expected_point_counts = [7, 19, 26, 38];
+    let expected_point_counts = [7, 19, 50, 38];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
