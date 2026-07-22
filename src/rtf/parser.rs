@@ -16213,6 +16213,9 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::ActionButtonInformation => {
             action_button_information_shape_point_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::ActionButtonSound => {
+            action_button_sound_shape_point_paths(width_twips, height_twips)
+        }
         _ => Vec::new(),
     }
 }
@@ -17227,6 +17230,57 @@ fn action_button_sound_shape_points(width_twips: i32, height_twips: i32) -> Vec<
             (100, 580),
         ],
     )
+}
+
+fn action_button_sound_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[
+                (650, 335),
+                (710, 375),
+                (750, 430),
+                (765, 500),
+                (750, 570),
+                (710, 625),
+                (650, 665),
+                (620, 620),
+                (665, 580),
+                (695, 535),
+                (705, 500),
+                (695, 465),
+                (665, 420),
+                (620, 380),
+            ],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[
+                (760, 230),
+                (835, 285),
+                (890, 365),
+                (920, 455),
+                (925, 500),
+                (920, 545),
+                (890, 635),
+                (835, 715),
+                (760, 770),
+                (725, 720),
+                (785, 665),
+                (830, 595),
+                (850, 525),
+                (850, 475),
+                (830, 405),
+                (785, 335),
+                (725, 280),
+            ],
+        ),
+    ]
 }
 
 fn action_button_movie_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
