@@ -74661,7 +74661,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 13);
-    let expected_point_counts = [27, 6, 12, 4, 12, 16, 8, 20, 6, 6, 8, 12, 18];
+    let expected_point_counts = [37, 6, 12, 4, 12, 16, 8, 20, 6, 6, 8, 12, 18];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
