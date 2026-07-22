@@ -74123,6 +74123,19 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
         );
     }
     assert_eq!(shapes[1].points[1].y_twips, 0);
+    assert_eq!(shapes[3].point_paths.len(), 1);
+    assert_eq!(shapes[3].point_paths[0].len(), 4);
+    assert!(
+        shapes[3]
+            .point_paths
+            .iter()
+            .flatten()
+            .all(|point| point.x_twips >= 0
+                && point.x_twips <= shapes[3].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[3].height_twips),
+        "action-button information dot path must stay inside passive frame"
+    );
     assert!(shapes[4].points.iter().any(|point| point.x_twips == 0));
     assert!(
         shapes[5]

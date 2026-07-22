@@ -16210,6 +16210,9 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::ActionButtonEnd => {
             action_button_end_shape_point_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::ActionButtonInformation => {
+            action_button_information_shape_point_paths(width_twips, height_twips)
+        }
         _ => Vec::new(),
     }
 }
@@ -17060,6 +17063,17 @@ fn action_button_information_shape_points(
             (420, 820),
         ],
     )
+}
+
+fn action_button_information_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(420, 100), (580, 100), (580, 220), (420, 220)],
+    )]
 }
 
 fn action_button_back_previous_shape_points(
