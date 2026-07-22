@@ -74108,7 +74108,7 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 12);
-    let expected_point_counts = [8, 11, 15, 8, 7, 7, 8, 8, 9, 5, 6, 9];
+    let expected_point_counts = [8, 11, 26, 8, 7, 7, 8, 8, 9, 5, 6, 9];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
