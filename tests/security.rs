@@ -74938,7 +74938,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     assert_eq!(shapes.len(), 10);
     let expected = [
         (StaticShapeKind::Polygon, 6),
-        (StaticShapeKind::Polygon, 14),
+        (StaticShapeKind::Polygon, 19),
         (StaticShapeKind::Polygon, 40),
         (StaticShapeKind::Polygon, 49),
         (StaticShapeKind::Polygon, 23),
