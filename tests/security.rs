@@ -74893,7 +74893,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         (StaticShapeKind::Polygon, 14),
         (StaticShapeKind::Polygon, 40),
         (StaticShapeKind::Polygon, 49),
-        (StaticShapeKind::Polygon, 19),
+        (StaticShapeKind::Polygon, 23),
         (StaticShapeKind::Polygon, 37),
         (StaticShapeKind::Polygon, 4),
         (StaticShapeKind::Polygon, 4),
