@@ -3950,7 +3950,27 @@ impl Parser {
                 self.set_old_style_list_marker_italic(control.parameter.unwrap_or(1) != 0);
             }
             "pnul" if destination_allows_visible_old_style_list_marker(&self.state) => {
-                self.set_old_style_list_marker_underline(control.parameter.unwrap_or(1) != 0);
+                self.set_old_style_list_marker_underline(UnderlineStyle::Single, control);
+            }
+            "pnulnone" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.set_old_style_list_marker_underline_style(UnderlineStyle::None);
+            }
+            "pnuldb" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.set_old_style_list_marker_underline(UnderlineStyle::Double, control);
+            }
+            "pnuld" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.set_old_style_list_marker_underline(UnderlineStyle::Dotted, control);
+            }
+            "pnuldash" | "pnuldashd" | "pnuldashdd"
+                if destination_allows_visible_old_style_list_marker(&self.state) =>
+            {
+                self.set_old_style_list_marker_underline(UnderlineStyle::Dashed, control);
+            }
+            "pnulwave" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.set_old_style_list_marker_underline(UnderlineStyle::Wave, control);
+            }
+            "pnulw" if destination_allows_visible_old_style_list_marker(&self.state) => {
+                self.set_old_style_list_marker_underline(UnderlineStyle::Words, control);
             }
             "pnstrike" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_strike(control.parameter.unwrap_or(1) != 0);
@@ -14851,13 +14871,18 @@ impl Parser {
         self.update_old_style_list_marker_character_style(|style| style.italic = enabled);
     }
 
-    fn set_old_style_list_marker_underline(&mut self, enabled: bool) {
+    fn set_old_style_list_marker_underline(&mut self, style: UnderlineStyle, control: &Control) {
+        let underline = if control.parameter.unwrap_or(1) == 0 {
+            UnderlineStyle::None
+        } else {
+            style
+        };
+        self.set_old_style_list_marker_underline_style(underline);
+    }
+
+    fn set_old_style_list_marker_underline_style(&mut self, underline: UnderlineStyle) {
         self.update_old_style_list_marker_character_style(|style| {
-            style.underline = if enabled {
-                UnderlineStyle::Single
-            } else {
-                UnderlineStyle::None
-            };
+            style.underline = underline;
         });
     }
 
@@ -20022,6 +20047,14 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "pnstart"
                 | "pnstrike"
                 | "pnul"
+                | "pnuldb"
+                | "pnuld"
+                | "pnuldash"
+                | "pnuldashd"
+                | "pnuldashdd"
+                | "pnulnone"
+                | "pnulw"
+                | "pnulwave"
                 | "pnucltr"
                 | "pnucrm"
                 | "charrsid"

@@ -4297,6 +4297,87 @@ fn old_style_list_marker_formatting_renders_passively_without_control_leakage() 
 }
 
 #[test]
+fn old_style_list_marker_underline_variants_render_passively_without_control_leakage() {
+    let input = br"{\rtf1{\pn\pndec\pnuldb}Double old marker\par{\pn\pndec\pnuld}Dotted old marker\par{\pn\pndec\pnuldash}Dashed old marker\par{\pn\pndec\pnulwave}Wave old marker\par{\pn\pndec\pnulw}Words old marker\par{\pn\pndec\pnuldb\pnulnone}Plain old marker\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+
+    for (index, (text, underline)) in [
+        ("Double old marker", UnderlineStyle::Double),
+        ("Dotted old marker", UnderlineStyle::Dotted),
+        ("Dashed old marker", UnderlineStyle::Dashed),
+        ("Wave old marker", UnderlineStyle::Wave),
+        ("Words old marker", UnderlineStyle::Words),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let paragraph = match &parsed.document.blocks[index] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected old-style list paragraph"),
+        };
+        assert_eq!(paragraph.runs[0].text, "1.\t");
+        assert_eq!(paragraph.runs[0].style.underline, underline);
+        assert_eq!(paragraph.runs[1].text, text);
+        assert_eq!(paragraph.runs[1].style.underline, UnderlineStyle::None);
+    }
+
+    let plain = match &parsed.document.blocks[5] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected old-style list paragraph"),
+    };
+    assert_eq!(plain.runs[0].text, "1.\tPlain old marker");
+    assert_eq!(plain.runs[0].style.underline, UnderlineStyle::None);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for expected in [
+        "1.Double old marker",
+        "1.Dotted old marker",
+        "1.Dashed old marker",
+        "1.Wave old marker",
+        "1.Words old marker",
+        "1.Plain old marker",
+    ] {
+        assert!(
+            rendered_text.contains(expected),
+            "decoded PDF text did not contain old-style underline marker text {expected:?}: {rendered_text:?}"
+        );
+    }
+
+    for forbidden in [
+        b"pnuldb".as_slice(),
+        b"pnuld",
+        b"pnuldash",
+        b"pnulwave",
+        b"pnulw",
+        b"pnulnone",
+        b"pndec",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden old-style list underline control leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn roman_and_alpha_list_markers_render_as_passive_pdf_text() {
     let input = rtf(&[
         "{",
