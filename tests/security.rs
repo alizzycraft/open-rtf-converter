@@ -454,6 +454,40 @@ fn unsupported_latin_extended_text_still_reports_browser_safe_font_gap() {
 }
 
 #[test]
+fn unsupported_greek_text_still_reports_browser_safe_font_gap() {
+    let input =
+        r"{\rtf1\ansi{\fonttbl{\f0\fswiss Unknown Word Sans;}}\f0 Unsupported \u945?\u7936?\par}"
+            .as_bytes()
+            .to_vec();
+    let mut options = ConvertOptions::browser_safe_defaults();
+    options.diagnostics = true;
+    let output = convert_rtf_to_pdf(&input, &options).unwrap();
+
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("Greek characters")
+            && diagnostic.message.contains("passive font asset support")
+            && diagnostic.message.contains("Unknown Word Sans")
+    }));
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"Unknown Word Sans",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden unsupported Greek/source content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn invalid_caller_font_assets_are_rejected_before_pdf_rendering() {
     let input = rtf(&[
         "{",

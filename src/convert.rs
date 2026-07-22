@@ -471,6 +471,8 @@ fn unsupported_passive_glyph_script(text: &str) -> Option<(&'static str, char)> 
     text.chars().find_map(|ch| {
         if is_cyrillic_char(ch) {
             Some(("Cyrillic", ch))
+        } else if is_greek_char(ch) {
+            Some(("Greek", ch))
         } else if is_latin_extended_char(ch) {
             Some(("Latin Extended", ch))
         } else {
@@ -491,6 +493,10 @@ fn is_latin_extended_char(ch: char) -> bool {
         ch,
         '\u{0100}'..='\u{024f}' | '\u{1e00}'..='\u{1eff}'
     )
+}
+
+fn is_greek_char(ch: char) -> bool {
+    matches!(ch, '\u{0370}'..='\u{03ff}' | '\u{1f00}'..='\u{1fff}')
 }
 
 fn font_name_matches_pdf_family(name: &str, family: PdfFontFamily) -> bool {
