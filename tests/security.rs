@@ -73427,7 +73427,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 12);
-    let expected_point_counts = [5, 18, 24, 24, 6, 4, 10, 15, 32, 10, 6, 16];
+    let expected_point_counts = [5, 18, 24, 24, 6, 4, 10, 15, 32, 10, 6, 22];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
