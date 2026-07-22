@@ -3263,25 +3263,25 @@ impl Parser {
             {
                 self.set_current_list_level_no_restart(control.parameter.unwrap_or(1) != 0);
             }
-            "b" if self.is_parsing_list_level_definition() => {
+            "b" | "ab" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_bold(control.parameter.unwrap_or(1) != 0);
             }
-            "i" if self.is_parsing_list_level_definition() => {
+            "i" | "ai" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_italic(control.parameter.unwrap_or(1) != 0);
             }
-            "ul" if self.is_parsing_list_level_definition() => {
+            "ul" | "aul" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Single, control);
             }
-            "ulnone" if self.is_parsing_list_level_definition() => {
+            "ulnone" | "aulnone" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline_style(UnderlineStyle::None);
             }
-            "uldb" if self.is_parsing_list_level_definition() => {
+            "uldb" | "auldb" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Double, control);
             }
             "ulth" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Thick, control);
             }
-            "uld" | "ulthd" if self.is_parsing_list_level_definition() => {
+            "uld" | "ulthd" | "auld" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Dotted, control);
             }
             "uldash" | "uldashd" | "uldashdd" | "ulldash" | "ulthdash" | "ulthdashd"
@@ -3295,10 +3295,10 @@ impl Parser {
             {
                 self.set_current_list_level_underline(UnderlineStyle::Wave, control);
             }
-            "ulw" if self.is_parsing_list_level_definition() => {
+            "ulw" | "aulw" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline(UnderlineStyle::Words, control);
             }
-            "strike" | "striked" if self.is_parsing_list_level_definition() => {
+            "strike" | "striked" | "astrike" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_strike(control.parameter.unwrap_or(1) != 0);
             }
             "strikedl" if self.is_parsing_list_level_definition() => {
@@ -3310,10 +3310,10 @@ impl Parser {
             "olnone" | "aolnone" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_overline(false);
             }
-            "outl" if self.is_parsing_list_level_definition() => {
+            "outl" | "aoutl" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_outline(control.parameter.unwrap_or(1) != 0);
             }
-            "shad" if self.is_parsing_list_level_definition() => {
+            "shad" | "ashad" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_shadow(control.parameter.unwrap_or(1) != 0);
             }
             "embo" if self.is_parsing_list_level_definition() => {
@@ -3339,10 +3339,10 @@ impl Parser {
             "accnone" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_emphasis_mark(CharacterEmphasisMark::None);
             }
-            "caps" if self.is_parsing_list_level_definition() => {
+            "caps" | "acaps" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_caps(control.parameter.unwrap_or(1) != 0);
             }
-            "scaps" if self.is_parsing_list_level_definition() => {
+            "scaps" | "ascaps" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_small_caps(control.parameter.unwrap_or(1) != 0);
             }
             "plain" if self.is_parsing_list_level_definition() => {
@@ -3372,11 +3372,29 @@ impl Parser {
                         .min(MAX_BASELINE_SHIFT_HALF_POINTS),
                 );
             }
+            "aup" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_baseline_shift(
+                    control
+                        .parameter
+                        .unwrap_or(6)
+                        .max(0)
+                        .min(MAX_BASELINE_SHIFT_HALF_POINTS),
+                );
+            }
             "dn" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_baseline_shift(
                     -control
                         .parameter
                         .unwrap_or(0)
+                        .max(0)
+                        .min(MAX_BASELINE_SHIFT_HALF_POINTS),
+                );
+            }
+            "adn" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_baseline_shift(
+                    -control
+                        .parameter
+                        .unwrap_or(6)
                         .max(0)
                         .min(MAX_BASELINE_SHIFT_HALF_POINTS),
                 );
@@ -3391,6 +3409,13 @@ impl Parser {
             "expndtw" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_character_spacing(
                     control.parameter.unwrap_or(0),
+                    offset,
+                );
+            }
+            "aexpnd" if self.is_parsing_list_level_definition() => {
+                let quarter_points = control.parameter.unwrap_or(0);
+                self.set_current_list_level_character_spacing(
+                    quarter_points.saturating_mul(5),
                     offset,
                 );
             }
@@ -3409,13 +3434,13 @@ impl Parser {
             "f" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_font(control.parameter.unwrap_or(0));
             }
-            "fs" if self.is_parsing_list_level_definition() => {
+            "fs" | "afs" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_font_size(control.parameter.unwrap_or(24), offset);
             }
             "ulc" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_underline_color(control.parameter.unwrap_or(0));
             }
-            "cf" if self.is_parsing_list_level_definition() => {
+            "cf" | "acf" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_color(control.parameter.unwrap_or(0));
             }
             "highlight" | "cb" | "chcbpat" if self.is_parsing_list_level_definition() => {

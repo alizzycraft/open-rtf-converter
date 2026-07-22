@@ -4490,7 +4490,7 @@ fn list_level_follow_controls_render_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_formatting_renders_passively_without_control_leakage() {
-    let input = br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;\red255\green255\blue0;\red0\green0\blue255;}{\*\listtable{\list{\listlevel\levelnfc0\f1\fs28\b\i\ul\ulc3\strike\caps\cf1\chshdng5000\chcbpat2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}".to_vec();
+    let input = br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;\red255\green255\blue0;\red0\green0\blue255;}{\*\listtable{\list{\listlevel\levelnfc0\f1\afs28\ab\ai\aul\ulc3\astrike\acaps\acf1\chshdng5000\chcbpat2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -4540,7 +4540,12 @@ fn list_level_marker_formatting_renders_passively_without_control_leakage() {
         b"levelnfc".as_slice(),
         b"leveltext",
         b"levelnumbers",
+        b"afs28",
+        b"aul",
         b"ulc",
+        b"astrike",
+        b"acaps",
+        b"acf1",
         b"chcbpat",
         b"chshdng",
         b"listtable",
@@ -4879,7 +4884,7 @@ fn list_level_marker_emphasis_marks_render_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_script_and_spacing_render_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}{\list{\listlevel\levelnfc0\aup{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid12}{\list{\listlevel\levelnfc0\adn{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid13}{\list{\listlevel\levelnfc0\aexpnd4{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid14}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}{\listoverride\listid12\ls8}{\listoverride\listid13\ls9}{\listoverride\listid14\ls10}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par\pard\ls8\ilvl0 Associated up marker\par\pard\ls9\ilvl0 Associated down marker\par\pard\ls10\ilvl0 Associated spaced marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
 
     for (index, text) in [
@@ -4890,6 +4895,9 @@ fn list_level_marker_script_and_spacing_render_passively_without_control_leakage
         "Spaced marker",
         "Kerned marker",
         "Scaled marker",
+        "Associated up marker",
+        "Associated down marker",
+        "Associated spaced marker",
     ]
     .into_iter()
     .enumerate()
@@ -4936,6 +4944,18 @@ fn list_level_marker_script_and_spacing_render_passively_without_control_leakage
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected paragraph"),
     };
+    let eighth = match &parsed.document.blocks[7] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let ninth = match &parsed.document.blocks[8] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let tenth = match &parsed.document.blocks[9] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
     assert!(first.runs[0].style.baseline_shift_half_points > 0);
     assert!(second.runs[0].style.baseline_shift_half_points < 0);
     assert_eq!(third.runs[0].style.baseline_shift_half_points, 8);
@@ -4943,6 +4963,9 @@ fn list_level_marker_script_and_spacing_render_passively_without_control_leakage
     assert_eq!(fifth.runs[0].style.character_spacing_twips, 80);
     assert_eq!(sixth.runs[0].style.character_kerning_half_points, 2);
     assert_eq!(seventh.runs[0].style.character_scaling_percent, 150);
+    assert_eq!(eighth.runs[0].style.baseline_shift_half_points, 6);
+    assert_eq!(ninth.runs[0].style.baseline_shift_half_points, -6);
+    assert_eq!(tenth.runs[0].style.character_spacing_twips, 20);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -4964,6 +4987,9 @@ fn list_level_marker_script_and_spacing_render_passively_without_control_leakage
         "1.Spaced marker",
         "1.Kerned marker",
         "1.Scaled marker",
+        "1.Associated up marker",
+        "1.Associated down marker",
+        "1.Associated spaced marker",
     ] {
         assert!(
             rendered_text.contains(expected),
@@ -4975,8 +5001,11 @@ fn list_level_marker_script_and_spacing_render_passively_without_control_leakage
         b"super".as_slice(),
         b"sub",
         b"expndtw",
+        b"aexpnd",
         b"kerning",
         b"charscalex",
+        b"aup",
+        b"adn",
         b"levelnfc",
         b"leveltext",
         b"levelnumbers",
