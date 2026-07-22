@@ -4770,6 +4770,8 @@ impl Parser {
                 self.state.character.strike = enabled;
                 self.state.character.double_strike = enabled;
             }
+            "ol" | "aol" => self.state.character.overline = control.parameter.unwrap_or(1) != 0,
+            "olnone" | "aolnone" => self.state.character.overline = false,
             "outl" | "aoutl" => self.state.character.outline = control.parameter.unwrap_or(1) != 0,
             "shad" | "ashad" => self.state.character.shadow = control.parameter.unwrap_or(1) != 0,
             "embo" => {
@@ -20635,6 +20637,9 @@ fn is_visible_non_destination_control(name: &str) -> bool {
             | "ul"
             | "ul0"
             | "ulnone"
+            | "ol"
+            | "ol0"
+            | "olnone"
             | "strike"
             | "strike0"
             | "striked"

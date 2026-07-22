@@ -65293,6 +65293,114 @@ fn word_only_underline_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn overline_renders_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 ",
+        "\\",
+        "ol over",
+        "\\",
+        "ol0 plain ",
+        "\\",
+        "ol again",
+        "\\",
+        "olnone done",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("over"));
+    assert!(text.contains("plain"));
+    assert!(text.contains("again"));
+    assert!(text.contains("done"));
+
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected paragraph"),
+    };
+    let over = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.trim() == "over")
+        .expect("overlined run");
+    let plain = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.trim() == "plain")
+        .expect("plain run");
+    let again = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.trim() == "again")
+        .expect("second overlined run");
+    let done = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.trim() == "done")
+        .expect("done run");
+    assert!(over.style.overline);
+    assert!(!plain.style.overline);
+    assert!(again.style.overline);
+    assert!(!done.style.overline);
+    for forbidden in ["ol", "olnone"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden overline control leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("overline.rtf");
+    let output_path = dir.path().join("overline.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("over"));
+    assert!(rendered_text.contains("plain"));
+    assert!(rendered_text.contains("again"));
+    assert!(rendered_text.contains("done"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count()
+            >= 2,
+        "overlined runs should emit passive stroked lines above text"
+    );
+    for forbidden in [
+        b"ol".as_slice(),
+        b"olnone",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden overline content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn underline_color_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
