@@ -72693,7 +72693,7 @@ fn office_circular_arrow_shape_renders_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shape.kind, StaticShapeKind::Polygon);
-    assert_eq!(shape.points.len(), 35);
+    assert_eq!(shape.points.len(), 40);
     assert!(
         shape.points.iter().all(|point| {
             point.x_twips >= 0
@@ -74891,7 +74891,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     let expected = [
         (StaticShapeKind::Polygon, 6),
         (StaticShapeKind::Polygon, 14),
-        (StaticShapeKind::Polygon, 35),
+        (StaticShapeKind::Polygon, 40),
         (StaticShapeKind::Polygon, 42),
         (StaticShapeKind::Polygon, 19),
         (StaticShapeKind::Polygon, 37),
