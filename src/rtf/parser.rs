@@ -16204,6 +16204,12 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::ChartPlus => chart_plus_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::Gear6 => gear_shape_point_paths(width_twips, height_twips, 6),
         ShapePolygonPreset::Gear9 => gear_shape_point_paths(width_twips, height_twips, 9),
+        ShapePolygonPreset::ActionButtonBeginning => {
+            action_button_beginning_shape_point_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonEnd => {
+            action_button_end_shape_point_paths(width_twips, height_twips)
+        }
         _ => Vec::new(),
     }
 }
@@ -17090,6 +17096,17 @@ fn action_button_beginning_shape_points(
     )
 }
 
+fn action_button_beginning_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(920, 180), (420, 500), (920, 820)],
+    )]
+}
+
 fn action_button_end_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     scaled_shape_points(
         width_twips,
@@ -17105,6 +17122,17 @@ fn action_button_end_shape_points(width_twips: i32, height_twips: i32) -> Vec<St
             (80, 820),
         ],
     )
+}
+
+fn action_button_end_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(80, 180), (580, 500), (80, 820)],
+    )]
 }
 
 fn action_button_return_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

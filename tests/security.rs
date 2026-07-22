@@ -74130,6 +74130,32 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
             .iter()
             .any(|point| point.x_twips == shapes[5].width_twips)
     );
+    assert_eq!(shapes[6].point_paths.len(), 1);
+    assert_eq!(shapes[6].point_paths[0].len(), 3);
+    assert!(
+        shapes[6]
+            .point_paths
+            .iter()
+            .flatten()
+            .all(|point| point.x_twips >= 0
+                && point.x_twips <= shapes[6].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[6].height_twips),
+        "action-button beginning extra path must stay inside passive frame"
+    );
+    assert_eq!(shapes[7].point_paths.len(), 1);
+    assert_eq!(shapes[7].point_paths[0].len(), 3);
+    assert!(
+        shapes[7]
+            .point_paths
+            .iter()
+            .flatten()
+            .all(|point| point.x_twips >= 0
+                && point.x_twips <= shapes[7].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[7].height_twips),
+        "action-button end extra path must stay inside passive frame"
+    );
     assert_eq!(shapes[9].points[3].y_twips, shapes[9].height_twips);
     for forbidden in [
         "shapeType",
