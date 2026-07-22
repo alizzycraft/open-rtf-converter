@@ -16133,6 +16133,77 @@ fn associated_character_properties_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn ignorable_marker_before_associated_character_control_preserves_visible_text_without_leakage() {
+    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\ab\ai\acf1\aul Visible alias text{\object\objdata 414243}}\par After\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(text.contains("Visible alias text"));
+    assert!(text.contains("After"));
+    for forbidden in ["ab", "ai", "acf1", "aul", "objdata", "414243"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden associated alias content leaked to text: {forbidden}"
+        );
+    }
+
+    let paragraph = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .expect("paragraph");
+    let visible = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.contains("Visible alias text"))
+        .expect("visible associated alias run");
+    assert!(visible.style.bold);
+    assert!(visible.style.italic);
+    assert_eq!(visible.style.color_index, 1);
+    assert_eq!(visible.style.underline, UnderlineStyle::Single);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Visible alias text") && rendered_text.contains("After"),
+        "decoded PDF text missing visible associated alias text: {rendered_text:?}"
+    );
+
+    for forbidden in [
+        b"acf1".as_slice(),
+        b"aul",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden associated alias content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emphasis_mark_controls_render_passive_overlays_without_control_leakage() {
     let input = br"{\rtf1\accdot Dot text \acccomma Comma text \accnone Plain text{\object\objdata 414243}\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
