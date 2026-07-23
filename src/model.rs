@@ -694,6 +694,7 @@ pub enum StaticShapeArrowhead {
     None,
     Open,
     Triangle,
+    Diamond,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

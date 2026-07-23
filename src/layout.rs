@@ -2990,6 +2990,34 @@ fn push_static_shape_arrowhead(
                 fill_color: Some(color),
             });
         }
+        StaticShapeArrowhead::Diamond => {
+            let center = LayoutPoint {
+                x: tip.x - unit_x * (arrow_length * 0.55),
+                y: tip.y - unit_y * (arrow_length * 0.55),
+            };
+            let side_a = LayoutPoint {
+                x: center.x + perpendicular_x * half_width,
+                y: center.y + perpendicular_y * half_width,
+            };
+            let side_b = LayoutPoint {
+                x: center.x - perpendicular_x * half_width,
+                y: center.y - perpendicular_y * half_width,
+            };
+            let tail = LayoutPoint {
+                x: tip.x - unit_x * arrow_length,
+                y: tip.y - unit_y * arrow_length,
+            };
+            page.items.push(LayoutItem::Polygon {
+                points: vec![tip, side_a, tail, side_b],
+                paths: Vec::new(),
+                overlay_paths: Vec::new(),
+                fill_rule: StaticImageVectorFillRule::Winding,
+                stroke_width,
+                stroke_color: color,
+                stroke_style: LineStyle::Solid,
+                fill_color: Some(color),
+            });
+        }
     }
 }
 
