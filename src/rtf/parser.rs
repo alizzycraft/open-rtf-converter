@@ -10149,6 +10149,13 @@ impl Parser {
                 ));
                 Ok(())
             }
+            destination if is_note_separator_destination(destination) => {
+                self.diagnostics.push(Diagnostic::warning(
+                    "note separator placeholder stripped before safe model normalization",
+                    Some(offset),
+                ));
+                Ok(())
+            }
             _ => self.push_placeholder(text, offset),
         }
     }
@@ -12175,6 +12182,11 @@ impl Parser {
                 "background picture stripped before safe model normalization",
                 Some(offset),
             ));
+        } else if is_note_separator_destination(destination) {
+            self.diagnostics.push(Diagnostic::warning(
+                "note separator picture stripped before safe model normalization",
+                Some(offset),
+            ));
         } else if matches!(destination, Destination::Footnote | Destination::Endnote) {
             self.diagnostics.push(Diagnostic::warning(
                 "note picture replaced with passive text placeholder before normalization",
@@ -12253,6 +12265,12 @@ impl Parser {
         } else if destination == Destination::Background {
             self.diagnostics.push(Diagnostic::warning(
                 "background picture placeholder stripped before safe model normalization",
+                Some(offset),
+            ));
+            Ok(())
+        } else if is_note_separator_destination(destination) {
+            self.diagnostics.push(Diagnostic::warning(
+                "note separator picture placeholder stripped before safe model normalization",
                 Some(offset),
             ));
             Ok(())

@@ -69543,6 +69543,122 @@ fn continued_endnotes_use_safe_authored_continuation_separator() {
 }
 
 #[test]
+fn note_separator_picture_placeholder_is_stripped_without_body_escape() {
+    let input =
+        br"{\rtf1{\ftnsep Safe separator {\pict\pngblip 00}\par}Body\chftn{\footnote \chftn Note text\par}\par}"
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(&format!("Body{}", footnote_reference_marker(0))));
+    assert!(text.contains("Note text"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_) | Block::Placeholder(_))),
+        "separator picture placeholder should not escape into body blocks: {:?}",
+        parsed.document.blocks
+    );
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("note separator picture placeholder stripped")),
+        "expected separator picture placeholder strip diagnostic: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Body1"));
+    assert!(rendered_text.contains("Safe separator"));
+    assert!(rendered_text.contains("Note text"));
+    assert!(!rendered_text.contains("[Image skipped"));
+    for forbidden in [
+        b"ftnsep".as_slice(),
+        b"pict",
+        b"pngblip",
+        b"[Image skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden separator picture content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn note_separator_vector_picture_is_stripped_without_body_image_escape() {
+    let input =
+        br"{\rtf1{\aftnsep Safe endnote separator {\pict\wmetafile8\picw200\pich100\picwgoal2160\pichgoal720 01020304}\par}Body\chftn{\endnote \chftn Note text\par}\par}"
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Body1"));
+    assert!(text.contains("Note text"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_))),
+        "separator vector picture should not escape into body images: {:?}",
+        parsed.document.blocks
+    );
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("note separator picture stripped")),
+        "expected separator static picture strip diagnostic: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Body1"));
+    assert!(rendered_text.contains("Safe endnote separator"));
+    assert!(rendered_text.contains("Note text"));
+    for forbidden in [
+        b"aftnsep".as_slice(),
+        b"pict",
+        b"wmetafile",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden separator vector picture content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn endnotes_at_end_of_document_render_on_passive_final_page_without_control_leakage() {
     let input = rtf(&[
         "{",
