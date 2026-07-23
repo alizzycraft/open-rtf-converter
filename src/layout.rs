@@ -3127,6 +3127,31 @@ fn push_static_shape_arrowhead(
                 fill_color: Some(color),
             });
         }
+        StaticShapeArrowhead::Stealth => {
+            let notch = LayoutPoint {
+                x: tip.x - unit_x * (arrow_length * 0.62),
+                y: tip.y - unit_y * (arrow_length * 0.62),
+            };
+            let tail_half_width = half_width * 0.42;
+            let tail_a = LayoutPoint {
+                x: base.x + perpendicular_x * tail_half_width,
+                y: base.y + perpendicular_y * tail_half_width,
+            };
+            let tail_b = LayoutPoint {
+                x: base.x - perpendicular_x * tail_half_width,
+                y: base.y - perpendicular_y * tail_half_width,
+            };
+            page.items.push(LayoutItem::Polygon {
+                points: vec![tip, wing_a, tail_a, notch, tail_b, wing_b],
+                paths: Vec::new(),
+                overlay_paths: Vec::new(),
+                fill_rule: StaticImageVectorFillRule::Winding,
+                stroke_width,
+                stroke_color: color,
+                stroke_style: LineStyle::Solid,
+                fill_color: Some(color),
+            });
+        }
     }
 }
 
