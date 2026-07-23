@@ -10156,6 +10156,13 @@ impl Parser {
                 ));
                 Ok(())
             }
+            destination if is_non_visible_model_destination(destination) => {
+                self.diagnostics.push(Diagnostic::warning(
+                    "non-visible destination placeholder stripped before safe model normalization",
+                    Some(offset),
+                ));
+                Ok(())
+            }
             _ => self.push_placeholder(text, offset),
         }
     }
@@ -12187,6 +12194,11 @@ impl Parser {
                 "note separator picture stripped before safe model normalization",
                 Some(offset),
             ));
+        } else if is_non_visible_model_destination(destination) {
+            self.diagnostics.push(Diagnostic::warning(
+                "non-visible destination picture stripped before safe model normalization",
+                Some(offset),
+            ));
         } else if matches!(destination, Destination::Footnote | Destination::Endnote) {
             self.diagnostics.push(Diagnostic::warning(
                 "note picture replaced with passive text placeholder before normalization",
@@ -12271,6 +12283,12 @@ impl Parser {
         } else if is_note_separator_destination(destination) {
             self.diagnostics.push(Diagnostic::warning(
                 "note separator picture placeholder stripped before safe model normalization",
+                Some(offset),
+            ));
+            Ok(())
+        } else if is_non_visible_model_destination(destination) {
+            self.diagnostics.push(Diagnostic::warning(
+                "non-visible destination picture placeholder stripped before safe model normalization",
                 Some(offset),
             ));
             Ok(())
@@ -12857,6 +12875,11 @@ impl Parser {
             } else {
                 self.document.background_shapes.push(shape);
             }
+        } else if is_non_visible_model_destination(destination) {
+            self.diagnostics.push(Diagnostic::warning(
+                "non-visible destination shape stripped before safe model normalization",
+                Some(offset),
+            ));
         } else {
             self.push_document_block(Block::Shape(shape), offset)?;
         }
@@ -21465,6 +21488,25 @@ fn is_note_separator_destination(destination: Destination) -> bool {
             | Destination::FootnoteContinuationSeparator
             | Destination::EndnoteSeparator
             | Destination::EndnoteContinuationSeparator
+    )
+}
+
+fn is_non_visible_model_destination(destination: Destination) -> bool {
+    matches!(
+        destination,
+        Destination::Ignored
+            | Destination::Metadata
+            | Destination::ObjectData
+            | Destination::Picture
+            | Destination::FieldInstruction
+            | Destination::BookmarkStart
+            | Destination::BookmarkEnd
+            | Destination::StyleSheet
+            | Destination::FontTable
+            | Destination::FontAlternate
+            | Destination::ListTable
+            | Destination::ListOverrideTable
+            | Destination::ColorTable
     )
 }
 

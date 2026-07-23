@@ -10451,6 +10451,58 @@ fn structural_metadata_fields_do_not_emit_visible_placeholders_or_payloads() {
 }
 
 #[test]
+fn metadata_resultless_fields_do_not_emit_visible_placeholders_or_payloads() {
+    let input = br#"{\rtf1{\info{\title Hidden title {\field{\*\fldinst INCLUDEPICTURE "https://hidden.example/payload.png"}}}}Visible body\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(text, "Visible body");
+    for forbidden in [
+        "[Field removed",
+        "INCLUDEPICTURE",
+        "hidden.example",
+        "payload.png",
+        "Hidden title",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "metadata resultless field leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible body"));
+    for forbidden in [
+        b"[Field removed".as_slice(),
+        b"INCLUDEPICTURE",
+        b"hidden.example",
+        b"payload.png",
+        b"Hidden title",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "metadata resultless field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn structural_metadata_bookmarks_do_not_feed_fields_or_pdf_anchors() {
     let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\*\bkmkstart HiddenFontMark}Hidden font payload{\*\bkmkend HiddenFontMark}}{\stylesheet{\s1 Visible Style;}{\*\bkmkstart HiddenStyleMark}Hidden style payload{\*\bkmkend HiddenStyleMark}}\f0 Body {\*\bkmkstart VisibleMark}Marked text{\*\bkmkend VisibleMark} visible {\field{\*\fldinst REF VisibleMark}} hidden {\field{\*\fldinst REF HiddenFontMark}} style {\field{\*\fldinst REF HiddenStyleMark}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -10517,6 +10569,65 @@ fn structural_metadata_bookmarks_do_not_feed_fields_or_pdf_anchors() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "structural metadata bookmark leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn metadata_static_shapes_do_not_emit_body_shapes_or_payloads() {
+    let input = br#"{\rtf1{\info{\title Hidden title {\shp{\*\shpinst\shpleft720\shptop720\shpright2160\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-metadata-shape-payload}}}}}}Visible body\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(text, "Visible body");
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Shape(_))),
+        "metadata static shape should not escape into body shapes: {:?}",
+        parsed.document.blocks
+    );
+    for forbidden in [
+        "Hidden title",
+        "shapeType",
+        "pFragments",
+        "hidden-metadata-shape-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "metadata static shape leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible body"));
+    for forbidden in [
+        b"Hidden title".as_slice(),
+        b"shapeType",
+        b"pFragments",
+        b"hidden-metadata-shape-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "metadata static shape leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -70875,6 +70986,110 @@ fn unknown_non_ignorable_destinations_are_skipped_without_pdf_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "unknown destination leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn ignorable_destination_picture_fallback_is_stripped_without_body_escape() {
+    let input = br"{\rtf1 Visible {\*\unknown{\pict\pngblip 00}} after\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible  after"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_) | Block::Placeholder(_))),
+        "ignorable picture fallback should not escape into body blocks: {:?}",
+        parsed.document.blocks
+    );
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible  after"));
+    for forbidden in [
+        b"unknown".as_slice(),
+        b"pict",
+        b"pngblip",
+        b"[Image skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "ignorable picture fallback leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn ignorable_destination_static_shape_is_stripped_without_body_escape() {
+    let input = br#"{\rtf1 Visible {\*\unknown{\shp{\*\shpinst\shpleft720\shptop720\shpright2160\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-ignorable-shape-payload}}}}} after\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible  after"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Shape(_))),
+        "ignorable static shape should not escape into body shapes: {:?}",
+        parsed.document.blocks
+    );
+    for forbidden in [
+        "unknown",
+        "shapeType",
+        "pFragments",
+        "hidden-ignorable-shape-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "ignorable static shape leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible  after"));
+    for forbidden in [
+        b"unknown".as_slice(),
+        b"shapeType",
+        b"pFragments",
+        b"hidden-ignorable-shape-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "ignorable static shape leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
