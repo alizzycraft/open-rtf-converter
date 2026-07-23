@@ -3814,6 +3814,7 @@ fn draw_passive_line(
             stroke_line(content, x1, y1, x2, y2, width);
         }
         LineStyle::Double => draw_double_line(content, x1, y1, x2, y2, width),
+        LineStyle::Triple => draw_triple_line(content, x1, y1, x2, y2, width),
         LineStyle::Wavy => stroke_wave_line(content, x1, y1, x2, y2, width),
     }
     content.restore_state();
@@ -3821,7 +3822,7 @@ fn draw_passive_line(
 
 fn set_passive_path_stroke_style(content: &mut Content, width: f32, style: LineStyle) {
     match style {
-        LineStyle::Solid | LineStyle::Double | LineStyle::Wavy => {}
+        LineStyle::Solid | LineStyle::Double | LineStyle::Triple | LineStyle::Wavy => {}
         LineStyle::Dotted => {
             let dot = width.max(0.5);
             content.set_dash_pattern([dot, dot * 2.0], 0.0);
@@ -4612,6 +4613,22 @@ fn draw_double_line(content: &mut Content, x1: f32, y1: f32, x2: f32, y2: f32, w
         stroke_line(content, x1, y1 - offset, x2, y2 - offset, stroke_width);
     } else if (x1 - x2).abs() < 0.01 {
         stroke_line(content, x1 + offset, y1, x2 + offset, y2, stroke_width);
+        stroke_line(content, x1 - offset, y1, x2 - offset, y2, stroke_width);
+    } else {
+        stroke_line(content, x1, y1, x2, y2, width);
+    }
+}
+
+fn draw_triple_line(content: &mut Content, x1: f32, y1: f32, x2: f32, y2: f32, width: f32) {
+    let stroke_width = (width * 0.22).clamp(0.25, width.max(0.25));
+    let offset = (width * 0.55).max(1.0);
+    if (y1 - y2).abs() < 0.01 {
+        stroke_line(content, x1, y1 + offset, x2, y2 + offset, stroke_width);
+        stroke_line(content, x1, y1, x2, y2, stroke_width);
+        stroke_line(content, x1, y1 - offset, x2, y2 - offset, stroke_width);
+    } else if (x1 - x2).abs() < 0.01 {
+        stroke_line(content, x1 + offset, y1, x2 + offset, y2, stroke_width);
+        stroke_line(content, x1, y1, x2, y2, stroke_width);
         stroke_line(content, x1 - offset, y1, x2 - offset, y2, stroke_width);
     } else {
         stroke_line(content, x1, y1, x2, y2, width);
@@ -6733,7 +6750,7 @@ endstream
             visible: true,
             width_twips: 60,
             color_index: None,
-            style: BorderStyle::Double,
+            style: BorderStyle::Triple,
             ..TableCellBorder::default()
         };
         let mut character_style = CharacterStyle::default();
@@ -6765,7 +6782,7 @@ endstream
                 .iter()
                 .filter(|operation| operation.operator == "S")
                 .count()
-                >= 6
+                >= 7
         );
         assert!(
             content

@@ -5,6 +5,7 @@ use std::path::Path;
 use lopdf::Document as PdfDocument;
 #[cfg(feature = "cli")]
 use open_rtf_converter::convert_rtf_file_to_pdf;
+use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineStyle};
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
@@ -67413,7 +67414,6 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         parsed.diagnostics
     );
     for expected in [
-        "Word border style \\brdrtriple approximated as passive double border",
         "Word border style \\brdrinset approximated as passive single border",
         "Word border effect \\brdrsh flattened for passive static PDF output",
     ] {
@@ -67426,6 +67426,14 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
             parsed.diagnostics
         );
     }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("brdrtriple approximated")),
+        "brdrtriple should normalize as a passive triple border: {:?}",
+        parsed.diagnostics
+    );
     for forbidden in [
         "brdrhair",
         "brdrdashdot",
@@ -67455,7 +67463,18 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
     )
     .unwrap();
     let pdf = fs::read(&output_path).unwrap();
-    assert!(PdfDocument::load_mem(&pdf).is_ok());
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count()
+            >= 8,
+        "triple border should emit additional passive stroke operations"
+    );
     for forbidden in [
         b"brdrhair".as_slice(),
         b"brdrdashdot",
@@ -84705,7 +84724,7 @@ fn office_shape_named_double_line_style_alias_renders_passively() {
 }
 
 #[test]
-fn office_shape_triple_line_style_is_bounded_passive_double_approximation() {
+fn office_shape_triple_line_style_renders_passive_triple_without_property_leakage() {
     let input = rtf(&[
         "{",
         "\\",
@@ -84762,13 +84781,22 @@ fn office_shape_triple_line_style_is_bounded_passive_double_approximation() {
 
     assert_eq!(
         shape.stroke_style,
-        open_rtf_converter::model::BorderStyle::Double
+        open_rtf_converter::model::BorderStyle::Triple
     );
     assert!(
         output.diagnostics.iter().any(|warning| warning
             .message
             .contains("unsupported/active drawing properties")),
-        "triple Office line style approximation should be diagnosed"
+        "active Office drawing properties should still be stripped: {:?}",
+        output.diagnostics
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|warning| !warning.message.contains("lineStyle approximation")),
+        "supported triple Office line style should not be diagnosed as an approximation: {:?}",
+        output.diagnostics
     );
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
@@ -84803,6 +84831,21 @@ fn office_shape_triple_line_style_is_bounded_passive_double_approximation() {
             String::from_utf8_lossy(forbidden)
         );
     }
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(
+                item,
+                LayoutItem::Line {
+                    style: LineStyle::Triple,
+                    ..
+                }
+            )),
+        "triple Office line style should normalize to a passive triple line"
+    );
 }
 
 #[test]

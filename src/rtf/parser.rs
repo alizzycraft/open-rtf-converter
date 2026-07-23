@@ -3510,6 +3510,9 @@ impl Parser {
             "brdrdb" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Double);
             }
+            "brdrtriple" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_border_style(BorderStyle::Triple);
+            }
             name if word_double_border_variant_control(name)
                 && self.is_parsing_list_level_definition() =>
             {
@@ -4738,6 +4741,7 @@ impl Parser {
             "brdrth" => self.set_current_border_style(BorderStyle::Thick),
             "brdrhair" => self.set_current_border_style(BorderStyle::Hairline),
             "brdrdb" => self.set_current_border_style(BorderStyle::Double),
+            "brdrtriple" => self.set_current_border_style(BorderStyle::Triple),
             name if word_double_border_variant_control(name) => {
                 self.set_current_border_style_approximation(name, BorderStyle::Double, offset);
             }
@@ -20373,8 +20377,7 @@ fn table_row_shading_pattern_control(name: &str) -> Option<ShadingPattern> {
 fn word_double_border_variant_control(name: &str) -> bool {
     matches!(
         name,
-        "brdrtriple"
-            | "brdrtnthsg"
+        "brdrtnthsg"
             | "brdrthtnsg"
             | "brdrtnthtnsg"
             | "brdrtnthmg"
@@ -20399,6 +20402,7 @@ fn passive_border_style_label(style: BorderStyle) -> &'static str {
         BorderStyle::Thick => "thick",
         BorderStyle::Hairline => "hairline",
         BorderStyle::Double => "double",
+        BorderStyle::Triple => "triple",
         BorderStyle::Dotted => "dotted",
         BorderStyle::Dashed => "dashed",
         BorderStyle::Wavy => "wavy",
@@ -22008,7 +22012,7 @@ fn parse_shape_line_style_property(value: &str) -> Option<(BorderStyle, bool)> {
         | "msolinethinthin" | "msolinethinthick" | "msolinethickthin" => {
             Some((BorderStyle::Double, false))
         }
-        "5" | "thickbetweenthin" | "msolinethickbetweenthin" => Some((BorderStyle::Double, true)),
+        "5" | "thickbetweenthin" | "msolinethickbetweenthin" => Some((BorderStyle::Triple, false)),
         _ => None,
     }
 }
@@ -47791,7 +47795,7 @@ After\par}"#;
         assert_eq!(first.style.borders.top.style, BorderStyle::Hairline);
         assert_eq!(first.style.borders.bottom.style, BorderStyle::Hairline);
         assert_eq!(second.style.borders.bottom.style, BorderStyle::Dashed);
-        assert_eq!(third.style.borders.top.style, BorderStyle::Double);
+        assert_eq!(third.style.borders.top.style, BorderStyle::Triple);
         assert_eq!(fourth.style.borders.left.style, BorderStyle::Single);
         assert_eq!(fifth.style.borders.right.style, BorderStyle::Single);
         assert_eq!(
@@ -47799,7 +47803,6 @@ After\par}"#;
             BorderStyle::Dashed
         );
         for expected in [
-            "Word border style \\brdrtriple approximated as passive double border",
             "Word border style \\brdrinset approximated as passive single border",
             "Word border effect \\brdrsh flattened for passive static PDF output",
         ] {
@@ -47812,6 +47815,14 @@ After\par}"#;
                 output.diagnostics
             );
         }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("brdrtriple approximated")),
+            "brdrtriple should normalize as a passive triple border: {:?}",
+            output.diagnostics
+        );
         assert!(
             output
                 .diagnostics

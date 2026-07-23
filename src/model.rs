@@ -815,6 +815,7 @@ pub enum BorderStyle {
     Thick,
     Hairline,
     Double,
+    Triple,
     Dotted,
     Dashed,
     Wavy,

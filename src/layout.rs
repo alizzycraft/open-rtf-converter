@@ -130,6 +130,7 @@ pub enum LineStyle {
     #[default]
     Solid,
     Double,
+    Triple,
     Dotted,
     Dashed,
     Wavy,
@@ -8889,6 +8890,7 @@ fn line_style_for_border_style(style: BorderStyle) -> LineStyle {
     match style {
         BorderStyle::Single | BorderStyle::Thick | BorderStyle::Hairline => LineStyle::Solid,
         BorderStyle::Double => LineStyle::Double,
+        BorderStyle::Triple => LineStyle::Triple,
         BorderStyle::Dotted => LineStyle::Dotted,
         BorderStyle::Dashed => LineStyle::Dashed,
         BorderStyle::Wavy => LineStyle::Wavy,
@@ -15505,6 +15507,31 @@ mod tests {
 
         assert!(line_styles.contains(&LineStyle::Double));
         assert!(line_styles.contains(&LineStyle::Dashed));
+
+        let mut triple_paragraph = ParagraphStyle::default();
+        triple_paragraph.borders.top = TableCellBorder {
+            visible: true,
+            width_twips: 60,
+            color_index: None,
+            style: BorderStyle::Triple,
+            ..TableCellBorder::default()
+        };
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: triple_paragraph,
+            runs: vec![Run {
+                text: "Triple".to_string(),
+                style: CharacterStyle::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        assert!(layout.pages[0].items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Line {
+                style: LineStyle::Triple,
+                ..
+            }
+        )));
     }
 
     #[test]
