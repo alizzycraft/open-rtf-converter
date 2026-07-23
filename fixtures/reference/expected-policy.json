@@ -202,8 +202,7 @@
         "rendering shape picture result with bounded passive shape frame",
         "ignoring duplicate embedded object alternate after passive shape result",
         "active content removed: object metadata in skipped destination",
-        "ignoring duplicate shape result fallback after passive primary shape result",
-        "Latin Extended characters for font 'Times New Roman CE'"
+        "ignoring duplicate shape result fallback after passive primary shape result"
       ],
       "forbidden_pdf_markers": [
         "objdata",

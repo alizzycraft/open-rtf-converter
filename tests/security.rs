@@ -312,13 +312,13 @@ fn cyrillic_charset_text_uses_bundled_serif_asset() {
     options.diagnostics = true;
     let output = convert_rtf_to_pdf(&input, &options).unwrap();
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("Cyrillic characters")
-            && diagnostic
-                .message
-                .contains("caller-provided passive font asset")
-            && diagnostic.message.contains("Times New Roman Cyr")
-    }));
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("Cyrillic characters for font 'Times New Roman Cyr'")),
+        "covered Cyrillic glyphs should render through embedded passive Type0 fonts without a degradation warning: {:?}",
+        output.diagnostics
+    );
 
     for forbidden in [
         b"Times New Roman Cyr".as_slice(),
@@ -379,13 +379,13 @@ fn central_european_charset_text_uses_bundled_serif_asset() {
     options.diagnostics = true;
     let output = convert_rtf_to_pdf(&input, &options).unwrap();
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("Latin Extended characters")
-            && diagnostic
-                .message
-                .contains("caller-provided passive font asset")
-            && diagnostic.message.contains("Times New Roman CE")
-    }));
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("Latin Extended characters for font 'Times New Roman CE'")),
+        "covered Central European glyphs should render through embedded passive Type0 fonts without a degradation warning: {:?}",
+        output.diagnostics
+    );
     assert!(
         !output
             .pdf

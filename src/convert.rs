@@ -301,10 +301,7 @@ fn collect_unsupported_glyph_diagnostic_from_fragment(
             "{} characters for font '{}' need passive font asset support; current PDF base-font fallback may render replacement glyphs",
             script, font_name
         ),
-        FontCoverage::Covered => format!(
-            "{} characters for font '{}' have a caller-provided passive font asset; covered glyphs can render through embedded passive Type0 fonts",
-            script, font_name
-        ),
+        FontCoverage::Covered => return,
         FontCoverage::MissingGlyph => format!(
             "{} characters for font '{}' are not covered by the caller-provided passive font asset; current PDF base-font fallback may render replacement glyphs",
             script, font_name

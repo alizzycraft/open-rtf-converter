@@ -292,7 +292,6 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "ignoring duplicate embedded object alternate after passive shape result",
                 "active content removed: object metadata in skipped destination",
                 "ignoring duplicate shape result fallback after passive primary shape result",
-                "Latin Extended characters for font 'Times New Roman CE'",
             ],
         },
     ]

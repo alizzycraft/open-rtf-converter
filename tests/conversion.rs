@@ -1003,10 +1003,10 @@ fn browser_safe_defaults_embed_bundled_metric_fonts_for_common_word_families() {
         );
     }
     assert!(
-        output.diagnostics.iter().any(|diagnostic| diagnostic
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
             .message
-            .contains("Latin Extended characters for font 'Times New Roman' have a caller-provided passive font asset")),
-        "serif asset should cover Latin Extended glyphs through embedded passive Type0 fonts: {:?}",
+            .contains("Latin Extended characters for font 'Times New Roman'")),
+        "covered Latin Extended glyphs should render through embedded passive Type0 fonts without a degradation warning: {:?}",
         output.diagnostics
     );
     for forbidden in [
