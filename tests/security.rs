@@ -5,7 +5,7 @@ use std::path::Path;
 use lopdf::Document as PdfDocument;
 #[cfg(feature = "cli")]
 use open_rtf_converter::convert_rtf_file_to_pdf;
-use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineStyle};
+use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineCap, LineStyle};
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
@@ -15,9 +15,9 @@ use open_rtf_converter::model::{
     PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER,
     ShadingPattern, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
     StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
-    StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind, StaticShapeTextVerticalAnchor,
-    TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection, TableRowAlignment, TextRelief,
-    UnderlineStyle,
+    StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap,
+    StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
+    TableRowAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -84846,6 +84846,189 @@ fn office_shape_triple_line_style_renders_passive_triple_without_property_leakag
             )),
         "triple Office line style should normalize to a passive triple line"
     );
+}
+
+#[test]
+fn office_shape_round_line_cap_renders_passively_without_property_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineEndCap}{",
+        "\\",
+        "sv round}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-round-cap-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("round cap line shape");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.stroke_cap, StaticShapeLineCap::Round);
+    assert!(
+        output.diagnostics.iter().any(|warning| warning
+            .message
+            .contains("unsupported/active drawing properties")),
+        "active Office drawing properties should still be stripped: {:?}",
+        output.diagnostics
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "lineEndCap",
+        "round",
+        "pFragments",
+        "hostile-round-cap-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden line cap drawing content leaked to text: {forbidden}"
+        );
+    }
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(
+                item,
+                LayoutItem::CappedLine {
+                    cap: LineCap::Round,
+                    ..
+                }
+            )),
+        "round Office line cap should normalize to a passive capped line"
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "J"),
+        "round Office line cap should emit a passive PDF line-cap operator"
+    );
+    for forbidden in [
+        b"lineEndCap".as_slice(),
+        b"pFragments",
+        b"hostile-round-cap-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden line cap drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_office_shape_line_cap_is_stripped_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineEndCap}{\sv active-cap-payload}}}}After\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("invalid cap line shape");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.stroke_cap, StaticShapeLineCap::Flat);
+    assert!(
+        output.diagnostics.iter().any(|warning| warning
+            .message
+            .contains("unsupported/active drawing properties")),
+        "invalid Office line cap should be stripped and diagnosed: {:?}",
+        output.diagnostics
+    );
+    for forbidden in ["lineEndCap", "active-cap-payload", "[Shape skipped"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden invalid line cap content leaked to text: {forbidden}"
+        );
+    }
+    for forbidden in [
+        b"lineEndCap".as_slice(),
+        b"active-cap-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden invalid line cap content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
 }
 
 #[test]

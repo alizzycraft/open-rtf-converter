@@ -15,12 +15,13 @@ use crate::model::{
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
     StaticImageVectorPathSegment, StaticImageVectorRaster, StaticImageVectorTextBounds,
     StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
-    TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
-    TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
-    TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
+    StaticShapeKind, StaticShapeLineCap, StaticShapePoint, StaticShapeTextVerticalAnchor,
+    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
+    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
+    TableCellPadding, TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief,
+    UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -1004,6 +1005,7 @@ struct ShapeBuilder {
     stroke_color: Color,
     stroke_color_from_foreground: bool,
     stroke_style: BorderStyle,
+    stroke_cap: StaticShapeLineCap,
     fill_enabled: bool,
     fill_color: Option<Color>,
     fill_color_from_foreground: bool,
@@ -1061,6 +1063,7 @@ impl Default for ShapeBuilder {
             stroke_color: Color::default(),
             stroke_color_from_foreground: false,
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_enabled: true,
             fill_color: None,
             fill_color_from_foreground: false,
@@ -12711,6 +12714,7 @@ impl Parser {
                 stroke_width_twips,
                 stroke_color: shape.stroke_color,
                 stroke_style: shape.stroke_style,
+                stroke_cap: shape.stroke_cap,
                 fill_color,
                 shadow_enabled: shape.shadow_enabled,
                 shadow_color: shape.shadow_color,
@@ -13536,6 +13540,15 @@ impl Parser {
                     if approximated {
                         self.mark_current_shape_unsupported_or_active_property_stripped();
                     }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineEndCap" => {
+                if let Some(cap) = parse_shape_line_cap_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.stroke_cap = cap;
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
@@ -22013,6 +22026,21 @@ fn parse_shape_line_style_property(value: &str) -> Option<(BorderStyle, bool)> {
             Some((BorderStyle::Double, false))
         }
         "5" | "thickbetweenthin" | "msolinethickbetweenthin" => Some((BorderStyle::Triple, false)),
+        _ => None,
+    }
+}
+
+fn parse_shape_line_cap_property(value: &str) -> Option<StaticShapeLineCap> {
+    let normalized = value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "0" | "flat" | "butt" | "msolinecapflat" => Some(StaticShapeLineCap::Flat),
+        "1" | "square" | "msolinecapsquare" => Some(StaticShapeLineCap::Square),
+        "2" | "round" | "msolinecapround" => Some(StaticShapeLineCap::Round),
         _ => None,
     }
 }

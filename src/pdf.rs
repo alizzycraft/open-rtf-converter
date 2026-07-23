@@ -2,15 +2,16 @@ use std::error::Error;
 use std::fmt;
 
 use pdf_writer::types::{
-    BlendMode, CidFontType, FontFlags, Predictor, SystemInfo, TextRenderingMode, UnicodeCmap,
+    BlendMode, CidFontType, FontFlags, LineCapStyle, Predictor, SystemInfo, TextRenderingMode,
+    UnicodeCmap,
 };
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
 use ttf_parser::{Face, name_id};
 
 use crate::fonts::{FontAsset, FontProvider};
 use crate::layout::{
-    LayoutDocument, LayoutItem, LineStyle, PdfColor, PdfFontFamily, TextFragment, TextRotation,
-    passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
+    LayoutDocument, LayoutItem, LineCap, LineStyle, PdfColor, PdfFontFamily, TextFragment,
+    TextRotation, passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
     BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ShadingPattern,
@@ -977,7 +978,30 @@ fn draw_layout_item(
                 color,
                 style,
             } => {
-                draw_passive_line(content, *x1, *y1, *x2, *y2, *width, *color, *style);
+                draw_passive_line(
+                    content,
+                    *x1,
+                    *y1,
+                    *x2,
+                    *y2,
+                    *width,
+                    *color,
+                    *style,
+                    LineCap::Flat,
+                );
+                return;
+            }
+            LayoutItem::CappedLine {
+                x1,
+                y1,
+                x2,
+                y2,
+                width,
+                color,
+                style,
+                cap,
+            } => {
+                draw_passive_line(content, *x1, *y1, *x2, *y2, *width, *color, *style, *cap);
                 return;
             }
             LayoutItem::Ellipse {
@@ -1293,6 +1317,7 @@ where
             LayoutItem::Highlight { .. }
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
+            | LayoutItem::CappedLine { .. }
             | LayoutItem::Ellipse { .. }
             | LayoutItem::RoundedRectangle { .. }
             | LayoutItem::Polygon { .. }
@@ -1328,6 +1353,7 @@ where
             | LayoutItem::Highlight { .. }
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
+            | LayoutItem::CappedLine { .. }
             | LayoutItem::Ellipse { .. }
             | LayoutItem::RoundedRectangle { .. }
             | LayoutItem::Polygon { .. } => return,
@@ -2338,6 +2364,7 @@ fn draw_passive_vector_line(
         stroke_width,
         pdf_color_from_model(color),
         stroke_style,
+        LineCap::Flat,
     );
 }
 
@@ -3798,9 +3825,11 @@ fn draw_passive_line(
     width: f32,
     color: PdfColor,
     style: LineStyle,
+    cap: LineCap,
 ) {
     content.save_state();
     set_stroke_color(content, color);
+    set_passive_line_cap(content, cap);
     match style {
         LineStyle::Solid => stroke_line(content, x1, y1, x2, y2, width),
         LineStyle::Dotted => {
@@ -3830,6 +3859,18 @@ fn set_passive_path_stroke_style(content: &mut Content, width: f32, style: LineS
         LineStyle::Dashed => {
             let dash = (width * 3.0).max(3.0);
             content.set_dash_pattern([dash, dash * 0.75], 0.0);
+        }
+    }
+}
+
+fn set_passive_line_cap(content: &mut Content, cap: LineCap) {
+    match cap {
+        LineCap::Flat => {}
+        LineCap::Round => {
+            content.set_line_cap(LineCapStyle::RoundCap);
+        }
+        LineCap::Square => {
+            content.set_line_cap(LineCapStyle::ProjectingSquareCap);
         }
     }
 }
@@ -5206,8 +5247,9 @@ mod tests {
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
         FontPitch, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER, PageSettings, Paragraph,
         ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticImageAlphaMask, StaticShape,
-        StaticShapeArrowhead, StaticShapeKind, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER,
-        Table, TableCell, TableCellBorder, TableRow, TableRowWrapMargins, UnderlineStyle,
+        StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap, StaticShapeTextVerticalAnchor,
+        TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder, TableRow, TableRowWrapMargins,
+        UnderlineStyle,
     };
     use lopdf::{Dictionary, Object};
 
@@ -6554,6 +6596,7 @@ endstream
                 blue: 0,
             },
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -6656,6 +6699,7 @@ endstream
                 blue: 0,
             },
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,

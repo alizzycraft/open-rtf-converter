@@ -647,6 +647,7 @@ pub struct StaticShape {
     pub stroke_width_twips: i32,
     pub stroke_color: Color,
     pub stroke_style: BorderStyle,
+    pub stroke_cap: StaticShapeLineCap,
     pub fill_color: Option<Color>,
     pub shadow_enabled: bool,
     pub shadow_color: Color,
@@ -689,6 +690,14 @@ pub enum StaticShapeArrowhead {
     None,
     Open,
     Triangle,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum StaticShapeLineCap {
+    #[default]
+    Flat,
+    Round,
+    Square,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

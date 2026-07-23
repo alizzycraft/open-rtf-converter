@@ -12,7 +12,7 @@ use crate::model::{
     PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
     StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    StaticShapeKind, StaticShapeLineCap, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
     Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
@@ -84,6 +84,16 @@ pub enum LayoutItem {
         color: PdfColor,
         style: LineStyle,
     },
+    CappedLine {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        width: f32,
+        color: PdfColor,
+        style: LineStyle,
+        cap: LineCap,
+    },
     Ellipse {
         x: f32,
         y: f32,
@@ -134,6 +144,14 @@ pub enum LineStyle {
     Dotted,
     Dashed,
     Wavy,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum LineCap {
+    #[default]
+    Flat,
+    Round,
+    Square,
 }
 
 #[derive(Debug, Clone)]
@@ -2359,6 +2377,7 @@ fn layout_shape(
     let shadow_offset_x = twips_to_points(shape.shadow_offset_x_twips);
     let shadow_offset_y = twips_to_points(shape.shadow_offset_y_twips);
     let stroke_style = line_style_for_border_style(shape.stroke_style);
+    let stroke_cap = line_cap_for_shape_cap(shape.stroke_cap);
     let Some(page) = pages.last_mut() else {
         return;
     };
@@ -2374,15 +2393,15 @@ fn layout_shape(
                     x: shape_point_x(x, width, width, shape.flip_horizontal),
                     y: shape_point_y(top_y, height, height, shape.flip_vertical),
                 };
-                page.items.push(LayoutItem::Line {
-                    x1: start.x,
-                    y1: start.y,
-                    x2: end.x,
-                    y2: end.y,
-                    width: width_points,
+                push_shape_line(
+                    page,
+                    start,
+                    end,
+                    width_points,
                     color,
-                    style: stroke_style,
-                });
+                    stroke_style,
+                    stroke_cap,
+                );
                 push_static_shape_arrowhead(
                     page,
                     shape.start_arrowhead,
@@ -2428,15 +2447,15 @@ fn layout_shape(
                 for segment in points.windows(2) {
                     let start = segment[0];
                     let end = segment[1];
-                    page.items.push(LayoutItem::Line {
-                        x1: start.x,
-                        y1: start.y,
-                        x2: end.x,
-                        y2: end.y,
-                        width: width_points,
+                    push_shape_line(
+                        page,
+                        start,
+                        end,
+                        width_points,
                         color,
-                        style: stroke_style,
-                    });
+                        stroke_style,
+                        stroke_cap,
+                    );
                 }
                 if let [first, second, ..] = points.as_slice() {
                     push_static_shape_arrowhead(
@@ -2851,6 +2870,39 @@ fn offset_shape_paths(
         .iter()
         .map(|path| offset_shape_points(path, offset_x, offset_y))
         .collect()
+}
+
+fn push_shape_line(
+    page: &mut LayoutPage,
+    start: LayoutPoint,
+    end: LayoutPoint,
+    width: f32,
+    color: PdfColor,
+    style: LineStyle,
+    cap: LineCap,
+) {
+    if cap == LineCap::Flat {
+        page.items.push(LayoutItem::Line {
+            x1: start.x,
+            y1: start.y,
+            x2: end.x,
+            y2: end.y,
+            width,
+            color,
+            style,
+        });
+    } else {
+        page.items.push(LayoutItem::CappedLine {
+            x1: start.x,
+            y1: start.y,
+            x2: end.x,
+            y2: end.y,
+            width,
+            color,
+            style,
+            cap,
+        });
+    }
 }
 
 fn push_static_shape_arrowhead(
@@ -3316,7 +3368,7 @@ fn layout_item_vertical_bounds(item: &LayoutItem) -> Option<VerticalBounds> {
             top: *y + 1.0,
             bottom: *y - 1.0,
         }),
-        LayoutItem::Line { y1, y2, width, .. } => {
+        LayoutItem::Line { y1, y2, width, .. } | LayoutItem::CappedLine { y1, y2, width, .. } => {
             let half_width = *width / 2.0;
             Some(VerticalBounds {
                 top: (*y1).max(*y2) + half_width,
@@ -3400,7 +3452,7 @@ fn translate_layout_item_y(item: &mut LayoutItem, delta_y: f32) {
             LayoutItem::Highlight { y, .. } => *y += delta_y,
             LayoutItem::Text(fragment) => fragment.baseline_y += delta_y,
             LayoutItem::Underline { y, .. } => *y += delta_y,
-            LayoutItem::Line { y1, y2, .. } => {
+            LayoutItem::Line { y1, y2, .. } | LayoutItem::CappedLine { y1, y2, .. } => {
                 *y1 += delta_y;
                 *y2 += delta_y;
             }
@@ -8897,6 +8949,14 @@ fn line_style_for_border_style(style: BorderStyle) -> LineStyle {
     }
 }
 
+fn line_cap_for_shape_cap(cap: StaticShapeLineCap) -> LineCap {
+    match cap {
+        StaticShapeLineCap::Flat => LineCap::Flat,
+        StaticShapeLineCap::Round => LineCap::Round,
+        StaticShapeLineCap::Square => LineCap::Square,
+    }
+}
+
 fn justified_word_spacing(
     line: &Line,
     style: &ParagraphStyle,
@@ -11065,6 +11125,7 @@ mod tests {
                 stroke_width_twips: 0,
                 stroke_color: Color::default(),
                 stroke_style: BorderStyle::Single,
+                stroke_cap: StaticShapeLineCap::Flat,
                 fill_color: Some(Color {
                     red: 200,
                     green: 20,
@@ -11126,6 +11187,7 @@ mod tests {
             stroke_width_twips: 0,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 200,
                 green: 20,
@@ -11258,6 +11320,7 @@ mod tests {
                 stroke_width_twips: 0,
                 stroke_color: Color::default(),
                 stroke_style: BorderStyle::Single,
+                stroke_cap: StaticShapeLineCap::Flat,
                 fill_color: Some(Color {
                     red: 200,
                     green: 20,
@@ -11325,6 +11388,7 @@ mod tests {
             stroke_width_twips: 0,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -11406,6 +11470,7 @@ mod tests {
                 blue: 0,
             },
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11482,6 +11547,7 @@ mod tests {
                 blue: 0,
             },
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -11567,6 +11633,7 @@ mod tests {
             stroke_width_twips: 0,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11665,6 +11732,7 @@ mod tests {
             stroke_width_twips: 0,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11734,6 +11802,7 @@ mod tests {
             stroke_width_twips: 0,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11813,6 +11882,7 @@ mod tests {
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dashed,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11869,6 +11939,7 @@ mod tests {
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11931,6 +12002,7 @@ mod tests {
                 blue: 0,
             },
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11999,6 +12071,7 @@ mod tests {
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12086,6 +12159,7 @@ mod tests {
             stroke_width_twips: 30,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12173,6 +12247,7 @@ mod tests {
             stroke_width_twips: 20,
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12247,6 +12322,7 @@ mod tests {
                 blue: 0,
             },
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12339,6 +12415,7 @@ mod tests {
                 blue: 0,
             },
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -19386,6 +19463,7 @@ mod tests {
                 blue: 0,
             },
             stroke_style: BorderStyle::Single,
+            stroke_cap: StaticShapeLineCap::Flat,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
