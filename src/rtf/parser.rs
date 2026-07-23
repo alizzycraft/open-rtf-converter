@@ -13559,7 +13559,9 @@ impl Parser {
                 None => self.mark_current_shape_unsupported_or_active_property_stripped(),
             },
             "pictureGray" | "pictureBiLevel" => {
-                let _ = parse_shape_property_i64(value);
+                if parse_shape_property_i64(value).is_none() {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
             }
             "fHitTestFill" | "fNoFillHitTest" | "fillShape" | "fillUseRect" => {
                 if parse_shape_property_i64(value).is_none() {

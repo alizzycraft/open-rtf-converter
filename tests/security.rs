@@ -7491,6 +7491,78 @@ fn active_shape_picture_metadata_is_stripped_without_property_leakage() {
 }
 
 #[test]
+fn invalid_shape_picture_color_mode_metadata_is_stripped_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pictureGray}{\sv maybe}}{\sp{\sn pictureBiLevel}{\sv also-maybe}}{\sp{\sn pFragments}{\sv hidden-invalid-shape-picture-mode-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with invalid picture color-mode metadata");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    for forbidden in [
+        "pictureGray",
+        "pictureBiLevel",
+        "maybe",
+        "also-maybe",
+        "pFragments",
+        "hidden-invalid-shape-picture-mode-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid shape picture color-mode metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"pictureGray".as_slice(),
+        b"pictureBiLevel",
+        b"maybe",
+        b"also-maybe",
+        b"pFragments",
+        b"hidden-invalid-shape-picture-mode-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid shape picture color-mode metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn duplicate_shape_fallback_object_still_rejects_active_payload_in_reject_mode() {
     let input = concat!(
         r"{\rtf1 Before {\shp{\*\shpinst",
