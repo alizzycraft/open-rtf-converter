@@ -11784,7 +11784,8 @@ impl Parser {
                 "picture data had an odd trailing hex nibble and was skipped",
                 Some(offset),
             ));
-            self.push_placeholder(
+            self.push_picture_placeholder_for_destination(
+                picture.owner_destination,
                 "[Image skipped: malformed picture data]".to_string(),
                 offset,
             )?;
@@ -11805,7 +11806,11 @@ impl Parser {
                 self.push_static_image(picture.owner_destination, image, offset)?;
                 self.mark_shape_visual_result_rendered();
             } else {
-                self.push_placeholder("[Image skipped: empty picture]".to_string(), offset)?;
+                self.push_picture_placeholder_for_destination(
+                    picture.owner_destination,
+                    "[Image skipped: empty picture]".to_string(),
+                    offset,
+                )?;
             }
             return Ok(());
         }
@@ -11853,7 +11858,11 @@ impl Parser {
                         "JPEG picture data was malformed and replaced with a placeholder",
                         Some(offset),
                     ));
-                    self.push_placeholder("[Image skipped: malformed JPEG]".to_string(), offset)?;
+                    self.push_picture_placeholder_for_destination(
+                        picture.owner_destination,
+                        "[Image skipped: malformed JPEG]".to_string(),
+                        offset,
+                    )?;
                 }
             },
             PictureKind::Png => match parse_png_image_data(&picture.bytes) {
@@ -11894,7 +11903,11 @@ impl Parser {
                             "PNG picture data was unsupported or malformed and replaced with a placeholder",
                             Some(offset),
                         ));
-                    self.push_placeholder("[Image skipped: unsupported PNG]".to_string(), offset)?;
+                    self.push_picture_placeholder_for_destination(
+                        picture.owner_destination,
+                        "[Image skipped: unsupported PNG]".to_string(),
+                        offset,
+                    )?;
                 }
             },
             PictureKind::Dib => {
@@ -11970,7 +11983,8 @@ impl Parser {
                                 "DIB picture data was unsupported or malformed and replaced with a placeholder",
                                 Some(offset),
                             ));
-                            self.push_placeholder(
+                            self.push_picture_placeholder_for_destination(
+                                picture.owner_destination,
                                 "[Image skipped: unsupported DIB]".to_string(),
                                 offset,
                             )?;
@@ -12143,7 +12157,13 @@ impl Parser {
         let image = self.apply_current_shape_image_placement(image, offset);
         self.mark_object_result_visible_content();
         self.mark_field_result_visible_content();
-        if is_header_destination(destination) {
+        if destination == Destination::ListText {
+            self.diagnostics.push(Diagnostic::warning(
+                "list marker picture replaced with passive text placeholder before normalization",
+                Some(offset),
+            ));
+            self.push_list_marker_text("[Image skipped: list marker picture]", offset)?;
+        } else if is_header_destination(destination) {
             self.finish_header_paragraph(offset)?;
             if self.has_started_visible_body() {
                 match destination {
@@ -12199,6 +12219,19 @@ impl Parser {
             self.push_document_block(Block::Image(image), offset)?;
         }
         Ok(())
+    }
+
+    fn push_picture_placeholder_for_destination(
+        &mut self,
+        destination: Destination,
+        text: String,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if destination == Destination::ListText {
+            self.push_list_marker_text(&text, offset)
+        } else {
+            self.push_placeholder(text, offset)
+        }
     }
 
     fn apply_current_shape_image_placement(
