@@ -6834,6 +6834,11 @@ fn unsafe_only_object_result_falls_back_to_passive_placeholder_without_payload_l
     assert!(images[0].bytes.is_empty());
     assert_eq!(images[0].display_width_twips, Some(2160));
     assert_eq!(images[0].display_height_twips, Some(720));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("resultless embedded object rendered as bounded passive placeholder")
+    }));
     for forbidden in [
         "objdata",
         "444546",
@@ -6893,6 +6898,61 @@ fn unsafe_only_object_result_falls_back_to_passive_placeholder_without_payload_l
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "unsafe-only object result leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn resultless_object_without_dimensions_reports_passive_text_placeholder() {
+    let input =
+        br"{\rtf1 Before {\object\objemb{\objdata 4142432f4a617661536372697074}} After\par}"
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before [Embedded object removed] After"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("resultless embedded object rendered as passive text placeholder")
+    }));
+    for forbidden in ["objdata", "414243", "JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "resultless object payload leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("[Embedded object removed]"));
+    for forbidden in [
+        b"objdata".as_slice(),
+        b"414243",
+        b"JavaScript",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "resultless object payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

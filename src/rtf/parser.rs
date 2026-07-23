@@ -1920,9 +1920,17 @@ impl Parser {
                     && !self.state.character.hidden
                 {
                     if let Some(image) = self.passive_object_placeholder_image() {
+                        self.diagnostics.push(Diagnostic::warning(
+                            "resultless embedded object rendered as bounded passive placeholder",
+                            Some(offset),
+                        ));
                         self.push_static_image(self.state.object_owner_destination, image, offset)?;
                         self.mark_shape_visual_result_rendered();
                     } else {
+                        self.diagnostics.push(Diagnostic::warning(
+                            "resultless embedded object rendered as passive text placeholder",
+                            Some(offset),
+                        ));
                         self.push_placeholder_for_destination(
                             self.state.object_owner_destination,
                             "[Embedded object removed]".to_string(),
