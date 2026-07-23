@@ -2922,7 +2922,7 @@ fn draw_passive_hatch_lines(
             draw_passive_forward_diagonal_hatch_lines(content, rect, spacing);
             draw_passive_backward_diagonal_hatch_lines(content, rect, spacing);
         }
-        ShadingPattern::None => {}
+        ShadingPattern::None | ShadingPattern::VerticalGradient => {}
     }
 }
 

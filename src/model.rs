@@ -1002,6 +1002,7 @@ pub enum ShadingPattern {
     DarkBackwardDiagonal,
     DarkCross,
     DarkDiagonalCross,
+    VerticalGradient,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

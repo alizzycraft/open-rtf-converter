@@ -13390,6 +13390,7 @@ impl Parser {
                         shape.fill_pattern = match fill_type {
                             ShapeFillType::Solid => ShadingPattern::None,
                             ShapeFillType::Pattern => ShadingPattern::Cross,
+                            ShapeFillType::Shade => ShadingPattern::VerticalGradient,
                             ShapeFillType::Unsupported => {
                                 self.mark_current_shape_unsupported_or_active_property_stripped();
                                 return;
@@ -22186,6 +22187,7 @@ fn parse_office_shape_color(value: &str) -> Option<Color> {
 enum ShapeFillType {
     Solid,
     Pattern,
+    Shade,
     Unsupported,
 }
 
@@ -22199,12 +22201,11 @@ fn parse_shape_fill_type_property(value: &str) -> Option<ShapeFillType> {
     match normalized.as_str() {
         "0" | "solid" | "msofillsolid" => Some(ShapeFillType::Solid),
         "1" | "pattern" | "msofillpattern" => Some(ShapeFillType::Pattern),
-        "2" | "texture" | "msofilltexture" | "3" | "picture" | "msofillpicture" | "4" | "shade"
-        | "msofillshade" | "5" | "shadecenter" | "msofillshadecenter" | "6" | "shadeshape"
-        | "msofillshadeshape" | "7" | "shadescale" | "msofillshadescale" | "8" | "shadepreset"
-        | "msofillshadepreset" | "9" | "background" | "msofillbackground" => {
-            Some(ShapeFillType::Unsupported)
-        }
+        "4" | "shade" | "msofillshade" => Some(ShapeFillType::Shade),
+        "2" | "texture" | "msofilltexture" | "3" | "picture" | "msofillpicture" | "5"
+        | "shadecenter" | "msofillshadecenter" | "6" | "shadeshape" | "msofillshadeshape" | "7"
+        | "shadescale" | "msofillshadescale" | "8" | "shadepreset" | "msofillshadepreset" | "9"
+        | "background" | "msofillbackground" => Some(ShapeFillType::Unsupported),
         _ => None,
     }
 }

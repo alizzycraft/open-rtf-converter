@@ -73551,13 +73551,23 @@ fn non_rectangular_office_shape_pattern_fills_are_clipped_without_property_leaka
 }
 
 #[test]
-fn office_shape_non_solid_fill_type_is_stripped_without_property_leakage() {
+fn office_shape_gradient_fill_type_renders_passively_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-gradient-fill-type-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with gradient fill");
 
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
+    assert_eq!(shape.fill_pattern, ShadingPattern::VerticalGradient);
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
@@ -73570,7 +73580,7 @@ fn office_shape_non_solid_fill_type_is_stripped_without_property_leakage() {
     ] {
         assert!(
             !text.contains(forbidden),
-            "non-solid fillType metadata leaked to normalized text: {forbidden}"
+            "gradient fillType metadata leaked to normalized text: {forbidden}"
         );
     }
 
@@ -73605,7 +73615,7 @@ fn office_shape_non_solid_fill_type_is_stripped_without_property_leakage() {
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "non-solid fillType metadata leaked to PDF: {:?}",
+            "gradient fillType metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

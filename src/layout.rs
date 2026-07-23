@@ -2647,27 +2647,34 @@ fn layout_shape(
                 );
             }
             if let Some(fill_color) = shape.fill_color {
-                page.items.push(LayoutItem::Highlight {
+                let color = PdfColor {
+                    red: fill_color.red as f32 / 255.0,
+                    green: fill_color.green as f32 / 255.0,
+                    blue: fill_color.blue as f32 / 255.0,
+                };
+                if shape.fill_pattern == ShadingPattern::VerticalGradient {
+                    push_passive_vertical_gradient_bands(page, x, bottom_y, width, height, color);
+                } else {
+                    page.items.push(LayoutItem::Highlight {
+                        x,
+                        y: bottom_y,
+                        width,
+                        height,
+                        color,
+                    });
+                }
+            }
+            if shape.fill_pattern != ShadingPattern::VerticalGradient {
+                push_shape_fill_pattern_lines(
+                    page,
                     x,
-                    y: bottom_y,
+                    bottom_y,
                     width,
                     height,
-                    color: PdfColor {
-                        red: fill_color.red as f32 / 255.0,
-                        green: fill_color.green as f32 / 255.0,
-                        blue: fill_color.blue as f32 / 255.0,
-                    },
-                });
+                    shape.fill_color,
+                    shape.fill_pattern,
+                );
             }
-            push_shape_fill_pattern_lines(
-                page,
-                x,
-                bottom_y,
-                width,
-                height,
-                shape.fill_color,
-                shape.fill_pattern,
-            );
             if let Some(width_points) = stroke_width_points {
                 page.items.push(LayoutItem::Line {
                     x1: x,
@@ -9816,7 +9823,7 @@ fn push_shading_pattern_lines(
                 color,
             );
         }
-        ShadingPattern::None => {}
+        ShadingPattern::None | ShadingPattern::VerticalGradient => {}
     }
 }
 
@@ -9848,6 +9855,44 @@ fn push_shape_fill_pattern_lines(
     );
 }
 
+fn push_passive_vertical_gradient_bands(
+    page: &mut LayoutPage,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: PdfColor,
+) {
+    if width <= 0.5 || height <= 0.5 {
+        return;
+    }
+    const BANDS: usize = 16;
+    let band_height = height / BANDS as f32;
+    for index in 0..BANDS {
+        let t = if BANDS <= 1 {
+            0.0
+        } else {
+            index as f32 / (BANDS - 1) as f32
+        };
+        let lightened = PdfColor {
+            red: color.red + ((1.0 - color.red) * t),
+            green: color.green + ((1.0 - color.green) * t),
+            blue: color.blue + ((1.0 - color.blue) * t),
+        };
+        page.items.push(LayoutItem::Highlight {
+            x,
+            y: y + (band_height * index as f32),
+            width,
+            height: if index + 1 == BANDS {
+                height - (band_height * index as f32)
+            } else {
+                band_height + 0.1
+            },
+            color: lightened,
+        });
+    }
+}
+
 fn shading_pattern_spacing(pattern: ShadingPattern) -> f32 {
     match pattern {
         ShadingPattern::DarkHorizontal
@@ -9862,7 +9907,8 @@ fn shading_pattern_spacing(pattern: ShadingPattern) -> f32 {
         | ShadingPattern::ForwardDiagonal
         | ShadingPattern::BackwardDiagonal
         | ShadingPattern::Cross
-        | ShadingPattern::DiagonalCross => 4.0,
+        | ShadingPattern::DiagonalCross
+        | ShadingPattern::VerticalGradient => 4.0,
     }
 }
 
