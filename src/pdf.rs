@@ -35,6 +35,7 @@ const TIMES_BOLD_ITALIC: &[u8] = b"F12";
 const SYMBOL_REGULAR: &[u8] = b"F13";
 const ZAPF_DINGBATS_REGULAR: &[u8] = b"F14";
 const PASSIVE_JPEG_LUMINOSITY_GS: &[u8] = b"GSImageLuminosity";
+const PASSIVE_SHAPE_ALPHA_PREFIX: &[u8] = b"GSShapeAlpha";
 
 const BUILTIN_FONTS: [(&[u8], &[u8]); 14] = [
     (HELVETICA_REGULAR, b"Helvetica"),
@@ -622,12 +623,23 @@ pub fn render_pdf_with_font_provider(
                     x_objects.pair(Name(&image.name), image.id);
                 }
             }
-            if page_uses_passive_jpeg_luminosity_blend(page) {
+            let opacity_pairs = collect_page_opacity_pairs(page);
+            if page_uses_passive_jpeg_luminosity_blend(page) || !opacity_pairs.is_empty() {
                 let mut ext_g_states = resources.ext_g_states();
-                ext_g_states
-                    .insert(Name(PASSIVE_JPEG_LUMINOSITY_GS))
-                    .start::<pdf_writer::writers::ExtGraphicsState>()
-                    .blend_mode(BlendMode::Luminosity);
+                if page_uses_passive_jpeg_luminosity_blend(page) {
+                    ext_g_states
+                        .insert(Name(PASSIVE_JPEG_LUMINOSITY_GS))
+                        .start::<pdf_writer::writers::ExtGraphicsState>()
+                        .blend_mode(BlendMode::Luminosity);
+                }
+                for (fill_percent, stroke_percent) in opacity_pairs {
+                    let name = passive_shape_alpha_name(fill_percent, stroke_percent);
+                    let mut state = ext_g_states
+                        .insert(Name(&name))
+                        .start::<pdf_writer::writers::ExtGraphicsState>();
+                    state.non_stroking_alpha(f32::from(fill_percent) / 100.0);
+                    state.stroking_alpha(f32::from(stroke_percent) / 100.0);
+                }
             }
         }
         page_writer.finish();
@@ -1094,6 +1106,25 @@ fn draw_layout_item(
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
+            LayoutItem::Opacity {
+                fill_percent,
+                stroke_percent,
+                item: nested,
+            } => {
+                content.save_state();
+                set_passive_shape_opacity(content, *fill_percent, *stroke_percent);
+                draw_layout_item(
+                    content,
+                    nested,
+                    layout,
+                    font_provider,
+                    supplied_fonts,
+                    page_images,
+                    image_ref_cursor,
+                );
+                content.restore_state();
+                return;
+            }
         }
     }
 }
@@ -1326,6 +1357,9 @@ where
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
+            LayoutItem::Opacity { item: nested, .. } => {
+                item = nested;
+            }
             LayoutItem::Highlight { .. }
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
@@ -1362,6 +1396,9 @@ where
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
+            LayoutItem::Opacity { item: nested, .. } => {
+                item = nested;
+            }
             LayoutItem::Text(_)
             | LayoutItem::Highlight { .. }
             | LayoutItem::Underline { .. }
@@ -1372,6 +1409,41 @@ where
             | LayoutItem::RoundedRectangle { .. }
             | LayoutItem::Polygon { .. } => return,
         }
+    }
+}
+
+fn collect_page_opacity_pairs(page: &crate::layout::LayoutPage) -> Vec<(u8, u8)> {
+    let mut pairs = Vec::new();
+    for item in &page.items {
+        collect_layout_item_opacity_pairs(item, &mut pairs);
+    }
+    pairs
+}
+
+fn collect_layout_item_opacity_pairs(item: &LayoutItem, pairs: &mut Vec<(u8, u8)>) {
+    match item {
+        LayoutItem::Opacity {
+            fill_percent,
+            stroke_percent,
+            item,
+        } => {
+            let pair = (*fill_percent, *stroke_percent);
+            if !pairs.contains(&pair) {
+                pairs.push(pair);
+            }
+            collect_layout_item_opacity_pairs(item, pairs);
+        }
+        LayoutItem::Drawing(fragment) => collect_layout_item_opacity_pairs(&fragment.item, pairs),
+        LayoutItem::Text(_)
+        | LayoutItem::Highlight { .. }
+        | LayoutItem::Underline { .. }
+        | LayoutItem::Line { .. }
+        | LayoutItem::CappedLine { .. }
+        | LayoutItem::JoinedPolyline { .. }
+        | LayoutItem::Ellipse { .. }
+        | LayoutItem::RoundedRectangle { .. }
+        | LayoutItem::Polygon { .. }
+        | LayoutItem::Image(_) => {}
     }
 }
 
@@ -3944,6 +4016,34 @@ fn set_passive_line_join(content: &mut Content, join: LineJoin) {
         LineJoin::Bevel => {
             content.set_line_join(LineJoinStyle::BevelJoin);
         }
+    }
+}
+
+fn set_passive_shape_opacity(content: &mut Content, fill_percent: u8, stroke_percent: u8) {
+    if fill_percent >= 100 && stroke_percent >= 100 {
+        return;
+    }
+    let name = passive_shape_alpha_name(fill_percent.min(100), stroke_percent.min(100));
+    content.set_parameters(Name(&name));
+}
+
+fn passive_shape_alpha_name(fill_percent: u8, stroke_percent: u8) -> Vec<u8> {
+    let mut name = PASSIVE_SHAPE_ALPHA_PREFIX.to_vec();
+    push_decimal_percent(&mut name, fill_percent.min(100));
+    name.push(b'S');
+    push_decimal_percent(&mut name, stroke_percent.min(100));
+    name
+}
+
+fn push_decimal_percent(output: &mut Vec<u8>, percent: u8) {
+    let bounded = percent.min(100);
+    if bounded >= 100 {
+        output.extend_from_slice(b"100");
+    } else if bounded >= 10 {
+        output.push(b'0' + (bounded / 10));
+        output.push(b'0' + (bounded % 10));
+    } else {
+        output.push(b'0' + bounded);
     }
 }
 
@@ -6674,6 +6774,8 @@ endstream
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -6782,6 +6884,8 @@ endstream
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,

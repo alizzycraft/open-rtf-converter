@@ -1011,6 +1011,8 @@ struct ShapeBuilder {
     stroke_style: BorderStyle,
     stroke_cap: StaticShapeLineCap,
     stroke_join: StaticShapeLineJoin,
+    fill_opacity_percent: u8,
+    stroke_opacity_percent: u8,
     fill_enabled: bool,
     fill_color: Option<Color>,
     fill_color_from_foreground: bool,
@@ -1074,6 +1076,8 @@ impl Default for ShapeBuilder {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_enabled: true,
             fill_color: None,
             fill_color_from_foreground: false,
@@ -12730,6 +12734,8 @@ impl Parser {
                 stroke_style: shape.stroke_style,
                 stroke_cap: shape.stroke_cap,
                 stroke_join: shape.stroke_join,
+                fill_opacity_percent: shape.fill_opacity_percent,
+                stroke_opacity_percent: shape.stroke_opacity_percent,
                 fill_color,
                 shadow_enabled: shape.shadow_enabled,
                 shadow_color: shape.shadow_color,
@@ -13328,7 +13334,11 @@ impl Parser {
                 }
             }
             "fillOpacity" => {
-                if !parse_shape_full_opacity_property(value).unwrap_or(false) {
+                if let Some(percent) = parse_shape_opacity_percent_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.fill_opacity_percent = percent;
+                } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
@@ -13354,7 +13364,11 @@ impl Parser {
                 }
             }
             "lineOpacity" => {
-                if !parse_shape_full_opacity_property(value).unwrap_or(false) {
+                if let Some(percent) = parse_shape_opacity_percent_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.stroke_opacity_percent = percent;
+                } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
@@ -22015,6 +22029,19 @@ fn parse_shape_property_signed_emu_twips(value: &str) -> Option<i64> {
 
 fn parse_shape_full_opacity_property(value: &str) -> Option<bool> {
     Some(parse_shape_property_i64(value)? >= 65_536)
+}
+
+fn parse_shape_opacity_percent_property(value: &str) -> Option<u8> {
+    let raw = parse_shape_property_i64(value)?;
+    if raw < 0 {
+        return None;
+    }
+    let percent = raw
+        .saturating_mul(100)
+        .saturating_add(32_768)
+        .checked_div(65_536)?
+        .clamp(0, 100);
+    u8::try_from(percent).ok()
 }
 
 fn parse_office_shape_color(value: &str) -> Option<Color> {

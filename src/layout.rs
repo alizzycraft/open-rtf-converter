@@ -102,6 +102,11 @@ pub enum LayoutItem {
         cap: LineCap,
         join: LineJoin,
     },
+    Opacity {
+        fill_percent: u8,
+        stroke_percent: u8,
+        item: Box<LayoutItem>,
+    },
     Ellipse {
         x: f32,
         y: f32,
@@ -2758,27 +2763,48 @@ fn layout_shape(
         font_provider,
     );
     if let Some(page) = pages.last_mut() {
-        wrap_static_shape_items_with_order(page, shape_item_start, shape.z_order, shape.below_text);
+        wrap_static_shape_items(
+            page,
+            shape_item_start,
+            shape.z_order,
+            shape.below_text,
+            shape.fill_opacity_percent,
+            shape.stroke_opacity_percent,
+        );
     }
     *cursor_y -= block_height + 6.0;
 }
 
-fn wrap_static_shape_items_with_order(
+fn wrap_static_shape_items(
     page: &mut LayoutPage,
     start: usize,
     z_order: i32,
     below_text: bool,
+    fill_opacity_percent: u8,
+    stroke_opacity_percent: u8,
 ) {
-    if (z_order == 0 && !below_text) || start >= page.items.len() {
+    let has_order = z_order != 0 || below_text;
+    let has_opacity = fill_opacity_percent < 100 || stroke_opacity_percent < 100;
+    if (!has_order && !has_opacity) || start >= page.items.len() {
         return;
     }
     for item in &mut page.items[start..] {
-        let previous = item.clone();
-        *item = LayoutItem::Drawing(DrawingFragment {
-            z_order,
-            below_text,
-            item: Box::new(previous),
-        });
+        if has_opacity {
+            let previous = item.clone();
+            *item = LayoutItem::Opacity {
+                fill_percent: fill_opacity_percent,
+                stroke_percent: stroke_opacity_percent,
+                item: Box::new(previous),
+            };
+        }
+        if has_order {
+            let previous = item.clone();
+            *item = LayoutItem::Drawing(DrawingFragment {
+                z_order,
+                below_text,
+                item: Box::new(previous),
+            });
+        }
     }
 }
 
@@ -3551,10 +3577,12 @@ fn layout_item_vertical_bounds(item: &LayoutItem) -> Option<VerticalBounds> {
             loop {
                 match current {
                     LayoutItem::Drawing(nested) => current = nested.item.as_ref(),
+                    LayoutItem::Opacity { item, .. } => current = item.as_ref(),
                     leaf => return layout_item_vertical_bounds(leaf),
                 }
             }
         }
+        LayoutItem::Opacity { item, .. } => layout_item_vertical_bounds(item),
     }
 }
 
@@ -3589,6 +3617,10 @@ fn translate_layout_item_y(item: &mut LayoutItem, delta_y: f32) {
             LayoutItem::Image(image) => image.y += delta_y,
             LayoutItem::Drawing(drawing) => {
                 current = drawing.item.as_mut();
+                continue;
+            }
+            LayoutItem::Opacity { item, .. } => {
+                current = item.as_mut();
                 continue;
             }
         }
@@ -11257,6 +11289,8 @@ mod tests {
                 stroke_style: BorderStyle::Single,
                 stroke_cap: StaticShapeLineCap::Flat,
                 stroke_join: StaticShapeLineJoin::Miter,
+                fill_opacity_percent: 100,
+                stroke_opacity_percent: 100,
                 fill_color: Some(Color {
                     red: 200,
                     green: 20,
@@ -11324,6 +11358,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 200,
                 green: 20,
@@ -11462,6 +11498,8 @@ mod tests {
                 stroke_style: BorderStyle::Single,
                 stroke_cap: StaticShapeLineCap::Flat,
                 stroke_join: StaticShapeLineJoin::Miter,
+                fill_opacity_percent: 100,
+                stroke_opacity_percent: 100,
                 fill_color: Some(Color {
                     red: 200,
                     green: 20,
@@ -11535,6 +11573,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -11622,6 +11662,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11704,6 +11746,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -11795,6 +11839,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11899,6 +11945,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11974,6 +12022,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12059,6 +12109,8 @@ mod tests {
             stroke_style: BorderStyle::Dashed,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12121,6 +12173,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12189,6 +12243,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12263,6 +12319,8 @@ mod tests {
             stroke_style: BorderStyle::Dotted,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12356,6 +12414,8 @@ mod tests {
             stroke_style: BorderStyle::Dotted,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12449,6 +12509,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12529,6 +12591,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12627,6 +12691,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -19680,6 +19746,8 @@ mod tests {
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
             stroke_join: StaticShapeLineJoin::Miter,
+            fill_opacity_percent: 100,
+            stroke_opacity_percent: 100,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,

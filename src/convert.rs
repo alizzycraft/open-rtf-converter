@@ -166,6 +166,9 @@ fn count_layout_item(item: &LayoutItem) -> usize {
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
+            LayoutItem::Opacity { item: nested, .. } => {
+                item = nested;
+            }
             LayoutItem::Text(_)
             | LayoutItem::Highlight { .. }
             | LayoutItem::Underline { .. }
@@ -401,6 +404,9 @@ where
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
+            LayoutItem::Opacity { item: nested, .. } => {
+                item = nested;
+            }
             LayoutItem::Highlight { .. }
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
@@ -427,6 +433,9 @@ where
             }
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
+            }
+            LayoutItem::Opacity { item: nested, .. } => {
+                item = nested;
             }
             LayoutItem::Text(_)
             | LayoutItem::Highlight { .. }

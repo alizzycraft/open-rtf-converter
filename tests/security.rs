@@ -73116,7 +73116,7 @@ fn office_shape_full_fill_and_line_opacity_are_consumed_without_property_leakage
 }
 
 #[test]
-fn partial_office_shape_fill_and_line_opacity_are_diagnosed_without_property_leakage() {
+fn partial_office_shape_fill_and_line_opacity_render_passively_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn fillOpacity}{\sv 32768}}{\sp{\sn lineColor}{\sv 255}}{\sp{\sn lineOpacity}{\sv 16384}}{\sp{\sn pFragments}{\sv hidden-partial-shape-opacity-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
@@ -73132,6 +73132,8 @@ fn partial_office_shape_fill_and_line_opacity_are_diagnosed_without_property_lea
 
     assert_eq!(shape.kind, StaticShapeKind::Rectangle);
     assert!(shape.fill_color.is_some());
+    assert_eq!(shape.fill_opacity_percent, 50);
+    assert_eq!(shape.stroke_opacity_percent, 25);
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
@@ -73163,6 +73165,32 @@ fn partial_office_shape_fill_and_line_opacity_are_diagnosed_without_property_lea
     )
     .unwrap();
     audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(
+                item,
+                LayoutItem::Opacity {
+                    fill_percent: 50,
+                    stroke_percent: 25,
+                    ..
+                }
+            )),
+        "partial Office shape opacity should wrap passive geometry"
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "gs"),
+        "partial Office shape opacity should emit passive PDF graphics state"
+    );
     for forbidden in [
         b"fillOpacity".as_slice(),
         b"lineOpacity",
@@ -73183,6 +73211,81 @@ fn partial_office_shape_fill_and_line_opacity_are_diagnosed_without_property_lea
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "partial fill/line opacity metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_office_shape_opacity_is_stripped_without_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn fillOpacity}{\sv -1}}{\sp{\sn lineOpacity}{\sv hostile-opacity-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with invalid opacity");
+
+    assert_eq!(shape.fill_opacity_percent, 100);
+    assert_eq!(shape.stroke_opacity_percent, 100);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "fillOpacity",
+        "lineOpacity",
+        "hostile-opacity-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid opacity metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        !layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(item, LayoutItem::Opacity { .. })),
+        "invalid Office shape opacity should not wrap passive geometry"
+    );
+    for forbidden in [
+        b"fillOpacity".as_slice(),
+        b"lineOpacity",
+        b"hostile-opacity-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid opacity metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

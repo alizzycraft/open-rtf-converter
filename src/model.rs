@@ -653,6 +653,8 @@ pub struct StaticShape {
     pub stroke_style: BorderStyle,
     pub stroke_cap: StaticShapeLineCap,
     pub stroke_join: StaticShapeLineJoin,
+    pub fill_opacity_percent: u8,
+    pub stroke_opacity_percent: u8,
     pub fill_color: Option<Color>,
     pub shadow_enabled: bool,
     pub shadow_color: Color,
