@@ -7690,6 +7690,141 @@ fn shape_picture_tone_metadata_updates_safe_image_without_property_leakage() {
 }
 
 #[test]
+fn invalid_picture_metadata_is_diagnosed_without_property_leakage() {
+    let image_hex = bytes_to_hex(&minimal_rgb_png(&[[255, 0, 0]]));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "pict",
+        "\\",
+        "pngblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBrightness}{",
+        "\\",
+        "sv active-brightness-payload}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureContrast}{",
+        "\\",
+        "sv active-contrast-payload}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-invalid-picture-metadata-payload}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("safe image survives invalid picture metadata");
+
+    assert_eq!(image.format, ImageFormat::Png);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active picture metadata")
+    }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "invalid picture metadata should be recognized and stripped, not treated as unknown RTF: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "pictureBrightness",
+        "pictureContrast",
+        "active-brightness-payload",
+        "active-contrast-payload",
+        "pFragments",
+        "hidden-invalid-picture-metadata-payload",
+        "pngblip",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid picture metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active picture metadata")
+    }));
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(decoded_pdf_text(&content).contains("Before"));
+    assert!(decoded_pdf_text(&content).contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "safe picture bytes should still render as a passive image"
+    );
+    for forbidden in [
+        b"pictureBrightness".as_slice(),
+        b"pictureContrast",
+        b"active-brightness-payload",
+        b"active-contrast-payload",
+        b"pFragments",
+        b"hidden-invalid-picture-metadata-payload",
+        b"pngblip",
+        image_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn duplicate_shape_fallback_object_still_rejects_active_payload_in_reject_mode() {
     let input = concat!(
         r"{\rtf1 Before {\shp{\*\shpinst",

@@ -13845,43 +13845,56 @@ impl Parser {
         }
     }
 
-    fn apply_picture_metadata_property(&mut self, name: &str, value: &str, _offset: usize) {
+    fn apply_picture_metadata_property(&mut self, name: &str, value: &str, offset: usize) {
         let name = name.trim();
         let value = value.trim();
         match name {
-            "pictureGray" => {
-                if parse_shape_property_i64(value).is_some_and(|enabled| enabled != 0) {
+            "pictureGray" => match parse_shape_property_i64(value) {
+                Some(enabled) => {
                     if let Some(picture) = self.current_picture.as_mut() {
-                        picture.grayscale = true;
+                        picture.grayscale = enabled != 0;
                     }
                 }
-            }
-            "pictureBiLevel" => {
-                if parse_shape_property_i64(value).is_some_and(|enabled| enabled != 0) {
+                None => self.warn_unsupported_picture_metadata_stripped(offset),
+            },
+            "pictureBiLevel" => match parse_shape_property_i64(value) {
+                Some(enabled) => {
                     if let Some(picture) = self.current_picture.as_mut() {
-                        picture.bilevel = true;
+                        picture.bilevel = enabled != 0;
                     }
                 }
-            }
-            "pictureBrightness" => {
-                if let Some(brightness) = parse_shape_picture_fixed_property(value)
-                    && let Some(picture) = self.current_picture.as_mut()
-                {
-                    picture.brightness_fixed = Some(brightness);
+                None => self.warn_unsupported_picture_metadata_stripped(offset),
+            },
+            "pictureBrightness" => match parse_shape_picture_fixed_property(value) {
+                Some(brightness) => {
+                    if let Some(picture) = self.current_picture.as_mut() {
+                        picture.brightness_fixed = Some(brightness);
+                    }
                 }
-            }
-            "pictureContrast" => {
-                if let Some(contrast) = parse_shape_picture_fixed_property(value)
-                    && let Some(picture) = self.current_picture.as_mut()
-                {
-                    picture.contrast_fixed = Some(contrast);
+                None => self.warn_unsupported_picture_metadata_stripped(offset),
+            },
+            "pictureContrast" => match parse_shape_picture_fixed_property(value) {
+                Some(contrast) => {
+                    if let Some(picture) = self.current_picture.as_mut() {
+                        picture.contrast_fixed = Some(contrast);
+                    }
                 }
-            }
+                None => self.warn_unsupported_picture_metadata_stripped(offset),
+            },
             "fHitTestFill" | "fillShape" | "fillUseRect" | "fNoFillHitTest" => {
-                let _ = parse_shape_property_i64(value);
+                if parse_shape_property_i64(value).is_none() {
+                    self.warn_unsupported_picture_metadata_stripped(offset);
+                }
             }
-            _ => {}
+            _ => self.warn_unsupported_picture_metadata_stripped(offset),
         }
+    }
+
+    fn warn_unsupported_picture_metadata_stripped(&mut self, offset: usize) {
+        self.diagnostics.push(Diagnostic::warning(
+            "stripping unsupported/active picture metadata before safe model normalization",
+            Some(offset),
+        ));
     }
 
     fn apply_picture_color_mode(
