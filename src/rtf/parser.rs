@@ -1002,6 +1002,7 @@ struct ShapeBuilder {
     stroke_enabled: bool,
     stroke_width_twips: i32,
     stroke_color: Color,
+    stroke_color_from_foreground: bool,
     stroke_style: BorderStyle,
     fill_enabled: bool,
     fill_color: Option<Color>,
@@ -1056,6 +1057,7 @@ impl Default for ShapeBuilder {
             stroke_enabled: true,
             stroke_width_twips: 15,
             stroke_color: Color::default(),
+            stroke_color_from_foreground: false,
             stroke_style: BorderStyle::Single,
             fill_enabled: true,
             fill_color: None,
@@ -13301,6 +13303,18 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.stroke_color = color;
+                    shape.stroke_color_from_foreground = true;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineBackColor" => {
+                if let Some(color) = parse_office_shape_color(value) {
+                    if let Some(shape) = self.current_shape.as_mut()
+                        && !shape.stroke_color_from_foreground
+                    {
+                        shape.stroke_color = color;
+                    }
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
