@@ -12163,6 +12163,15 @@ impl Parser {
                 Some(offset),
             ));
             self.push_list_marker_text("[Image skipped: list marker picture]", offset)?;
+        } else if matches!(destination, Destination::Footnote | Destination::Endnote) {
+            self.diagnostics.push(Diagnostic::warning(
+                "note picture replaced with passive text placeholder before normalization",
+                Some(offset),
+            ));
+            let previous_destination = self.state.destination;
+            self.state.destination = destination;
+            self.push_text("[Image skipped: note picture]", offset)?;
+            self.state.destination = previous_destination;
         } else if is_header_destination(destination) {
             self.finish_header_paragraph(offset)?;
             if self.has_started_visible_body() {
@@ -12229,6 +12238,12 @@ impl Parser {
     ) -> Result<(), ParseError> {
         if destination == Destination::ListText {
             self.push_list_marker_text(&text, offset)
+        } else if matches!(destination, Destination::Footnote | Destination::Endnote) {
+            let previous_destination = self.state.destination;
+            self.state.destination = destination;
+            self.push_text(&text, offset)?;
+            self.state.destination = previous_destination;
+            Ok(())
         } else {
             self.push_placeholder(text, offset)
         }
@@ -12738,6 +12753,15 @@ impl Parser {
                 Some(offset),
             ));
             self.push_list_marker_text("[Shape skipped: list marker shape]", offset)?;
+        } else if matches!(destination, Destination::Footnote | Destination::Endnote) {
+            self.diagnostics.push(Diagnostic::warning(
+                "note shape replaced with passive text placeholder before normalization",
+                Some(offset),
+            ));
+            let previous_destination = self.state.destination;
+            self.state.destination = destination;
+            self.push_text("[Shape skipped: note shape]", offset)?;
+            self.state.destination = previous_destination;
         } else if is_header_destination(destination) {
             self.finish_header_paragraph(offset)?;
             if self.has_started_visible_body() {

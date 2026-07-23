@@ -68158,6 +68158,114 @@ fn footnotes_strip_active_content_without_losing_safe_text() {
 }
 
 #[test]
+fn footnote_picture_placeholder_stays_note_text_without_body_escape() {
+    let input =
+        br"{\rtf1 Body\chftn{\footnote \chftn before {\pict\pngblip 00} after\par}\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(&format!("Body{}", footnote_reference_marker(0))));
+    assert!(text.contains("before [Image skipped: unsupported PNG] after"));
+    assert!(!parsed.document.footnotes.is_empty());
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_) | Block::Placeholder(_))),
+        "footnote-owned picture placeholder should not escape into body blocks: {:?}",
+        parsed.document.blocks
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Body1"));
+    assert!(rendered_text.contains("before [Image skipped: unsupported PNG] after"));
+    for forbidden in [
+        b"chftn".as_slice(),
+        b"footnote",
+        b"pict",
+        b"pngblip",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden footnote picture content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn footnote_static_shape_stays_note_text_without_body_escape() {
+    let input = br#"{\rtf1 Body\chftn{\footnote \chftn before {\shp{\*\shpinst\shpleft720\shptop720\shpright2160\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hostile-note-shape-payload}}}} after\par}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(&format!("Body{}", footnote_reference_marker(0))));
+    assert!(text.contains("before [Shape skipped: note shape] after"));
+    assert!(!parsed.document.footnotes.is_empty());
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Shape(_))),
+        "footnote-owned static shape should not escape into body blocks: {:?}",
+        parsed.document.blocks
+    );
+    for forbidden in ["shapeType", "pFragments", "hostile-note-shape-payload"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden footnote shape content leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Body1"));
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("[Shape skipped: note shape]"));
+    assert!(rendered_text.contains("after"));
+    for forbidden in [
+        b"chftn".as_slice(),
+        b"footnote",
+        b"shapeType",
+        b"pFragments",
+        b"hostile-note-shape-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden footnote shape content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn bottom_footnote_placement_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
