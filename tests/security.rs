@@ -73034,6 +73034,142 @@ fn hidden_office_shape_picture_is_stripped_without_image_or_payload_leakage() {
 }
 
 #[test]
+fn office_shape_full_fill_and_line_opacity_are_consumed_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn fillOpacity}{\sv 65536}}{\sp{\sn lineColor}{\sv 255}}{\sp{\sn lineOpacity}{\sv 65536}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with full fill/line opacity");
+
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert!(shape.fill_color.is_some());
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "full fillOpacity/lineOpacity should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in ["fillOpacity", "lineOpacity", "shapeType"] {
+        assert!(
+            !text.contains(forbidden),
+            "full opacity metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"fillOpacity".as_slice(),
+        b"lineOpacity",
+        b"shapeType",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "full opacity metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn partial_office_shape_fill_and_line_opacity_are_diagnosed_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn fillOpacity}{\sv 32768}}{\sp{\sn lineColor}{\sv 255}}{\sp{\sn lineOpacity}{\sv 16384}}{\sp{\sn pFragments}{\sv hidden-partial-shape-opacity-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with partial fill/line opacity");
+
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert!(shape.fill_color.is_some());
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "fillOpacity",
+        "lineOpacity",
+        "32768",
+        "16384",
+        "pFragments",
+        "hidden-partial-shape-opacity-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "partial fill/line opacity metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"fillOpacity".as_slice(),
+        b"lineOpacity",
+        b"32768",
+        b"16384",
+        b"pFragments",
+        b"hidden-partial-shape-opacity-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "partial fill/line opacity metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn oversized_office_shape_line_color_is_stripped_without_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineColor}{\sv 4294967295}}{\sp{\sn pFragments}{\sv hidden-invalid-line-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

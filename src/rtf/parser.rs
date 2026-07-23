@@ -13304,6 +13304,11 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
+            "fillOpacity" => {
+                if !parse_shape_full_opacity_property(value).unwrap_or(false) {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "lineColor" | "lineForeColor" => {
                 if let Some(color) = parse_office_shape_color(value)
                     && let Some(shape) = self.current_shape.as_mut()
@@ -13322,6 +13327,11 @@ impl Parser {
                         shape.stroke_color = color;
                     }
                 } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineOpacity" => {
+                if !parse_shape_full_opacity_property(value).unwrap_or(false) {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
