@@ -80838,6 +80838,148 @@ fn office_shape_filled_flag_renders_default_passive_fill_without_property_leakag
 }
 
 #[test]
+fn office_shape_inert_fill_metadata_is_consumed_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fHitTestFill}{\sv 1}}{\sp{\sn fNoFillHitTest}{\sv 0}}{\sp{\sn fillShape}{\sv 1}}{\sp{\sn fillUseRect}{\sv 0}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with inert fill metadata");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "valid inert fill metadata should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "shapeType",
+        "fHitTestFill",
+        "fNoFillHitTest",
+        "fillShape",
+        "fillUseRect",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "inert fill metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fHitTestFill",
+        b"fNoFillHitTest",
+        b"fillShape",
+        b"fillUseRect",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "inert fill metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_office_shape_inert_fill_metadata_is_stripped_without_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fHitTestFill}{\sv not-a-number}}{\sp{\sn pFragments}{\sv hidden-invalid-inert-fill-metadata-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with invalid inert fill metadata");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    for forbidden in [
+        "shapeType",
+        "fHitTestFill",
+        "not-a-number",
+        "pFragments",
+        "hidden-invalid-inert-fill-metadata-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid inert fill metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"shapeType".as_slice(),
+        b"fHitTestFill",
+        b"not-a-number",
+        b"pFragments",
+        b"hidden-invalid-inert-fill-metadata-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid inert fill metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn disabled_office_shape_fill_remains_hidden_after_color_metadata_without_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fFilled}{\sv 0}}{\sp{\sn fillColor}{\sv 65535}}{\sp{\sn pFragments}{\sv hidden-disabled-fill-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

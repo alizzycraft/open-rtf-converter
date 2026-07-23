@@ -13561,6 +13561,11 @@ impl Parser {
             "pictureGray" | "pictureBiLevel" => {
                 let _ = parse_shape_property_i64(value);
             }
+            "fHitTestFill" | "fNoFillHitTest" | "fillShape" | "fillUseRect" => {
+                if parse_shape_property_i64(value).is_none() {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "fFlipH" => {
                 if let Some(enabled) = parse_shape_property_i64(value)
                     && let Some(shape) = self.current_shape.as_mut()
