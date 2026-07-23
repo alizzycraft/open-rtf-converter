@@ -21912,8 +21912,10 @@ fn parse_shape_line_style_property(value: &str) -> Option<(BorderStyle, bool)> {
         .collect::<String>();
     match normalized.as_str() {
         "0" | "1" | "single" | "msolinesingle" => Some((BorderStyle::Single, false)),
-        "2" | "3" | "4" | "thinthin" | "thinthick" | "thickthin" | "msolinethinthin"
-        | "msolinethinthick" | "msolinethickthin" => Some((BorderStyle::Double, false)),
+        "2" | "3" | "4" | "double" | "msolinedouble" | "thinthin" | "thinthick" | "thickthin"
+        | "msolinethinthin" | "msolinethinthick" | "msolinethickthin" => {
+            Some((BorderStyle::Double, false))
+        }
         "5" | "thickbetweenthin" | "msolinethickbetweenthin" => Some((BorderStyle::Double, true)),
         _ => None,
     }

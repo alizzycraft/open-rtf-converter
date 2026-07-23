@@ -83785,6 +83785,95 @@ fn office_shape_line_style_renders_passively_without_property_leakage() {
 }
 
 #[test]
+fn office_shape_named_double_line_style_alias_renders_passively() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineStyle}{",
+        "\\",
+        "sv msoLineDouble}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("named double line style shape");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(
+        shape.stroke_style,
+        open_rtf_converter::model::BorderStyle::Double
+    );
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "named double lineStyle should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["lineStyle", "msoLineDouble"] {
+        assert!(
+            !text.contains(forbidden),
+            "named double lineStyle metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"lineStyle".as_slice(),
+        b"msoLineDouble",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "named double lineStyle metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_shape_triple_line_style_is_bounded_passive_double_approximation() {
     let input = rtf(&[
         "{",
