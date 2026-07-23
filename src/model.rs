@@ -656,6 +656,7 @@ pub struct StaticShape {
     pub fill_opacity_percent: u8,
     pub stroke_opacity_percent: u8,
     pub fill_color: Option<Color>,
+    pub fill_gradient_color: Option<Color>,
     pub fill_pattern: ShadingPattern,
     pub shadow_enabled: bool,
     pub shadow_color: Color,

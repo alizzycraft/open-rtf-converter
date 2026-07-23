@@ -2653,7 +2653,14 @@ fn layout_shape(
                     blue: fill_color.blue as f32 / 255.0,
                 };
                 if shape.fill_pattern == ShadingPattern::VerticalGradient {
-                    push_passive_vertical_gradient_bands(page, x, bottom_y, width, height, color);
+                    let end_color = shape.fill_gradient_color.map(|gradient_color| PdfColor {
+                        red: gradient_color.red as f32 / 255.0,
+                        green: gradient_color.green as f32 / 255.0,
+                        blue: gradient_color.blue as f32 / 255.0,
+                    });
+                    push_passive_vertical_gradient_bands(
+                        page, x, bottom_y, width, height, color, end_color,
+                    );
                 } else {
                     page.items.push(LayoutItem::Highlight {
                         x,
@@ -9861,7 +9868,8 @@ fn push_passive_vertical_gradient_bands(
     y: f32,
     width: f32,
     height: f32,
-    color: PdfColor,
+    start_color: PdfColor,
+    end_color: Option<PdfColor>,
 ) {
     if width <= 0.5 || height <= 0.5 {
         return;
@@ -9874,10 +9882,15 @@ fn push_passive_vertical_gradient_bands(
         } else {
             index as f32 / (BANDS - 1) as f32
         };
+        let end_color = end_color.unwrap_or(PdfColor {
+            red: 1.0,
+            green: 1.0,
+            blue: 1.0,
+        });
         let lightened = PdfColor {
-            red: color.red + ((1.0 - color.red) * t),
-            green: color.green + ((1.0 - color.green) * t),
-            blue: color.blue + ((1.0 - color.blue) * t),
+            red: start_color.red + ((end_color.red - start_color.red) * t),
+            green: start_color.green + ((end_color.green - start_color.green) * t),
+            blue: start_color.blue + ((end_color.blue - start_color.blue) * t),
         };
         page.items.push(LayoutItem::Highlight {
             x,
@@ -11467,6 +11480,7 @@ mod tests {
                     green: 20,
                     blue: 20,
                 }),
+                fill_gradient_color: None,
                 fill_pattern: crate::model::ShadingPattern::None,
                 shadow_enabled: false,
                 shadow_color: Color {
@@ -11538,6 +11552,7 @@ mod tests {
                 green: 20,
                 blue: 20,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11680,6 +11695,7 @@ mod tests {
                     green: 20,
                     blue: 20,
                 }),
+                fill_gradient_color: None,
                 fill_pattern: crate::model::ShadingPattern::None,
                 shadow_enabled: false,
                 shadow_color: Color {
@@ -11757,6 +11773,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11844,6 +11861,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11934,6 +11952,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12025,6 +12044,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12133,6 +12153,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12212,6 +12233,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12301,6 +12323,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12367,6 +12390,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12439,6 +12463,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12517,6 +12542,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12618,6 +12644,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12715,6 +12742,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12799,6 +12827,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12902,6 +12931,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -19960,6 +19990,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {

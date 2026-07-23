@@ -6954,6 +6954,7 @@ endstream
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -7066,6 +7067,7 @@ endstream
                 green: 20,
                 blue: 30,
             }),
+            fill_gradient_color: None,
             fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {

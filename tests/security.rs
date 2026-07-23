@@ -73622,6 +73622,85 @@ fn office_shape_gradient_fill_type_renders_passively_without_property_leakage() 
 }
 
 #[test]
+fn office_shape_gradient_fill_uses_back_color_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 255}}{\sp{\sn fillBackColor}{\sv 16711680}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with two-color gradient fill");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.fill_pattern, ShadingPattern::VerticalGradient);
+    assert_eq!(
+        shape.fill_color,
+        Some(Color {
+            red: 255,
+            green: 0,
+            blue: 0
+        })
+    );
+    assert_eq!(
+        shape.fill_gradient_color,
+        Some(Color {
+            red: 0,
+            green: 0,
+            blue: 255
+        })
+    );
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "two-color gradient fill should be consumed as passive metadata: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["fillType", "msofillShade", "fillBackColor", "16711680"] {
+        assert!(
+            !text.contains(forbidden),
+            "two-color gradient fill metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"fillType".as_slice(),
+        b"msofillShade",
+        b"fillBackColor",
+        b"16711680",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "two-color gradient fill metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_shape_shade_fill_variants_are_bounded_passive_gradients_without_property_leakage() {
     for fill_type in [
         "msofillShadeCenter",

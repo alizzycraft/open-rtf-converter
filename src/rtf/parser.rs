@@ -1027,6 +1027,7 @@ struct ShapeBuilder {
     stroke_opacity_percent: u8,
     fill_enabled: bool,
     fill_color: Option<Color>,
+    fill_gradient_color: Option<Color>,
     fill_pattern: ShadingPattern,
     fill_color_from_foreground: bool,
     picture_grayscale: bool,
@@ -1098,6 +1099,7 @@ impl Default for ShapeBuilder {
             stroke_opacity_percent: 100,
             fill_enabled: true,
             fill_color: None,
+            fill_gradient_color: None,
             fill_pattern: ShadingPattern::None,
             fill_color_from_foreground: false,
             picture_grayscale: false,
@@ -12764,6 +12766,9 @@ impl Parser {
         } else {
             None
         };
+        let fill_gradient_color = fill_color
+            .filter(|_| shape.fill_enabled)
+            .and(shape.fill_gradient_color);
         self.push_static_shape(
             shape.owner_destination,
             StaticShape {
@@ -12790,6 +12795,7 @@ impl Parser {
                 fill_opacity_percent: shape.fill_opacity_percent,
                 stroke_opacity_percent: shape.stroke_opacity_percent,
                 fill_color,
+                fill_gradient_color,
                 fill_pattern: if fill_color.is_some() {
                     shape.fill_pattern
                 } else {
@@ -13375,10 +13381,11 @@ impl Parser {
             }
             "fillBackColor" => {
                 if let Some(color) = parse_office_shape_color(value) {
-                    if let Some(shape) = self.current_shape.as_mut()
-                        && !shape.fill_color_from_foreground
-                    {
-                        shape.fill_color = Some(color);
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.fill_gradient_color = Some(color);
+                        if !shape.fill_color_from_foreground {
+                            shape.fill_color = Some(color);
+                        }
                     }
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
