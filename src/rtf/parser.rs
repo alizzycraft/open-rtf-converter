@@ -2263,7 +2263,12 @@ impl Parser {
                                 Some(offset),
                             ));
                         }
-                        self.push_passive_field_result(result, &field_instruction, offset)?;
+                        self.push_passive_field_result(
+                            field_owner_destination,
+                            result,
+                            &field_instruction,
+                            offset,
+                        )?;
                     } else {
                         if let Some(name) = field_instruction_name(&field_instruction) {
                             self.diagnostics.push(Diagnostic::warning(
@@ -2413,7 +2418,12 @@ impl Parser {
                                     Some(offset),
                                 ));
                             }
-                            self.push_passive_field_result(result, &field_instruction, offset)?;
+                            self.push_passive_field_result(
+                                field_owner_destination,
+                                result,
+                                &field_instruction,
+                                offset,
+                            )?;
                         }
                     }
                 }
@@ -8862,6 +8872,7 @@ impl Parser {
 
     fn push_passive_field_result(
         &mut self,
+        destination: Destination,
         result: PassiveFieldResult,
         instruction: &str,
         offset: usize,
@@ -8889,12 +8900,12 @@ impl Parser {
                     .collect::<String>()
                     == result.text
             }) {
-                self.push_passive_field_segments(&segments, offset)
+                self.push_passive_field_segments(destination, &segments, offset)
             } else {
-                self.push_text(&result.text, offset)
+                self.push_passive_field_text_for_destination(destination, &result.text, offset)
             }
         } else {
-            self.push_text(&result.text, offset)
+            self.push_passive_field_text_for_destination(destination, &result.text, offset)
         };
         self.state.character.font_size_half_points = previous_font_size;
         self.state.character.font_index = previous_font;
@@ -8902,8 +8913,26 @@ impl Parser {
         result
     }
 
+    fn push_passive_field_text_for_destination(
+        &mut self,
+        destination: Destination,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if destination == Destination::ListText {
+            self.push_list_marker_text(text, offset)
+        } else {
+            let previous_destination = self.state.destination;
+            self.state.destination = destination;
+            let result = self.push_text(text, offset);
+            self.state.destination = previous_destination;
+            result
+        }
+    }
+
     fn push_passive_field_segments(
         &mut self,
+        destination: Destination,
         segments: &[PassiveFieldSegment],
         offset: usize,
     ) -> Result<(), ParseError> {
@@ -8920,7 +8949,8 @@ impl Parser {
                 .font_size_scale_percent
                 .unwrap_or(previous_font_size_scale);
             self.state.character.overline = previous_overline || segment.overline;
-            result = self.push_text(&segment.text, offset);
+            result =
+                self.push_passive_field_text_for_destination(destination, &segment.text, offset);
             if result.is_err() {
                 break;
             }
