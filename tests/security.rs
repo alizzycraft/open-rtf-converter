@@ -7363,8 +7363,8 @@ fn shape_picture_identity_metadata_does_not_mark_passive_shape_unsupported() {
     assert!(text.contains("After"));
     assert_eq!(shape.kind, StaticShapeKind::Rectangle);
     assert_eq!(shape.stroke_width_twips, 0);
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("shape picture activation metadata stripped")
     }));
@@ -7419,6 +7419,72 @@ fn shape_picture_identity_metadata_does_not_mark_passive_shape_unsupported() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "shape picture identity metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn active_shape_picture_metadata_is_stripped_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pictureActive}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-active-shape-picture-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with active picture metadata");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("shape picture activation metadata stripped")
+    }));
+    for forbidden in [
+        "pictureActive",
+        "pFragments",
+        "hidden-active-shape-picture-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "active shape picture metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"pictureActive".as_slice(),
+        b"pFragments",
+        b"hidden-active-shape-picture-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "active shape picture metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

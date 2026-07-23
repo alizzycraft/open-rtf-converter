@@ -13548,16 +13548,16 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
-            "pictureActive" => {
-                if parse_shape_property_i64(value).is_some() {
+            "pictureActive" => match parse_shape_property_i64(value) {
+                Some(0) => {}
+                Some(_) => {
                     self.diagnostics.push(Diagnostic::warning(
-                        "shape picture activation metadata stripped before safe model normalization",
-                        Some(offset),
-                    ));
-                } else {
-                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                            "shape picture activation metadata stripped before safe model normalization",
+                            Some(offset),
+                        ));
                 }
-            }
+                None => self.mark_current_shape_unsupported_or_active_property_stripped(),
+            },
             "pictureGray" | "pictureBiLevel" => {
                 let _ = parse_shape_property_i64(value);
             }
