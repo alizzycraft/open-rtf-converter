@@ -13288,6 +13288,14 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
+            "fillType" => {
+                if !matches!(
+                    parse_shape_fill_type_property(value),
+                    Some(ShapeFillType::Solid)
+                ) {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "lineColor" | "lineForeColor" => {
                 if let Some(color) = parse_office_shape_color(value)
                     && let Some(shape) = self.current_shape.as_mut()
@@ -21850,6 +21858,30 @@ fn parse_office_shape_color(value: &str) -> Option<Color> {
         green: ((value >> 8) & 0xff) as u8,
         blue: ((value >> 16) & 0xff) as u8,
     })
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum ShapeFillType {
+    Solid,
+    Unsupported,
+}
+
+fn parse_shape_fill_type_property(value: &str) -> Option<ShapeFillType> {
+    let normalized = value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    match normalized.as_str() {
+        "0" | "solid" | "msofillsolid" => Some(ShapeFillType::Solid),
+        "1" | "pattern" | "msofillpattern" | "2" | "texture" | "msofilltexture" | "3"
+        | "picture" | "msofillpicture" | "4" | "shade" | "msofillshade" | "5" | "shadecenter"
+        | "msofillshadecenter" | "6" | "shadeshape" | "msofillshadeshape" | "7" | "shadescale"
+        | "msofillshadescale" | "8" | "shadepreset" | "msofillshadepreset" | "9" | "background"
+        | "msofillbackground" => Some(ShapeFillType::Unsupported),
+        _ => None,
+    }
 }
 
 fn parse_shape_line_dashing_property(value: &str) -> Option<BorderStyle> {

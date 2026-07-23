@@ -72427,6 +72427,106 @@ fn invalid_office_shape_fill_back_color_is_stripped_without_becoming_visible_bla
 }
 
 #[test]
+fn office_shape_solid_fill_type_is_consumed_without_unsupported_property_warning() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv solid}}{\sp{\sn fillColor}{\sv 65280}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with solid fillType");
+
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(
+        shape.fill_color,
+        Some(open_rtf_converter::model::Color {
+            red: 0,
+            green: 255,
+            blue: 0,
+        })
+    );
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "solid fillType should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["fillType", "solid"] {
+        assert!(
+            !text.contains(forbidden),
+            "solid fillType metadata leaked to normalized text: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn office_shape_non_solid_fill_type_is_stripped_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-gradient-fill-type-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    for forbidden in [
+        "fillType",
+        "msofillShade",
+        "hidden-gradient-fill-type-payload",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "non-solid fillType metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"fillType".as_slice(),
+        b"msofillShade",
+        b"hidden-gradient-fill-type-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "non-solid fillType metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn hidden_office_shape_text_is_stripped_without_placeholder_or_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fHidden}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-shape-text-payload}}}{\shptxt Invisible box text\par}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
