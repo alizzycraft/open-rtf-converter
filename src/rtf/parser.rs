@@ -1006,6 +1006,8 @@ struct ShapeBuilder {
     fill_enabled: bool,
     fill_color: Option<Color>,
     fill_color_from_foreground: bool,
+    shadow_enabled: bool,
+    shadow_color: Color,
     text_wrap: bool,
     wrap_side: StaticImageWrapSide,
     wrap_margin_left_twips: i32,
@@ -1058,6 +1060,12 @@ impl Default for ShapeBuilder {
             fill_enabled: true,
             fill_color: None,
             fill_color_from_foreground: false,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_wrap: false,
             wrap_side: StaticImageWrapSide::Both,
             wrap_margin_left_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
@@ -12694,6 +12702,8 @@ impl Parser {
                 stroke_color: shape.stroke_color,
                 stroke_style: shape.stroke_style,
                 fill_color,
+                shadow_enabled: shape.shadow_enabled,
+                shadow_color: shape.shadow_color,
                 text_margin_left_twips: shape.text_margin_left_twips,
                 text_margin_right_twips: shape.text_margin_right_twips,
                 text_margin_top_twips: shape.text_margin_top_twips,
@@ -13272,6 +13282,24 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.stroke_color = color;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "fShadow" => {
+                if let Some(enabled) = parse_shape_property_i64(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.shadow_enabled = enabled != 0;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "shadowColor" => {
+                if let Some(color) = parse_office_shape_color(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.shadow_color = color;
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }

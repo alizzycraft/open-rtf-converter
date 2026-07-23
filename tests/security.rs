@@ -71893,6 +71893,88 @@ fn bounded_shape_text_renders_inside_passive_shape_without_body_flow_or_payload_
 }
 
 #[test]
+fn office_shape_shadow_renders_as_passive_bounded_geometry_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn fShadow}{\sv 1}}{\sp{\sn shadowColor}{\sv 8421504}}{\sp{\sn pFragments}{\sv hidden-shadow-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with shadow");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert!(shape.shadow_enabled);
+    assert_eq!(
+        shape.shadow_color,
+        Color {
+            red: 128,
+            green: 128,
+            blue: 128,
+        }
+    );
+    for forbidden in ["fShadow", "shadowColor", "hidden-shadow-payload"] {
+        assert!(
+            !text.contains(forbidden),
+            "shape shadow property leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        fill_count >= 2,
+        "shadowed filled shape should emit passive shadow fill plus shape fill"
+    );
+    for forbidden in [
+        b"fShadow".as_slice(),
+        b"shadowColor",
+        b"hidden-shadow-payload",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape shadow property leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn invalid_office_shape_fill_color_is_stripped_without_becoming_visible_black() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv -1}}{\sp{\sn pFragments}{\sv hidden-invalid-fill-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

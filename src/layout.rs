@@ -29,6 +29,7 @@ const PASSIVE_NARROW_FONT_SCALE_PERCENT: i32 = 82;
 const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
 const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
 const LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER: &str = "888";
+const PASSIVE_SHAPE_SHADOW_OFFSET_POINTS: f32 = 3.0;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -2350,6 +2351,11 @@ fn layout_shape(
         green: shape.stroke_color.green as f32 / 255.0,
         blue: shape.stroke_color.blue as f32 / 255.0,
     };
+    let shadow_color = shape.shadow_enabled.then(|| PdfColor {
+        red: shape.shadow_color.red as f32 / 255.0,
+        green: shape.shadow_color.green as f32 / 255.0,
+        blue: shape.shadow_color.blue as f32 / 255.0,
+    });
     let stroke_style = line_style_for_border_style(shape.stroke_style);
     let Some(page) = pages.last_mut() else {
         return;
@@ -2527,6 +2533,18 @@ fn layout_shape(
                         .collect()
                 })
                 .collect::<Vec<_>>();
+            if let Some(shadow_color) = shadow_color {
+                page.items.push(LayoutItem::Polygon {
+                    points: offset_shape_points(&points, PASSIVE_SHAPE_SHADOW_OFFSET_POINTS),
+                    paths: offset_shape_paths(&paths, PASSIVE_SHAPE_SHADOW_OFFSET_POINTS),
+                    overlay_paths: Vec::new(),
+                    fill_rule: shape.fill_rule,
+                    stroke_width: 0.0,
+                    stroke_color: shadow_color,
+                    stroke_style: LineStyle::Solid,
+                    fill_color: Some(shadow_color),
+                });
+            }
             page.items.push(LayoutItem::Polygon {
                 points,
                 paths,
@@ -2543,6 +2561,17 @@ fn layout_shape(
             });
         }
         StaticShapeKind::Rectangle => {
+            if let Some(shadow_color) =
+                shadow_color.filter(|_| stroke_width_points.is_some() || shape.fill_color.is_some())
+            {
+                page.items.push(LayoutItem::Highlight {
+                    x: x + PASSIVE_SHAPE_SHADOW_OFFSET_POINTS,
+                    y: bottom_y - PASSIVE_SHAPE_SHADOW_OFFSET_POINTS,
+                    width,
+                    height,
+                    color: shadow_color,
+                });
+            }
             if let Some(fill_color) = shape.fill_color {
                 page.items.push(LayoutItem::Highlight {
                     x,
@@ -2601,6 +2630,19 @@ fn layout_shape(
                 return;
             }
             let min_dimension = width.min(height).max(1.0);
+            if let Some(shadow_color) = shadow_color {
+                page.items.push(LayoutItem::RoundedRectangle {
+                    x: x + PASSIVE_SHAPE_SHADOW_OFFSET_POINTS,
+                    y: bottom_y - PASSIVE_SHAPE_SHADOW_OFFSET_POINTS,
+                    width,
+                    height,
+                    radius: (min_dimension * 0.2).clamp(1.0, min_dimension / 2.0),
+                    stroke_width: 0.0,
+                    stroke_color: shadow_color,
+                    stroke_style: LineStyle::Solid,
+                    fill_color: Some(shadow_color),
+                });
+            }
             page.items.push(LayoutItem::RoundedRectangle {
                 x,
                 y: bottom_y,
@@ -2619,6 +2661,18 @@ fn layout_shape(
         }
         StaticShapeKind::Ellipse => {
             if stroke_width_points.is_some() || shape.fill_color.is_some() {
+                if let Some(shadow_color) = shadow_color {
+                    page.items.push(LayoutItem::Ellipse {
+                        x: x + PASSIVE_SHAPE_SHADOW_OFFSET_POINTS,
+                        y: bottom_y - PASSIVE_SHAPE_SHADOW_OFFSET_POINTS,
+                        width,
+                        height,
+                        stroke_width: 0.0,
+                        stroke_color: shadow_color,
+                        stroke_style: LineStyle::Solid,
+                        fill_color: Some(shadow_color),
+                    });
+                }
                 page.items.push(LayoutItem::Ellipse {
                     x,
                     y: bottom_y,
@@ -2774,6 +2828,23 @@ fn shape_point_y(top: f32, height: f32, offset_y: f32, flip_vertical: bool) -> f
     } else {
         top - offset_y
     }
+}
+
+fn offset_shape_points(points: &[LayoutPoint], offset: f32) -> Vec<LayoutPoint> {
+    points
+        .iter()
+        .map(|point| LayoutPoint {
+            x: point.x + offset,
+            y: point.y - offset,
+        })
+        .collect()
+}
+
+fn offset_shape_paths(paths: &[Vec<LayoutPoint>], offset: f32) -> Vec<Vec<LayoutPoint>> {
+    paths
+        .iter()
+        .map(|path| offset_shape_points(path, offset))
+        .collect()
 }
 
 fn push_static_shape_arrowhead(
@@ -10992,6 +11063,12 @@ mod tests {
                     green: 20,
                     blue: 20,
                 }),
+                shadow_enabled: false,
+                shadow_color: Color {
+                    red: 128,
+                    green: 128,
+                    blue: 128,
+                },
                 text_margin_left_twips: 80,
                 text_margin_right_twips: 80,
                 text_margin_top_twips: 80,
@@ -11045,6 +11122,12 @@ mod tests {
                 green: 20,
                 blue: 20,
             }),
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11169,6 +11252,12 @@ mod tests {
                     green: 20,
                     blue: 20,
                 }),
+                shadow_enabled: false,
+                shadow_color: Color {
+                    red: 128,
+                    green: 128,
+                    blue: 128,
+                },
                 text_margin_left_twips: 80,
                 text_margin_right_twips: 80,
                 text_margin_top_twips: 80,
@@ -11228,6 +11317,12 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11297,6 +11392,12 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11369,6 +11470,12 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11442,6 +11549,12 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 360,
             text_margin_right_twips: 180,
             text_margin_top_twips: 240,
@@ -11532,6 +11645,12 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11593,6 +11712,12 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11664,6 +11789,12 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dashed,
             fill_color: None,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11712,6 +11843,12 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11766,6 +11903,12 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             fill_color: None,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11826,6 +11969,12 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
             fill_color: None,
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11909,6 +12058,12 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -11988,6 +12143,12 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -12054,6 +12215,12 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -12138,6 +12305,12 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
@@ -19152,6 +19325,12 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            shadow_enabled: false,
+            shadow_color: Color {
+                red: 128,
+                green: 128,
+                blue: 128,
+            },
             text_margin_left_twips: 80,
             text_margin_right_twips: 80,
             text_margin_top_twips: 80,
