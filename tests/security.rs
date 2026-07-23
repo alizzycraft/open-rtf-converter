@@ -88041,6 +88041,163 @@ fn old_drawing_polygon_renders_passively_without_coordinate_or_payload_leakage()
 }
 
 #[test]
+fn old_drawing_fill_patterns_render_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dprect",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dplinew30",
+        "\\",
+        "dpfillfgcr10",
+        "\\",
+        "dpfillfgcg20",
+        "\\",
+        "dpfillfgcb30",
+        "\\",
+        "dpfillpat14{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-dark-horizontal-fill-payload}}}{",
+        "\\",
+        "do",
+        "\\",
+        "dprect",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy1440",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dplinew30",
+        "\\",
+        "dpfillfgcr200",
+        "\\",
+        "dpfillfgcg210",
+        "\\",
+        "dpfillfgcb220",
+        "\\",
+        "dpfillpat24{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-cross-fill-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(shapes.len(), 2);
+    assert_eq!(shapes[0].fill_pattern, ShadingPattern::DarkHorizontal);
+    assert_eq!(shapes[1].fill_pattern, ShadingPattern::Cross);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "old drawing fill patterns should be consumed without unsupported-control noise: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "dprect",
+        "dpfillpat",
+        "dpfillfg",
+        "pFragments",
+        "hostile-dark-horizontal-fill-payload",
+        "hostile-cross-fill-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "old drawing fill pattern metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count()
+            >= 6,
+        "old drawing hatch fills should emit bounded passive hatch strokes"
+    );
+    for forbidden in [
+        b"dprect".as_slice(),
+        b"dpfillpat",
+        b"dpfillfg",
+        b"pFragments",
+        b"hostile-dark-horizontal-fill-payload",
+        b"hostile-cross-fill-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "old drawing fill pattern metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_drawing_static_ellipse_renders_passively_without_property_leakage() {
     let input = rtf(&[
         "{",

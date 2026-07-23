@@ -13313,15 +13313,28 @@ impl Parser {
 
     fn set_current_shape_fill_pattern(&mut self, value: Option<i32>) {
         if let Some(shape) = self.current_shape.as_mut() {
-            if value.unwrap_or(1) == 0 {
-                shape.fill_color = None;
-                shape.fill_color_from_foreground = false;
-            } else {
-                shape.fill_color.get_or_insert(Color {
-                    red: 255,
-                    green: 255,
-                    blue: 255,
-                });
+            match old_drawing_fill_pattern(value.unwrap_or(1)) {
+                OldDrawingFillPattern::None => {
+                    shape.fill_color = None;
+                    shape.fill_color_from_foreground = false;
+                    shape.fill_pattern = ShadingPattern::None;
+                }
+                OldDrawingFillPattern::Solid => {
+                    shape.fill_color.get_or_insert(Color {
+                        red: 255,
+                        green: 255,
+                        blue: 255,
+                    });
+                    shape.fill_pattern = ShadingPattern::None;
+                }
+                OldDrawingFillPattern::Hatch(pattern) => {
+                    shape.fill_color.get_or_insert(Color {
+                        red: 255,
+                        green: 255,
+                        blue: 255,
+                    });
+                    shape.fill_pattern = pattern;
+                }
             }
         }
     }
@@ -20568,6 +20581,32 @@ fn paragraph_shading_pattern_control(name: &str) -> Option<ShadingPattern> {
         "bgdkcross" => Some(ShadingPattern::DarkCross),
         "bgdkdcross" => Some(ShadingPattern::DarkDiagonalCross),
         _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OldDrawingFillPattern {
+    None,
+    Solid,
+    Hatch(ShadingPattern),
+}
+
+fn old_drawing_fill_pattern(value: i32) -> OldDrawingFillPattern {
+    match value {
+        0 => OldDrawingFillPattern::None,
+        14 => OldDrawingFillPattern::Hatch(ShadingPattern::DarkHorizontal),
+        15 => OldDrawingFillPattern::Hatch(ShadingPattern::DarkVertical),
+        16 => OldDrawingFillPattern::Hatch(ShadingPattern::DarkForwardDiagonal),
+        17 => OldDrawingFillPattern::Hatch(ShadingPattern::DarkBackwardDiagonal),
+        18 => OldDrawingFillPattern::Hatch(ShadingPattern::DarkCross),
+        19 => OldDrawingFillPattern::Hatch(ShadingPattern::DarkDiagonalCross),
+        20 => OldDrawingFillPattern::Hatch(ShadingPattern::Horizontal),
+        21 => OldDrawingFillPattern::Hatch(ShadingPattern::Vertical),
+        22 => OldDrawingFillPattern::Hatch(ShadingPattern::ForwardDiagonal),
+        23 => OldDrawingFillPattern::Hatch(ShadingPattern::BackwardDiagonal),
+        24 => OldDrawingFillPattern::Hatch(ShadingPattern::Cross),
+        25 => OldDrawingFillPattern::Hatch(ShadingPattern::DiagonalCross),
+        _ => OldDrawingFillPattern::Solid,
     }
 }
 
