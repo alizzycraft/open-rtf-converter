@@ -22201,11 +22201,14 @@ fn parse_shape_fill_type_property(value: &str) -> Option<ShapeFillType> {
     match normalized.as_str() {
         "0" | "solid" | "msofillsolid" => Some(ShapeFillType::Solid),
         "1" | "pattern" | "msofillpattern" => Some(ShapeFillType::Pattern),
-        "4" | "shade" | "msofillshade" => Some(ShapeFillType::Shade),
-        "2" | "texture" | "msofilltexture" | "3" | "picture" | "msofillpicture" | "5"
-        | "shadecenter" | "msofillshadecenter" | "6" | "shadeshape" | "msofillshadeshape" | "7"
-        | "shadescale" | "msofillshadescale" | "8" | "shadepreset" | "msofillshadepreset" | "9"
-        | "background" | "msofillbackground" => Some(ShapeFillType::Unsupported),
+        "4" | "shade" | "msofillshade" | "5" | "shadecenter" | "msofillshadecenter" | "6"
+        | "shadeshape" | "msofillshadeshape" | "7" | "shadescale" | "msofillshadescale" => {
+            Some(ShapeFillType::Shade)
+        }
+        "2" | "texture" | "msofilltexture" | "3" | "picture" | "msofillpicture" | "8"
+        | "shadepreset" | "msofillshadepreset" | "9" | "background" | "msofillbackground" => {
+            Some(ShapeFillType::Unsupported)
+        }
         _ => None,
     }
 }

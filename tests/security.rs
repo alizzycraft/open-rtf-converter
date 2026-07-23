@@ -73622,6 +73622,76 @@ fn office_shape_gradient_fill_type_renders_passively_without_property_leakage() 
 }
 
 #[test]
+fn office_shape_shade_fill_variants_are_bounded_passive_gradients_without_property_leakage() {
+    for fill_type in [
+        "msofillShadeCenter",
+        "msofillShadeShape",
+        "msofillShadeScale",
+    ] {
+        let input = format!(
+            r#"{{\rtf1 Before\par{{\shp{{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{{\sp{{\sn shapeType}}{{\sv 1}}}}{{\sp{{\sn fillType}}{{\sv {fill_type}}}}}{{\sp{{\sn fillColor}}{{\sv 65280}}}}}}}}After\par}}"#
+        )
+        .into_bytes();
+        let parsed = parse_rtf_bytes(&input).unwrap();
+        let text = collect_text(&parsed.document);
+        let shape = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("passive shape with shade fill variant");
+
+        assert!(text.contains("Before"));
+        assert!(text.contains("After"));
+        assert_eq!(shape.fill_pattern, ShadingPattern::VerticalGradient);
+        assert!(
+            parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+                .message
+                .contains("unsupported/active drawing properties")),
+            "shade fill variants should be consumed as passive metadata: {:?}",
+            parsed.diagnostics
+        );
+        for forbidden in ["fillType", fill_type] {
+            assert!(
+                !text.contains(forbidden),
+                "shade fill variant metadata leaked to normalized text: {forbidden}"
+            );
+        }
+
+        let output = convert_rtf_to_pdf(
+            &input,
+            &ConvertOptions {
+                diagnostics: true,
+                ..ConvertOptions::browser_safe_defaults()
+            },
+        )
+        .unwrap();
+        audit_passive_pdf_bytes(&output.pdf).unwrap();
+        for forbidden in [
+            b"fillType".as_slice(),
+            fill_type.as_bytes(),
+            b"/JavaScript",
+            b"/EmbeddedFile",
+            b"/Launch",
+            b"/OpenAction",
+            b"/RichMedia",
+        ] {
+            assert!(
+                !output
+                    .pdf
+                    .windows(forbidden.len())
+                    .any(|window| window == forbidden),
+                "shade fill variant metadata leaked to PDF: {:?}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
+}
+
+#[test]
 fn hidden_office_shape_text_is_stripped_without_placeholder_or_payload_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fHidden}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-shape-text-payload}}}{\shptxt Invisible box text\par}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
