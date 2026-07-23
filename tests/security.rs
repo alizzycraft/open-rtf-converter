@@ -73701,6 +73701,133 @@ fn office_shape_gradient_fill_uses_back_color_without_property_leakage() {
 }
 
 #[test]
+fn non_rectangular_office_shape_gradient_fills_are_clipped_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 4}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 255}}{\sp{\sn fillBackColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-gradient-diamond-payload}}}}{\shp{\*\shpinst\shpleft720\shptop1800\shpright2880\shpbottom2520{\sp{\sn shapeType}{\sv 9}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn fillBackColor}{\sv 16776960}}{\sp{\sn pFragments}{\sv hidden-gradient-ellipse-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shapes.len(), 2);
+    assert_eq!(shapes[0].kind, StaticShapeKind::Polygon);
+    assert_eq!(shapes[0].fill_pattern, ShadingPattern::VerticalGradient);
+    assert_eq!(
+        shapes[0].fill_gradient_color,
+        Some(Color {
+            red: 0,
+            green: 0,
+            blue: 255
+        })
+    );
+    assert_eq!(shapes[1].kind, StaticShapeKind::Ellipse);
+    assert_eq!(shapes[1].fill_pattern, ShadingPattern::VerticalGradient);
+    assert_eq!(
+        shapes[1].fill_gradient_color,
+        Some(Color {
+            red: 0,
+            green: 255,
+            blue: 255
+        })
+    );
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(
+                item,
+                LayoutItem::Polygon {
+                    fill_pattern: ShadingPattern::VerticalGradient,
+                    fill_gradient_color: Some(_),
+                    ..
+                }
+            )),
+        "gradient-filled diamond should preserve gradient endpoint through layout"
+    );
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(
+                item,
+                LayoutItem::Ellipse {
+                    fill_pattern: ShadingPattern::VerticalGradient,
+                    fill_gradient_color: Some(_),
+                    ..
+                }
+            )),
+        "gradient-filled ellipse should preserve gradient endpoint through layout"
+    );
+    for forbidden in [
+        "fillType",
+        "msofillShade",
+        "fillBackColor",
+        "hidden-gradient-diamond-payload",
+        "hidden-gradient-ellipse-payload",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "non-rectangular gradient metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let passive_fill_ops = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+    assert!(
+        passive_fill_ops >= 16,
+        "non-rectangular gradients should render bounded passive fill bands"
+    );
+    for forbidden in [
+        b"fillType".as_slice(),
+        b"msofillShade",
+        b"fillBackColor",
+        b"hidden-gradient-diamond-payload",
+        b"hidden-gradient-ellipse-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "non-rectangular gradient metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_shape_shade_fill_variants_are_bounded_passive_gradients_without_property_leakage() {
     for fill_type in [
         "msofillShadeCenter",

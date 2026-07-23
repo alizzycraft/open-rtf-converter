@@ -116,6 +116,7 @@ pub enum LayoutItem {
         stroke_color: PdfColor,
         stroke_style: LineStyle,
         fill_color: Option<PdfColor>,
+        fill_gradient_color: Option<PdfColor>,
         fill_pattern: ShadingPattern,
     },
     RoundedRectangle {
@@ -128,6 +129,7 @@ pub enum LayoutItem {
         stroke_color: PdfColor,
         stroke_style: LineStyle,
         fill_color: Option<PdfColor>,
+        fill_gradient_color: Option<PdfColor>,
         fill_pattern: ShadingPattern,
     },
     Polygon {
@@ -139,6 +141,7 @@ pub enum LayoutItem {
         stroke_color: PdfColor,
         stroke_style: LineStyle,
         fill_color: Option<PdfColor>,
+        fill_gradient_color: Option<PdfColor>,
         fill_pattern: ShadingPattern,
     },
     Image(ImageFragment),
@@ -2348,6 +2351,14 @@ fn shape_vertical_origin(
     }
 }
 
+fn pdf_color_from_model_color(color: crate::model::Color) -> PdfColor {
+    PdfColor {
+        red: color.red as f32 / 255.0,
+        green: color.green as f32 / 255.0,
+        blue: color.blue as f32 / 255.0,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn layout_shape(
     pages: &mut Vec<LayoutPage>,
@@ -2387,16 +2398,11 @@ fn layout_shape(
     } else {
         None
     };
-    let color = PdfColor {
-        red: shape.stroke_color.red as f32 / 255.0,
-        green: shape.stroke_color.green as f32 / 255.0,
-        blue: shape.stroke_color.blue as f32 / 255.0,
-    };
-    let shadow_color = shape.shadow_enabled.then(|| PdfColor {
-        red: shape.shadow_color.red as f32 / 255.0,
-        green: shape.shadow_color.green as f32 / 255.0,
-        blue: shape.shadow_color.blue as f32 / 255.0,
-    });
+    let color = pdf_color_from_model_color(shape.stroke_color);
+    let shadow_color = shape
+        .shadow_enabled
+        .then(|| pdf_color_from_model_color(shape.shadow_color));
+    let fill_gradient_color = shape.fill_gradient_color.map(pdf_color_from_model_color);
     let shadow_offset_x = twips_to_points(shape.shadow_offset_x_twips);
     let shadow_offset_y = twips_to_points(shape.shadow_offset_y_twips);
     let stroke_style = line_style_for_border_style(shape.stroke_style);
@@ -2609,6 +2615,7 @@ fn layout_shape(
                         stroke_color: shadow_color,
                         stroke_style: LineStyle::Solid,
                         fill_color: Some(shadow_color),
+                        fill_gradient_color: None,
                         fill_pattern: ShadingPattern::None,
                     },
                     shape.shadow_opacity_percent,
@@ -2622,11 +2629,8 @@ fn layout_shape(
                 stroke_width: stroke_width_points.unwrap_or(0.0),
                 stroke_color: color,
                 stroke_style,
-                fill_color: shape.fill_color.map(|fill_color| PdfColor {
-                    red: fill_color.red as f32 / 255.0,
-                    green: fill_color.green as f32 / 255.0,
-                    blue: fill_color.blue as f32 / 255.0,
-                }),
+                fill_color: shape.fill_color.map(pdf_color_from_model_color),
+                fill_gradient_color,
                 fill_pattern: shape.fill_pattern,
             });
         }
@@ -2740,6 +2744,7 @@ fn layout_shape(
                         stroke_color: shadow_color,
                         stroke_style: LineStyle::Solid,
                         fill_color: Some(shadow_color),
+                        fill_gradient_color: None,
                         fill_pattern: ShadingPattern::None,
                     },
                     shape.shadow_opacity_percent,
@@ -2754,11 +2759,8 @@ fn layout_shape(
                 stroke_width: stroke_width_points.unwrap_or(0.0),
                 stroke_color: color,
                 stroke_style,
-                fill_color: shape.fill_color.map(|fill_color| PdfColor {
-                    red: fill_color.red as f32 / 255.0,
-                    green: fill_color.green as f32 / 255.0,
-                    blue: fill_color.blue as f32 / 255.0,
-                }),
+                fill_color: shape.fill_color.map(pdf_color_from_model_color),
+                fill_gradient_color,
                 fill_pattern: shape.fill_pattern,
             });
         }
@@ -2776,6 +2778,7 @@ fn layout_shape(
                             stroke_color: shadow_color,
                             stroke_style: LineStyle::Solid,
                             fill_color: Some(shadow_color),
+                            fill_gradient_color: None,
                             fill_pattern: ShadingPattern::None,
                         },
                         shape.shadow_opacity_percent,
@@ -2789,11 +2792,8 @@ fn layout_shape(
                     stroke_width: stroke_width_points.unwrap_or(0.0),
                     stroke_color: color,
                     stroke_style,
-                    fill_color: shape.fill_color.map(|fill_color| PdfColor {
-                        red: fill_color.red as f32 / 255.0,
-                        green: fill_color.green as f32 / 255.0,
-                        blue: fill_color.blue as f32 / 255.0,
-                    }),
+                    fill_color: shape.fill_color.map(pdf_color_from_model_color),
+                    fill_gradient_color,
                     fill_pattern: shape.fill_pattern,
                 });
             }
@@ -3101,6 +3101,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_gradient_color: None,
                 fill_pattern: ShadingPattern::None,
             });
         }
@@ -3123,6 +3124,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_gradient_color: None,
                 fill_pattern: ShadingPattern::None,
             });
         }
@@ -3152,6 +3154,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_gradient_color: None,
                 fill_pattern: ShadingPattern::None,
             });
         }
@@ -3181,6 +3184,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_gradient_color: None,
                 fill_pattern: ShadingPattern::None,
             });
         }
@@ -3207,6 +3211,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_gradient_color: None,
                 fill_pattern: ShadingPattern::None,
             });
         }

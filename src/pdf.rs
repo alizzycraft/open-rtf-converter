@@ -1037,6 +1037,7 @@ fn draw_layout_item(
                 stroke_color,
                 stroke_style,
                 fill_color,
+                fill_gradient_color,
                 fill_pattern,
             } => {
                 draw_passive_ellipse(
@@ -1049,6 +1050,7 @@ fn draw_layout_item(
                     *stroke_color,
                     *stroke_style,
                     *fill_color,
+                    *fill_gradient_color,
                     *fill_pattern,
                 );
                 return;
@@ -1063,6 +1065,7 @@ fn draw_layout_item(
                 stroke_color,
                 stroke_style,
                 fill_color,
+                fill_gradient_color,
                 fill_pattern,
             } => {
                 draw_passive_rounded_rectangle(
@@ -1076,6 +1079,7 @@ fn draw_layout_item(
                     *stroke_color,
                     *stroke_style,
                     *fill_color,
+                    *fill_gradient_color,
                     *fill_pattern,
                 );
                 return;
@@ -1089,6 +1093,7 @@ fn draw_layout_item(
                 stroke_color,
                 stroke_style,
                 fill_color,
+                fill_gradient_color,
                 fill_pattern,
             } => {
                 draw_passive_compound_polygon(
@@ -1100,6 +1105,7 @@ fn draw_layout_item(
                     *stroke_style,
                     *fill_rule,
                     *fill_color,
+                    *fill_gradient_color,
                     *fill_pattern,
                     overlay_paths,
                 );
@@ -2545,6 +2551,7 @@ fn draw_passive_vector_polygon(
             stroke_style,
             fill_rule,
             None,
+            None,
             ShadingPattern::None,
         );
         return;
@@ -2561,6 +2568,7 @@ fn draw_passive_vector_polygon(
         stroke_style,
         fill_rule,
         fill_color.map(pdf_color_from_model),
+        None,
         ShadingPattern::None,
     );
 }
@@ -2734,6 +2742,154 @@ fn draw_passive_hatch_rect(
     content.clip_nonzero();
     content.end_path();
     draw_passive_hatch_lines(content, rect, pattern, color);
+    content.restore_state();
+}
+
+fn draw_passive_gradient_bands(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    start_color: PdfColor,
+    end_color: Option<PdfColor>,
+) {
+    if rect.width <= 0.5 || rect.height <= 0.5 {
+        return;
+    }
+    const BANDS: usize = 16;
+    let end_color = end_color.unwrap_or(PdfColor {
+        red: 1.0,
+        green: 1.0,
+        blue: 1.0,
+    });
+    let band_height = rect.height / BANDS as f32;
+    for index in 0..BANDS {
+        let t = index as f32 / (BANDS - 1) as f32;
+        set_fill_color(
+            content,
+            PdfColor {
+                red: start_color.red + ((end_color.red - start_color.red) * t),
+                green: start_color.green + ((end_color.green - start_color.green) * t),
+                blue: start_color.blue + ((end_color.blue - start_color.blue) * t),
+            },
+        );
+        content.rect(
+            rect.x,
+            rect.y + (band_height * index as f32),
+            rect.width,
+            if index + 1 == BANDS {
+                rect.height - (band_height * index as f32)
+            } else {
+                band_height + 0.1
+            },
+        );
+        content.fill_nonzero();
+    }
+}
+
+fn draw_passive_gradient_polygon(
+    content: &mut Content,
+    points: &[crate::layout::LayoutPoint],
+    fill_rule: StaticImageVectorFillRule,
+    start_color: PdfColor,
+    end_color: Option<PdfColor>,
+) {
+    let Some(bounds) = vector_points_bounds(points) else {
+        return;
+    };
+    if bounds.width <= 0.5 || bounds.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    append_passive_polygon_path(content, points);
+    match fill_rule {
+        StaticImageVectorFillRule::Alternate => content.clip_even_odd(),
+        StaticImageVectorFillRule::Winding => content.clip_nonzero(),
+    };
+    content.end_path();
+    draw_passive_gradient_bands(content, bounds, start_color, end_color);
+    content.restore_state();
+}
+
+fn draw_passive_gradient_compound_polygon(
+    content: &mut Content,
+    points: &[crate::layout::LayoutPoint],
+    paths: &[Vec<crate::layout::LayoutPoint>],
+    fill_rule: StaticImageVectorFillRule,
+    start_color: PdfColor,
+    end_color: Option<PdfColor>,
+) {
+    let mut bounds = vector_points_bounds(points).or_else(|| {
+        paths
+            .iter()
+            .find_map(|path| vector_points_bounds(path.as_slice()))
+    });
+    let Some(mut bounds) = bounds.take() else {
+        return;
+    };
+    for path in paths.iter().filter_map(|path| vector_points_bounds(path)) {
+        let min_x = bounds.x.min(path.x);
+        let min_y = bounds.y.min(path.y);
+        let max_x = (bounds.x + bounds.width).max(path.x + path.width);
+        let max_y = (bounds.y + bounds.height).max(path.y + path.height);
+        bounds = VectorDrawRect {
+            x: min_x,
+            y: min_y,
+            width: (max_x - min_x).max(0.1),
+            height: (max_y - min_y).max(0.1),
+        };
+    }
+    if bounds.width <= 0.5 || bounds.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    if points.len() >= 3 {
+        append_passive_polygon_path(content, points);
+    }
+    for path in paths {
+        if path.len() >= 3 {
+            append_passive_polygon_path(content, path);
+        }
+    }
+    match fill_rule {
+        StaticImageVectorFillRule::Alternate => content.clip_even_odd(),
+        StaticImageVectorFillRule::Winding => content.clip_nonzero(),
+    };
+    content.end_path();
+    draw_passive_gradient_bands(content, bounds, start_color, end_color);
+    content.restore_state();
+}
+
+fn draw_passive_gradient_rounded_rectangle(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    radius: f32,
+    start_color: PdfColor,
+    end_color: Option<PdfColor>,
+) {
+    if rect.width <= 0.5 || rect.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    append_passive_rounded_rectangle_path(content, rect.x, rect.y, rect.width, rect.height, radius);
+    content.clip_nonzero();
+    content.end_path();
+    draw_passive_gradient_bands(content, rect, start_color, end_color);
+    content.restore_state();
+}
+
+fn draw_passive_gradient_ellipse(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    start_color: PdfColor,
+    end_color: Option<PdfColor>,
+) {
+    if rect.width <= 0.5 || rect.height <= 0.5 {
+        return;
+    }
+    content.save_state();
+    append_passive_ellipse_path(content, rect.x, rect.y, rect.width, rect.height);
+    content.clip_nonzero();
+    content.end_path();
+    draw_passive_gradient_bands(content, rect, start_color, end_color);
     content.restore_state();
 }
 
@@ -3052,6 +3208,7 @@ fn draw_passive_vector_rounded_rectangle(
             }),
             stroke_style,
             None,
+            None,
             ShadingPattern::None,
         );
         return;
@@ -3071,6 +3228,7 @@ fn draw_passive_vector_rounded_rectangle(
         }),
         stroke_style,
         fill_color.map(pdf_color_from_model),
+        None,
         ShadingPattern::None,
     );
 }
@@ -3110,6 +3268,7 @@ fn draw_passive_vector_ellipse(
             }),
             stroke_style,
             None,
+            None,
             ShadingPattern::None,
         );
         return;
@@ -3128,6 +3287,7 @@ fn draw_passive_vector_ellipse(
         }),
         stroke_style,
         fill_color.map(pdf_color_from_model),
+        None,
         ShadingPattern::None,
     );
 }
@@ -4123,6 +4283,7 @@ fn draw_passive_ellipse(
     stroke_color: PdfColor,
     stroke_style: LineStyle,
     fill_color: Option<PdfColor>,
+    fill_gradient_color: Option<PdfColor>,
     fill_pattern: ShadingPattern,
 ) {
     if stroke_width <= 0.0 && fill_color.is_none() {
@@ -4148,7 +4309,36 @@ fn draw_passive_ellipse(
         content.stroke();
     }
     content.restore_state();
-    if fill_pattern != ShadingPattern::None
+    if fill_pattern == ShadingPattern::VerticalGradient
+        && let Some(fill_color) = fill_color
+    {
+        draw_passive_gradient_ellipse(
+            content,
+            VectorDrawRect {
+                x,
+                y,
+                width,
+                height,
+            },
+            fill_color,
+            fill_gradient_color,
+        );
+        if has_stroke {
+            draw_passive_ellipse(
+                content,
+                x,
+                y,
+                width,
+                height,
+                stroke_width,
+                stroke_color,
+                stroke_style,
+                None,
+                None,
+                ShadingPattern::None,
+            );
+        }
+    } else if fill_pattern != ShadingPattern::None
         && let Some(fill_color) = fill_color
     {
         draw_passive_hatch_ellipse(
@@ -4173,6 +4363,7 @@ fn draw_passive_ellipse(
                 stroke_color,
                 stroke_style,
                 None,
+                None,
                 ShadingPattern::None,
             );
         }
@@ -4191,6 +4382,7 @@ fn draw_passive_rounded_rectangle(
     stroke_color: PdfColor,
     stroke_style: LineStyle,
     fill_color: Option<PdfColor>,
+    fill_gradient_color: Option<PdfColor>,
     fill_pattern: ShadingPattern,
 ) {
     if stroke_width <= 0.0 && fill_color.is_none() {
@@ -4216,7 +4408,38 @@ fn draw_passive_rounded_rectangle(
         content.stroke();
     }
     content.restore_state();
-    if fill_pattern != ShadingPattern::None
+    if fill_pattern == ShadingPattern::VerticalGradient
+        && let Some(fill_color) = fill_color
+    {
+        draw_passive_gradient_rounded_rectangle(
+            content,
+            VectorDrawRect {
+                x,
+                y,
+                width,
+                height,
+            },
+            radius,
+            fill_color,
+            fill_gradient_color,
+        );
+        if has_stroke {
+            draw_passive_rounded_rectangle(
+                content,
+                x,
+                y,
+                width,
+                height,
+                radius,
+                stroke_width,
+                stroke_color,
+                stroke_style,
+                None,
+                None,
+                ShadingPattern::None,
+            );
+        }
+    } else if fill_pattern != ShadingPattern::None
         && let Some(fill_color) = fill_color
     {
         draw_passive_hatch_rounded_rectangle(
@@ -4242,6 +4465,7 @@ fn draw_passive_rounded_rectangle(
                 stroke_width,
                 stroke_color,
                 stroke_style,
+                None,
                 None,
                 ShadingPattern::None,
             );
@@ -4413,6 +4637,7 @@ fn draw_passive_polygon(
     stroke_style: LineStyle,
     fill_rule: StaticImageVectorFillRule,
     fill_color: Option<PdfColor>,
+    fill_gradient_color: Option<PdfColor>,
     fill_pattern: ShadingPattern,
 ) {
     let Some(first) = points.first() else {
@@ -4459,7 +4684,24 @@ fn draw_passive_polygon(
         content.stroke();
     }
     content.restore_state();
-    if fill_pattern != ShadingPattern::None
+    if fill_pattern == ShadingPattern::VerticalGradient
+        && let Some(fill_color) = fill_color
+    {
+        draw_passive_gradient_polygon(content, points, fill_rule, fill_color, fill_gradient_color);
+        if has_stroke {
+            draw_passive_polygon(
+                content,
+                points,
+                stroke_width,
+                stroke_color,
+                stroke_style,
+                fill_rule,
+                None,
+                None,
+                ShadingPattern::None,
+            );
+        }
+    } else if fill_pattern != ShadingPattern::None
         && let Some(fill_color) = fill_color
     {
         draw_passive_hatch_polygon(content, points, fill_rule, fill_pattern, fill_color);
@@ -4471,6 +4713,7 @@ fn draw_passive_polygon(
                 stroke_color,
                 stroke_style,
                 fill_rule,
+                None,
                 None,
                 ShadingPattern::None,
             );
@@ -4487,6 +4730,7 @@ fn draw_passive_compound_polygon(
     stroke_style: LineStyle,
     fill_rule: StaticImageVectorFillRule,
     fill_color: Option<PdfColor>,
+    fill_gradient_color: Option<PdfColor>,
     fill_pattern: ShadingPattern,
     overlay_paths: &[Vec<crate::layout::LayoutPoint>],
 ) {
@@ -4499,6 +4743,7 @@ fn draw_passive_compound_polygon(
             stroke_style,
             fill_rule,
             fill_color,
+            fill_gradient_color,
             fill_pattern,
         );
         return;
@@ -4548,7 +4793,33 @@ fn draw_passive_compound_polygon(
         }
     }
     content.restore_state();
-    if fill_pattern != ShadingPattern::None
+    if fill_pattern == ShadingPattern::VerticalGradient
+        && let Some(fill_color) = fill_color
+    {
+        draw_passive_gradient_compound_polygon(
+            content,
+            points,
+            paths,
+            fill_rule,
+            fill_color,
+            fill_gradient_color,
+        );
+        if has_stroke {
+            draw_passive_compound_polygon(
+                content,
+                points,
+                paths,
+                stroke_width,
+                stroke_color,
+                stroke_style,
+                fill_rule,
+                None,
+                None,
+                ShadingPattern::None,
+                overlay_paths,
+            );
+        }
+    } else if fill_pattern != ShadingPattern::None
         && let Some(fill_color) = fill_color
     {
         draw_passive_hatch_compound_polygon(
@@ -4568,6 +4839,7 @@ fn draw_passive_compound_polygon(
                 stroke_color,
                 stroke_style,
                 fill_rule,
+                None,
                 None,
                 ShadingPattern::None,
                 overlay_paths,
