@@ -1000,6 +1000,10 @@ struct ShapeBuilder {
     rotation_units: i32,
     start_arrowhead: StaticShapeArrowhead,
     end_arrowhead: StaticShapeArrowhead,
+    start_arrowhead_width_percent: i32,
+    start_arrowhead_length_percent: i32,
+    end_arrowhead_width_percent: i32,
+    end_arrowhead_length_percent: i32,
     stroke_enabled: bool,
     stroke_width_twips: i32,
     stroke_color: Color,
@@ -1058,6 +1062,10 @@ impl Default for ShapeBuilder {
             rotation_units: 0,
             start_arrowhead: StaticShapeArrowhead::None,
             end_arrowhead: StaticShapeArrowhead::None,
+            start_arrowhead_width_percent: 100,
+            start_arrowhead_length_percent: 100,
+            end_arrowhead_width_percent: 100,
+            end_arrowhead_length_percent: 100,
             stroke_enabled: true,
             stroke_width_twips: 15,
             stroke_color: Color::default(),
@@ -12711,6 +12719,10 @@ impl Parser {
                 flip_vertical: shape.flip_vertical,
                 start_arrowhead: shape.start_arrowhead,
                 end_arrowhead: shape.end_arrowhead,
+                start_arrowhead_width_percent: shape.start_arrowhead_width_percent,
+                start_arrowhead_length_percent: shape.start_arrowhead_length_percent,
+                end_arrowhead_width_percent: shape.end_arrowhead_width_percent,
+                end_arrowhead_length_percent: shape.end_arrowhead_length_percent,
                 stroke_width_twips,
                 stroke_color: shape.stroke_color,
                 stroke_style: shape.stroke_style,
@@ -13567,6 +13579,42 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.end_arrowhead = arrowhead;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineStartArrowWidth" => {
+                if let Some(percent) = parse_shape_arrowhead_width_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.start_arrowhead_width_percent = percent;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineStartArrowLength" => {
+                if let Some(percent) = parse_shape_arrowhead_length_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.start_arrowhead_length_percent = percent;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineEndArrowWidth" => {
+                if let Some(percent) = parse_shape_arrowhead_width_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.end_arrowhead_width_percent = percent;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineEndArrowLength" => {
+                if let Some(percent) = parse_shape_arrowhead_length_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.end_arrowhead_length_percent = percent;
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
@@ -22116,6 +22164,35 @@ fn parse_shape_arrowhead_property(value: &str) -> Option<StaticShapeArrowhead> {
         "2" | "triangle" | "msoarrowheadtriangle" => Some(StaticShapeArrowhead::Triangle),
         _ => None,
     }
+}
+
+fn parse_shape_arrowhead_width_property(value: &str) -> Option<i32> {
+    let normalized = normalize_shape_enum_property(value);
+    match normalized.as_str() {
+        "0" | "narrow" | "small" | "msoarrowheadnarrow" => Some(70),
+        "1" | "medium" | "msoarrowheadwidthmedium" => Some(100),
+        "2" | "wide" | "large" | "msoarrowheadwide" => Some(135),
+        _ => None,
+    }
+}
+
+fn parse_shape_arrowhead_length_property(value: &str) -> Option<i32> {
+    let normalized = normalize_shape_enum_property(value);
+    match normalized.as_str() {
+        "0" | "short" | "small" | "msoarrowheadshort" => Some(75),
+        "1" | "medium" | "msoarrowheadlengthmedium" => Some(100),
+        "2" | "long" | "large" | "msoarrowheadlong" => Some(135),
+        _ => None,
+    }
+}
+
+fn normalize_shape_enum_property(value: &str) -> String {
+    value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn merge_child_field_instruction(

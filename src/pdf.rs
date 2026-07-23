@@ -6589,6 +6589,10 @@ endstream
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
             end_arrowhead: StaticShapeArrowhead::None,
+            start_arrowhead_width_percent: 100,
+            start_arrowhead_length_percent: 100,
+            end_arrowhead_width_percent: 100,
+            end_arrowhead_length_percent: 100,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,
@@ -6692,6 +6696,10 @@ endstream
             flip_vertical: false,
             start_arrowhead: StaticShapeArrowhead::None,
             end_arrowhead: StaticShapeArrowhead::None,
+            start_arrowhead_width_percent: 100,
+            start_arrowhead_length_percent: 100,
+            end_arrowhead_width_percent: 100,
+            end_arrowhead_length_percent: 100,
             stroke_width_twips: 20,
             stroke_color: Color {
                 red: 255,

@@ -85168,6 +85168,211 @@ fn office_shape_arrowheads_render_passively_without_property_leakage() {
 }
 
 #[test]
+fn office_shape_arrowhead_size_renders_passively_without_property_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineEndArrowhead}{",
+        "\\",
+        "sv triangle}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineEndArrowWidth}{",
+        "\\",
+        "sv wide}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineEndArrowLength}{",
+        "\\",
+        "sv long}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-arrow-size-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("sized arrowhead line shape");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.end_arrowhead_width_percent, 135);
+    assert_eq!(shape.end_arrowhead_length_percent, 135);
+    assert!(
+        output.diagnostics.iter().any(|warning| warning
+            .message
+            .contains("unsupported/active drawing properties")),
+        "unrelated active Office drawing properties should still be stripped: {:?}",
+        output.diagnostics
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "lineEndArrowhead",
+        "lineEndArrowWidth",
+        "lineEndArrowLength",
+        "triangle",
+        "wide",
+        "long",
+        "pFragments",
+        "hostile-arrow-size-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden arrowhead size content leaked to text: {forbidden}"
+        );
+    }
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(
+                item,
+                LayoutItem::Polygon {
+                    fill_color: Some(_),
+                    ..
+                }
+            )),
+        "sized triangle arrowhead should render as passive filled geometry"
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "B"),
+        "sized triangle arrowhead should emit passive fill-and-stroke geometry"
+    );
+    for forbidden in [
+        b"lineEndArrowWidth".as_slice(),
+        b"lineEndArrowLength",
+        b"pFragments",
+        b"hostile-arrow-size-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden arrowhead size content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_office_shape_arrowhead_size_is_stripped_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 20}}{\sp{\sn lineEndArrowhead}{\sv triangle}}{\sp{\sn lineEndArrowWidth}{\sv active-arrow-size-payload}}}}After\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("invalid arrowhead size line shape");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.end_arrowhead_width_percent, 100);
+    assert!(
+        output.diagnostics.iter().any(|warning| warning
+            .message
+            .contains("unsupported/active drawing properties")),
+        "invalid Office arrowhead size should be stripped and diagnosed: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        "lineEndArrowWidth",
+        "active-arrow-size-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden invalid arrowhead size content leaked to text: {forbidden}"
+        );
+    }
+    for forbidden in [
+        b"lineEndArrowWidth".as_slice(),
+        b"active-arrow-size-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden invalid arrowhead size content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_shape_named_arrowhead_aliases_render_passively() {
     let input = rtf(&[
         "{",
