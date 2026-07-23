@@ -79406,6 +79406,10 @@ fn old_drawing_text_box_renders_passively_without_property_leakage() {
         "\\",
         "dodhgt1{",
         "\\",
+        "dpxsize3150",
+        "\\",
+        "dpysize1575",
+        "\\",
         "dptxbx{",
         "\\",
         "dptxbxtext Legacy box text {",
@@ -79428,16 +79432,38 @@ fn old_drawing_text_box_renders_passively_without_property_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("legacy drawing text box should remain a passive shape");
 
     assert!(text.contains("Before"));
     assert!(text.contains("Legacy box text"));
     assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(shape.z_order, 1);
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_) | Block::Placeholder(_))),
+        "active object inside legacy text box should not create body image/placeholder blocks: {:?}",
+        parsed.document.blocks
+    );
     for forbidden in [
         "dobx",
         "dobxcolumn",
         "doby",
         "dobypara",
         "dodhgt",
+        "dpxsize",
+        "dpysize",
         "dptxbx",
         "dptxbxtext",
         "objdata",
@@ -79486,6 +79512,8 @@ fn old_drawing_text_box_renders_passively_without_property_leakage() {
         b"doby",
         b"dobypara",
         b"dodhgt",
+        b"dpxsize",
+        b"dpysize",
         b"dptxbx",
         b"dptxbxtext",
         b"objdata",

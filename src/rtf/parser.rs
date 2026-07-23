@@ -3656,6 +3656,12 @@ impl Parser {
             "shptxt" | "dptxbx" | "dptxbxtext"
                 if self.state.inside_shape && destination_allows_visible_content(&self.state) =>
             {
+                if matches!(control.name.as_str(), "dptxbx" | "dptxbxtext")
+                    && let Some(shape) = self.current_shape.as_mut()
+                    && shape.kind.is_none()
+                {
+                    shape.kind = Some(StaticShapeKind::Rectangle);
+                }
                 self.state.shape_result_seen = true;
                 self.state.destination = Destination::ShapeText;
             }
@@ -10142,6 +10148,13 @@ impl Parser {
                 self.state.destination = previous_destination;
                 Ok(())
             }
+            Destination::ShapeText => {
+                let previous_destination = self.state.destination;
+                self.state.destination = destination;
+                self.push_text(&text, offset)?;
+                self.state.destination = previous_destination;
+                Ok(())
+            }
             Destination::Background => {
                 self.diagnostics.push(Diagnostic::warning(
                     "background placeholder stripped before safe model normalization",
@@ -12194,6 +12207,15 @@ impl Parser {
                 "note separator picture stripped before safe model normalization",
                 Some(offset),
             ));
+        } else if destination == Destination::ShapeText {
+            self.diagnostics.push(Diagnostic::warning(
+                "shape text picture replaced with passive text placeholder before normalization",
+                Some(offset),
+            ));
+            let previous_destination = self.state.destination;
+            self.state.destination = destination;
+            self.push_text("[Image skipped: shape text picture]", offset)?;
+            self.state.destination = previous_destination;
         } else if is_non_visible_model_destination(destination) {
             self.diagnostics.push(Diagnostic::warning(
                 "non-visible destination picture stripped before safe model normalization",
@@ -12285,6 +12307,12 @@ impl Parser {
                 "note separator picture placeholder stripped before safe model normalization",
                 Some(offset),
             ));
+            Ok(())
+        } else if destination == Destination::ShapeText {
+            let previous_destination = self.state.destination;
+            self.state.destination = destination;
+            self.push_text(&text, offset)?;
+            self.state.destination = previous_destination;
             Ok(())
         } else if is_non_visible_model_destination(destination) {
             self.diagnostics.push(Diagnostic::warning(
@@ -12875,6 +12903,15 @@ impl Parser {
             } else {
                 self.document.background_shapes.push(shape);
             }
+        } else if destination == Destination::ShapeText {
+            self.diagnostics.push(Diagnostic::warning(
+                "nested shape in shape text replaced with passive text placeholder before normalization",
+                Some(offset),
+            ));
+            let previous_destination = self.state.destination;
+            self.state.destination = destination;
+            self.push_text("[Shape skipped: nested shape text shape]", offset)?;
+            self.state.destination = previous_destination;
         } else if is_non_visible_model_destination(destination) {
             self.diagnostics.push(Diagnostic::warning(
                 "non-visible destination shape stripped before safe model normalization",
@@ -44890,7 +44927,7 @@ After\par}"#;
     }
 
     #[test]
-    fn renders_old_drawing_text_box_as_safe_passive_paragraph() {
+    fn renders_old_drawing_text_box_as_safe_passive_shape() {
         let output = parse_rtf(
             r"{\rtf1 Before\par{\do\dobx720\doby720\dodhgt1{\dptxbx Legacy box text\par}}After\par}",
         )
@@ -44910,8 +44947,26 @@ After\par}"#;
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let shape = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("legacy text box shape");
+        let shape_text = shape
+            .text
+            .iter()
+            .flat_map(|paragraph| &paragraph.runs)
+            .map(|run| run.text.as_str())
+            .collect::<String>();
 
-        assert_eq!(paragraph_text, vec!["Before", "Legacy box text", "After"]);
+        assert_eq!(paragraph_text, vec!["Before", "After"]);
+        assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+        assert_eq!(shape.z_order, 1);
+        assert_eq!(shape_text, "Legacy box text");
         assert!(output.document.blocks.iter().all(|block| {
             !matches!(
                 block,
@@ -45830,7 +45885,7 @@ After\par}"#;
     }
 
     #[test]
-    fn renders_old_drawing_text_box_text_destination_as_safe_passive_paragraph() {
+    fn renders_old_drawing_text_box_text_destination_as_safe_passive_shape() {
         let output = parse_rtf(
             r"{\rtf1 Before\par{\do\dobx720\doby720\dodhgt1{\dptxbx{\dptxbxtext Legacy box text\par}}}After\par}",
         )
@@ -45850,8 +45905,26 @@ After\par}"#;
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let shape = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("legacy text box shape");
+        let shape_text = shape
+            .text
+            .iter()
+            .flat_map(|paragraph| &paragraph.runs)
+            .map(|run| run.text.as_str())
+            .collect::<String>();
 
-        assert_eq!(paragraph_text, vec!["Before", "Legacy box text", "After"]);
+        assert_eq!(paragraph_text, vec!["Before", "After"]);
+        assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+        assert_eq!(shape.z_order, 1);
+        assert_eq!(shape_text, "Legacy box text");
         assert!(output.document.blocks.iter().all(|block| {
             !matches!(
                 block,
