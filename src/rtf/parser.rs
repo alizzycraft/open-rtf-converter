@@ -2093,7 +2093,12 @@ impl Parser {
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_layout_positioning_resultless_field(name)
                     {
-                        self.handle_resultless_layout_field(name, &field_instruction, offset)?;
+                        self.handle_resultless_layout_field(
+                            field_owner_destination,
+                            name,
+                            &field_instruction,
+                            offset,
+                        )?;
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_active_non_visible_resultless_field(name)
                     {
@@ -2300,7 +2305,12 @@ impl Parser {
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_layout_positioning_resultless_field(name)
                     {
-                        self.handle_resultless_layout_field(name, &field_instruction, offset)?;
+                        self.handle_resultless_layout_field(
+                            field_owner_destination,
+                            name,
+                            &field_instruction,
+                            offset,
+                        )?;
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_active_non_visible_resultless_field(name)
                     {
@@ -8964,6 +8974,7 @@ impl Parser {
 
     fn handle_resultless_layout_field(
         &mut self,
+        destination: Destination,
         name: &str,
         instruction: &str,
         offset: usize,
@@ -8975,6 +8986,7 @@ impl Parser {
             );
             if advance.horizontal_twips != 0 || advance.vertical_twips != 0 {
                 self.push_passive_advance_marker(
+                    destination,
                     advance.horizontal_twips,
                     advance.vertical_twips,
                     offset,
@@ -9010,6 +9022,7 @@ impl Parser {
 
     fn push_passive_advance_marker(
         &mut self,
+        destination: Destination,
         horizontal_twips: i32,
         vertical_twips: i32,
         offset: usize,
@@ -9018,7 +9031,11 @@ impl Parser {
         let previous_baseline_shift = self.state.character.baseline_shift_half_points;
         self.state.character.character_spacing_twips = horizontal_twips;
         self.state.character.baseline_shift_half_points = vertical_twips / 10;
-        let result = self.push_text(PASSIVE_ADVANCE_MARKER, offset);
+        let result = self.push_passive_field_text_for_destination(
+            destination,
+            PASSIVE_ADVANCE_MARKER,
+            offset,
+        );
         self.state.character.character_spacing_twips = previous_spacing;
         self.state.character.baseline_shift_half_points = previous_baseline_shift;
         result
