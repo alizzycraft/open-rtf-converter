@@ -12,12 +12,12 @@ use crate::model::{
     PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
     StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeLineCap, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
-    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TableRowWrapMargins, UnderlineStyle,
+    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
+    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS,
+    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
+    TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -94,6 +94,14 @@ pub enum LayoutItem {
         style: LineStyle,
         cap: LineCap,
     },
+    JoinedPolyline {
+        points: Vec<LayoutPoint>,
+        width: f32,
+        color: PdfColor,
+        style: LineStyle,
+        cap: LineCap,
+        join: LineJoin,
+    },
     Ellipse {
         x: f32,
         y: f32,
@@ -152,6 +160,13 @@ pub enum LineCap {
     Flat,
     Round,
     Square,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum LineJoin {
+    Miter,
+    Round,
+    Bevel,
 }
 
 #[derive(Debug, Clone)]
@@ -2378,6 +2393,7 @@ fn layout_shape(
     let shadow_offset_y = twips_to_points(shape.shadow_offset_y_twips);
     let stroke_style = line_style_for_border_style(shape.stroke_style);
     let stroke_cap = line_cap_for_shape_cap(shape.stroke_cap);
+    let stroke_join = line_join_for_shape_join(shape.stroke_join);
     let Some(page) = pages.last_mut() else {
         return;
     };
@@ -2448,18 +2464,29 @@ fn layout_shape(
                         ),
                     })
                     .collect::<Vec<_>>();
-                for segment in points.windows(2) {
-                    let start = segment[0];
-                    let end = segment[1];
-                    push_shape_line(
-                        page,
-                        start,
-                        end,
-                        width_points,
+                if stroke_join == LineJoin::Miter {
+                    for segment in points.windows(2) {
+                        let start = segment[0];
+                        let end = segment[1];
+                        push_shape_line(
+                            page,
+                            start,
+                            end,
+                            width_points,
+                            color,
+                            stroke_style,
+                            stroke_cap,
+                        );
+                    }
+                } else if points.len() >= 2 {
+                    page.items.push(LayoutItem::JoinedPolyline {
+                        points: points.clone(),
+                        width: width_points,
                         color,
-                        stroke_style,
-                        stroke_cap,
-                    );
+                        style: stroke_style,
+                        cap: stroke_cap,
+                        join: stroke_join,
+                    });
                 }
                 if let [first, second, ..] = points.as_slice() {
                     push_static_shape_arrowhead(
@@ -3443,6 +3470,24 @@ fn layout_item_vertical_bounds(item: &LayoutItem) -> Option<VerticalBounds> {
                 bottom: (*y1).min(*y2) - half_width,
             })
         }
+        LayoutItem::JoinedPolyline { points, width, .. } => {
+            if points.is_empty() {
+                return None;
+            }
+            let half_width = *width / 2.0;
+            Some(VerticalBounds {
+                top: points
+                    .iter()
+                    .map(|point| point.y)
+                    .fold(f32::NEG_INFINITY, f32::max)
+                    + half_width,
+                bottom: points
+                    .iter()
+                    .map(|point| point.y)
+                    .fold(f32::INFINITY, f32::min)
+                    - half_width,
+            })
+        }
         LayoutItem::Ellipse {
             y,
             height,
@@ -3523,6 +3568,11 @@ fn translate_layout_item_y(item: &mut LayoutItem, delta_y: f32) {
             LayoutItem::Line { y1, y2, .. } | LayoutItem::CappedLine { y1, y2, .. } => {
                 *y1 += delta_y;
                 *y2 += delta_y;
+            }
+            LayoutItem::JoinedPolyline { points, .. } => {
+                for point in points {
+                    point.y += delta_y;
+                }
             }
             LayoutItem::Ellipse { y, .. } => *y += delta_y,
             LayoutItem::RoundedRectangle { y, .. } => *y += delta_y,
@@ -9025,6 +9075,14 @@ fn line_cap_for_shape_cap(cap: StaticShapeLineCap) -> LineCap {
     }
 }
 
+fn line_join_for_shape_join(join: StaticShapeLineJoin) -> LineJoin {
+    match join {
+        StaticShapeLineJoin::Miter => LineJoin::Miter,
+        StaticShapeLineJoin::Round => LineJoin::Round,
+        StaticShapeLineJoin::Bevel => LineJoin::Bevel,
+    }
+}
+
 fn justified_word_spacing(
     line: &Line,
     style: &ParagraphStyle,
@@ -11198,6 +11256,7 @@ mod tests {
                 stroke_color: Color::default(),
                 stroke_style: BorderStyle::Single,
                 stroke_cap: StaticShapeLineCap::Flat,
+                stroke_join: StaticShapeLineJoin::Miter,
                 fill_color: Some(Color {
                     red: 200,
                     green: 20,
@@ -11264,6 +11323,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 200,
                 green: 20,
@@ -11401,6 +11461,7 @@ mod tests {
                 stroke_color: Color::default(),
                 stroke_style: BorderStyle::Single,
                 stroke_cap: StaticShapeLineCap::Flat,
+                stroke_join: StaticShapeLineJoin::Miter,
                 fill_color: Some(Color {
                     red: 200,
                     green: 20,
@@ -11473,6 +11534,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -11559,6 +11621,7 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11640,6 +11703,7 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -11730,6 +11794,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11833,6 +11898,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11907,6 +11973,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -11991,6 +12058,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dashed,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12052,6 +12120,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12119,6 +12188,7 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12192,6 +12262,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: None,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12284,6 +12355,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Dotted,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12376,6 +12448,7 @@ mod tests {
             stroke_color: Color::default(),
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12455,6 +12528,7 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -12552,6 +12626,7 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -19604,6 +19679,7 @@ mod tests {
             },
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,

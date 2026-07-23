@@ -171,6 +171,7 @@ fn count_layout_item(item: &LayoutItem) -> usize {
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
             | LayoutItem::CappedLine { .. }
+            | LayoutItem::JoinedPolyline { .. }
             | LayoutItem::Ellipse { .. }
             | LayoutItem::RoundedRectangle { .. }
             | LayoutItem::Polygon { .. }
@@ -404,6 +405,7 @@ where
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
             | LayoutItem::CappedLine { .. }
+            | LayoutItem::JoinedPolyline { .. }
             | LayoutItem::Ellipse { .. }
             | LayoutItem::RoundedRectangle { .. }
             | LayoutItem::Polygon { .. }
@@ -431,6 +433,7 @@ where
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
             | LayoutItem::CappedLine { .. }
+            | LayoutItem::JoinedPolyline { .. }
             | LayoutItem::Ellipse { .. }
             | LayoutItem::RoundedRectangle { .. }
             | LayoutItem::Polygon { .. } => return,

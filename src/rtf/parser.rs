@@ -15,13 +15,13 @@ use crate::model::{
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
     StaticImageVectorPathSegment, StaticImageVectorRaster, StaticImageVectorTextBounds,
     StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeLineCap, StaticShapePoint, StaticShapeTextVerticalAnchor,
-    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
-    TableCellPadding, TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief,
-    UnderlineStyle,
+    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapePoint,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
+    TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
+    TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
+    TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -1010,6 +1010,7 @@ struct ShapeBuilder {
     stroke_color_from_foreground: bool,
     stroke_style: BorderStyle,
     stroke_cap: StaticShapeLineCap,
+    stroke_join: StaticShapeLineJoin,
     fill_enabled: bool,
     fill_color: Option<Color>,
     fill_color_from_foreground: bool,
@@ -1072,6 +1073,7 @@ impl Default for ShapeBuilder {
             stroke_color_from_foreground: false,
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_enabled: true,
             fill_color: None,
             fill_color_from_foreground: false,
@@ -12727,6 +12729,7 @@ impl Parser {
                 stroke_color: shape.stroke_color,
                 stroke_style: shape.stroke_style,
                 stroke_cap: shape.stroke_cap,
+                stroke_join: shape.stroke_join,
                 fill_color,
                 shadow_enabled: shape.shadow_enabled,
                 shadow_color: shape.shadow_color,
@@ -13561,6 +13564,15 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.stroke_cap = cap;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "lineJoinStyle" => {
+                if let Some(join) = parse_shape_line_join_property(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.stroke_join = join;
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
@@ -22089,6 +22101,16 @@ fn parse_shape_line_cap_property(value: &str) -> Option<StaticShapeLineCap> {
         "0" | "flat" | "butt" | "msolinecapflat" => Some(StaticShapeLineCap::Flat),
         "1" | "square" | "msolinecapsquare" => Some(StaticShapeLineCap::Square),
         "2" | "round" | "msolinecapround" => Some(StaticShapeLineCap::Round),
+        _ => None,
+    }
+}
+
+fn parse_shape_line_join_property(value: &str) -> Option<StaticShapeLineJoin> {
+    let normalized = normalize_shape_enum_property(value);
+    match normalized.as_str() {
+        "0" | "3" | "miter" | "msolinejoinmiter" => Some(StaticShapeLineJoin::Miter),
+        "1" | "round" | "msolinejoinround" => Some(StaticShapeLineJoin::Round),
+        "2" | "bevel" | "msolinejoinbevel" => Some(StaticShapeLineJoin::Bevel),
         _ => None,
     }
 }

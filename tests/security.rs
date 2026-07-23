@@ -5,7 +5,7 @@ use std::path::Path;
 use lopdf::Document as PdfDocument;
 #[cfg(feature = "cli")]
 use open_rtf_converter::convert_rtf_file_to_pdf;
-use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineCap, LineStyle};
+use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineCap, LineJoin, LineStyle};
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
@@ -16,8 +16,8 @@ use open_rtf_converter::model::{
     ShadingPattern, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
     StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
     StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap,
-    StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
-    TableRowAlignment, TextRelief, UnderlineStyle,
+    StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment,
+    TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -84367,6 +84367,267 @@ fn office_shape_line_dashing_renders_passively_without_property_leakage() {
             !pdf.windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden lineDashing drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn office_shape_round_line_join_renders_passively_without_property_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dppolyline",
+        "\\",
+        "dpptx360",
+        "\\",
+        "dppty480",
+        "\\",
+        "dpptx1440",
+        "\\",
+        "dppty480",
+        "\\",
+        "dpptx1440",
+        "\\",
+        "dppty1200",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineWidth}{",
+        "\\",
+        "sv 76200}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineJoinStyle}{",
+        "\\",
+        "sv round}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-line-join-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("polyline shape with round join");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.kind, StaticShapeKind::Polyline);
+    assert_eq!(shape.stroke_join, StaticShapeLineJoin::Round);
+    assert!(
+        output.diagnostics.iter().any(|warning| warning
+            .message
+            .contains("unsupported/active drawing properties")),
+        "unrelated active Office drawing properties should still be stripped: {:?}",
+        output.diagnostics
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "lineJoinStyle",
+        "round",
+        "pFragments",
+        "hostile-line-join-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden lineJoinStyle drawing content leaked to text: {forbidden}"
+        );
+    }
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(
+                item,
+                LayoutItem::JoinedPolyline {
+                    points,
+                    join: LineJoin::Round,
+                    ..
+                } if points.len() == 3
+            )),
+        "round joined polyline should stay one passive joined path"
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "j"
+                && operation.operands.len() == 1
+                && pdf_operand_number(&operation.operands[0])
+                    .is_some_and(|value| (value - 1.0).abs() < 0.01)
+        }),
+        "round line join should emit passive PDF line-join operator"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "joined polyline should still render as a passive stroked path"
+    );
+    for forbidden in [
+        b"lineJoinStyle".as_slice(),
+        b"pFragments",
+        b"hostile-line-join-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden lineJoinStyle drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_office_shape_line_join_is_stripped_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dppolyline",
+        "\\",
+        "dpptx360",
+        "\\",
+        "dppty480",
+        "\\",
+        "dpptx1440",
+        "\\",
+        "dppty480",
+        "\\",
+        "dpptx1440",
+        "\\",
+        "dppty1200",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineJoinStyle}{",
+        "\\",
+        "sv activeJoinPayload}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-invalid-line-join-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("polyline shape with invalid join");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.stroke_join, StaticShapeLineJoin::Miter);
+    assert!(
+        output.diagnostics.iter().any(|warning| warning
+            .message
+            .contains("stripping unsupported/active drawing properties")),
+        "invalid line join should be diagnosed as stripped: {:?}",
+        output.diagnostics
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "lineJoinStyle",
+        "activeJoinPayload",
+        "pFragments",
+        "hostile-invalid-line-join-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden invalid lineJoinStyle drawing content leaked to text: {forbidden}"
+        );
+    }
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        !layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(item, LayoutItem::JoinedPolyline { .. })),
+        "invalid line join should not create joined passive geometry"
+    );
+    for forbidden in [
+        b"lineJoinStyle".as_slice(),
+        b"activeJoinPayload",
+        b"pFragments",
+        b"hostile-invalid-line-join-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden invalid lineJoinStyle drawing content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

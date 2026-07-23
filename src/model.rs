@@ -652,6 +652,7 @@ pub struct StaticShape {
     pub stroke_color: Color,
     pub stroke_style: BorderStyle,
     pub stroke_cap: StaticShapeLineCap,
+    pub stroke_join: StaticShapeLineJoin,
     pub fill_color: Option<Color>,
     pub shadow_enabled: bool,
     pub shadow_color: Color,
@@ -704,6 +705,14 @@ pub enum StaticShapeLineCap {
     Flat,
     Round,
     Square,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum StaticShapeLineJoin {
+    #[default]
+    Miter,
+    Round,
+    Bevel,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

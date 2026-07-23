@@ -2,16 +2,17 @@ use std::error::Error;
 use std::fmt;
 
 use pdf_writer::types::{
-    BlendMode, CidFontType, FontFlags, LineCapStyle, Predictor, SystemInfo, TextRenderingMode,
-    UnicodeCmap,
+    BlendMode, CidFontType, FontFlags, LineCapStyle, LineJoinStyle, Predictor, SystemInfo,
+    TextRenderingMode, UnicodeCmap,
 };
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
 use ttf_parser::{Face, name_id};
 
 use crate::fonts::{FontAsset, FontProvider};
 use crate::layout::{
-    LayoutDocument, LayoutItem, LineCap, LineStyle, PdfColor, PdfFontFamily, TextFragment,
-    TextRotation, passive_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
+    LayoutDocument, LayoutItem, LineCap, LineJoin, LineStyle, PdfColor, PdfFontFamily,
+    TextFragment, TextRotation, passive_pair_kerning_points, style_uses_passive_kerning,
+    twips_to_points,
 };
 use crate::model::{
     BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ShadingPattern,
@@ -1004,6 +1005,17 @@ fn draw_layout_item(
                 draw_passive_line(content, *x1, *y1, *x2, *y2, *width, *color, *style, *cap);
                 return;
             }
+            LayoutItem::JoinedPolyline {
+                points,
+                width,
+                color,
+                style,
+                cap,
+                join,
+            } => {
+                draw_passive_joined_polyline(content, points, *width, *color, *style, *cap, *join);
+                return;
+            }
             LayoutItem::Ellipse {
                 x,
                 y,
@@ -1318,6 +1330,7 @@ where
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
             | LayoutItem::CappedLine { .. }
+            | LayoutItem::JoinedPolyline { .. }
             | LayoutItem::Ellipse { .. }
             | LayoutItem::RoundedRectangle { .. }
             | LayoutItem::Polygon { .. }
@@ -1354,6 +1367,7 @@ where
             | LayoutItem::Underline { .. }
             | LayoutItem::Line { .. }
             | LayoutItem::CappedLine { .. }
+            | LayoutItem::JoinedPolyline { .. }
             | LayoutItem::Ellipse { .. }
             | LayoutItem::RoundedRectangle { .. }
             | LayoutItem::Polygon { .. } => return,
@@ -3849,6 +3863,52 @@ fn draw_passive_line(
     content.restore_state();
 }
 
+fn draw_passive_joined_polyline(
+    content: &mut Content,
+    points: &[crate::layout::LayoutPoint],
+    width: f32,
+    color: PdfColor,
+    style: LineStyle,
+    cap: LineCap,
+    join: LineJoin,
+) {
+    if points.len() < 2 {
+        return;
+    }
+    if !matches!(
+        style,
+        LineStyle::Solid | LineStyle::Dotted | LineStyle::Dashed
+    ) {
+        for segment in points.windows(2) {
+            draw_passive_line(
+                content,
+                segment[0].x,
+                segment[0].y,
+                segment[1].x,
+                segment[1].y,
+                width,
+                color,
+                style,
+                cap,
+            );
+        }
+        return;
+    }
+
+    content.save_state();
+    set_stroke_color(content, color);
+    content.set_line_width(width.max(0.25));
+    set_passive_line_cap(content, cap);
+    set_passive_line_join(content, join);
+    set_passive_path_stroke_style(content, width, style);
+    content.move_to(points[0].x, points[0].y);
+    for point in &points[1..] {
+        content.line_to(point.x, point.y);
+    }
+    content.stroke();
+    content.restore_state();
+}
+
 fn set_passive_path_stroke_style(content: &mut Content, width: f32, style: LineStyle) {
     match style {
         LineStyle::Solid | LineStyle::Double | LineStyle::Triple | LineStyle::Wavy => {}
@@ -3871,6 +3931,18 @@ fn set_passive_line_cap(content: &mut Content, cap: LineCap) {
         }
         LineCap::Square => {
             content.set_line_cap(LineCapStyle::ProjectingSquareCap);
+        }
+    }
+}
+
+fn set_passive_line_join(content: &mut Content, join: LineJoin) {
+    match join {
+        LineJoin::Miter => {}
+        LineJoin::Round => {
+            content.set_line_join(LineJoinStyle::RoundJoin);
+        }
+        LineJoin::Bevel => {
+            content.set_line_join(LineJoinStyle::BevelJoin);
         }
     }
 }
@@ -5247,9 +5319,9 @@ mod tests {
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
         FontPitch, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER, PageSettings, Paragraph,
         ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticImageAlphaMask, StaticShape,
-        StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap, StaticShapeTextVerticalAnchor,
-        TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder, TableRow, TableRowWrapMargins,
-        UnderlineStyle,
+        StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+        StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder,
+        TableRow, TableRowWrapMargins, UnderlineStyle,
     };
     use lopdf::{Dictionary, Object};
 
@@ -6601,6 +6673,7 @@ endstream
             },
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
@@ -6708,6 +6781,7 @@ endstream
             },
             stroke_style: BorderStyle::Single,
             stroke_cap: StaticShapeLineCap::Flat,
+            stroke_join: StaticShapeLineJoin::Miter,
             fill_color: Some(Color {
                 red: 10,
                 green: 20,
