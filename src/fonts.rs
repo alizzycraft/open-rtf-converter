@@ -319,7 +319,10 @@ fn bundled_browser_safe_mono_aliases() -> Vec<String> {
 }
 
 fn bundled_browser_safe_symbol_aliases() -> Vec<String> {
-    ["Symbol"].into_iter().map(str::to_string).collect()
+    ["Symbol", "Segoe UI Symbol"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -662,6 +665,7 @@ mod tests {
         assert!(provider.has_asset_for_family("Courier New"));
         assert!(provider.has_asset_for_family("Courier"));
         assert!(provider.has_asset_for_family("Symbol"));
+        assert!(provider.has_asset_for_family("Segoe UI Symbol"));
         assert_eq!(
             provider.coverage_for_char("Arial", 'A'),
             FontCoverage::Covered
@@ -680,6 +684,10 @@ mod tests {
         );
         assert_eq!(
             provider.coverage_for_char("Symbol", '\u{221a}'),
+            FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Segoe UI Symbol", '\u{221a}'),
             FontCoverage::Covered
         );
         assert!(

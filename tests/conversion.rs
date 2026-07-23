@@ -1243,6 +1243,54 @@ fn browser_safe_defaults_embed_bundled_symbol_metric_font_for_math_text() {
 }
 
 #[test]
+fn browser_safe_defaults_cover_segoe_ui_symbol_math_alias_without_system_fonts() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial;}{\f1 Segoe UI Symbol;}}\f0 Math: \f1 \u8730?\u8721?\u8800?\u8776?\u8594?\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("font 'Segoe UI Symbol'")),
+        "bundled Segoe UI Symbol alias should avoid font substitution diagnostics: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"Segoe UI Symbol",
+        b"/BaseFont /Symbol",
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/Launch",
+        b"/EmbeddedFile",
+        b"/Filespec",
+        b"/RichMedia",
+        b"/XFA",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden Segoe UI Symbol fallback or active PDF marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn caller_font_asset_matches_terminated_rtf_alternate_font_name_without_system_fonts() {
     let input =
         br"{\rtf1\ansi{\fonttbl{\f0 Mystery Sans{\*\falt Tuffy;Ignored Asset;};}}\f0 Alternate terminated AB\par}";
