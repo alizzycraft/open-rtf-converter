@@ -72113,6 +72113,85 @@ fn office_shape_shadow_renders_as_passive_bounded_geometry_without_property_leak
 }
 
 #[test]
+fn office_shape_shadow_offsets_render_as_bounded_passive_geometry_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn fShadow}{\sv 1}}{\sp{\sn shadowColor}{\sv 8421504}}{\sp{\sn shadowOffsetX}{\sv 127000}}{\sp{\sn shadowOffsetY}{\sv -63500}}{\sp{\sn pFragments}{\sv hidden-shadow-offset-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with explicit shadow offsets");
+
+    assert!(shape.shadow_enabled);
+    assert_eq!(shape.shadow_offset_x_twips, 200);
+    assert_eq!(shape.shadow_offset_y_twips, -100);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "shadowOffsetX",
+        "shadowOffsetY",
+        "pFragments",
+        "hidden-shadow-offset-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "shape shadow offset property leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let fill_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "f")
+        .count();
+
+    assert!(
+        fill_count >= 2,
+        "shadowed filled shape should emit passive shadow fill plus shape fill"
+    );
+    for forbidden in [
+        b"shadowOffsetX".as_slice(),
+        b"shadowOffsetY",
+        b"pFragments",
+        b"hidden-shadow-offset-payload",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape shadow offset property leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn invalid_office_shape_fill_color_is_stripped_without_becoming_visible_black() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv -1}}{\sp{\sn pFragments}{\sv hidden-invalid-fill-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

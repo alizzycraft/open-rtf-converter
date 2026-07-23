@@ -650,6 +650,8 @@ pub struct StaticShape {
     pub fill_color: Option<Color>,
     pub shadow_enabled: bool,
     pub shadow_color: Color,
+    pub shadow_offset_x_twips: i32,
+    pub shadow_offset_y_twips: i32,
     pub text_margin_left_twips: i32,
     pub text_margin_right_twips: i32,
     pub text_margin_top_twips: i32,

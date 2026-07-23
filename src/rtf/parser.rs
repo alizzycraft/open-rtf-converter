@@ -1009,6 +1009,8 @@ struct ShapeBuilder {
     fill_color_from_foreground: bool,
     shadow_enabled: bool,
     shadow_color: Color,
+    shadow_offset_x_twips: i32,
+    shadow_offset_y_twips: i32,
     text_wrap: bool,
     wrap_side: StaticImageWrapSide,
     wrap_margin_left_twips: i32,
@@ -1068,6 +1070,8 @@ impl Default for ShapeBuilder {
                 green: 128,
                 blue: 128,
             },
+            shadow_offset_x_twips: 60,
+            shadow_offset_y_twips: 60,
             text_wrap: false,
             wrap_side: StaticImageWrapSide::Both,
             wrap_margin_left_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
@@ -12706,6 +12710,8 @@ impl Parser {
                 fill_color,
                 shadow_enabled: shape.shadow_enabled,
                 shadow_color: shape.shadow_color,
+                shadow_offset_x_twips: shape.shadow_offset_x_twips,
+                shadow_offset_y_twips: shape.shadow_offset_y_twips,
                 text_margin_left_twips: shape.text_margin_left_twips,
                 text_margin_right_twips: shape.text_margin_right_twips,
                 text_margin_top_twips: shape.text_margin_top_twips,
@@ -13333,6 +13339,34 @@ impl Parser {
                     && let Some(shape) = self.current_shape.as_mut()
                 {
                     shape.shadow_color = color;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "shadowOffsetX" => {
+                if let Some(twips) = parse_shape_property_signed_emu_twips(value) {
+                    let offset_twips = self.clamp_shape_signed_offset(
+                        twips as i32,
+                        "shape shadow x offset",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.shadow_offset_x_twips = offset_twips;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "shadowOffsetY" => {
+                if let Some(twips) = parse_shape_property_signed_emu_twips(value) {
+                    let offset_twips = self.clamp_shape_signed_offset(
+                        twips as i32,
+                        "shape shadow y offset",
+                        offset,
+                    );
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.shadow_offset_y_twips = offset_twips;
+                    }
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
@@ -14424,6 +14458,18 @@ impl Parser {
     fn clamp_shape_offset(&mut self, value: i32, label: &str, offset: usize) -> i32 {
         let limit = self.limits().max_shape_offset_twips.max(0);
         let clamped = value.clamp(0, limit);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("{label} clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        clamped
+    }
+
+    fn clamp_shape_signed_offset(&mut self, value: i32, label: &str, offset: usize) -> i32 {
+        let limit = self.limits().max_shape_offset_twips.max(0);
+        let clamped = value.clamp(-limit, limit);
         if clamped != value {
             self.diagnostics.push(Diagnostic::warning(
                 format!("{label} clamped from {value} to {clamped} twips"),
@@ -21867,6 +21913,12 @@ fn parse_shape_rotation_units(value: &str) -> Option<i32> {
 fn parse_shape_property_emu_twips(value: &str) -> Option<i64> {
     let emu = parse_shape_property_i64(value)?;
     Some(((emu.max(0).saturating_add(317)) / 635).min(i32::MAX as i64))
+}
+
+fn parse_shape_property_signed_emu_twips(value: &str) -> Option<i64> {
+    let emu = parse_shape_property_i64(value)?;
+    let magnitude = (emu.unsigned_abs().saturating_add(317) / 635).min(i32::MAX as u64) as i64;
+    Some(if emu < 0 { -magnitude } else { magnitude })
 }
 
 fn parse_office_shape_color(value: &str) -> Option<Color> {
