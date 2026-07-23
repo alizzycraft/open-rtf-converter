@@ -116,6 +116,7 @@ pub enum LayoutItem {
         stroke_color: PdfColor,
         stroke_style: LineStyle,
         fill_color: Option<PdfColor>,
+        fill_pattern: ShadingPattern,
     },
     RoundedRectangle {
         x: f32,
@@ -127,6 +128,7 @@ pub enum LayoutItem {
         stroke_color: PdfColor,
         stroke_style: LineStyle,
         fill_color: Option<PdfColor>,
+        fill_pattern: ShadingPattern,
     },
     Polygon {
         points: Vec<LayoutPoint>,
@@ -137,6 +139,7 @@ pub enum LayoutItem {
         stroke_color: PdfColor,
         stroke_style: LineStyle,
         fill_color: Option<PdfColor>,
+        fill_pattern: ShadingPattern,
     },
     Image(ImageFragment),
     Drawing(DrawingFragment),
@@ -2606,6 +2609,7 @@ fn layout_shape(
                         stroke_color: shadow_color,
                         stroke_style: LineStyle::Solid,
                         fill_color: Some(shadow_color),
+                        fill_pattern: ShadingPattern::None,
                     },
                     shape.shadow_opacity_percent,
                 );
@@ -2623,6 +2627,7 @@ fn layout_shape(
                     green: fill_color.green as f32 / 255.0,
                     blue: fill_color.blue as f32 / 255.0,
                 }),
+                fill_pattern: shape.fill_pattern,
             });
         }
         StaticShapeKind::Rectangle => {
@@ -2721,6 +2726,7 @@ fn layout_shape(
                         stroke_color: shadow_color,
                         stroke_style: LineStyle::Solid,
                         fill_color: Some(shadow_color),
+                        fill_pattern: ShadingPattern::None,
                     },
                     shape.shadow_opacity_percent,
                 );
@@ -2739,6 +2745,7 @@ fn layout_shape(
                     green: fill_color.green as f32 / 255.0,
                     blue: fill_color.blue as f32 / 255.0,
                 }),
+                fill_pattern: shape.fill_pattern,
             });
         }
         StaticShapeKind::Ellipse => {
@@ -2755,6 +2762,7 @@ fn layout_shape(
                             stroke_color: shadow_color,
                             stroke_style: LineStyle::Solid,
                             fill_color: Some(shadow_color),
+                            fill_pattern: ShadingPattern::None,
                         },
                         shape.shadow_opacity_percent,
                     );
@@ -2772,6 +2780,7 @@ fn layout_shape(
                         green: fill_color.green as f32 / 255.0,
                         blue: fill_color.blue as f32 / 255.0,
                     }),
+                    fill_pattern: shape.fill_pattern,
                 });
             }
         }
@@ -3078,6 +3087,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_pattern: ShadingPattern::None,
             });
         }
         StaticShapeArrowhead::Diamond => {
@@ -3106,6 +3116,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_pattern: ShadingPattern::None,
             });
         }
         StaticShapeArrowhead::Oval => {
@@ -3134,6 +3145,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_pattern: ShadingPattern::None,
             });
         }
         StaticShapeArrowhead::Stealth => {
@@ -3159,6 +3171,7 @@ fn push_static_shape_arrowhead(
                 stroke_color: color,
                 stroke_style: LineStyle::Solid,
                 fill_color: Some(color),
+                fill_pattern: ShadingPattern::None,
             });
         }
     }
@@ -12755,6 +12768,7 @@ mod tests {
                     stroke_color,
                     stroke_style,
                     fill_color,
+                    ..
                 } => Some((
                     *x,
                     *y,
@@ -12858,6 +12872,7 @@ mod tests {
                     stroke_color,
                     stroke_style,
                     fill_color,
+                    ..
                 } => Some((
                     *x,
                     *y,
