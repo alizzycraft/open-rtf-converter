@@ -9608,6 +9608,7 @@ impl Parser {
     }
 
     fn finish_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
+        self.flush_pending_explicit_list_marker(offset)?;
         let paragraph_style_index = self.state.paragraph_style_index;
         let mut pending_style_reference_text = None;
         if self.state.destination == Destination::ShapeText {
@@ -9650,6 +9651,67 @@ impl Parser {
                 }
             }
             self.push_document_block(Block::Paragraph(paragraph), offset)?;
+        }
+        Ok(())
+    }
+
+    fn flush_pending_explicit_list_marker(&mut self, offset: usize) -> Result<(), ParseError> {
+        if self.state.destination != Destination::Body
+            || !self.current_output_paragraph_is_empty()
+            || self.pending_list_marker.is_empty()
+        {
+            return Ok(());
+        }
+
+        let marker = PendingListMarker {
+            text: std::mem::take(&mut self.pending_list_marker),
+            character_style: None,
+            runs: std::mem::take(&mut self.pending_list_marker_runs),
+        };
+        self.pending_old_style_list_marker = None;
+
+        let marker_chars = if marker.runs.is_empty() {
+            marker.text.chars().count()
+        } else {
+            marker
+                .runs
+                .iter()
+                .map(|run| run.text.chars().count())
+                .sum::<usize>()
+        };
+        self.output_text_chars = self
+            .output_text_chars
+            .checked_add(marker_chars)
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
+        if self.output_text_chars > self.limits().max_output_text_chars {
+            return Err(ParseError::OutputTextTooLarge(offset));
+        }
+
+        if marker.runs.is_empty() {
+            self.capture_bookmark_text(&marker.text, offset)?;
+        } else {
+            for run in &marker.runs {
+                self.capture_bookmark_text(&run.text, offset)?;
+            }
+        }
+
+        let paragraph = if let Some(row) = self.current_table_row.as_mut() {
+            row.cell_open = true;
+            &mut row.current_cell_paragraph
+        } else {
+            &mut self.current_paragraph
+        };
+        if marker.runs.is_empty() {
+            push_text_to_paragraph(
+                paragraph,
+                &marker.text,
+                &self.state.paragraph,
+                &self.state.character,
+            );
+        } else {
+            for run in &marker.runs {
+                push_text_to_paragraph(paragraph, &run.text, &self.state.paragraph, &run.style);
+            }
         }
         Ok(())
     }

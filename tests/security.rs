@@ -3772,6 +3772,63 @@ fn formatted_explicit_listtext_marker_renders_passively_without_control_leakage(
 }
 
 #[test]
+fn explicit_list_marker_only_paragraph_does_not_leak_to_next_paragraph() {
+    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtext\b\cf1 1.\tab}\par Next\par}"
+        .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraphs: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(paragraphs.len(), 2);
+    assert_eq!(paragraphs[0].runs[0].text, "1.\t");
+    assert!(paragraphs[0].runs[0].style.bold);
+    assert_eq!(paragraphs[0].runs[0].style.color_index, 1);
+    assert_eq!(paragraphs[1].runs[0].text, "Next");
+    assert!(!paragraphs[1].runs[0].style.bold);
+    assert_eq!(paragraphs[1].runs[0].style.color_index, 0);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("1."));
+    assert!(rendered_text.contains("Next"));
+
+    for forbidden in [
+        b"listtext".as_slice(),
+        b"cf1",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden explicit marker-only paragraph content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn named_control_explicit_list_marker_renders_as_marker_without_control_leakage() {
     let input = br"{\rtf1{\*\pntext\bullet\tab}Named bullet marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
