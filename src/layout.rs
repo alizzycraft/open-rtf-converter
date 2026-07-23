@@ -2595,16 +2595,20 @@ fn layout_shape(
                 })
                 .collect::<Vec<_>>();
             if let Some(shadow_color) = shadow_color {
-                page.items.push(LayoutItem::Polygon {
-                    points: offset_shape_points(&points, shadow_offset_x, shadow_offset_y),
-                    paths: offset_shape_paths(&paths, shadow_offset_x, shadow_offset_y),
-                    overlay_paths: Vec::new(),
-                    fill_rule: shape.fill_rule,
-                    stroke_width: 0.0,
-                    stroke_color: shadow_color,
-                    stroke_style: LineStyle::Solid,
-                    fill_color: Some(shadow_color),
-                });
+                push_shape_shadow_item(
+                    page,
+                    LayoutItem::Polygon {
+                        points: offset_shape_points(&points, shadow_offset_x, shadow_offset_y),
+                        paths: offset_shape_paths(&paths, shadow_offset_x, shadow_offset_y),
+                        overlay_paths: Vec::new(),
+                        fill_rule: shape.fill_rule,
+                        stroke_width: 0.0,
+                        stroke_color: shadow_color,
+                        stroke_style: LineStyle::Solid,
+                        fill_color: Some(shadow_color),
+                    },
+                    shape.shadow_opacity_percent,
+                );
             }
             page.items.push(LayoutItem::Polygon {
                 points,
@@ -2625,13 +2629,17 @@ fn layout_shape(
             if let Some(shadow_color) =
                 shadow_color.filter(|_| stroke_width_points.is_some() || shape.fill_color.is_some())
             {
-                page.items.push(LayoutItem::Highlight {
-                    x: x + shadow_offset_x,
-                    y: bottom_y - shadow_offset_y,
-                    width,
-                    height,
-                    color: shadow_color,
-                });
+                push_shape_shadow_item(
+                    page,
+                    LayoutItem::Highlight {
+                        x: x + shadow_offset_x,
+                        y: bottom_y - shadow_offset_y,
+                        width,
+                        height,
+                        color: shadow_color,
+                    },
+                    shape.shadow_opacity_percent,
+                );
             }
             if let Some(fill_color) = shape.fill_color {
                 page.items.push(LayoutItem::Highlight {
@@ -2692,17 +2700,21 @@ fn layout_shape(
             }
             let min_dimension = width.min(height).max(1.0);
             if let Some(shadow_color) = shadow_color {
-                page.items.push(LayoutItem::RoundedRectangle {
-                    x: x + shadow_offset_x,
-                    y: bottom_y - shadow_offset_y,
-                    width,
-                    height,
-                    radius: (min_dimension * 0.2).clamp(1.0, min_dimension / 2.0),
-                    stroke_width: 0.0,
-                    stroke_color: shadow_color,
-                    stroke_style: LineStyle::Solid,
-                    fill_color: Some(shadow_color),
-                });
+                push_shape_shadow_item(
+                    page,
+                    LayoutItem::RoundedRectangle {
+                        x: x + shadow_offset_x,
+                        y: bottom_y - shadow_offset_y,
+                        width,
+                        height,
+                        radius: (min_dimension * 0.2).clamp(1.0, min_dimension / 2.0),
+                        stroke_width: 0.0,
+                        stroke_color: shadow_color,
+                        stroke_style: LineStyle::Solid,
+                        fill_color: Some(shadow_color),
+                    },
+                    shape.shadow_opacity_percent,
+                );
             }
             page.items.push(LayoutItem::RoundedRectangle {
                 x,
@@ -2723,16 +2735,20 @@ fn layout_shape(
         StaticShapeKind::Ellipse => {
             if stroke_width_points.is_some() || shape.fill_color.is_some() {
                 if let Some(shadow_color) = shadow_color {
-                    page.items.push(LayoutItem::Ellipse {
-                        x: x + shadow_offset_x,
-                        y: bottom_y - shadow_offset_y,
-                        width,
-                        height,
-                        stroke_width: 0.0,
-                        stroke_color: shadow_color,
-                        stroke_style: LineStyle::Solid,
-                        fill_color: Some(shadow_color),
-                    });
+                    push_shape_shadow_item(
+                        page,
+                        LayoutItem::Ellipse {
+                            x: x + shadow_offset_x,
+                            y: bottom_y - shadow_offset_y,
+                            width,
+                            height,
+                            stroke_width: 0.0,
+                            stroke_color: shadow_color,
+                            stroke_style: LineStyle::Solid,
+                            fill_color: Some(shadow_color),
+                        },
+                        shape.shadow_opacity_percent,
+                    );
                 }
                 page.items.push(LayoutItem::Ellipse {
                     x,
@@ -2805,6 +2821,18 @@ fn wrap_static_shape_items(
                 item: Box::new(previous),
             });
         }
+    }
+}
+
+fn push_shape_shadow_item(page: &mut LayoutPage, item: LayoutItem, shadow_opacity_percent: u8) {
+    if shadow_opacity_percent < 100 {
+        page.items.push(LayoutItem::Opacity {
+            fill_percent: shadow_opacity_percent,
+            stroke_percent: shadow_opacity_percent,
+            item: Box::new(item),
+        });
+    } else {
+        page.items.push(item);
     }
 }
 
@@ -11302,6 +11330,7 @@ mod tests {
                     green: 128,
                     blue: 128,
                 },
+                shadow_opacity_percent: 100,
                 shadow_offset_x_twips: 60,
                 shadow_offset_y_twips: 60,
                 text_margin_left_twips: 80,
@@ -11371,6 +11400,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -11511,6 +11541,7 @@ mod tests {
                     green: 128,
                     blue: 128,
                 },
+                shadow_opacity_percent: 100,
                 shadow_offset_x_twips: 60,
                 shadow_offset_y_twips: 60,
                 text_margin_left_twips: 80,
@@ -11586,6 +11617,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -11671,6 +11703,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -11759,6 +11792,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -11848,6 +11882,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 360,
@@ -11954,6 +11989,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12031,6 +12067,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12118,6 +12155,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12182,6 +12220,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12252,6 +12291,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12328,6 +12368,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12427,6 +12468,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12522,6 +12564,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12604,6 +12647,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -12704,6 +12748,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,
@@ -19759,6 +19804,7 @@ mod tests {
                 green: 128,
                 blue: 128,
             },
+            shadow_opacity_percent: 100,
             shadow_offset_x_twips: 60,
             shadow_offset_y_twips: 60,
             text_margin_left_twips: 80,

@@ -72273,7 +72273,7 @@ fn office_shape_full_shadow_opacity_is_consumed_without_property_leakage() {
 }
 
 #[test]
-fn partial_office_shape_shadow_opacity_is_diagnosed_without_property_leakage() {
+fn partial_office_shape_shadow_opacity_renders_passively_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn fShadow}{\sv 1}}{\sp{\sn shadowColor}{\sv 8421504}}{\sp{\sn shadowOpacity}{\sv 32768}}{\sp{\sn pFragments}{\sv hidden-partial-shadow-opacity-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
@@ -72288,11 +72288,14 @@ fn partial_office_shape_shadow_opacity_is_diagnosed_without_property_leakage() {
         .expect("passive shape with partial shadow opacity");
 
     assert!(shape.shadow_enabled);
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert_eq!(shape.shadow_opacity_percent, 50);
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| diagnostic
             .message
-            .contains("stripping unsupported/active drawing properties")
-    }));
+            .contains("stripping unsupported/active drawing properties")),
+        "unrelated active Office drawing properties should still be stripped: {:?}",
+        parsed.diagnostics
+    );
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     for forbidden in [
@@ -72317,6 +72320,32 @@ fn partial_office_shape_shadow_opacity_is_diagnosed_without_property_leakage() {
     )
     .unwrap();
     audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(
+                item,
+                LayoutItem::Opacity {
+                    fill_percent: 50,
+                    stroke_percent: 50,
+                    ..
+                }
+            )),
+        "partial shadow opacity should wrap generated shadow geometry"
+    );
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "gs"),
+        "partial shadow opacity should emit passive PDF graphics state"
+    );
     for forbidden in [
         b"shadowOpacity".as_slice(),
         b"32768",
@@ -72335,6 +72364,79 @@ fn partial_office_shape_shadow_opacity_is_diagnosed_without_property_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "partial shadow opacity metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn invalid_office_shape_shadow_opacity_is_stripped_without_payload_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillColor}{\sv 13434879}}{\sp{\sn fShadow}{\sv 1}}{\sp{\sn shadowColor}{\sv 8421504}}{\sp{\sn shadowOpacity}{\sv hostile-shadow-opacity-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with invalid shadow opacity");
+
+    assert!(shape.shadow_enabled);
+    assert_eq!(shape.shadow_opacity_percent, 100);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "shadowOpacity",
+        "hostile-shadow-opacity-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "invalid shadow opacity metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        !layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .any(|item| matches!(item, LayoutItem::Opacity { .. })),
+        "invalid shadow opacity should not create an opacity wrapper"
+    );
+    for forbidden in [
+        b"shadowOpacity".as_slice(),
+        b"hostile-shadow-opacity-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "invalid shadow opacity metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
