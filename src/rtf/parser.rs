@@ -10142,6 +10142,13 @@ impl Parser {
                 self.state.destination = previous_destination;
                 Ok(())
             }
+            Destination::Background => {
+                self.diagnostics.push(Diagnostic::warning(
+                    "background placeholder stripped before safe model normalization",
+                    Some(offset),
+                ));
+                Ok(())
+            }
             _ => self.push_placeholder(text, offset),
         }
     }
@@ -12163,6 +12170,11 @@ impl Parser {
                 Some(offset),
             ));
             self.push_list_marker_text("[Image skipped: list marker picture]", offset)?;
+        } else if destination == Destination::Background {
+            self.diagnostics.push(Diagnostic::warning(
+                "background picture stripped before safe model normalization",
+                Some(offset),
+            ));
         } else if matches!(destination, Destination::Footnote | Destination::Endnote) {
             self.diagnostics.push(Diagnostic::warning(
                 "note picture replaced with passive text placeholder before normalization",
@@ -12238,6 +12250,12 @@ impl Parser {
     ) -> Result<(), ParseError> {
         if destination == Destination::ListText {
             self.push_list_marker_text(&text, offset)
+        } else if destination == Destination::Background {
+            self.diagnostics.push(Diagnostic::warning(
+                "background picture placeholder stripped before safe model normalization",
+                Some(offset),
+            ));
+            Ok(())
         } else if matches!(destination, Destination::Footnote | Destination::Endnote) {
             let previous_destination = self.state.destination;
             self.state.destination = destination;

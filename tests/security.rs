@@ -81426,6 +81426,120 @@ fn background_static_shape_renders_passively_without_body_flow_or_payload_leakag
 }
 
 #[test]
+fn background_picture_is_stripped_without_body_flow_or_payload_leakage() {
+    let input = br#"{\rtf1{\background{\pict\pngblip 00}}Visible body\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible body"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_) | Block::Placeholder(_))),
+        "background picture should not escape into body blocks: {:?}",
+        parsed.document.blocks
+    );
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("background picture placeholder stripped")),
+        "expected background picture strip diagnostic: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["pict", "pngblip", "[Image skipped"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden background picture content leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible body"));
+    for forbidden in [
+        b"background".as_slice(),
+        b"pict",
+        b"pngblip",
+        b"[Image skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden background picture content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn background_vector_picture_is_stripped_without_body_image_escape() {
+    let input =
+        br#"{\rtf1{\background{\pict\wmetafile8\picw200\pich100\picwgoal2160\pichgoal720 01020304}}Visible body\par}"#
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible body"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_))),
+        "background vector picture should not escape into body images: {:?}",
+        parsed.document.blocks
+    );
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("background picture stripped")),
+        "expected background static image strip diagnostic: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Visible body"));
+    for forbidden in [
+        b"background".as_slice(),
+        b"pict",
+        b"wmetafile",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden background vector picture content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn header_static_shape_renders_passively_without_body_flow_or_property_leakage() {
     let input = rtf(&[
         "{",
