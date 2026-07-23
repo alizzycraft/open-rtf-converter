@@ -22258,6 +22258,7 @@ fn parse_shape_arrowhead_property(value: &str) -> Option<StaticShapeArrowhead> {
         "4" | "diamond" | "msoarrowheaddiamond" => Some(StaticShapeArrowhead::Diamond),
         "5" | "oval" | "msoarrowheadoval" => Some(StaticShapeArrowhead::Oval),
         "stealth" | "msoarrowheadstealth" => Some(StaticShapeArrowhead::Stealth),
+        "block" | "msoarrowheadblock" => Some(StaticShapeArrowhead::Block),
         _ => None,
     }
 }

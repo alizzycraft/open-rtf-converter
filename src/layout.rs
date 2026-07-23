@@ -3090,6 +3090,28 @@ fn push_static_shape_arrowhead(
                 fill_pattern: ShadingPattern::None,
             });
         }
+        StaticShapeArrowhead::Block => {
+            let rear_half_width = half_width * 0.58;
+            let rear_a = LayoutPoint {
+                x: base.x + perpendicular_x * rear_half_width,
+                y: base.y + perpendicular_y * rear_half_width,
+            };
+            let rear_b = LayoutPoint {
+                x: base.x - perpendicular_x * rear_half_width,
+                y: base.y - perpendicular_y * rear_half_width,
+            };
+            page.items.push(LayoutItem::Polygon {
+                points: vec![tip, wing_a, rear_a, rear_b, wing_b],
+                paths: Vec::new(),
+                overlay_paths: Vec::new(),
+                fill_rule: StaticImageVectorFillRule::Winding,
+                stroke_width,
+                stroke_color: color,
+                stroke_style: LineStyle::Solid,
+                fill_color: Some(color),
+                fill_pattern: ShadingPattern::None,
+            });
+        }
         StaticShapeArrowhead::Diamond => {
             let center = LayoutPoint {
                 x: tip.x - unit_x * (arrow_length * 0.55),
