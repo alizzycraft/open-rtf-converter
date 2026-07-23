@@ -7564,6 +7564,132 @@ fn invalid_shape_picture_color_mode_metadata_is_stripped_without_property_leakag
 }
 
 #[test]
+fn shape_picture_tone_metadata_updates_safe_image_without_property_leakage() {
+    let image_hex = bytes_to_hex(&minimal_24bit_dib_with_rgb_pixels(
+        2,
+        1,
+        &[[128, 64, 192], [32, 96, 160]],
+    ));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop720",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1440{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBrightness}{",
+        "\\",
+        "sv 32768}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureContrast}{",
+        "\\",
+        "sv 65536}}}{",
+        "\\",
+        "*",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "dibitmap",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("shape picture image");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(image.format, ImageFormat::Rgb8);
+    assert_eq!(image.bytes, vec![255, 191, 255, 159, 223, 255]);
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "shape tone metadata should be consumed as passive metadata: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "pictureBrightness",
+        "pictureContrast",
+        "32768",
+        "65536",
+        "dibitmap",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "shape picture tone metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"pictureBrightness".as_slice(),
+        b"pictureContrast",
+        b"32768",
+        b"65536",
+        b"dibitmap",
+        image_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape picture tone metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn duplicate_shape_fallback_object_still_rejects_active_payload_in_reject_mode() {
     let input = concat!(
         r"{\rtf1 Before {\shp{\*\shpinst",

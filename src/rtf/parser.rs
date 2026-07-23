@@ -788,6 +788,8 @@ struct PictureBuilder {
     crop: ImageCrop,
     grayscale: bool,
     bilevel: bool,
+    brightness_fixed: Option<i32>,
+    contrast_fixed: Option<i32>,
 }
 
 impl Default for PictureBuilder {
@@ -808,8 +810,18 @@ impl Default for PictureBuilder {
             crop: ImageCrop::default(),
             grayscale: false,
             bilevel: false,
+            brightness_fixed: None,
+            contrast_fixed: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PictureAdjustments {
+    grayscale: bool,
+    bilevel: bool,
+    brightness_fixed: Option<i32>,
+    contrast_fixed: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1019,6 +1031,8 @@ struct ShapeBuilder {
     fill_color_from_foreground: bool,
     picture_grayscale: bool,
     picture_bilevel: bool,
+    picture_brightness_fixed: Option<i32>,
+    picture_contrast_fixed: Option<i32>,
     shadow_enabled: bool,
     shadow_color: Color,
     shadow_opacity_percent: u8,
@@ -1088,6 +1102,8 @@ impl Default for ShapeBuilder {
             fill_color_from_foreground: false,
             picture_grayscale: false,
             picture_bilevel: false,
+            picture_brightness_fixed: None,
+            picture_contrast_fixed: None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -11931,8 +11947,12 @@ impl Parser {
                     };
                     self.apply_picture_color_mode(
                         &mut image,
-                        picture.grayscale,
-                        picture.bilevel,
+                        PictureAdjustments {
+                            grayscale: picture.grayscale,
+                            bilevel: picture.bilevel,
+                            brightness_fixed: picture.brightness_fixed,
+                            contrast_fixed: picture.contrast_fixed,
+                        },
                         offset,
                     );
                     self.push_static_image(picture.owner_destination, image, offset)?;
@@ -11976,8 +11996,12 @@ impl Parser {
                     };
                     self.apply_picture_color_mode(
                         &mut image,
-                        picture.grayscale,
-                        picture.bilevel,
+                        PictureAdjustments {
+                            grayscale: picture.grayscale,
+                            bilevel: picture.bilevel,
+                            brightness_fixed: picture.brightness_fixed,
+                            contrast_fixed: picture.contrast_fixed,
+                        },
                         offset,
                     );
                     self.push_static_image(picture.owner_destination, image, offset)?;
@@ -12023,8 +12047,12 @@ impl Parser {
                     };
                     self.apply_picture_color_mode(
                         &mut image,
-                        picture.grayscale,
-                        picture.bilevel,
+                        PictureAdjustments {
+                            grayscale: picture.grayscale,
+                            bilevel: picture.bilevel,
+                            brightness_fixed: picture.brightness_fixed,
+                            contrast_fixed: picture.contrast_fixed,
+                        },
                         offset,
                     );
                     self.push_static_image(picture.owner_destination, image, offset)?;
@@ -12056,8 +12084,12 @@ impl Parser {
                             };
                             self.apply_picture_color_mode(
                                 &mut image,
-                                picture.grayscale,
-                                picture.bilevel,
+                                PictureAdjustments {
+                                    grayscale: picture.grayscale,
+                                    bilevel: picture.bilevel,
+                                    brightness_fixed: picture.brightness_fixed,
+                                    contrast_fixed: picture.contrast_fixed,
+                                },
                                 offset,
                             );
                             self.push_static_image(picture.owner_destination, image, offset)?;
@@ -12239,13 +12271,18 @@ impl Parser {
             ));
             return Ok(());
         }
-        if let Some((grayscale, bilevel)) = self
+        if let Some(adjustments) = self
             .current_shape
             .as_ref()
             .filter(|_| self.state.inside_shape)
-            .map(|shape| (shape.picture_grayscale, shape.picture_bilevel))
+            .map(|shape| PictureAdjustments {
+                grayscale: shape.picture_grayscale,
+                bilevel: shape.picture_bilevel,
+                brightness_fixed: shape.picture_brightness_fixed,
+                contrast_fixed: shape.picture_contrast_fixed,
+            })
         {
-            self.apply_picture_color_mode(&mut image, grayscale, bilevel, offset);
+            self.apply_picture_color_mode(&mut image, adjustments, offset);
         }
         let image = self.apply_current_shape_image_placement(image, offset);
         self.mark_object_result_visible_content();
@@ -13748,6 +13785,22 @@ impl Parser {
                 }
                 None => self.mark_current_shape_unsupported_or_active_property_stripped(),
             },
+            "pictureBrightness" => match parse_shape_picture_fixed_property(value) {
+                Some(brightness) => {
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.picture_brightness_fixed = Some(brightness);
+                    }
+                }
+                None => self.mark_current_shape_unsupported_or_active_property_stripped(),
+            },
+            "pictureContrast" => match parse_shape_picture_fixed_property(value) {
+                Some(contrast) => {
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.picture_contrast_fixed = Some(contrast);
+                    }
+                }
+                None => self.mark_current_shape_unsupported_or_active_property_stripped(),
+            },
             "fHitTestFill" | "fNoFillHitTest" | "fillShape" | "fillUseRect" => {
                 if parse_shape_property_i64(value).is_none() {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
@@ -13802,6 +13855,20 @@ impl Parser {
                     }
                 }
             }
+            "pictureBrightness" => {
+                if let Some(brightness) = parse_shape_picture_fixed_property(value)
+                    && let Some(picture) = self.current_picture.as_mut()
+                {
+                    picture.brightness_fixed = Some(brightness);
+                }
+            }
+            "pictureContrast" => {
+                if let Some(contrast) = parse_shape_picture_fixed_property(value)
+                    && let Some(picture) = self.current_picture.as_mut()
+                {
+                    picture.contrast_fixed = Some(contrast);
+                }
+            }
             "fHitTestFill" | "fillShape" | "fillUseRect" | "fNoFillHitTest" => {
                 let _ = parse_shape_property_i64(value);
             }
@@ -13812,11 +13879,14 @@ impl Parser {
     fn apply_picture_color_mode(
         &mut self,
         image: &mut StaticImage,
-        grayscale: bool,
-        bilevel: bool,
+        adjustments: PictureAdjustments,
         offset: usize,
     ) {
-        if !grayscale && !bilevel {
+        let grayscale = adjustments.grayscale;
+        let bilevel = adjustments.bilevel;
+        let has_tone_adjustment =
+            adjustments.brightness_fixed.is_some() || adjustments.contrast_fixed.is_some();
+        if !grayscale && !bilevel && !has_tone_adjustment {
             return;
         }
 
@@ -13825,15 +13895,14 @@ impl Parser {
                 &mut image.bytes,
                 image.width_px,
                 image.height_px,
-                grayscale,
-                bilevel,
+                adjustments,
             )
         {
             return;
         }
 
         if image.format == ImageFormat::PngIndexed
-            && apply_indexed_palette_picture_color_mode(&mut image.palette, grayscale, bilevel)
+            && apply_indexed_palette_picture_color_mode(&mut image.palette, adjustments)
         {
             return;
         }
@@ -13844,8 +13913,7 @@ impl Parser {
                 image.width_px,
                 image.height_px,
                 image.format,
-                grayscale,
-                bilevel,
+                adjustments,
             )
         {
             return;
@@ -13855,6 +13923,12 @@ impl Parser {
             if bilevel {
                 self.diagnostics.push(Diagnostic::warning(
                     "JPEG picture bilevel property approximated by passive PDF grayscale blend",
+                    Some(offset),
+                ));
+            }
+            if has_tone_adjustment {
+                self.diagnostics.push(Diagnostic::warning(
+                    "JPEG picture brightness/contrast property approximated by passive original image",
                     Some(offset),
                 ));
             }
@@ -13880,6 +13954,12 @@ impl Parser {
         if bilevel {
             self.diagnostics.push(Diagnostic::warning(
                 "picture bilevel property approximated by passive original image",
+                Some(offset),
+            ));
+        }
+        if has_tone_adjustment {
+            self.diagnostics.push(Diagnostic::warning(
+                "picture brightness/contrast property approximated by passive original image",
                 Some(offset),
             ));
         }
@@ -22083,6 +22163,11 @@ fn parse_shape_opacity_percent_property(value: &str) -> Option<u8> {
         .checked_div(65_536)?
         .clamp(0, 100);
     u8::try_from(percent).ok()
+}
+
+fn parse_shape_picture_fixed_property(value: &str) -> Option<i32> {
+    let raw = parse_shape_property_i64(value)?;
+    i32::try_from(raw.clamp(-65_536, 196_608)).ok()
 }
 
 fn parse_office_shape_color(value: &str) -> Option<Color> {
@@ -32529,10 +32614,13 @@ fn apply_rgb8_picture_color_mode(
     bytes: &mut [u8],
     width_px: u32,
     height_px: u32,
-    grayscale: bool,
-    bilevel: bool,
+    adjustments: PictureAdjustments,
 ) -> bool {
-    if !grayscale && !bilevel {
+    if !adjustments.grayscale
+        && !adjustments.bilevel
+        && adjustments.brightness_fixed.is_none()
+        && adjustments.contrast_fixed.is_none()
+    {
         return true;
     }
     let Some(expected_len) = usize::try_from(width_px)
@@ -32551,15 +32639,7 @@ fn apply_rgb8_picture_color_mode(
     }
 
     for pixel in bytes.chunks_exact_mut(3) {
-        let gray = rgb_luminance(pixel[0], pixel[1], pixel[2]);
-        let value = if bilevel {
-            if gray >= 128 { 255 } else { 0 }
-        } else {
-            gray
-        };
-        pixel[0] = value;
-        pixel[1] = value;
-        pixel[2] = value;
+        apply_picture_adjustments_to_rgb(pixel, adjustments);
     }
     true
 }
@@ -32568,12 +32648,62 @@ fn rgb_luminance(red: u8, green: u8, blue: u8) -> u8 {
     ((u32::from(red) * 77 + u32::from(green) * 150 + u32::from(blue) * 29 + 128) >> 8) as u8
 }
 
+fn adjust_picture_sample(sample: u8, adjustments: PictureAdjustments) -> u8 {
+    let contrast = i64::from(
+        adjustments
+            .contrast_fixed
+            .unwrap_or(65_536)
+            .clamp(0, 196_608),
+    );
+    let brightness = i64::from(
+        adjustments
+            .brightness_fixed
+            .unwrap_or(0)
+            .clamp(-65_536, 65_536),
+    );
+    let contrasted = if contrast == 65_536 {
+        i64::from(sample)
+    } else {
+        let centered = i64::from(sample) - 128;
+        ((centered * contrast) + 32_768) / 65_536 + 128
+    };
+    let brightened = contrasted + ((brightness * 255) / 65_536);
+    brightened.clamp(0, 255) as u8
+}
+
+fn apply_picture_adjustments_to_rgb(pixel: &mut [u8], adjustments: PictureAdjustments) {
+    pixel[0] = adjust_picture_sample(pixel[0], adjustments);
+    pixel[1] = adjust_picture_sample(pixel[1], adjustments);
+    pixel[2] = adjust_picture_sample(pixel[2], adjustments);
+    if adjustments.grayscale || adjustments.bilevel {
+        let gray = rgb_luminance(pixel[0], pixel[1], pixel[2]);
+        let value = if adjustments.bilevel {
+            if gray >= 128 { 255 } else { 0 }
+        } else {
+            gray
+        };
+        pixel[0] = value;
+        pixel[1] = value;
+        pixel[2] = value;
+    }
+}
+
+fn apply_picture_adjustments_to_gray(sample: &mut u8, adjustments: PictureAdjustments) {
+    *sample = adjust_picture_sample(*sample, adjustments);
+    if adjustments.bilevel {
+        *sample = if *sample >= 128 { 255 } else { 0 };
+    }
+}
+
 fn apply_indexed_palette_picture_color_mode(
     palette: &mut [u8],
-    grayscale: bool,
-    bilevel: bool,
+    adjustments: PictureAdjustments,
 ) -> bool {
-    if !grayscale && !bilevel {
+    if !adjustments.grayscale
+        && !adjustments.bilevel
+        && adjustments.brightness_fixed.is_none()
+        && adjustments.contrast_fixed.is_none()
+    {
         return true;
     }
     if palette.is_empty() || palette.len() % 3 != 0 {
@@ -32581,15 +32711,7 @@ fn apply_indexed_palette_picture_color_mode(
     }
 
     for entry in palette.chunks_exact_mut(3) {
-        let gray = rgb_luminance(entry[0], entry[1], entry[2]);
-        let value = if bilevel {
-            if gray >= 128 { 255 } else { 0 }
-        } else {
-            gray
-        };
-        entry[0] = value;
-        entry[1] = value;
-        entry[2] = value;
+        apply_picture_adjustments_to_rgb(entry, adjustments);
     }
     true
 }
@@ -32599,10 +32721,13 @@ fn apply_png_picture_color_mode(
     width_px: u32,
     height_px: u32,
     format: ImageFormat,
-    grayscale: bool,
-    bilevel: bool,
+    adjustments: PictureAdjustments,
 ) -> bool {
-    if !grayscale && !bilevel {
+    if !adjustments.grayscale
+        && !adjustments.bilevel
+        && adjustments.brightness_fixed.is_none()
+        && adjustments.contrast_fixed.is_none()
+    {
         return true;
     }
     let components = match format {
@@ -32637,22 +32762,12 @@ fn apply_png_picture_color_mode(
         match format {
             ImageFormat::Png => {
                 for pixel in pixels.chunks_exact_mut(3) {
-                    let gray = rgb_luminance(pixel[0], pixel[1], pixel[2]);
-                    let value = if bilevel {
-                        if gray >= 128 { 255 } else { 0 }
-                    } else {
-                        gray
-                    };
-                    pixel[0] = value;
-                    pixel[1] = value;
-                    pixel[2] = value;
+                    apply_picture_adjustments_to_rgb(pixel, adjustments);
                 }
             }
             ImageFormat::PngGrayscale => {
                 for sample in pixels {
-                    if bilevel {
-                        *sample = if *sample >= 128 { 255 } else { 0 };
-                    }
+                    apply_picture_adjustments_to_gray(sample, adjustments);
                 }
             }
             _ => return false,
@@ -48641,6 +48756,53 @@ After\par}"#;
         let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 2)
             .expect("PNG scanline");
         assert_eq!(scanlines, vec![0, 255]);
+    }
+
+    #[test]
+    fn rgb_png_brightness_contrast_metadata_updates_stored_scanlines() {
+        let input = [
+            r"{\rtf1{\pict\pngblip{\picprop{\sp{\sn pictureBrightness}{\sv 32768}}{\sp{\sn pictureContrast}{\sv 131072}}}\picwgoal720\pichgoal720 ",
+            bytes_to_hex(&minimal_rgb_png_with_pixel(128, 64, 192)).as_str(),
+            "}}",
+        ]
+        .concat();
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Png);
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| !diagnostic
+                .message
+                .contains("picture brightness/contrast property approximated")),
+            "RGB PNG brightness/contrast should be applied to stored scanlines: {:?}",
+            output.diagnostics
+        );
+        let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+            .expect("PNG scanline");
+        assert_eq!(scanlines, vec![0, 255, 128, 255]);
+    }
+
+    #[test]
+    fn dib_picture_brightness_metadata_updates_safe_rgb_bytes() {
+        let input = format!(
+            r"{{\rtf1{{\pict\dibitmap{{\picprop{{\sp{{\sn pictureBrightness}}{{\sv -32768}}}}}}\picwgoal720\pichgoal720 {}}}}}",
+            bytes_to_hex(&minimal_24bit_dib_with_rgb_pixels(
+                2,
+                1,
+                &[[128, 64, 192], [32, 96, 160]]
+            ))
+        );
+        let output = parse_rtf(&input).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected image block"),
+        };
+
+        assert_eq!(image.format, ImageFormat::Rgb8);
+        assert_eq!(image.bytes, vec![1, 0, 65, 0, 0, 33]);
     }
 
     #[test]
