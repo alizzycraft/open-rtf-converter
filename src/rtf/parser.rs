@@ -9608,7 +9608,7 @@ impl Parser {
     }
 
     fn finish_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
-        self.flush_pending_explicit_list_marker(offset)?;
+        self.flush_pending_paragraph_list_marker(offset)?;
         let paragraph_style_index = self.state.paragraph_style_index;
         let mut pending_style_reference_text = None;
         if self.state.destination == Destination::ShapeText {
@@ -9655,20 +9655,36 @@ impl Parser {
         Ok(())
     }
 
-    fn flush_pending_explicit_list_marker(&mut self, offset: usize) -> Result<(), ParseError> {
-        if self.state.destination != Destination::Body
-            || !self.current_output_paragraph_is_empty()
-            || self.pending_list_marker.is_empty()
+    fn flush_pending_paragraph_list_marker(&mut self, offset: usize) -> Result<(), ParseError> {
+        if self.state.destination != Destination::Body || !self.current_output_paragraph_is_empty()
         {
             return Ok(());
         }
 
-        let marker = PendingListMarker {
-            text: std::mem::take(&mut self.pending_list_marker),
-            character_style: None,
-            runs: std::mem::take(&mut self.pending_list_marker_runs),
+        if self.pending_list_marker.is_empty() && self.pending_old_style_list_marker.is_none() {
+            return Ok(());
+        }
+
+        if self.state.character.hidden {
+            self.pending_list_marker.clear();
+            self.pending_list_marker_runs.clear();
+            self.pending_old_style_list_marker = None;
+            return Ok(());
+        }
+
+        let marker = if self.pending_list_marker.is_empty() {
+            let Some(marker) = self.take_old_style_list_marker(offset)? else {
+                return Ok(());
+            };
+            marker
+        } else {
+            self.pending_old_style_list_marker = None;
+            PendingListMarker {
+                text: std::mem::take(&mut self.pending_list_marker),
+                character_style: None,
+                runs: std::mem::take(&mut self.pending_list_marker_runs),
+            }
         };
-        self.pending_old_style_list_marker = None;
 
         let marker_chars = if marker.runs.is_empty() {
             marker.text.chars().count()
@@ -9706,7 +9722,10 @@ impl Parser {
                 paragraph,
                 &marker.text,
                 &self.state.paragraph,
-                &self.state.character,
+                marker
+                    .character_style
+                    .as_ref()
+                    .unwrap_or(&self.state.character),
             );
         } else {
             for run in &marker.runs {

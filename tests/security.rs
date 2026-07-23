@@ -3654,6 +3654,109 @@ fn old_style_list_marker_text_reset_clears_stale_styled_runs_without_leakage() {
 }
 
 #[test]
+fn old_style_marker_only_paragraph_flushes_without_leaking_to_next_paragraph() {
+    let input =
+        br"{\rtf1{\colortbl;\red255\green0\blue0;}{\pn\pnucrm\pnstart4\pnb\pncf1}\par Next\par}"
+            .to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraphs: Vec<_> = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(paragraphs.len(), 2);
+    assert_eq!(paragraphs[0].runs[0].text, "IV.\t");
+    assert!(paragraphs[0].runs[0].style.bold);
+    assert_eq!(paragraphs[0].runs[0].style.color_index, 1);
+    assert_eq!(paragraphs[1].runs[0].text, "Next");
+    assert!(!paragraphs[1].runs[0].style.bold);
+    assert_eq!(paragraphs[1].runs[0].style.color_index, 0);
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("IV."));
+    assert!(rendered_text.contains("Next"));
+
+    for forbidden in [
+        b"pnucrm".as_slice(),
+        b"pnstart",
+        b"pncf",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden old-style marker-only paragraph content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn hidden_pending_list_marker_state_does_not_leak_to_next_paragraph() {
+    let input = br"{\rtf1{\pn\pndec\pnstart9}\v\par\v0 Visible\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Visible"));
+    assert!(!text.contains("9.\t"));
+    assert!(!text.contains("pndec"));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Visible"));
+    assert!(!rendered_text.contains("9."));
+
+    for forbidden in [
+        b"pndec".as_slice(),
+        b"pnstart",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "hidden pending marker state leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn structural_old_style_list_markers_do_not_cross_pdf_boundary() {
     let input = br"{\rtf1{\fonttbl{\f0 Arial;{\pntext HiddenFontMarker\tab}}}{\stylesheet{\s1 VisibleStyle;{\pn\pndec\pnstart9{\pntxtb HiddenStyleMarker}{\pntxta .\tab}}}}{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers;}{\pntext HiddenListMarker\tab}}\listid7}}Visible body\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
