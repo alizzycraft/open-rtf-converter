@@ -13473,6 +13473,25 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
+            "pib" => {}
+            "pictureId" => {
+                if parse_shape_property_i64(value).is_none() {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "pictureActive" => {
+                if parse_shape_property_i64(value).is_some() {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "shape picture activation metadata stripped before safe model normalization",
+                        Some(offset),
+                    ));
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "pictureGray" | "pictureBiLevel" => {
+                let _ = parse_shape_property_i64(value);
+            }
             "fFlipH" => {
                 if let Some(enabled) = parse_shape_property_i64(value)
                     && let Some(shape) = self.current_shape.as_mut()
@@ -13521,6 +13540,9 @@ impl Parser {
                         picture.bilevel = true;
                     }
                 }
+            }
+            "fHitTestFill" | "fillShape" | "fillUseRect" | "fNoFillHitTest" => {
+                let _ = parse_shape_property_i64(value);
             }
             _ => {}
         }

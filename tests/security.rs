@@ -7285,6 +7285,86 @@ fn shape_result_fallback_is_ignored_after_primary_passive_visual_result() {
 }
 
 #[test]
+fn shape_picture_identity_metadata_does_not_mark_passive_shape_unsupported() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pib}{\sv passive-picture-binary-id}}{\sp{\sn pictureId}{\sv 65536}}{\sp{\sn pictureActive}{\sv 0}}{\sp{\sn pictureGray}{\sv 0}}{\sp{\sn pictureBiLevel}{\sv 0}}{\sp{\sn fLine}{\sv 0}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with picture identity metadata");
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(shape.stroke_width_twips, 0);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("shape picture activation metadata stripped")
+    }));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "picture identity metadata should not mark passive shape unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "pictureId",
+        "pib",
+        "pictureActive",
+        "pictureGray",
+        "pictureBiLevel",
+        "shapeType",
+        "fLine",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "shape picture identity metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"pictureId".as_slice(),
+        b"pib",
+        b"pictureActive",
+        b"pictureGray",
+        b"pictureBiLevel",
+        b"shapeType",
+        b"fLine",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape picture identity metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn duplicate_shape_fallback_object_still_rejects_active_payload_in_reject_mode() {
     let input = concat!(
         r"{\rtf1 Before {\shp{\*\shpinst",
@@ -26806,6 +26886,107 @@ fn picture_metadata_controls_do_not_corrupt_image_or_leak_payloads() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn inert_picture_hit_test_metadata_is_consumed_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn fHitTestFill}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn fillShape}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn fillUseRect}{",
+        "\\",
+        "sv 0}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn fNoFillHitTest}{",
+        "\\",
+        "sv 0}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive image");
+
+    assert_eq!(image.format, open_rtf_converter::model::ImageFormat::Jpeg);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "inert picture metadata should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["fHitTestFill", "fillShape", "fillUseRect", "fNoFillHitTest"] {
+        assert!(
+            !text.contains(forbidden),
+            "inert picture metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    for forbidden in [
+        b"fHitTestFill".as_slice(),
+        b"fillShape",
+        b"fillUseRect",
+        b"fNoFillHitTest",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "inert picture metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
