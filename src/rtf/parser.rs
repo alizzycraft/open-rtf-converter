@@ -12635,7 +12635,16 @@ impl Parser {
                 Some(offset),
             ));
         }
-        if is_header_destination(destination) {
+        if destination == Destination::ListText {
+            for paragraph in paragraphs {
+                for run in paragraph.runs {
+                    let previous_style = self.state.character.clone();
+                    self.state.character = run.style;
+                    self.push_list_marker_text(&run.text, offset)?;
+                    self.state.character = previous_style;
+                }
+            }
+        } else if is_header_destination(destination) {
             self.reserve_header_footer_paragraph_slots(paragraphs.len(), offset)?;
             if self.has_started_visible_body() {
                 match destination {
@@ -12723,7 +12732,13 @@ impl Parser {
         offset: usize,
     ) -> Result<(), ParseError> {
         self.mark_field_result_visible_content();
-        if is_header_destination(destination) {
+        if destination == Destination::ListText {
+            self.diagnostics.push(Diagnostic::warning(
+                "list marker shape replaced with passive text placeholder before normalization",
+                Some(offset),
+            ));
+            self.push_list_marker_text("[Shape skipped: list marker shape]", offset)?;
+        } else if is_header_destination(destination) {
             self.finish_header_paragraph(offset)?;
             if self.has_started_visible_body() {
                 match destination {
