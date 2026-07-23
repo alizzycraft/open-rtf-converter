@@ -1017,6 +1017,8 @@ struct ShapeBuilder {
     fill_color: Option<Color>,
     fill_pattern: ShadingPattern,
     fill_color_from_foreground: bool,
+    picture_grayscale: bool,
+    picture_bilevel: bool,
     shadow_enabled: bool,
     shadow_color: Color,
     shadow_opacity_percent: u8,
@@ -1084,6 +1086,8 @@ impl Default for ShapeBuilder {
             fill_color: None,
             fill_pattern: ShadingPattern::None,
             fill_color_from_foreground: false,
+            picture_grayscale: false,
+            picture_bilevel: false,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12220,7 +12224,7 @@ impl Parser {
     fn push_static_image(
         &mut self,
         destination: Destination,
-        image: StaticImage,
+        mut image: StaticImage,
         offset: usize,
     ) -> Result<(), ParseError> {
         if self
@@ -12234,6 +12238,14 @@ impl Parser {
                 Some(offset),
             ));
             return Ok(());
+        }
+        if let Some((grayscale, bilevel)) = self
+            .current_shape
+            .as_ref()
+            .filter(|_| self.state.inside_shape)
+            .map(|shape| (shape.picture_grayscale, shape.picture_bilevel))
+        {
+            self.apply_picture_color_mode(&mut image, grayscale, bilevel, offset);
         }
         let image = self.apply_current_shape_image_placement(image, offset);
         self.mark_object_result_visible_content();
@@ -13720,11 +13732,22 @@ impl Parser {
                 }
                 None => self.mark_current_shape_unsupported_or_active_property_stripped(),
             },
-            "pictureGray" | "pictureBiLevel" => {
-                if parse_shape_property_i64(value).is_none() {
-                    self.mark_current_shape_unsupported_or_active_property_stripped();
+            "pictureGray" => match parse_shape_property_i64(value) {
+                Some(enabled) => {
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.picture_grayscale = enabled != 0;
+                    }
                 }
-            }
+                None => self.mark_current_shape_unsupported_or_active_property_stripped(),
+            },
+            "pictureBiLevel" => match parse_shape_property_i64(value) {
+                Some(enabled) => {
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.picture_bilevel = enabled != 0;
+                    }
+                }
+                None => self.mark_current_shape_unsupported_or_active_property_stripped(),
+            },
             "fHitTestFill" | "fNoFillHitTest" | "fillShape" | "fillUseRect" => {
                 if parse_shape_property_i64(value).is_none() {
                     self.mark_current_shape_unsupported_or_active_property_stripped();

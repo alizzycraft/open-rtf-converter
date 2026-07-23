@@ -28806,6 +28806,273 @@ fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
 }
 
 #[test]
+fn shape_picture_grayscale_metadata_updates_safe_image_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_rgb_png(&[[255, 0, 0]]));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop360",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1080{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureGray}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-shape-grayscale-picture-payload}}}{",
+        "\\",
+        "*",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "pngblip",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("shape grayscale picture image");
+
+    assert_eq!(image.format, ImageFormat::Png);
+    assert!(image.placement.is_some());
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("picture grayscale property approximated")),
+        "shape picture grayscale should be applied to stored scanlines: {:?}",
+        parsed.diagnostics
+    );
+    let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+        .expect("shape grayscale PNG scanline");
+    assert_eq!(scanlines, vec![0, 77, 77, 77]);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "pictureGray",
+        "pFragments",
+        "hidden-shape-grayscale-picture-payload",
+        "shppict",
+        "pngblip",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "shape grayscale picture metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "shape grayscale picture should still render a passive image XObject"
+    );
+    for forbidden in [
+        b"pictureGray".as_slice(),
+        b"pFragments",
+        b"hidden-shape-grayscale-picture-payload",
+        b"shppict",
+        b"pngblip",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape grayscale picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn shape_picture_bilevel_metadata_updates_safe_image_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_rgb_png(&[[255, 0, 0]]));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop360",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1080{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBiLevel}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-shape-bilevel-picture-payload}}}{",
+        "\\",
+        "*",
+        "\\",
+        "shppict{",
+        "\\",
+        "pict",
+        "\\",
+        "pngblip",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("shape bilevel picture image");
+
+    assert_eq!(image.format, ImageFormat::Png);
+    assert!(image.placement.is_some());
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("picture bilevel property approximated")
+                && !diagnostic
+                    .message
+                    .contains("picture grayscale property approximated")
+        }),
+        "shape picture bilevel should be applied to stored scanlines: {:?}",
+        parsed.diagnostics
+    );
+    let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
+        .expect("shape bilevel PNG scanline");
+    assert_eq!(scanlines, vec![0, 0, 0, 0]);
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "pictureBiLevel",
+        "pFragments",
+        "hidden-shape-bilevel-picture-payload",
+        "shppict",
+        "pngblip",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "shape bilevel picture metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "shape bilevel picture should still render a passive image XObject"
+    );
+    for forbidden in [
+        b"pictureBiLevel".as_slice(),
+        b"pFragments",
+        b"hidden-shape-bilevel-picture-payload",
+        b"shppict",
+        b"pngblip",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "shape bilevel picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shape_picture_result_uses_passive_author_wrap_distances_without_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
