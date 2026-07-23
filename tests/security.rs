@@ -84111,6 +84111,106 @@ fn office_shape_arrowheads_render_passively_without_property_leakage() {
 }
 
 #[test]
+fn office_shape_named_arrowhead_aliases_render_passively() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineStartArrowhead}{",
+        "\\",
+        "sv msoArrowheadOpen}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineEndArrowhead}{",
+        "\\",
+        "sv msoArrowheadTriangle}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("named arrowhead line shape");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shape.start_arrowhead, StaticShapeArrowhead::Open);
+    assert_eq!(shape.end_arrowhead, StaticShapeArrowhead::Triangle);
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "named arrowhead aliases should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "lineStartArrowhead",
+        "lineEndArrowhead",
+        "msoArrowheadOpen",
+        "msoArrowheadTriangle",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "named arrowhead metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"lineStartArrowhead".as_slice(),
+        b"lineEndArrowhead",
+        b"msoArrowheadOpen",
+        b"msoArrowheadTriangle",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "named arrowhead metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_shape_numeric_arrowhead_styles_render_passively_without_property_leakage() {
     let input = rtf(&[
         "{",
