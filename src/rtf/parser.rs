@@ -3998,6 +3998,7 @@ impl Parser {
             }
             "pntxtb" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.pending_list_marker.clear();
+                self.pending_list_marker_runs.clear();
                 self.pending_old_style_list_marker = None;
                 self.state.destination = Destination::ListText;
             }

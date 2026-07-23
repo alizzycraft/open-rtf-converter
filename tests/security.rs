@@ -3577,6 +3577,83 @@ fn old_style_list_marker_text_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn old_style_list_marker_text_reset_clears_stale_styled_runs_without_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1{",
+        "\\",
+        "colortbl;",
+        "\\",
+        "red255",
+        "\\",
+        "green0",
+        "\\",
+        "blue0;}{",
+        "\\",
+        "pn",
+        "\\",
+        "pndec{",
+        "\\",
+        "pntxta",
+        "\\",
+        "b",
+        "\\",
+        "cf1 STALE",
+        "\\",
+        "tab}{",
+        "\\",
+        "pntxtb 7}{",
+        "\\",
+        "pntxta .",
+        "\\",
+        "tab}}Item",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("7.\tItem"));
+    for forbidden in ["STALE", "pntxtb", "pntxta", "pndec"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden stale marker content leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("reset-old-style-list-marker.rtf");
+    let output_path = dir.path().join("reset-old-style-list-marker.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    assert!(PdfDocument::load_mem(&pdf).is_ok());
+    for forbidden in [
+        b"STALE".as_slice(),
+        b"pntxtb",
+        b"pntxta",
+        b"pndec",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn structural_old_style_list_markers_do_not_cross_pdf_boundary() {
     let input = br"{\rtf1{\fonttbl{\f0 Arial;{\pntext HiddenFontMarker\tab}}}{\stylesheet{\s1 VisibleStyle;{\pn\pndec\pnstart9{\pntxtb HiddenStyleMarker}{\pntxta .\tab}}}}{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers;}{\pntext HiddenListMarker\tab}}\listid7}}Visible body\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
