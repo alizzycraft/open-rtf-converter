@@ -22163,6 +22163,7 @@ fn parse_shape_arrowhead_property(value: &str) -> Option<StaticShapeArrowhead> {
         "3" | "open" | "arrow" | "msoarrowheadopen" => Some(StaticShapeArrowhead::Open),
         "2" | "triangle" | "msoarrowheadtriangle" => Some(StaticShapeArrowhead::Triangle),
         "4" | "diamond" | "msoarrowheaddiamond" => Some(StaticShapeArrowhead::Diamond),
+        "5" | "oval" | "msoarrowheadoval" => Some(StaticShapeArrowhead::Oval),
         _ => None,
     }
 }

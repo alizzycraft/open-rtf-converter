@@ -3018,6 +3018,34 @@ fn push_static_shape_arrowhead(
                 fill_color: Some(color),
             });
         }
+        StaticShapeArrowhead::Oval => {
+            let center = LayoutPoint {
+                x: tip.x - unit_x * (arrow_length * 0.45),
+                y: tip.y - unit_y * (arrow_length * 0.45),
+            };
+            let radius_x = (arrow_length * 0.38).clamp(2.0, 10.0);
+            let radius_y = half_width.clamp(2.0, 10.0);
+            let mut points = Vec::with_capacity(12);
+            for index in 0..12 {
+                let angle = std::f32::consts::PI * 2.0 * (index as f32) / 12.0;
+                let along = angle.cos() * radius_x;
+                let across = angle.sin() * radius_y;
+                points.push(LayoutPoint {
+                    x: center.x + unit_x * along + perpendicular_x * across,
+                    y: center.y + unit_y * along + perpendicular_y * across,
+                });
+            }
+            page.items.push(LayoutItem::Polygon {
+                points,
+                paths: Vec::new(),
+                overlay_paths: Vec::new(),
+                fill_rule: StaticImageVectorFillRule::Winding,
+                stroke_width,
+                stroke_color: color,
+                stroke_style: LineStyle::Solid,
+                fill_color: Some(color),
+            });
+        }
     }
 }
 
