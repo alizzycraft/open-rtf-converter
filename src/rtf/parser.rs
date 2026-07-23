@@ -10123,6 +10123,7 @@ impl Parser {
             return Ok(());
         }
         match destination {
+            Destination::ListText => self.push_list_marker_text(&text, offset),
             destination
                 if is_header_destination(destination) || is_footer_destination(destination) =>
             {

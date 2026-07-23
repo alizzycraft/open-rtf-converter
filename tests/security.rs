@@ -3990,6 +3990,73 @@ fn passive_advance_field_inside_explicit_list_marker_stays_marker_text() {
 }
 
 #[test]
+fn resultless_active_field_placeholder_inside_explicit_list_marker_stays_marker_text() {
+    let input =
+        br#"{\rtf1{\*\listtext{\field{\*\fldinst HYPERLINK "https://example.com"}}\tab}Body\par}"#
+            .to_vec();
+    let parsed = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            active_content_policy: ActiveContentPolicy::Placeholder,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    let paragraph = match &parsed.document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        _ => panic!("expected list paragraph"),
+    };
+    let text = paragraph
+        .runs
+        .iter()
+        .map(|run| run.text.as_str())
+        .collect::<String>();
+
+    assert_eq!(text, "[Field removed: no passive result]\tBody");
+    assert!(!text.contains("HYPERLINK"));
+    assert!(!text.contains("https://example.com"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| matches!(block, Block::Paragraph(_))),
+        "marker placeholder should not become a standalone block: {:?}",
+        parsed.document.blocks
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("[Field removed: no passive result]Body"));
+    assert!(!rendered_text.contains("HYPERLINK"));
+    assert!(!rendered_text.contains("https://example.com"));
+
+    for forbidden in [
+        b"listtext".as_slice(),
+        b"HYPERLINK",
+        b"https://example.com",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden marker placeholder field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn explicit_list_marker_only_paragraph_does_not_leak_to_next_paragraph() {
     let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtext\b\cf1 1.\tab}\par Next\par}"
         .to_vec();
