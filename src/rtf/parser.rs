@@ -13343,6 +13343,11 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
+            "shadowOpacity" => {
+                if !parse_shape_full_opacity_property(value).unwrap_or(false) {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "shadowOffsetX" => {
                 if let Some(twips) = parse_shape_property_signed_emu_twips(value) {
                     let offset_twips = self.clamp_shape_signed_offset(
@@ -21919,6 +21924,10 @@ fn parse_shape_property_signed_emu_twips(value: &str) -> Option<i64> {
     let emu = parse_shape_property_i64(value)?;
     let magnitude = (emu.unsigned_abs().saturating_add(317) / 635).min(i32::MAX as u64) as i64;
     Some(if emu < 0 { -magnitude } else { magnitude })
+}
+
+fn parse_shape_full_opacity_property(value: &str) -> Option<bool> {
+    Some(parse_shape_property_i64(value)? >= 65_536)
 }
 
 fn parse_office_shape_color(value: &str) -> Option<Color> {
