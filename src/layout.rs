@@ -2654,6 +2654,15 @@ fn layout_shape(
                     },
                 });
             }
+            push_shape_fill_pattern_lines(
+                page,
+                x,
+                bottom_y,
+                width,
+                height,
+                shape.fill_color,
+                shape.fill_pattern,
+            );
             if let Some(width_points) = stroke_width_points {
                 page.items.push(LayoutItem::Line {
                     x1: x,
@@ -9776,6 +9785,34 @@ fn push_shading_pattern_lines(
     }
 }
 
+fn push_shape_fill_pattern_lines(
+    page: &mut LayoutPage,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    fill_color: Option<crate::model::Color>,
+    pattern: ShadingPattern,
+) {
+    if pattern == ShadingPattern::None || fill_color.is_none() {
+        return;
+    }
+    let color = fill_color.expect("checked above");
+    push_shading_pattern_lines(
+        page,
+        x,
+        y,
+        width,
+        height,
+        PdfColor {
+            red: color.red as f32 / 255.0,
+            green: color.green as f32 / 255.0,
+            blue: color.blue as f32 / 255.0,
+        },
+        pattern,
+    );
+}
+
 fn shading_pattern_spacing(pattern: ShadingPattern) -> f32 {
     match pattern {
         ShadingPattern::DarkHorizontal
@@ -11349,6 +11386,7 @@ mod tests {
                     green: 20,
                     blue: 20,
                 }),
+                fill_pattern: crate::model::ShadingPattern::None,
                 shadow_enabled: false,
                 shadow_color: Color {
                     red: 128,
@@ -11419,6 +11457,7 @@ mod tests {
                 green: 20,
                 blue: 20,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -11560,6 +11599,7 @@ mod tests {
                     green: 20,
                     blue: 20,
                 }),
+                fill_pattern: crate::model::ShadingPattern::None,
                 shadow_enabled: false,
                 shadow_color: Color {
                     red: 128,
@@ -11636,6 +11676,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -11722,6 +11763,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -11811,6 +11853,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -11901,6 +11944,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12008,6 +12052,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12086,6 +12131,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12174,6 +12220,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12239,6 +12286,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12310,6 +12358,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12387,6 +12436,7 @@ mod tests {
             fill_opacity_percent: 100,
             stroke_opacity_percent: 100,
             fill_color: None,
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12487,6 +12537,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12583,6 +12634,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12666,6 +12718,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -12767,6 +12820,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -19823,6 +19877,7 @@ mod tests {
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,

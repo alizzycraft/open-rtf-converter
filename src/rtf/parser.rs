@@ -1015,6 +1015,7 @@ struct ShapeBuilder {
     stroke_opacity_percent: u8,
     fill_enabled: bool,
     fill_color: Option<Color>,
+    fill_pattern: ShadingPattern,
     fill_color_from_foreground: bool,
     shadow_enabled: bool,
     shadow_color: Color,
@@ -1081,6 +1082,7 @@ impl Default for ShapeBuilder {
             stroke_opacity_percent: 100,
             fill_enabled: true,
             fill_color: None,
+            fill_pattern: ShadingPattern::None,
             fill_color_from_foreground: false,
             shadow_enabled: false,
             shadow_color: Color {
@@ -12739,6 +12741,11 @@ impl Parser {
                 fill_opacity_percent: shape.fill_opacity_percent,
                 stroke_opacity_percent: shape.stroke_opacity_percent,
                 fill_color,
+                fill_pattern: if fill_color.is_some() {
+                    shape.fill_pattern
+                } else {
+                    ShadingPattern::None
+                },
                 shadow_enabled: shape.shadow_enabled,
                 shadow_color: shape.shadow_color,
                 shadow_opacity_percent: shape.shadow_opacity_percent,
@@ -13329,10 +13336,18 @@ impl Parser {
                 }
             }
             "fillType" => {
-                if !matches!(
-                    parse_shape_fill_type_property(value),
-                    Some(ShapeFillType::Solid)
-                ) {
+                if let Some(fill_type) = parse_shape_fill_type_property(value) {
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.fill_pattern = match fill_type {
+                            ShapeFillType::Solid => ShadingPattern::None,
+                            ShapeFillType::Pattern => ShadingPattern::Cross,
+                            ShapeFillType::Unsupported => {
+                                self.mark_current_shape_unsupported_or_active_property_stripped();
+                                return;
+                            }
+                        };
+                    }
+                } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
@@ -22062,6 +22077,7 @@ fn parse_office_shape_color(value: &str) -> Option<Color> {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ShapeFillType {
     Solid,
+    Pattern,
     Unsupported,
 }
 
@@ -22074,11 +22090,13 @@ fn parse_shape_fill_type_property(value: &str) -> Option<ShapeFillType> {
         .collect::<String>();
     match normalized.as_str() {
         "0" | "solid" | "msofillsolid" => Some(ShapeFillType::Solid),
-        "1" | "pattern" | "msofillpattern" | "2" | "texture" | "msofilltexture" | "3"
-        | "picture" | "msofillpicture" | "4" | "shade" | "msofillshade" | "5" | "shadecenter"
-        | "msofillshadecenter" | "6" | "shadeshape" | "msofillshadeshape" | "7" | "shadescale"
-        | "msofillshadescale" | "8" | "shadepreset" | "msofillshadepreset" | "9" | "background"
-        | "msofillbackground" => Some(ShapeFillType::Unsupported),
+        "1" | "pattern" | "msofillpattern" => Some(ShapeFillType::Pattern),
+        "2" | "texture" | "msofilltexture" | "3" | "picture" | "msofillpicture" | "4" | "shade"
+        | "msofillshade" | "5" | "shadecenter" | "msofillshadecenter" | "6" | "shadeshape"
+        | "msofillshadeshape" | "7" | "shadescale" | "msofillshadescale" | "8" | "shadepreset"
+        | "msofillshadepreset" | "9" | "background" | "msofillbackground" => {
+            Some(ShapeFillType::Unsupported)
+        }
         _ => None,
     }
 }

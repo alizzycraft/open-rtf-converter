@@ -72934,6 +72934,102 @@ fn office_shape_solid_fill_type_is_consumed_without_unsupported_property_warning
 }
 
 #[test]
+fn office_shape_pattern_fill_type_renders_passively_without_property_leakage() {
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv msoFillPattern}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-pattern-fill-type-payload}}}}After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive shape with pattern fillType");
+
+    assert_eq!(shape.kind, StaticShapeKind::Rectangle);
+    assert_eq!(shape.fill_pattern, ShadingPattern::Cross);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    for forbidden in [
+        "fillType",
+        "msoFillPattern",
+        "pFragments",
+        "hidden-pattern-fill-type-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "pattern fillType metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert!(
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .filter(|item| matches!(item, LayoutItem::Line { .. }))
+            .count()
+            > 4,
+        "rectangular pattern fill should render passive hatch lines in addition to borders"
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count()
+            > 4,
+        "rectangular pattern fill should emit passive stroked hatch lines"
+    );
+    for forbidden in [
+        b"fillType".as_slice(),
+        b"msoFillPattern",
+        b"pFragments",
+        b"hidden-pattern-fill-type-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "pattern fillType metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_shape_non_solid_fill_type_is_stripped_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-gradient-fill-type-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

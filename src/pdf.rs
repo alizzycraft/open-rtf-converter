@@ -6781,6 +6781,7 @@ endstream
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
@@ -6892,6 +6893,7 @@ endstream
                 green: 20,
                 blue: 30,
             }),
+            fill_pattern: crate::model::ShadingPattern::None,
             shadow_enabled: false,
             shadow_color: Color {
                 red: 128,
