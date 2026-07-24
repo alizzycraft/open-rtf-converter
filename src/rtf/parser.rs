@@ -25016,6 +25016,8 @@ impl<'a> FormulaParser<'a> {
                 }
                 "ROUND" => return None,
                 "COUNT" => i64::try_from(args + 1).ok()?,
+                "SIGN" if args == 0 => argument.signum(),
+                "SIGN" => return None,
                 _ => return None,
             };
             args += 1;
@@ -44220,6 +44222,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula COUNT field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_sign_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Negative {\field{\*\fldinst = SIGN(-8 + 3)}} zero {\field{\*\fldinst = SIGN(4 - 4)}} positive {\field{\*\fldinst = SIGN(9)}} extra {\field{\*\fldinst = SIGN(1,2)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Negative -1 zero 0 positive 1 extra [Field removed: no passive result]")
+        );
+        for forbidden in ["SIGN", "-8 + 3", "4 - 4", "1,2", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula SIGN field leaked unsafe text: {forbidden}"
             );
         }
     }
