@@ -3572,7 +3572,8 @@ impl Parser {
                 self.set_current_list_level_border_style(style);
             }
             "brdrsh" if self.is_parsing_list_level_definition() => {
-                self.warn_border_effect_approximation("brdrsh", offset);
+                self.set_current_list_level_border_style(BorderStyle::Emboss);
+                self.warn_border_effect_passive_fallback("brdrsh", offset);
             }
             "brdrdot" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Dotted);
@@ -4788,7 +4789,8 @@ impl Parser {
                 self.set_current_border_style(style);
             }
             "brdrsh" => {
-                self.warn_border_effect_approximation("brdrsh", offset);
+                self.set_current_border_style(BorderStyle::Emboss);
+                self.warn_border_effect_passive_fallback("brdrsh", offset);
             }
             "brdrdot" => self.set_current_border_style(BorderStyle::Dotted),
             "brdrdash" | "brdrdashsm" | "brdrdashd" | "brdrdashdd" | "brdrdashdot"
@@ -11126,9 +11128,11 @@ impl Parser {
         }
     }
 
-    fn warn_border_effect_approximation(&mut self, control_name: &str, offset: usize) {
+    fn warn_border_effect_passive_fallback(&mut self, control_name: &str, offset: usize) {
         self.diagnostics.push(Diagnostic::warning(
-            format!("Word border effect \\{control_name} flattened for passive static PDF output"),
+            format!(
+                "Word border effect \\{control_name} rendered as bounded passive relief border"
+            ),
             Some(offset),
         ));
     }
@@ -48451,7 +48455,7 @@ After\par}"#;
         assert_eq!(eighth.style.borders.left.style, BorderStyle::ThinThick);
         assert_eq!(ninth.style.borders.right.style, BorderStyle::ThickThin);
         assert_eq!(tenth.style.borders.bottom.style, BorderStyle::ThinThickThin);
-        assert_eq!(eleventh.style.borders.right.style, BorderStyle::Single);
+        assert_eq!(eleventh.style.borders.right.style, BorderStyle::Emboss);
         assert_eq!(
             table.rows[0].cells[0].borders.left.style,
             BorderStyle::Dashed
@@ -48459,7 +48463,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("Word border effect \\brdrsh flattened for passive static PDF output")
+                .contains("Word border effect \\brdrsh rendered as bounded passive relief border")
         }));
         assert!(
             output

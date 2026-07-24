@@ -68949,6 +68949,11 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
             .any(|style| style.borders.top.style == BorderStyle::ThinThickThin)
     );
     assert!(
+        paragraph_styles
+            .iter()
+            .any(|style| style.borders.bottom.style == BorderStyle::Emboss)
+    );
+    assert!(
         parsed
             .diagnostics
             .iter()
@@ -68959,7 +68964,7 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("Word border effect \\brdrsh flattened for passive static PDF output")
+            .contains("Word border effect \\brdrsh rendered as bounded passive relief border")
     }));
     assert!(
         parsed
