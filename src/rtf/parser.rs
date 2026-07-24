@@ -24975,9 +24975,13 @@ impl<'a> FormulaParser<'a> {
 
         let mut value = if name == "PRODUCT" { 1i64 } else { 0i64 };
         let mut args = 0usize;
+        let mut expecting_argument = false;
         loop {
             self.skip_ws();
             if self.consume(')') {
+                if expecting_argument {
+                    return None;
+                }
                 return (args > 0).then_some(value);
             }
 
@@ -25011,12 +25015,14 @@ impl<'a> FormulaParser<'a> {
                     }
                 }
                 "ROUND" => return None,
+                "COUNT" => i64::try_from(args + 1).ok()?,
                 _ => return None,
             };
             args += 1;
 
             self.skip_ws();
             if self.consume(',') {
+                expecting_argument = true;
                 continue;
             }
             if self.consume(')') {
@@ -44192,6 +44198,28 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula ROUND field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_count_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Count {\field{\*\fldinst = COUNT(2, 3 + 1, -5)}} empty {\field{\*\fldinst = COUNT()}} malformed {\field{\*\fldinst = COUNT(1,)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Count 3 empty [Field removed: no passive result] malformed [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in ["COUNT", "3 + 1", "1,", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula COUNT field leaked unsafe text: {forbidden}"
             );
         }
     }
