@@ -85095,6 +85095,11 @@ fn square_shape_wrap_metadata_is_consumed_by_passive_line_exclusion() {
     )
     .unwrap();
 
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "shape picture result layout metadata normalized into bounded passive image placement",
+        )
+    }));
     assert!(
         output.diagnostics.iter().all(|diagnostic| {
             !diagnostic
@@ -85313,6 +85318,11 @@ fn shape_picture_wrap_side_metadata_is_consumed_by_passive_line_exclusion() {
             },
         )
         .unwrap();
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "shape picture result layout metadata normalized into bounded passive image placement",
+            )
+        }));
         assert!(
             output.diagnostics.iter().all(|diagnostic| {
                 !diagnostic

@@ -12527,7 +12527,7 @@ impl Parser {
         let height_twips = shape
             .height_twips
             .clamp(1, self.limits().max_shape_dimension_twips.max(1));
-        image.placement = Some(StaticImagePlacement {
+        let placement = StaticImagePlacement {
             left_twips,
             top_twips,
             width_twips,
@@ -12542,11 +12542,19 @@ impl Parser {
             wrap_margin_bottom_twips: shape.wrap_margin_bottom_twips,
             horizontal_anchor: shape.horizontal_anchor,
             vertical_anchor: shape.vertical_anchor,
-        });
+        };
+        let has_layout_metadata = image_placement_has_non_default_layout_metadata(&placement);
+        image.placement = Some(placement);
         self.diagnostics.push(Diagnostic::warning(
             "rendering shape picture result with bounded passive shape frame",
             Some(offset),
         ));
+        if has_layout_metadata {
+            self.diagnostics.push(Diagnostic::warning(
+                "shape picture result layout metadata normalized into bounded passive image placement",
+                Some(offset),
+            ));
+        }
         image
     }
 
@@ -32773,6 +32781,19 @@ fn twips_to_96dpi_px(value: i32) -> u32 {
     let twips = u128::from(value.max(1) as u32);
     let px = ((twips * 96) + 720) / 1440;
     u32::try_from(px.max(1)).unwrap_or(u32::MAX)
+}
+
+fn image_placement_has_non_default_layout_metadata(placement: &StaticImagePlacement) -> bool {
+    placement.z_order != 0
+        || placement.below_text
+        || placement.text_wrap
+        || placement.wrap_side != StaticImageWrapSide::Both
+        || placement.wrap_margin_left_twips != 0
+        || placement.wrap_margin_right_twips != 0
+        || placement.wrap_margin_top_twips != 0
+        || placement.wrap_margin_bottom_twips != 0
+        || placement.horizontal_anchor != StaticShapeHorizontalAnchor::Column
+        || placement.vertical_anchor != StaticShapeVerticalAnchor::Paragraph
 }
 
 fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
