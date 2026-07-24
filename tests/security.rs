@@ -11875,6 +11875,71 @@ fn resultless_styleref_fields_render_safe_prior_style_text_without_payload_leaka
 }
 
 #[test]
+fn resultless_styleref_number_switch_renders_list_number_without_payload_leakage() {
+    let input = br#"{\rtf1{\stylesheet{\s1 TitleStyle;}}{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\s1\ls1\ilvl0 Numbered title\par\pard Ref {\field{\*\fldinst STYLEREF TitleStyle \\n}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("1.\tNumbered title"));
+    assert!(text.contains("Ref 1."));
+    assert!(!text.contains("Ref Numbered title"));
+    for forbidden in [
+        "STYLEREF",
+        "TitleStyle",
+        "listtable",
+        "leveltext",
+        "levelnumbers",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "STYLEREF number switch leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Numbered title"));
+    assert!(
+        rendered_text.contains("Ref 1."),
+        "decoded PDF text did not contain passive STYLEREF list number: {rendered_text:?}"
+    );
+    assert!(!rendered_text.contains("Ref Numbered title"));
+    for forbidden in [
+        b"STYLEREF".as_slice(),
+        b"TitleStyle",
+        b"listtable",
+        b"leveltext",
+        b"levelnumbers",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden STYLEREF number content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_styleref_fields_resolve_unicode_style_names_without_control_leakage() {
     let input = rtf(&[
         "{",

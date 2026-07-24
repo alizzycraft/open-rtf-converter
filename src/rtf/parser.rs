@@ -1410,6 +1410,7 @@ struct Parser {
     document_revision_number: Option<i32>,
     field_bookmark_values: Vec<(String, String)>,
     style_reference_texts: Vec<(i32, String)>,
+    style_reference_number_texts: Vec<(i32, String)>,
     bookmark_captures: Vec<BookmarkCapture>,
     next_bookmark_marker_id: usize,
     styles: Vec<StyleDefinition>,
@@ -1607,6 +1608,7 @@ impl Parser {
             document_revision_number: None,
             field_bookmark_values: Vec::new(),
             style_reference_texts: Vec::new(),
+            style_reference_number_texts: Vec::new(),
             bookmark_captures: Vec::new(),
             next_bookmark_marker_id: 1,
             styles: Vec::new(),
@@ -9664,11 +9666,18 @@ impl Parser {
         let Some(style_index) = self.field_style_ref_index(instruction) else {
             return None;
         };
-        let text = self
-            .style_reference_texts
-            .iter()
-            .rev()
-            .find_map(|(index, text)| (*index == style_index).then(|| text.clone()))?;
+        let wants_number = field_style_ref_wants_number_switch(instruction)?;
+        let text = if wants_number {
+            self.style_reference_number_texts
+                .iter()
+                .rev()
+                .find_map(|(index, text)| (*index == style_index).then(|| text.clone()))?
+        } else {
+            self.style_reference_texts
+                .iter()
+                .rev()
+                .find_map(|(index, text)| (*index == style_index).then(|| text.clone()))?
+        };
         Some(PassiveFieldResult {
             text,
             font_name: None,
@@ -9680,7 +9689,7 @@ impl Parser {
     fn field_style_ref_index(&self, instruction: &str) -> Option<i32> {
         let name = field_first_argument(instruction)?;
         let rest = field_rest_after_first_argument(instruction)?;
-        if !field_remainder_contains_only_passive_format_switches(rest) {
+        if !field_remainder_contains_only_style_ref_switches(rest) {
             return None;
         }
         if let Ok(index) = name.trim().parse::<i32>() {
@@ -9771,6 +9780,7 @@ impl Parser {
         self.flush_pending_paragraph_list_marker(offset)?;
         let paragraph_style_index = self.state.paragraph_style_index;
         let mut pending_style_reference_text = None;
+        let mut pending_style_reference_number_text = None;
         if self.state.destination == Destination::ShapeText {
             self.finish_shape_text_paragraph();
             return Ok(());
@@ -9786,6 +9796,8 @@ impl Parser {
                 );
                 if paragraph_style_index.is_some() {
                     pending_style_reference_text = paragraph_plain_text(&paragraph);
+                    pending_style_reference_number_text =
+                        paragraph_style_ref_number_text(&paragraph);
                 }
                 row.current_cell_paragraphs.push(paragraph);
                 row.cell_open = true;
@@ -9793,6 +9805,11 @@ impl Parser {
             if let (Some(index), Some(text)) = (paragraph_style_index, pending_style_reference_text)
             {
                 self.store_style_reference_text(index, text, offset)?;
+            }
+            if let (Some(index), Some(text)) =
+                (paragraph_style_index, pending_style_reference_number_text)
+            {
+                self.store_style_reference_number_text(index, text, offset)?;
             }
             return Ok(());
         }
@@ -9808,6 +9825,9 @@ impl Parser {
             if let Some(index) = paragraph_style_index {
                 if let Some(text) = paragraph_plain_text(&paragraph) {
                     self.store_style_reference_text(index, text, offset)?;
+                }
+                if let Some(text) = paragraph_style_ref_number_text(&paragraph) {
+                    self.store_style_reference_number_text(index, text, offset)?;
                 }
             }
             self.push_document_block(Block::Paragraph(paragraph), offset)?;
@@ -9923,6 +9943,37 @@ impl Parser {
             });
         }
         self.style_reference_texts.push((style_index, text));
+        Ok(())
+    }
+
+    fn store_style_reference_number_text(
+        &mut self,
+        style_index: i32,
+        text: String,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if text.is_empty()
+            || text.chars().count() > self.limits().max_text_run_len
+            || text.chars().any(|ch| ch.is_control())
+            || contains_internal_marker(&text)
+        {
+            return Ok(());
+        }
+        if let Some((_, stored_text)) = self
+            .style_reference_number_texts
+            .iter_mut()
+            .find(|(index, _)| *index == style_index)
+        {
+            *stored_text = text;
+            return Ok(());
+        }
+        if self.style_reference_number_texts.len() >= self.limits().max_style_references {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "style references".to_string(),
+                offset,
+            });
+        }
+        self.style_reference_number_texts.push((style_index, text));
         Ok(())
     }
 
@@ -24339,6 +24390,62 @@ fn field_remainder_contains_only_passive_format_switches(input: &str) -> bool {
     true
 }
 
+fn field_remainder_contains_only_style_ref_switches(input: &str) -> bool {
+    let mut rest = input.trim_start();
+    while !rest.is_empty() {
+        let Some(after_backslash) = rest.strip_prefix('\\') else {
+            return false;
+        };
+        if let Some(after_star) = after_backslash.strip_prefix('*') {
+            let Some((_, after_switch)) = field_format_switch_after_star(after_star) else {
+                return false;
+            };
+            rest = after_switch.trim_start();
+        } else if let Some(after_hash) = after_backslash.strip_prefix('#') {
+            let Some((_, after_picture)) = field_numeric_picture_argument_with_rest(after_hash)
+            else {
+                return false;
+            };
+            rest = after_picture.trim_start();
+        } else if let Some(after_number) = strip_field_switch_letter(after_backslash, 'n') {
+            rest = after_number.trim_start();
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn field_style_ref_wants_number_switch(instruction: &str) -> Option<bool> {
+    let mut rest = field_rest_after_first_argument(instruction)?.trim_start();
+    let mut wants_number = false;
+    while !rest.is_empty() {
+        let after_backslash = rest.strip_prefix('\\')?;
+        if let Some(after_star) = after_backslash.strip_prefix('*') {
+            let (_, after_switch) = field_format_switch_after_star(after_star)?;
+            rest = after_switch.trim_start();
+        } else if let Some(after_hash) = after_backslash.strip_prefix('#') {
+            let (_, after_picture) = field_numeric_picture_argument_with_rest(after_hash)?;
+            rest = after_picture.trim_start();
+        } else if let Some(after_number) = strip_field_switch_letter(after_backslash, 'n') {
+            wants_number = true;
+            rest = after_number.trim_start();
+        } else {
+            return None;
+        }
+    }
+    Some(wants_number)
+}
+
+fn strip_field_switch_letter(input: &str, letter: char) -> Option<&str> {
+    let after_letter = input.strip_prefix(letter)?;
+    if after_letter.chars().next().is_none_or(char::is_whitespace) {
+        Some(after_letter)
+    } else {
+        None
+    }
+}
+
 fn field_format_switch_after_star(input: &str) -> Option<(FieldFormatSwitch, &str)> {
     let input = input.trim_start();
     let (name, rest) = if input.starts_with('"') {
@@ -25427,6 +25534,26 @@ fn paragraph_plain_text(paragraph: &Paragraph) -> Option<String> {
     }
     let text = text.trim().to_string();
     (!text.is_empty()).then_some(text)
+}
+
+fn paragraph_style_ref_number_text(paragraph: &Paragraph) -> Option<String> {
+    let mut text = String::new();
+    for run in &paragraph.runs {
+        if run.style.hidden {
+            continue;
+        }
+        text.push_str(&run.text);
+    }
+    let (marker, _) = text.split_once('\t')?;
+    let marker = marker.trim().to_string();
+    if marker.is_empty()
+        || marker.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
+        || marker.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(&marker)
+    {
+        return None;
+    }
+    Some(marker)
 }
 
 fn push_text_to_runs(runs: &mut Vec<Run>, text: &str, character_style: &CharacterStyle) {
@@ -42343,6 +42470,34 @@ mod tests {
                 .message
                 .contains("rendering passive field STYLEREF without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_styleref_number_switch_renders_passive_list_number_only() {
+        let output = parse_rtf(
+            r#"{\rtf1{\stylesheet{\s1 Heading One;}}{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\s1\ls1\ilvl0 Numbered heading\par\pard Ref {\field{\*\fldinst STYLEREF "Heading One" \\n}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("1.\tNumbered headingRef 1."),
+            "text was {text:?}"
+        );
+        assert!(!text.contains("Ref Numbered heading"));
+        for forbidden in [
+            "STYLEREF",
+            "Heading One",
+            "listtable",
+            "leveltext",
+            "levelnumbers",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "STYLEREF number switch leaked style/list metadata: {forbidden}"
+            );
+        }
     }
 
     #[test]
