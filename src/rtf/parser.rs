@@ -2229,7 +2229,9 @@ impl Parser {
                         && is_prompt_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
-                            format!("prompt field {name} removed without requesting user input"),
+                            format!(
+                                "prompt field {name} rendered as passive placeholder without requesting user input"
+                            ),
                             Some(offset),
                         ));
                         self.push_placeholder_for_destination(
@@ -2242,7 +2244,7 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "mail-merge field {name} removed without executing merge data source"
+                                "mail-merge field {name} rendered as passive placeholder without executing merge data source"
                             ),
                             Some(offset),
                         ));
@@ -2256,7 +2258,7 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "drawing field {name} removed without synthesizing drawing canvas output"
+                                "drawing field {name} rendered as passive placeholder without synthesizing drawing canvas output"
                             ),
                             Some(offset),
                         ));
@@ -2270,7 +2272,7 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "active control field {name} removed without creating active form or control content"
+                                "active control field {name} rendered as passive placeholder without creating active form or control content"
                             ),
                             Some(offset),
                         ));
@@ -2284,7 +2286,7 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "generated field {name} removed without synthesizing generated field output"
+                                "generated field {name} rendered as passive placeholder without synthesizing generated field output"
                             ),
                             Some(offset),
                         ));
@@ -2298,7 +2300,7 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "building-block field {name} removed without reading template storage"
+                                "building-block field {name} rendered as passive placeholder without reading template storage"
                             ),
                             Some(offset),
                         ));
@@ -2312,7 +2314,7 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "embedded object field {name} removed without activating embedded object"
+                                "embedded object field {name} rendered as passive placeholder without activating embedded object"
                             ),
                             Some(offset),
                         ));
@@ -42835,7 +42837,12 @@ After\par}"#;
                 .contains("non-visible field ASK stripped")
         }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
+            diagnostic.message.contains(
+                "prompt field FILLIN rendered as passive placeholder without requesting user input",
+            )
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
                 .message
                 .contains("prompt field FILLIN removed without requesting user input")
         }));
@@ -42898,9 +42905,9 @@ After\par}"#;
         for name in ["MERGEREC", "MERGESEQ"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
-                    diagnostic
-                        .message
-                        .contains(&format!("mail-merge field {name} removed"))
+                    diagnostic.message.contains(&format!(
+                        "mail-merge field {name} rendered as passive placeholder without executing merge data source"
+                    ))
                 }),
                 "missing diagnostic for {name}"
             );
@@ -42937,13 +42944,18 @@ After\par}"#;
         for name in ["ADDRESSBLOCK", "GREETINGLINE"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
-                    diagnostic
-                        .message
-                        .contains(&format!("mail-merge field {name} removed"))
+                    diagnostic.message.contains(&format!(
+                        "mail-merge field {name} rendered as passive placeholder without executing merge data source"
+                    ))
                 }),
                 "missing diagnostic for {name}"
             );
         }
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("mail-merge field ADDRESSBLOCK removed")
+        }));
 
         let strip_options = RtfParseOptions {
             active_content_policy: ActiveContentPolicy::Strip,
@@ -42999,13 +43011,19 @@ After\par}"#;
         for name in ["TOC", "INDEX", "CITATION", "BIBLIOGRAPHY", "TOA"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
-                    diagnostic
-                        .message
-                        .contains(&format!("generated field {name} removed"))
+                    diagnostic.message.contains(&format!(
+                        "generated field {name} rendered as passive placeholder without synthesizing generated field output"
+                    ))
                 }),
                 "missing diagnostic for {name}"
             );
         }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| { !diagnostic.message.contains("generated field TOC removed") })
+        );
 
         let strip_options = RtfParseOptions {
             active_content_policy: ActiveContentPolicy::Strip,
@@ -43070,9 +43088,9 @@ After\par}"#;
         for name in ["AUTOTEXT", "AUTOTEXTLIST"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
-                    diagnostic
-                        .message
-                        .contains(&format!("building-block field {name} removed"))
+                    diagnostic.message.contains(&format!(
+                        "building-block field {name} rendered as passive placeholder without reading template storage"
+                    ))
                 }),
                 "missing diagnostic for {name}"
             );
@@ -43080,9 +43098,9 @@ After\par}"#;
         for name in ["BARCODE", "DISPLAYBARCODE", "MERGEBARCODE"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
-                    diagnostic
-                        .message
-                        .contains(&format!("generated field {name} removed"))
+                    diagnostic.message.contains(&format!(
+                        "generated field {name} rendered as passive placeholder without synthesizing generated field output"
+                    ))
                 }),
                 "missing diagnostic for {name}"
             );
@@ -43093,9 +43111,9 @@ After\par}"#;
                 .contains("rendering passive field EQ without executing field instruction")
         }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("embedded object field EMBED removed")
+            diagnostic.message.contains(
+                "embedded object field EMBED rendered as passive placeholder without activating embedded object",
+            )
         }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
@@ -43147,9 +43165,9 @@ After\par}"#;
             );
         }
         assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("drawing field SHAPE removed without synthesizing drawing canvas output")
+            diagnostic.message.contains(
+                "drawing field SHAPE rendered as passive placeholder without synthesizing drawing canvas output",
+            )
         }));
 
         let strip_options = RtfParseOptions {
@@ -43199,13 +43217,18 @@ After\par}"#;
         for name in ["CONTROL", "HTMLCHECKBOX", "HTMLSELECT"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
-                    diagnostic
-                        .message
-                        .contains(&format!("active control field {name} removed"))
+                    diagnostic.message.contains(&format!(
+                        "active control field {name} rendered as passive placeholder without creating active form or control content"
+                    ))
                 }),
                 "missing diagnostic for {name}"
             );
         }
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("active control field CONTROL removed")
+        }));
 
         let strip_options = RtfParseOptions {
             active_content_policy: ActiveContentPolicy::Strip,

@@ -14381,6 +14381,22 @@ visible after\par}"#
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("visible after"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for name in ["TOC", "INDEX", "CITATION", "BIBLIOGRAPHY", "TOA"] {
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "generated field {name} rendered as passive placeholder without synthesizing generated field output"
+                ))
+            }),
+            "missing generated field diagnostic for {name}"
+        );
+    }
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| { !diagnostic.message.contains("generated field TOC removed") })
+    );
     for forbidden in [
         b"TOC".as_slice(),
         b"INDEX",
@@ -14485,6 +14501,31 @@ visible after\par}"#
     );
     assert!(rendered_text.contains("go Visible jump"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for name in ["AUTOTEXT", "AUTOTEXTLIST"] {
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "building-block field {name} rendered as passive placeholder without reading template storage"
+                ))
+            }),
+            "missing building-block diagnostic for {name}"
+        );
+    }
+    for name in ["BARCODE", "DISPLAYBARCODE", "MERGEBARCODE"] {
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "generated field {name} rendered as passive placeholder without synthesizing generated field output"
+                ))
+            }),
+            "missing generated field diagnostic for {name}"
+        );
+    }
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "embedded object field EMBED rendered as passive placeholder without activating embedded object",
+        )
+    }));
     for forbidden in [
         b"AUTOTEXT".as_slice(),
         b"AUTOTEXTLIST",
@@ -14560,6 +14601,11 @@ visible after\par}"#
     assert!(rendered_text.contains("stored Visible drawing fallback"));
     assert!(rendered_text.contains("resultless [Field removed: no passive result]"));
     assert!(rendered_text.contains("visible after"));
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "drawing field SHAPE rendered as passive placeholder without synthesizing drawing canvas output",
+        )
+    }));
     for forbidden in [
         b"SHAPE".as_slice(),
         b"MERGEFORMAT",
@@ -14637,6 +14683,21 @@ visible after\par}"#
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("visible after"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for name in ["CONTROL", "HTMLCHECKBOX", "HTMLINPUT", "HTMLSELECT"] {
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "active control field {name} rendered as passive placeholder without creating active form or control content"
+                ))
+            }),
+            "missing active control diagnostic for {name}"
+        );
+    }
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("active control field CONTROL removed")
+    }));
     for forbidden in [
         b"CONTROL".as_slice(),
         b"HTMLCHECKBOX",
@@ -14943,6 +15004,16 @@ visible after\par}"#
     assert!(rendered_text.contains("ask-ref [Field removed: no passive result]"));
     assert!(rendered_text.contains("fill [Field removed: no passive result]"));
     assert!(rendered_text.contains("visible after"));
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "prompt field FILLIN rendered as passive placeholder without requesting user input",
+        )
+    }));
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("prompt field FILLIN removed without requesting user input")
+    }));
     for forbidden in [
         b"ASK".as_slice(),
         b"FILLIN",
@@ -15030,6 +15101,16 @@ visible after\par}"#
     assert!(rendered_text.contains("name"));
     assert!(rendered_text.contains("Client"));
     assert!(rendered_text.contains("visible after"));
+    for name in ["MERGEREC", "MERGESEQ"] {
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "mail-merge field {name} rendered as passive placeholder without executing merge data source"
+                ))
+            }),
+            "missing mail-merge diagnostic for {name}"
+        );
+    }
     for forbidden in [
         b"NEXT".as_slice(),
         b"NEXTIF",
@@ -15108,6 +15189,21 @@ visible after\par}"#
     assert!(rendered_text.contains("address [Field removed: no passive result]"));
     assert!(rendered_text.contains("greeting [Field removed: no passive result]"));
     assert!(rendered_text.contains("visible after"));
+    for name in ["ADDRESSBLOCK", "GREETINGLINE"] {
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "mail-merge field {name} rendered as passive placeholder without executing merge data source"
+                ))
+            }),
+            "missing mail-merge diagnostic for {name}"
+        );
+    }
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("mail-merge field ADDRESSBLOCK removed")
+    }));
     for forbidden in [
         b"ADDRESSBLOCK".as_slice(),
         b"GREETINGLINE",
