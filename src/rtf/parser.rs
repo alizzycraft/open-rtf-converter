@@ -6309,7 +6309,7 @@ impl Parser {
     fn enable_line_numbering(&mut self, offset: usize) {
         if !self.current_section_page.line_numbering.enabled {
             self.diagnostics.push(Diagnostic::warning(
-                "line numbering approximated by passive margin text",
+                "line numbering rendered as bounded passive margin text",
                 Some(offset),
             ));
         }
@@ -47036,6 +47036,18 @@ After\par}"#;
         assert!(!paragraph(0).style.suppress_line_numbers);
         assert!(paragraph(1).style.suppress_line_numbers);
         assert!(!paragraph(2).style.suppress_line_numbers);
+        assert!(output.document.page.line_numbering.enabled);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("line numbering rendered as bounded passive margin text")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("line numbering approximated"))
+        );
         assert!(
             output
                 .diagnostics

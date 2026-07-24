@@ -24895,8 +24895,14 @@ fn word_preamble_note_and_line_number_controls_are_passive_approximations() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("line numbering approximated by passive margin text")
+            .contains("line numbering rendered as bounded passive margin text")
     }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| { !diagnostic.message.contains("line numbering approximated") })
+    );
 
     let output = convert_rtf_to_pdf(
         &input,
