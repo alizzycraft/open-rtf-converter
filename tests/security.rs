@@ -9359,6 +9359,79 @@ fn docproperty_timestamp_aliases_render_metadata_without_instruction_or_payload_
 }
 
 #[test]
+fn docproperty_stat_aliases_resolve_layout_stats_without_instruction_leakage() {
+    let input = br#"{\rtf1 Alpha beta\page Gamma stats pages {\field{\*\fldinst DOCPROPERTY "Number of Pages"}} words {\field{\*\fldinst DOCPROPERTY "Number of Words"}} chars {\field{\*\fldinst DOCPROPERTY "Number of Characters"}} spaces {\field{\*\fldinst DOCPROPERTY "Number of Characters With Spaces"}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(TOTAL_PAGES_MARKER));
+    assert!(text.contains(DOCUMENT_WORDS_MARKER));
+    assert!(text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER));
+    for forbidden in [
+        "DOCPROPERTY",
+        "Number of Pages",
+        "Number of Words",
+        "Number of Characters",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "DOCPROPERTY stat alias leaked instruction text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 2);
+    let page_texts = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .expect("page content");
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>();
+    let rendered_text = page_texts.join("\n");
+
+    assert!(
+        rendered_text.contains("stats pages 2 words"),
+        "decoded PDF text did not resolve DOCPROPERTY page count: {rendered_text:?}"
+    );
+    assert!(
+        rendered_text.contains("chars"),
+        "decoded PDF text omitted DOCPROPERTY character stat label: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"DOCPROPERTY".as_slice(),
+        b"Number of Pages",
+        b"Number of Words",
+        b"Number of Characters",
+        b"fldinst",
+        TOTAL_PAGES_MARKER.as_bytes(),
+        DOCUMENT_WORDS_MARKER.as_bytes(),
+        DOCUMENT_CHARS_MARKER.as_bytes(),
+        DOCUMENT_CHARS_WITH_SPACES_MARKER.as_bytes(),
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "DOCPROPERTY stat alias leaked active/internal PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shortcut_document_property_fields_render_metadata_without_instruction_leakage() {
     let input = br#"{\rtf1{\info{\title Safe title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\author Alice}{\operator Bob}{\doccomm Comment text}}Doc {\field{\*\fldinst TITLE}} / {\field{\*\fldinst AUTHOR \\* Upper}} / {\field{\*\fldinst LASTSAVEDBY}} / {\field{\*\fldinst COMMENTS}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();

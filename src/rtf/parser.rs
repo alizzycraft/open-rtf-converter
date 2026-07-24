@@ -9214,7 +9214,9 @@ impl Parser {
 
     fn passive_doc_property_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
-        let text = if let Some(kind) = document_timestamp_property_field_name(&name) {
+        let text = if let Some(marker) = document_stat_property_field_marker(&name) {
+            marker.to_string()
+        } else if let Some(kind) = document_timestamp_property_field_name(&name) {
             let timestamp = self
                 .document_timestamps
                 .iter()
@@ -22930,6 +22932,7 @@ fn field_result_allows_internal_marker(instruction: &str, text: &str) -> bool {
         Some("SECTION") => text == SECTION_NUMBER_MARKER,
         Some("SECTIONPAGES") => text == SECTION_PAGES_MARKER,
         Some("PAGEREF") => is_bookmark_page_marker(text),
+        Some("DOCPROPERTY") => field_docproperty_result_allows_internal_marker(instruction, text),
         _ => false,
     }
 }
@@ -23179,14 +23182,7 @@ fn document_timestamp_field_name(name: &str) -> Option<DocumentTimestampKind> {
 }
 
 fn document_timestamp_property_field_name(name: &str) -> Option<DocumentTimestampKind> {
-    match name
-        .trim()
-        .to_ascii_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .as_str()
-    {
+    match normalized_document_property_name(name).as_str() {
         "create time" | "creation date" | "creation time" => Some(DocumentTimestampKind::Created),
         "last save time" | "last saved time" | "last save date" | "last saved date" => {
             Some(DocumentTimestampKind::Saved)
@@ -23195,6 +23191,32 @@ fn document_timestamp_property_field_name(name: &str) -> Option<DocumentTimestam
         | "last printed date" => Some(DocumentTimestampKind::Printed),
         _ => None,
     }
+}
+
+fn document_stat_property_field_marker(name: &str) -> Option<&'static str> {
+    match normalized_document_property_name(name).as_str() {
+        "number of pages" | "pages" => Some(TOTAL_PAGES_MARKER),
+        "number of words" | "words" => Some(DOCUMENT_WORDS_MARKER),
+        "number of characters" | "characters" => Some(DOCUMENT_CHARS_MARKER),
+        "number of characters with spaces" | "characters with spaces" => {
+            Some(DOCUMENT_CHARS_WITH_SPACES_MARKER)
+        }
+        _ => None,
+    }
+}
+
+fn field_docproperty_result_allows_internal_marker(instruction: &str, text: &str) -> bool {
+    field_first_argument(instruction)
+        .and_then(|name| document_stat_property_field_marker(&name))
+        .is_some_and(|marker| marker == text)
+}
+
+fn normalized_document_property_name(name: &str) -> String {
+    name.trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn clean_document_property_text(
@@ -45530,6 +45552,47 @@ After\par}"#;
                 "DOCPROPERTY timestamp alias leaked unsafe text: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn resultless_docproperty_stat_aliases_render_safe_layout_markers() {
+        let output = parse_rtf(
+            r#"{\rtf1 Alpha beta\page Gamma stats pages {\field{\*\fldinst DOCPROPERTY "Number of Pages"}} words {\field{\*\fldinst DOCPROPERTY "Number of Words"}} chars {\field{\*\fldinst DOCPROPERTY "Number of Characters"}} spaces {\field{\*\fldinst DOCPROPERTY "Number of Characters With Spaces"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(TOTAL_PAGES_MARKER));
+        assert!(text.contains(DOCUMENT_WORDS_MARKER));
+        assert!(text.contains(DOCUMENT_CHARS_MARKER));
+        assert!(text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER));
+        for forbidden in [
+            "DOCPROPERTY",
+            "Number of Pages",
+            "Number of Words",
+            "Number of Characters",
+            "fldinst",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "DOCPROPERTY stat alias leaked unsafe text: {forbidden}"
+            );
+        }
+        assert!(
+            apply_field_format_switches(
+                r#"DOCPROPERTY "Number of Words""#,
+                PassiveFieldResult::text(DOCUMENT_WORDS_MARKER),
+            )
+            .is_some()
+        );
+        assert!(
+            apply_field_format_switches(
+                r#"DOCPROPERTY Title"#,
+                PassiveFieldResult::text(DOCUMENT_WORDS_MARKER),
+            )
+            .is_none()
+        );
     }
 
     #[test]
