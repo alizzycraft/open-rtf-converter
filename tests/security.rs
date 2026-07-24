@@ -12841,7 +12841,19 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "\\",
         "*",
         "\\",
-        "fldinst = SQRT(9 + 7)}} average {",
+        "fldinst = SQRT(9 + 7)}} and {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = AND(1, 2 + 3, -5)}} or {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = OR(0, 4 - 4, 7)}} average {",
         "\\",
         "field{",
         "\\",
@@ -12861,12 +12873,13 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let text = collect_text(&parsed.document);
 
     assert!(text.contains(
-        "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 sqrt 4 average 4 unsupported [Field removed: no passive result]."
+        "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 sqrt 4 and 1 or 1 average 4 unsupported [Field removed: no passive result]."
     ));
     for forbidden in [
         "fldinst", "\\#", "\"0\"", "\"000\"", "\"00\"", "(6 + 4)", "3 * 2", "SUM", "MIN", "MAX",
-        "ABS", "PRODUCT", "POWER", "MOD", "ROUND", "COUNT", "SIGN", "INT", "SQRT", "AVERAGE",
-        "MEDIAN", "ROMAN", "2 + 3", "4 * 5", "-8 + 3", "3 + 1", "2 + 1", "17 + 3", "9 + 7", "5,0",
+        "ABS", "PRODUCT", "POWER", "MOD", "ROUND", "COUNT", "SIGN", "INT", "SQRT", "AND", "OR",
+        "AVERAGE", "MEDIAN", "ROMAN", "2 + 3", "4 * 5", "-8 + 3", "3 + 1", "2 + 1", "17 + 3",
+        "9 + 7", "4 - 4", "5,0",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -12893,7 +12906,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let rendered_text = decoded_pdf_text(&content);
     assert!(
         rendered_text.contains(
-            "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 sqrt 4 average 4 unsupported [Field removed: no passive result]."
+            "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 sqrt 4 and 1 or 1 average 4 unsupported [Field removed: no passive result]."
         ),
         "decoded PDF text did not contain passive formula values: {rendered_text:?}"
     );
@@ -12916,6 +12929,8 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         b"SIGN",
         b"INT",
         b"SQRT",
+        b"AND",
+        b"OR",
         b"AVERAGE",
         b"MEDIAN",
         b"ROMAN",
@@ -12926,6 +12941,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         b"2 + 1",
         b"17 + 3",
         b"9 + 7",
+        b"4 - 4",
         b"5,0",
         b"/JavaScript",
         b"/EmbeddedFile",

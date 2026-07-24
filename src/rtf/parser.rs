@@ -25029,6 +25029,14 @@ impl<'a> FormulaParser<'a> {
                 "SQRT" if args == 0 => checked_exact_integer_sqrt(argument)?,
                 "SQRT" => return None,
                 "AVERAGE" => value.checked_add(argument)?,
+                "AND" => {
+                    if args == 0 {
+                        i64::from(argument != 0)
+                    } else {
+                        i64::from(value != 0 && argument != 0)
+                    }
+                }
+                "OR" => i64::from(value != 0 || argument != 0),
                 _ => return None,
             };
             args += 1;
@@ -44335,6 +44343,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula SQRT field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_boolean_functions_render_bounded_passive_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 And {\field{\*\fldinst = AND(1, 2 + 3, -5)}} false {\field{\*\fldinst = AND(1,0)}} Or {\field{\*\fldinst = OR(0, 4 - 4, 7)}} empty {\field{\*\fldinst = OR()}} malformed {\field{\*\fldinst = AND(1,)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "And 1 false 0 Or 1 empty [Field removed: no passive result] malformed [Field removed: no passive result]"
+        ));
+        for forbidden in ["AND", "OR", "2 + 3", "4 - 4", "1,", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula boolean field leaked unsafe text: {forbidden}"
             );
         }
     }
