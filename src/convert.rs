@@ -208,7 +208,7 @@ fn passive_font_substitution_diagnostics(
             continue;
         } else if font_name_matches_pdf_family(&font.name, family) {
             format!(
-                "font '{}' approximated with passive PDF base font {}; provide a passive font asset for closer Word-compatible output",
+                "font '{}' rendered through bounded passive PDF base font {}; provide a passive font asset for closer Word-compatible metrics",
                 font.name,
                 passive_pdf_font_family_label(family)
             )

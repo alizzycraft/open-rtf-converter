@@ -18864,24 +18864,31 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         );
     }
     for expected in [
-        "font 'MS Sans Serif' approximated with passive PDF base font Helvetica",
-        "font 'MS Serif' approximated with passive PDF base font Times-Roman",
-        "font 'Wingdings' approximated with passive PDF base font ZapfDingbats",
-        "font 'Times New Roman' approximated with passive PDF base font Times-Roman",
-        "font 'Times New Roman CE' approximated with passive PDF base font Times-Roman",
-        "font 'Arial' approximated with passive PDF base font Helvetica",
-        "font 'Courier New' approximated with passive PDF base font Courier",
+        "font 'MS Sans Serif' rendered through bounded passive PDF base font Helvetica",
+        "font 'MS Serif' rendered through bounded passive PDF base font Times-Roman",
+        "font 'Wingdings' rendered through bounded passive PDF base font ZapfDingbats",
+        "font 'Times New Roman' rendered through bounded passive PDF base font Times-Roman",
+        "font 'Times New Roman CE' rendered through bounded passive PDF base font Times-Roman",
+        "font 'Arial' rendered through bounded passive PDF base font Helvetica",
+        "font 'Courier New' rendered through bounded passive PDF base font Courier",
     ] {
         assert!(
             report
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains(expected)),
-            "missing font approximation diagnostic {expected:?}; diagnostics were {:?}",
+            "missing bounded passive font diagnostic {expected:?}; diagnostics were {:?}",
             report.diagnostics
         );
     }
     for unexpected in [
+        "font 'MS Sans Serif' approximated",
+        "font 'MS Serif' approximated",
+        "font 'Wingdings' approximated",
+        "font 'Times New Roman' approximated",
+        "font 'Times New Roman CE' approximated",
+        "font 'Arial' approximated",
+        "font 'Courier New' approximated",
         "font 'MS Sans Serif' substituted",
         "font 'MS Serif' substituted",
         "font 'Wingdings' substituted",
