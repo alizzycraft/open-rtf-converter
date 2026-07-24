@@ -76187,6 +76187,11 @@ fn rotated_office_rectangles_lower_to_passive_polygon_without_payload_leakage() 
         },
     )
     .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("shape rotation rendered as bounded passive static geometry")
+    }));
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
@@ -76267,6 +76272,11 @@ fn rotated_office_lines_lower_to_passive_polyline_without_payload_leakage() {
         },
     )
     .unwrap();
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("shape rotation rendered as bounded passive static geometry")
+    }));
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
@@ -76361,6 +76371,14 @@ fn rotated_office_round_rectangles_lower_to_passive_polygon_without_payload_leak
         "rotated rounded rectangle should warn that rounded corners are approximated: {:?}",
         output.diagnostics
     );
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("shape rotation rendered as bounded passive static geometry")
+    }));
+    assert!(output.diagnostics.iter().any(|diagnostic| diagnostic.message.contains(
+        "rotated rounded rectangle rendered as bounded passive polygon with rounded corners flattened"
+    )));
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();

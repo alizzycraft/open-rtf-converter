@@ -12659,6 +12659,8 @@ impl Parser {
         }
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
+        let mut passive_rotation_rendered = false;
+        let mut passive_rotation_flattened = false;
         if shape.rotation_units != 0 {
             match kind {
                 StaticShapeKind::Rectangle | StaticShapeKind::RoundedRectangle => {
@@ -12668,8 +12670,10 @@ impl Parser {
                         shape.height_twips,
                         shape.rotation_units,
                     );
+                    passive_rotation_rendered = true;
                     if shape.rounded_rectangle {
                         unsupported_or_active_property_stripped = true;
+                        passive_rotation_flattened = true;
                     }
                 }
                 StaticShapeKind::Line => {
@@ -12679,6 +12683,7 @@ impl Parser {
                         shape.height_twips,
                         shape.rotation_units,
                     );
+                    passive_rotation_rendered = true;
                 }
                 StaticShapeKind::Polygon => {
                     points = points
@@ -12725,6 +12730,7 @@ impl Parser {
                                 .collect()
                         })
                         .collect();
+                    passive_rotation_rendered = true;
                 }
                 _ => unsupported_or_active_property_stripped = true,
             }
@@ -12908,6 +12914,18 @@ impl Parser {
         };
         self.diagnostics
             .push(Diagnostic::warning(shape_diagnostic, Some(offset)));
+        if passive_rotation_rendered {
+            self.diagnostics.push(Diagnostic::warning(
+                "shape rotation rendered as bounded passive static geometry",
+                Some(offset),
+            ));
+        }
+        if passive_rotation_flattened {
+            self.diagnostics.push(Diagnostic::warning(
+                "rotated rounded rectangle rendered as bounded passive polygon with rounded corners flattened",
+                Some(offset),
+            ));
+        }
         Ok(true)
     }
 
