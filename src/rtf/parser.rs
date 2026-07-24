@@ -13928,7 +13928,7 @@ impl Parser {
             return;
         }
 
-        if image.format == ImageFormat::Jpeg
+        if matches!(image.format, ImageFormat::Jpeg | ImageFormat::JpegGrayscale)
             && !grayscale
             && !bilevel
             && has_tone_adjustment

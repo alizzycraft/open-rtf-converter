@@ -877,6 +877,9 @@ fn write_passive_image_xobject(
                         tone_adjustment.decode_high,
                     ]);
                 }
+                (ImageFormat::JpegGrayscale, Some(tone_adjustment)) => {
+                    image.decode([tone_adjustment.decode_low, tone_adjustment.decode_high]);
+                }
                 (ImageFormat::JpegInverted, _) => {
                     image.decode([1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
                 }
@@ -7860,6 +7863,54 @@ endstream
         assert!(
             pdf.windows(b"/Decode [0.5019608 1 0.5019608 1 0.5019608 1]".len())
                 .any(|window| window == b"/Decode [0.5019608 1 0.5019608 1 0.5019608 1]")
+        );
+        assert!(
+            !pdf.windows(b"/JavaScript".len())
+                .any(|window| window == b"/JavaScript")
+        );
+        assert!(
+            !pdf.windows(b"/EmbeddedFile".len())
+                .any(|window| window == b"/EmbeddedFile")
+        );
+    }
+
+    #[test]
+    fn writes_passive_grayscale_jpeg_tone_adjustment_as_decode_array() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::JpegGrayscale,
+            bytes: minimal_grayscale_jpeg_with_dimensions(1, 1),
+            palette: Vec::new(),
+            alpha_mask: None,
+            tone_adjustment: Some(ImageToneAdjustment {
+                decode_low: 0.0,
+                decode_high: 128.0 / 255.0,
+            }),
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        assert!(
+            pdf.windows(b"/ColorSpace /DeviceGray".len())
+                .any(|window| window == b"/ColorSpace /DeviceGray")
+        );
+        assert!(
+            pdf.windows(b"/Decode [0 0.5019608]".len())
+                .any(|window| window == b"/Decode [0 0.5019608]")
         );
         assert!(
             !pdf.windows(b"/JavaScript".len())
