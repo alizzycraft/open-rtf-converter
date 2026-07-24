@@ -1410,6 +1410,7 @@ struct Parser {
     document_revision_number: Option<i32>,
     document_paragraph_count: Option<i32>,
     document_line_count: Option<i32>,
+    document_byte_count: Option<i32>,
     field_bookmark_values: Vec<(String, String)>,
     style_reference_texts: Vec<(i32, String)>,
     style_reference_number_texts: Vec<(i32, String)>,
@@ -1610,6 +1611,7 @@ impl Parser {
             document_revision_number: None,
             document_paragraph_count: None,
             document_line_count: None,
+            document_byte_count: None,
             field_bookmark_values: Vec::new(),
             style_reference_texts: Vec::new(),
             style_reference_number_texts: Vec::new(),
@@ -3222,6 +3224,12 @@ impl Parser {
                     && self.state.destination == Destination::Metadata =>
             {
                 self.set_document_line_count(control.parameter, offset)?;
+            }
+            "nofbytes"
+                if self.state.inside_document_info
+                    && self.state.destination == Destination::Metadata =>
+            {
+                self.set_document_byte_count(control.parameter, offset)?;
             }
             "propname"
                 if control_starts_group
@@ -8874,6 +8882,20 @@ impl Parser {
         Ok(())
     }
 
+    fn set_document_byte_count(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes("nofbytes".len(), offset)?;
+        if let Some(value) =
+            self.bounded_document_metadata_count(value, "document byte count", offset)?
+        {
+            self.document_byte_count = Some(value);
+        }
+        Ok(())
+    }
+
     fn bounded_document_metadata_count(
         &self,
         value: Option<i32>,
@@ -9398,6 +9420,7 @@ impl Parser {
                 Some(self.document_paragraph_count?.to_string())
             }
             "number of lines" | "lines" => Some(self.document_line_count?.to_string()),
+            "number of bytes" | "bytes" => Some(self.document_byte_count?.to_string()),
             _ => None,
         }
     }
@@ -21952,6 +21975,7 @@ fn is_metadata_destination(name: &str) -> bool {
             | "nofwords"
             | "nofchars"
             | "nofcharsws"
+            | "nofbytes"
             | "edmins"
             | "vern"
             | "ftnsep"
@@ -45676,23 +45700,27 @@ After\par}"#;
     #[test]
     fn resultless_docproperty_numeric_aliases_render_from_metadata_only() {
         let output = parse_rtf(
-            r#"{\rtf1{\info{\version42}{\edmins17}\nofparas3\noflines12}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} paragraphs {\field{\*\fldinst DOCPROPERTY "Number of Paragraphs"}} lines {\field{\*\fldinst DOCPROPERTY "Number of Lines" \\# "000"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"#,
+            r##"{\rtf1{\info{\version42}{\edmins17}\nofparas3\noflines12\nofbytes4096}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} paragraphs {\field{\*\fldinst DOCPROPERTY "Number of Paragraphs"}} lines {\field{\*\fldinst DOCPROPERTY "Number of Lines" \\# "000"}} bytes {\field{\*\fldinst DOCPROPERTY "Number of Bytes" \\# "#,##0"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"##,
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Revision XLII edit 0017 paragraphs 3 lines 012 missing 17"));
+        assert!(
+            text.contains("Revision XLII edit 0017 paragraphs 3 lines 012 bytes 4,096 missing 17")
+        );
         for forbidden in [
             "DOCPROPERTY",
             "Revision Number",
             "Total Editing Time",
             "Number of Paragraphs",
             "Number of Lines",
+            "Number of Bytes",
             "Editing Time",
             "version",
             "edmins",
             "nofparas",
             "noflines",
+            "nofbytes",
             "fldinst",
             "[Field removed",
         ] {
@@ -45786,7 +45814,7 @@ After\par}"#;
     #[test]
     fn resultless_info_metadata_aliases_render_passive_values() {
         let output = parse_rtf(
-            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30}{\revtim\yr2025\mo1\dy2}{\version9}{\edmins17}\nofparas3\noflines12}Alpha beta Gamma info created {\field{\*\fldinst INFO "Creation Date" \\@ "yyyy-MM-dd"}} saved {\field{\*\fldinst INFO "Last Save Time"}} revision {\field{\*\fldinst INFO "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst INFO "Total Editing Time" \\# "0000"}} words {\field{\*\fldinst INFO "Number of Words"}} paragraphs {\field{\*\fldinst INFO "Number of Paragraphs"}} lines {\field{\*\fldinst INFO "Number of Lines" \\# "000"}} file {\field{\*\fldinst INFO Filename}}\par}"#,
+            r##"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30}{\revtim\yr2025\mo1\dy2}{\version9}{\edmins17}\nofparas3\noflines12\nofbytes4096}Alpha beta Gamma info created {\field{\*\fldinst INFO "Creation Date" \\@ "yyyy-MM-dd"}} saved {\field{\*\fldinst INFO "Last Save Time"}} revision {\field{\*\fldinst INFO "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst INFO "Total Editing Time" \\# "0000"}} words {\field{\*\fldinst INFO "Number of Words"}} paragraphs {\field{\*\fldinst INFO "Number of Paragraphs"}} lines {\field{\*\fldinst INFO "Number of Lines" \\# "000"}} bytes {\field{\*\fldinst INFO "Number of Bytes" \\# "#,##0"}} file {\field{\*\fldinst INFO Filename}}\par}"##,
         )
         .unwrap();
         let text = document_text(&output.document);
@@ -45794,6 +45822,7 @@ After\par}"#;
         assert!(text.contains("created 2024-07-05 saved 2025-01-02 00:00:00"));
         assert!(text.contains("revision IX edit 0017"));
         assert!(text.contains("paragraphs 3 lines 012"));
+        assert!(text.contains("bytes 4,096"));
         assert!(text.contains(DOCUMENT_WORDS_MARKER));
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
@@ -45808,6 +45837,7 @@ After\par}"#;
             "Number of Words",
             "Number of Paragraphs",
             "Number of Lines",
+            "Number of Bytes",
             "Filename",
             "creatim",
             "revtim",
@@ -45815,6 +45845,7 @@ After\par}"#;
             "edmins",
             "nofparas",
             "noflines",
+            "nofbytes",
             "fldinst",
         ] {
             assert!(
