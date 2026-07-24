@@ -165,6 +165,9 @@ pub enum LineStyle {
     Wavy,
     Emboss,
     Engrave,
+    ThinThick,
+    ThickThin,
+    ThinThickThin,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -9216,6 +9219,9 @@ fn line_style_for_border_style(style: BorderStyle) -> LineStyle {
         BorderStyle::Wavy => LineStyle::Wavy,
         BorderStyle::Emboss => LineStyle::Emboss,
         BorderStyle::Engrave => LineStyle::Engrave,
+        BorderStyle::ThinThick => LineStyle::ThinThick,
+        BorderStyle::ThickThin => LineStyle::ThickThin,
+        BorderStyle::ThinThickThin => LineStyle::ThinThickThin,
     }
 }
 

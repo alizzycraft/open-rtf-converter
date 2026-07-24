@@ -852,6 +852,9 @@ pub enum BorderStyle {
     Wavy,
     Emboss,
     Engrave,
+    ThinThick,
+    ThickThin,
+    ThinThickThin,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

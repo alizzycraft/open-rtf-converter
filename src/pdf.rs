@@ -2437,6 +2437,9 @@ fn vector_command_line_style(style: BorderStyle) -> LineStyle {
         BorderStyle::Dashed => LineStyle::Dashed,
         BorderStyle::Emboss => LineStyle::Emboss,
         BorderStyle::Engrave => LineStyle::Engrave,
+        BorderStyle::ThinThick => LineStyle::ThinThick,
+        BorderStyle::ThickThin => LineStyle::ThickThin,
+        BorderStyle::ThinThickThin => LineStyle::ThinThickThin,
         _ => LineStyle::Solid,
     }
 }
@@ -4160,6 +4163,9 @@ fn draw_passive_line(
         LineStyle::Wavy => stroke_wave_line(content, x1, y1, x2, y2, width),
         LineStyle::Emboss => draw_relief_line(content, x1, y1, x2, y2, width, color, true),
         LineStyle::Engrave => draw_relief_line(content, x1, y1, x2, y2, width, color, false),
+        LineStyle::ThinThick => draw_weighted_double_line(content, x1, y1, x2, y2, width, true),
+        LineStyle::ThickThin => draw_weighted_double_line(content, x1, y1, x2, y2, width, false),
+        LineStyle::ThinThickThin => draw_weighted_triple_line(content, x1, y1, x2, y2, width),
     }
     content.restore_state();
 }
@@ -4217,7 +4223,10 @@ fn set_passive_path_stroke_style(content: &mut Content, width: f32, style: LineS
         | LineStyle::Triple
         | LineStyle::Wavy
         | LineStyle::Emboss
-        | LineStyle::Engrave => {}
+        | LineStyle::Engrave
+        | LineStyle::ThinThick
+        | LineStyle::ThickThin
+        | LineStyle::ThinThickThin => {}
         LineStyle::Dotted => {
             let dot = width.max(0.5);
             content.set_dash_pattern([dot, dot * 2.0], 0.0);
@@ -5297,6 +5306,58 @@ fn draw_triple_line(content: &mut Content, x1: f32, y1: f32, x2: f32, y2: f32, w
         stroke_line(content, x1 + offset, y1, x2 + offset, y2, stroke_width);
         stroke_line(content, x1, y1, x2, y2, stroke_width);
         stroke_line(content, x1 - offset, y1, x2 - offset, y2, stroke_width);
+    } else {
+        stroke_line(content, x1, y1, x2, y2, width);
+    }
+}
+
+fn draw_weighted_double_line(
+    content: &mut Content,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    width: f32,
+    thin_first: bool,
+) {
+    let thin_width = (width * 0.24).clamp(0.25, width.max(0.25));
+    let thick_width = (width * 0.52).clamp(0.35, width.max(0.35));
+    let offset = (width * 0.55).max(1.0);
+    let (first_width, second_width) = if thin_first {
+        (thin_width, thick_width)
+    } else {
+        (thick_width, thin_width)
+    };
+    if (y1 - y2).abs() < 0.01 {
+        stroke_line(content, x1, y1 + offset, x2, y2 + offset, first_width);
+        stroke_line(content, x1, y1 - offset, x2, y2 - offset, second_width);
+    } else if (x1 - x2).abs() < 0.01 {
+        stroke_line(content, x1 + offset, y1, x2 + offset, y2, first_width);
+        stroke_line(content, x1 - offset, y1, x2 - offset, y2, second_width);
+    } else {
+        stroke_line(content, x1, y1, x2, y2, width);
+    }
+}
+
+fn draw_weighted_triple_line(
+    content: &mut Content,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    width: f32,
+) {
+    let thin_width = (width * 0.18).clamp(0.25, width.max(0.25));
+    let thick_width = (width * 0.38).clamp(0.35, width.max(0.35));
+    let offset = (width * 0.62).max(1.0);
+    if (y1 - y2).abs() < 0.01 {
+        stroke_line(content, x1, y1 + offset, x2, y2 + offset, thin_width);
+        stroke_line(content, x1, y1, x2, y2, thick_width);
+        stroke_line(content, x1, y1 - offset, x2, y2 - offset, thin_width);
+    } else if (x1 - x2).abs() < 0.01 {
+        stroke_line(content, x1 + offset, y1, x2 + offset, y2, thin_width);
+        stroke_line(content, x1, y1, x2, y2, thick_width);
+        stroke_line(content, x1 - offset, y1, x2 - offset, y2, thin_width);
     } else {
         stroke_line(content, x1, y1, x2, y2, width);
     }

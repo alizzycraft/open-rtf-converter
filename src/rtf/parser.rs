@@ -3556,14 +3556,17 @@ impl Parser {
             "brdrtriple" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_border_style(BorderStyle::Triple);
             }
-            name if word_double_border_variant_control(name)
+            "brdrinset" | "brdrengrave" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_border_style(BorderStyle::Engrave);
+            }
+            "brdroutset" | "brdremboss" if self.is_parsing_list_level_definition() => {
+                self.set_current_list_level_border_style(BorderStyle::Emboss);
+            }
+            name if word_compound_border_variant_style(name).is_some()
                 && self.is_parsing_list_level_definition() =>
             {
-                self.set_current_list_level_border_style_approximation(
-                    name,
-                    BorderStyle::Double,
-                    offset,
-                );
+                let style = word_compound_border_variant_style(name).unwrap_or(BorderStyle::Double);
+                self.set_current_list_level_border_style(style);
             }
             name if word_single_border_variant_control(name)
                 && self.is_parsing_list_level_definition() =>
@@ -4787,8 +4790,8 @@ impl Parser {
             "brdrtriple" => self.set_current_border_style(BorderStyle::Triple),
             "brdrinset" | "brdrengrave" => self.set_current_border_style(BorderStyle::Engrave),
             "brdroutset" | "brdremboss" => self.set_current_border_style(BorderStyle::Emboss),
-            name if word_double_border_variant_control(name) => {
-                self.set_current_border_style_approximation(name, BorderStyle::Double, offset);
+            name if let Some(style) = word_compound_border_variant_style(name) => {
+                self.set_current_border_style(style);
             }
             name if word_single_border_variant_control(name) => {
                 self.set_current_border_style_approximation(name, BorderStyle::Single, offset);
@@ -20648,19 +20651,13 @@ fn table_row_shading_pattern_control(name: &str) -> Option<ShadingPattern> {
     }
 }
 
-fn word_double_border_variant_control(name: &str) -> bool {
-    matches!(
-        name,
-        "brdrtnthsg"
-            | "brdrthtnsg"
-            | "brdrtnthtnsg"
-            | "brdrtnthmg"
-            | "brdrthtnmg"
-            | "brdrtnthtnmg"
-            | "brdrtnthlg"
-            | "brdrthtnlg"
-            | "brdrtnthtnlg"
-    )
+fn word_compound_border_variant_style(name: &str) -> Option<BorderStyle> {
+    match name {
+        "brdrtnthsg" | "brdrtnthmg" | "brdrtnthlg" => Some(BorderStyle::ThinThick),
+        "brdrthtnsg" | "brdrthtnmg" | "brdrthtnlg" => Some(BorderStyle::ThickThin),
+        "brdrtnthtnsg" | "brdrtnthtnmg" | "brdrtnthtnlg" => Some(BorderStyle::ThinThickThin),
+        _ => None,
+    }
 }
 
 fn word_single_border_variant_control(name: &str) -> bool {
@@ -20682,6 +20679,9 @@ fn passive_border_style_label(style: BorderStyle) -> &'static str {
         BorderStyle::Wavy => "wavy",
         BorderStyle::Emboss => "embossed",
         BorderStyle::Engrave => "engraved",
+        BorderStyle::ThinThick => "thin-thick",
+        BorderStyle::ThickThin => "thick-thin",
+        BorderStyle::ThinThickThin => "thin-thick-thin",
     }
 }
 
@@ -20689,7 +20689,7 @@ fn is_known_ignored_control(name: &str) -> bool {
     paragraph_shading_pattern_control(name).is_some()
         || table_cell_shading_pattern_control(name).is_some()
         || table_row_shading_pattern_control(name).is_some()
-        || word_double_border_variant_control(name)
+        || word_compound_border_variant_style(name).is_some()
         || word_single_border_variant_control(name)
         || matches!(
             name,
@@ -48146,7 +48146,7 @@ After\par}"#;
     #[test]
     fn normalizes_extended_word_border_style_controls() {
         let output = parse_rtf(
-            r"{\rtf1\box\brdrhair Hairline paragraph\par\pard\brdrb\brdrdashdot Dash dot paragraph\par\pard\brdrt\brdrtriple Triple paragraph\par\pard\brdrl\brdrinset Inset paragraph\par\pard\brdrr\brdroutset Outset paragraph\par\pard\brdrb\brdrengrave Engrave paragraph\par\pard\brdrt\brdremboss Emboss paragraph\par\pard\brdrr\brdrs\brdrsh Shadow paragraph\par\trowd\clbrdrl\brdrdashdd\cellx1440 dashdd\cell\row}",
+            r"{\rtf1\box\brdrhair Hairline paragraph\par\pard\brdrb\brdrdashdot Dash dot paragraph\par\pard\brdrt\brdrtriple Triple paragraph\par\pard\brdrl\brdrinset Inset paragraph\par\pard\brdrr\brdroutset Outset paragraph\par\pard\brdrb\brdrengrave Engrave paragraph\par\pard\brdrt\brdremboss Emboss paragraph\par\pard\brdrl\brdrtnthsg Thin thick paragraph\par\pard\brdrr\brdrthtnmg Thick thin paragraph\par\pard\brdrb\brdrtnthtnlg Thin thick thin paragraph\par\pard\brdrr\brdrs\brdrsh Shadow paragraph\par\trowd\clbrdrl\brdrdashdd\cellx1440 dashdd\cell\row}",
         )
         .unwrap();
         let first = match &output.document.blocks[0] {
@@ -48181,7 +48181,19 @@ After\par}"#;
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected paragraph"),
         };
-        let table = match &output.document.blocks[8] {
+        let ninth = match &output.document.blocks[8] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let tenth = match &output.document.blocks[9] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let eleventh = match &output.document.blocks[10] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let table = match &output.document.blocks[11] {
             Block::Table(table) => table,
             _ => panic!("expected table"),
         };
@@ -48196,7 +48208,10 @@ After\par}"#;
         assert_eq!(fifth.style.borders.right.style, BorderStyle::Emboss);
         assert_eq!(sixth.style.borders.bottom.style, BorderStyle::Engrave);
         assert_eq!(seventh.style.borders.top.style, BorderStyle::Emboss);
-        assert_eq!(eighth.style.borders.right.style, BorderStyle::Single);
+        assert_eq!(eighth.style.borders.left.style, BorderStyle::ThinThick);
+        assert_eq!(ninth.style.borders.right.style, BorderStyle::ThickThin);
+        assert_eq!(tenth.style.borders.bottom.style, BorderStyle::ThinThickThin);
+        assert_eq!(eleventh.style.borders.right.style, BorderStyle::Single);
         assert_eq!(
             table.rows[0].cells[0].borders.left.style,
             BorderStyle::Dashed

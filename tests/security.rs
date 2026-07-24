@@ -67929,6 +67929,30 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         "\\",
         "brdrb",
         "\\",
+        "brdrtnthsg thin thick paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "pard",
+        "\\",
+        "brdrr",
+        "\\",
+        "brdrthtnmg thick thin paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "pard",
+        "\\",
+        "brdrt",
+        "\\",
+        "brdrtnthtnlg thin thick thin paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "pard",
+        "\\",
+        "brdrb",
+        "\\",
         "brdrs",
         "\\",
         "brdrsh shadow paragraph",
@@ -67958,6 +67982,9 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
     assert!(text.contains("outset paragraph"));
     assert!(text.contains("engrave paragraph"));
     assert!(text.contains("emboss paragraph"));
+    assert!(text.contains("thin thick paragraph"));
+    assert!(text.contains("thick thin paragraph"));
+    assert!(text.contains("thin thick thin paragraph"));
     assert!(text.contains("shadow paragraph"));
     assert!(text.contains("cell border"));
     let paragraph_styles = parsed
@@ -67988,6 +68015,21 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         paragraph_styles
             .iter()
             .any(|style| style.borders.top.style == BorderStyle::Emboss)
+    );
+    assert!(
+        paragraph_styles
+            .iter()
+            .any(|style| style.borders.bottom.style == BorderStyle::ThinThick)
+    );
+    assert!(
+        paragraph_styles
+            .iter()
+            .any(|style| style.borders.right.style == BorderStyle::ThickThin)
+    );
+    assert!(
+        paragraph_styles
+            .iter()
+            .any(|style| style.borders.top.style == BorderStyle::ThinThickThin)
     );
     assert!(
         parsed
@@ -68022,6 +68064,9 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         .collect::<Vec<_>>();
     assert!(line_styles.contains(&LineStyle::Engrave));
     assert!(line_styles.contains(&LineStyle::Emboss));
+    assert!(line_styles.contains(&LineStyle::ThinThick));
+    assert!(line_styles.contains(&LineStyle::ThickThin));
+    assert!(line_styles.contains(&LineStyle::ThinThickThin));
     for forbidden in [
         "brdrhair",
         "brdrdashdot",
@@ -68031,6 +68076,9 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         "brdroutset",
         "brdrengrave",
         "brdremboss",
+        "brdrtnthsg",
+        "brdrthtnmg",
+        "brdrtnthtnlg",
         "brdrsh",
         "brdrdashdd",
     ] {
@@ -68075,6 +68123,9 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         b"brdroutset",
         b"brdrengrave",
         b"brdremboss",
+        b"brdrtnthsg",
+        b"brdrthtnmg",
+        b"brdrtnthtnlg",
         b"brdrsh",
         b"brdrdashdd",
         b"/JavaScript",
