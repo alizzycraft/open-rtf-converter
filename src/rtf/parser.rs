@@ -24991,6 +24991,8 @@ impl<'a> FormulaParser<'a> {
                 "MIN" => value.min(argument),
                 "MAX" if args == 0 => argument,
                 "MAX" => value.max(argument),
+                "ABS" if args == 0 => argument.checked_abs()?,
+                "ABS" => return None,
                 _ => return None,
             };
             args += 1;
@@ -44097,6 +44099,23 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula min/max field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_abs_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Magnitude {\field{\*\fldinst = ABS(-8 + 3) \\# "00"}} malformed {\field{\*\fldinst = ABS(1,2)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Magnitude 05 malformed [Field removed: no passive result]"));
+        for forbidden in ["ABS", "-8 + 3", "1,2", "fldinst", "\\#"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula ABS field leaked unsafe text: {forbidden}"
             );
         }
     }
