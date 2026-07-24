@@ -24932,17 +24932,30 @@ impl<'a> FormulaParser<'a> {
     }
 
     fn parse_term(&mut self) -> Option<i64> {
-        let mut value = self.parse_factor()?;
+        let mut value = self.parse_power()?;
         loop {
             self.skip_ws();
             if self.consume('*') {
-                value = value.checked_mul(self.parse_factor()?)?;
+                value = value.checked_mul(self.parse_power()?)?;
             } else if self.consume('/') {
-                let divisor = self.parse_factor()?;
+                let divisor = self.parse_power()?;
                 if divisor == 0 {
                     return None;
                 }
                 value = value.checked_div(divisor)?;
+            } else {
+                return Some(value);
+            }
+        }
+    }
+
+    fn parse_power(&mut self) -> Option<i64> {
+        let mut value = self.parse_factor()?;
+        loop {
+            self.skip_ws();
+            if self.consume('^') {
+                let exponent = u32::try_from(self.parse_factor()?).ok()?;
+                value = value.checked_pow(exponent)?;
             } else {
                 return Some(value);
             }
@@ -44388,6 +44401,37 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula POWER field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_exponent_operator_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Power {\field{\*\fldinst = 2 ^ 3}} precedence {\field{\*\fldinst = 2 * 3 ^ 2}} formatted {\field{\*\fldinst = (1 + 2) ^ 3 \\# "000"}} negative {\field{\*\fldinst = 2 ^ -1}} overflow {\field{\*\fldinst = 999999999 ^ 9}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Power 8 precedence 18 formatted 027 negative [Field removed: no passive result] overflow [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "2 ^ 3",
+            "3 ^ 2",
+            "(1 + 2)",
+            "2 ^ -1",
+            "999999999 ^ 9",
+            "\\#",
+            "\"000\"",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula exponent field leaked unsafe text: {forbidden}"
             );
         }
     }
