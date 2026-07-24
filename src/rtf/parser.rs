@@ -24982,7 +24982,7 @@ impl<'a> FormulaParser<'a> {
                 if expecting_argument {
                     return None;
                 }
-                return (args > 0).then_some(value);
+                return self.finalize_function_value(&name, value, args);
             }
 
             if args >= MAX_PASSIVE_FORMULA_FUNCTION_ARGS {
@@ -25020,6 +25020,7 @@ impl<'a> FormulaParser<'a> {
                 "INT" => return None,
                 "SIGN" if args == 0 => argument.signum(),
                 "SIGN" => return None,
+                "AVERAGE" => value.checked_add(argument)?,
                 _ => return None,
             };
             args += 1;
@@ -25030,12 +25031,23 @@ impl<'a> FormulaParser<'a> {
                 continue;
             }
             if self.consume(')') {
-                if matches!(name.as_str(), "MOD" | "ROUND") && args != 2 {
-                    return None;
-                }
-                return Some(value);
+                return self.finalize_function_value(&name, value, args);
             }
             return None;
+        }
+    }
+
+    fn finalize_function_value(&self, name: &str, value: i64, args: usize) -> Option<i64> {
+        if args == 0 {
+            return None;
+        }
+        match name {
+            "MOD" | "ROUND" if args != 2 => None,
+            "AVERAGE" => {
+                let divisor = i64::try_from(args).ok()?;
+                (value % divisor == 0).then_some(value / divisor)
+            }
+            _ => Some(value),
         }
     }
 
@@ -44262,6 +44274,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula INT field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_average_exact_integer_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Average {\field{\*\fldinst = AVERAGE(2, 3 + 1, 6)}} fractional {\field{\*\fldinst = AVERAGE(1,2)}} empty {\field{\*\fldinst = AVERAGE()}} malformed {\field{\*\fldinst = AVERAGE(1,)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "Average 4 fractional [Field removed: no passive result] empty [Field removed: no passive result] malformed [Field removed: no passive result]"
+        ));
+        for forbidden in ["AVERAGE", "3 + 1", "1,2", "1,", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula AVERAGE field leaked unsafe text: {forbidden}"
             );
         }
     }

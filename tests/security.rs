@@ -12829,13 +12829,19 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "\\",
         "*",
         "\\",
-        "fldinst = INT(17 + 3)}} unsupported {",
+        "fldinst = INT(17 + 3)}} average {",
         "\\",
         "field{",
         "\\",
         "*",
         "\\",
-        "fldinst = AVERAGE(2,0)}}.",
+        "fldinst = AVERAGE(2, 3 + 1, 6)}} unsupported {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = MEDIAN(2,0)}}.",
         "\\",
         "par}",
     ]);
@@ -12843,12 +12849,12 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let text = collect_text(&parsed.document);
 
     assert!(text.contains(
-        "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 unsupported [Field removed: no passive result]."
+        "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 average 4 unsupported [Field removed: no passive result]."
     ));
     for forbidden in [
         "fldinst", "\\#", "\"0\"", "\"000\"", "\"00\"", "(6 + 4)", "3 * 2", "SUM", "MIN", "MAX",
-        "ABS", "PRODUCT", "MOD", "ROUND", "COUNT", "SIGN", "INT", "AVERAGE", "ROMAN", "2 + 3",
-        "4 * 5", "-8 + 3", "3 + 1", "17 + 3", "5,0",
+        "ABS", "PRODUCT", "MOD", "ROUND", "COUNT", "SIGN", "INT", "AVERAGE", "MEDIAN", "ROMAN",
+        "2 + 3", "4 * 5", "-8 + 3", "3 + 1", "17 + 3", "5,0",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -12875,7 +12881,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let rendered_text = decoded_pdf_text(&content);
     assert!(
         rendered_text.contains(
-            "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 unsupported [Field removed: no passive result]."
+            "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 average 4 unsupported [Field removed: no passive result]."
         ),
         "decoded PDF text did not contain passive formula values: {rendered_text:?}"
     );
@@ -12897,6 +12903,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         b"SIGN",
         b"INT",
         b"AVERAGE",
+        b"MEDIAN",
         b"ROMAN",
         b"2 + 3",
         b"4 * 5",
