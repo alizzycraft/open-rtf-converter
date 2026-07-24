@@ -24044,10 +24044,15 @@ fn word_session_and_layout_flags_are_classified_without_payload_leakage() {
         "Word session/layout flags should not be unknown or unsupported: {:?}",
         parsed.diagnostics
     );
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("vertical document layout approximated")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "vertical document layout rendered through bounded passive horizontal fallback",
+        )
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic

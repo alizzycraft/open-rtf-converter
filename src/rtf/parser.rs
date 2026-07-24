@@ -20917,7 +20917,9 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
         | "useltbaln" | "htmautsp" | "wraptrsp" | "sprsspbf" | "sprsbsp" => {
             Some("Word typography compatibility option approximated by passive layout")
         }
-        "vertdoc" => Some("vertical document layout approximated by passive horizontal layout"),
+        "vertdoc" => {
+            Some("vertical document layout rendered through bounded passive horizontal fallback")
+        }
         _ => None,
     }
 }
