@@ -15209,7 +15209,6 @@ visible after\par}"#
     assert!(rendered_text.contains("[Field removed: no passive result]"));
     for name in [
         "FILENAME",
-        "FILESIZE",
         "TEMPLATE",
         "USERNAME",
         "USERINITIALS",
@@ -15224,6 +15223,11 @@ visible after\par}"#
             "missing environment field diagnostic for {name}"
         );
     }
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("field FILESIZE has no stored result and was not evaluated dynamically")
+    }));
     assert!(output.diagnostics.iter().all(|diagnostic| {
         !diagnostic
             .message
@@ -15253,6 +15257,76 @@ visible after\par}"#
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden environment field leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn filesize_field_renders_metadata_byte_count_without_host_state_or_instruction_leakage() {
+    let input = br##"{\rtf1{\info\nofbytes4096}Visible before size {\field{\*\fldinst FILESIZE \\# "#,##0"}} path {\field{\*\fldinst FILENAME \p}} visible after\par}"##.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains(
+        "Visible before size 4,096 path [Field removed: no passive result] visible after"
+    ));
+    for forbidden in [
+        "FILESIZE",
+        "FILENAME",
+        "nofbytes",
+        "Users\\",
+        "open-rtf-converter",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden FILESIZE field content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains(
+        "Visible before size 4,096 path [Field removed: no passive result] visible after"
+    ));
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "environment field FILENAME rendered as passive placeholder without exposing converter host state",
+        )
+    }));
+    for forbidden in [
+        b"FILESIZE".as_slice(),
+        b"FILENAME",
+        b"nofbytes",
+        b"Users\\",
+        b"open-rtf-converter",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/URI",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden FILESIZE field content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

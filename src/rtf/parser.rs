@@ -9269,6 +9269,8 @@ impl Parser {
             self.passive_edit_time_field_result()
         } else if field_instruction_name(instruction) == Some("REVNUM") {
             self.passive_revision_number_field_result()
+        } else if field_instruction_name(instruction) == Some("FILESIZE") {
+            self.passive_file_size_field_result()
         } else {
             passive_field_result(
                 instruction,
@@ -9406,6 +9408,15 @@ impl Parser {
     fn passive_revision_number_field_result(&self) -> Option<PassiveFieldResult> {
         Some(PassiveFieldResult {
             text: self.document_revision_number?.to_string(),
+            font_name: None,
+            font_size_half_points: None,
+            form_field: false,
+        })
+    }
+
+    fn passive_file_size_field_result(&self) -> Option<PassiveFieldResult> {
+        Some(PassiveFieldResult {
+            text: self.document_byte_count?.to_string(),
             font_name: None,
             font_size_half_points: None,
             form_field: false,
@@ -23463,7 +23474,7 @@ fn is_external_resultless_field(name: &str) -> bool {
 fn is_environment_resultless_field(name: &str) -> bool {
     matches!(
         name,
-        "FILENAME" | "FILESIZE" | "TEMPLATE" | "USERADDRESS" | "USERINITIALS" | "USERNAME"
+        "FILENAME" | "TEMPLATE" | "USERADDRESS" | "USERINITIALS" | "USERNAME"
     )
 }
 
@@ -42993,7 +43004,6 @@ After\par}"#;
         }
         for name in [
             "FILENAME",
-            "FILESIZE",
             "TEMPLATE",
             "USERNAME",
             "USERINITIALS",
@@ -43008,6 +43018,11 @@ After\par}"#;
                 "missing diagnostic for {name}"
             );
         }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("field FILESIZE has no stored result and was not evaluated dynamically")
+        }));
         assert!(output.diagnostics.iter().all(|diagnostic| {
             !diagnostic
                 .message
@@ -45855,6 +45870,23 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "INFO metadata alias leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_filesize_renders_passive_metadata_byte_count() {
+        let output = parse_rtf(
+            r##"{\rtf1{\info\nofbytes4096}Size {\field{\*\fldinst FILESIZE \\# "#,##0"}} missing {\field{\*\fldinst FILENAME \p}}\par}"##,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Size 4,096 missing [Field removed: no passive result]"));
+        for forbidden in ["FILESIZE", "FILENAME", "nofbytes", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "FILESIZE metadata field leaked unsafe text: {forbidden}"
             );
         }
     }
