@@ -20946,14 +20946,14 @@ fn shape_layout_compatibility_control_message(
         "dobxcolumn" | "dobxmargin" | "dobxpage" | "dobypara" | "dobymargin" | "dobypage"
         | "shpbxcolumn" | "shpbxmargin" | "shpbxpage" | "shpbypara" | "shpbymargin"
         | "shpbypage" => None,
-        "shpwr" if matches!(parameter.unwrap_or(1), 4 | 5) => {
-            Some("shape contour wrapping approximated by passive bounding-box exclusion")
-        }
+        "shpwr" if matches!(parameter.unwrap_or(1), 4 | 5) => Some(
+            "shape contour wrapping interpreted through bounded passive bounding-box exclusion",
+        ),
         "shpwr" if !matches!(parameter.unwrap_or(1), 0..=5) => {
-            Some("shape text wrapping approximated by passive shape layout")
+            Some("shape text wrapping interpreted through bounded passive shape layout")
         }
         "shpwrk" if !matches!(parameter.unwrap_or(0), 0..=3) => {
-            Some("shape text wrapping approximated by passive shape layout")
+            Some("shape text wrapping interpreted through bounded passive shape layout")
         }
         "dodhgt" | "shpz" | "shpfblwtxt" | "shpwr" | "shpwrk" | "shpfhdr" | "shplid" => None,
         _ => None,

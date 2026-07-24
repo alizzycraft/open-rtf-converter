@@ -84967,6 +84967,129 @@ fn shape_picture_wrap_side_metadata_is_consumed_by_passive_line_exclusion() {
 }
 
 #[test]
+fn unsupported_shape_wrap_modes_warn_as_bounded_passive_layout_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft720",
+        "\\",
+        "shptop720",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom1440",
+        "\\",
+        "shpwr4",
+        "\\",
+        "shpwrk9{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-wrap-payload}}}}After",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Shape(_))),
+        "unsupported wrap metadata should still leave a safe passive shape"
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "shape contour wrapping interpreted through bounded passive bounding-box exclusion",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("shape text wrapping interpreted through bounded passive shape layout")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("shape contour wrapping approximated")
+            && !diagnostic
+                .message
+                .contains("shape text wrapping approximated")
+    }));
+    for forbidden in [
+        "shpwr",
+        "shpwrk",
+        "shapeType",
+        "pFragments",
+        "hidden-wrap-payload",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "unsupported shape wrap metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    for forbidden in [
+        b"shpwr".as_slice(),
+        b"shpwrk",
+        b"shapeType",
+        b"pFragments",
+        b"hidden-wrap-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsupported shape wrap metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn column_paragraph_shape_anchoring_is_consumed_as_passive_layout_metadata() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
