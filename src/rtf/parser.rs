@@ -5443,15 +5443,17 @@ impl Parser {
                 self.upsert_current_section_settings();
             }
             "pgnx" => {
-                self.current_section_page.page_number_x_twips = Some(
-                    self.clamp_page_number_position(control.parameter, "page number x", offset),
-                );
+                let position =
+                    self.clamp_page_number_position(control.parameter, "page number x", offset);
+                self.current_section_page.page_number_x_twips = Some(position);
+                self.warn_page_number_position_rendered(position, offset);
                 self.upsert_current_section_settings();
             }
             "pgny" => {
-                self.current_section_page.page_number_y_twips = Some(
-                    self.clamp_page_number_position(control.parameter, "page number y", offset),
-                );
+                let position =
+                    self.clamp_page_number_position(control.parameter, "page number y", offset);
+                self.current_section_page.page_number_y_twips = Some(position);
+                self.warn_page_number_position_rendered(position, offset);
                 self.upsert_current_section_settings();
             }
             "pgndec" => self.set_page_number_format(PageNumberFormat::Decimal),
@@ -6245,6 +6247,15 @@ impl Parser {
             label,
             offset,
         )
+    }
+
+    fn warn_page_number_position_rendered(&mut self, position_twips: i32, offset: usize) {
+        if position_twips > 0 {
+            self.diagnostics.push(Diagnostic::warning(
+                "page number position rendered as bounded passive header/footer coordinates",
+                Some(offset),
+            ));
+        }
     }
 
     fn set_page_number_format(&mut self, format: PageNumberFormat) {
@@ -41271,6 +41282,11 @@ mod tests {
             !diagnostic
                 .message
                 .contains("page number position approximated")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "page number position rendered as bounded passive header/footer coordinates",
+            )
         }));
     }
 

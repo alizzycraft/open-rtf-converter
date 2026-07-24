@@ -13997,6 +13997,11 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
             .message
             .contains("page number position approximated")
     }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("page number position rendered as bounded passive header/footer coordinates")
+    }));
     for expected in [
         "section line grid applied as bounded passive paragraph line pitch",
         "section text grid approximated by passive paragraph layout",
