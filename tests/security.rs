@@ -9581,7 +9581,7 @@ fn extended_shortcut_document_property_fields_render_metadata_without_instructio
 
 #[test]
 fn info_fields_render_metadata_without_instruction_or_active_payload_leakage() {
-    let input = br#"{\rtf1{\info{\title Safe title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\author Alice}{\doccomm Comment text}}Doc {\field{\*\fldinst INFO Title}} / {\field{\*\fldinst INFO Author \\* Upper}} / {\field{\*\fldinst INFO Comments}} / {\field{\*\fldinst INFO Filename}}\par}"#.to_vec();
+    let input = br#"{\rtf1{\info{\title Safe title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\author Alice}{\operator Bob}{\doccomm Comment text}}Doc {\field{\*\fldinst INFO Title}} / {\field{\*\fldinst INFO Author \\* Upper}} / {\field{\*\fldinst INFO "Last Author"}} / {\field{\*\fldinst INFO "Last Modified By" \\* Upper}} / {\field{\*\fldinst INFO Comments}} / {\field{\*\fldinst INFO Filename}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
@@ -9589,10 +9589,12 @@ fn info_fields_render_metadata_without_instruction_or_active_payload_leakage() {
     let rendered_text = decoded_pdf_text(&content);
 
     assert!(rendered_text.contains("Doc Safe title"));
-    assert!(rendered_text.contains("tail / ALICE / Comment text"));
+    assert!(rendered_text.contains("tail / ALICE / Bob / BOB / Comment text"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
     for forbidden in [
         b"INFO".as_slice(),
+        b"Last Author",
+        b"Last Modified By",
         b"Filename",
         b"HYPERLINK",
         b"https://example.com",

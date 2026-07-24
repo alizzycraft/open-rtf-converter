@@ -23247,7 +23247,9 @@ fn document_property_field_name(name: &str) -> Option<DocumentProperty> {
         "author" => Some(DocumentProperty::Author),
         "keywords" => Some(DocumentProperty::Keywords),
         "comments" | "comment" => Some(DocumentProperty::Comments),
-        "lastsavedby" | "last saved by" | "operator" => Some(DocumentProperty::Operator),
+        "lastsavedby" | "last saved by" | "last author" | "last modified by" | "operator" => {
+            Some(DocumentProperty::Operator)
+        }
         "manager" => Some(DocumentProperty::Manager),
         "company" => Some(DocumentProperty::Company),
         "category" => Some(DocumentProperty::Category),
@@ -45793,17 +45795,19 @@ After\par}"#;
     #[test]
     fn resultless_info_fields_render_safe_metadata_values() {
         let output = parse_rtf(
-            r#"{\rtf1{\info{\title Info Title}{\author Alice}{\doccomm Comment text}}Doc {\field{\*\fldinst INFO Title}} by {\field{\*\fldinst INFO Author \\* Upper}} note {\field{\*\fldinst INFO Comments}} file {\field{\*\fldinst INFO Filename}}\par}"#,
+            r#"{\rtf1{\info{\title Info Title}{\author Alice}{\operator Bob}{\doccomm Comment text}}Doc {\field{\*\fldinst INFO Title}} by {\field{\*\fldinst INFO Author \\* Upper}} saved {\field{\*\fldinst INFO "Last Author"}} modified {\field{\*\fldinst INFO "Last Modified By" \\* Upper}} note {\field{\*\fldinst INFO Comments}} file {\field{\*\fldinst INFO Filename}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Doc Info Title by ALICE note Comment text file"));
+        assert!(
+            text.contains("Doc Info Title by ALICE saved Bob modified BOB note Comment text file")
+        );
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
             1
         );
-        for forbidden in ["fldinst", "Filename"] {
+        for forbidden in ["fldinst", "Last Author", "Last Modified By", "Filename"] {
             assert!(
                 !text.contains(forbidden),
                 "INFO field leaked unsafe text: {forbidden}"
