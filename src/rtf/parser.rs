@@ -23035,6 +23035,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "CITATION" => Some("CITATION"),
         "COMMENTS" => Some("COMMENTS"),
         "COMPARE" => Some("COMPARE"),
+        "COMPANY" => Some("COMPANY"),
         "CONTROL" => Some("CONTROL"),
         "PAGE" => Some("PAGE"),
         "NUMPAGES" => Some("NUMPAGES"),
@@ -23097,6 +23098,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "LINK" => Some("LINK"),
         "LISTNUM" => Some("LISTNUM"),
         "MACROBUTTON" => Some("MACROBUTTON"),
+        "MANAGER" => Some("MANAGER"),
         "MERGEFIELD" => Some("MERGEFIELD"),
         "MERGEBARCODE" => Some("MERGEBARCODE"),
         "MERGEREC" => Some("MERGEREC"),
@@ -23112,6 +23114,7 @@ fn field_instruction_name(instruction: &str) -> Option<&'static str> {
         "SYMBOL" => Some("SYMBOL"),
         "SKIPIF" => Some("SKIPIF"),
         "STYLEREF" => Some("STYLEREF"),
+        "CATEGORY" => Some("CATEGORY"),
         "TIME" => Some("TIME"),
         "TITLE" => Some("TITLE"),
         "TEMPLATE" => Some("TEMPLATE"),
@@ -23148,6 +23151,9 @@ fn document_shortcut_property_field_name(name: &str) -> Option<DocumentProperty>
         "KEYWORDS" => Some(DocumentProperty::Keywords),
         "COMMENTS" => Some(DocumentProperty::Comments),
         "LASTSAVEDBY" => Some(DocumentProperty::Operator),
+        "MANAGER" => Some(DocumentProperty::Manager),
+        "COMPANY" => Some(DocumentProperty::Company),
+        "CATEGORY" => Some(DocumentProperty::Category),
         _ => None,
     }
 }
@@ -45484,6 +45490,30 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "shortcut document property field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_extended_shortcut_document_property_fields_render_safe_metadata_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\manager Alice Manager}{\company Contoso \u937?}{\category Internal Use}{\doccomm Hidden comment}}Mgr {\field{\*\fldinst MANAGER}} company {\field{\*\fldinst COMPANY \\* Upper}} category {\field{\*\fldinst CATEGORY}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Mgr Alice Manager company CONTOSO \u{3a9} category Internal Use"));
+        for forbidden in [
+            "MANAGER",
+            "COMPANY",
+            "CATEGORY",
+            "fldinst",
+            "Hidden comment",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "extended shortcut document property field leaked unsafe text: {forbidden}"
             );
         }
     }

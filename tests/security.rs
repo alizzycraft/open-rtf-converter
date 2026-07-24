@@ -9355,6 +9355,44 @@ fn shortcut_document_property_fields_render_metadata_without_instruction_leakage
 }
 
 #[test]
+fn extended_shortcut_document_property_fields_render_metadata_without_instruction_leakage() {
+    let input = br#"{\rtf1{\info{\manager Alice Manager}{\company Contoso \u937? {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\category Internal Use}{\doccomm Hidden comment}}Mgr {\field{\*\fldinst MANAGER}} / {\field{\*\fldinst COMPANY \\* Upper}} / {\field{\*\fldinst CATEGORY}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Mgr Alice Manager / CONTOSO"));
+    assert!(rendered_text.contains("TAIL / Internal Use"));
+    for forbidden in [
+        b"MANAGER".as_slice(),
+        b"COMPANY",
+        b"CATEGORY",
+        b"HYPERLINK",
+        b"https://example.com",
+        b"Hidden link",
+        b"Hidden comment",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "extended shortcut document property field leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn info_fields_render_metadata_without_instruction_or_active_payload_leakage() {
     let input = br#"{\rtf1{\info{\title Safe title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\author Alice}{\doccomm Comment text}}Doc {\field{\*\fldinst INFO Title}} / {\field{\*\fldinst INFO Author \\* Upper}} / {\field{\*\fldinst INFO Comments}} / {\field{\*\fldinst INFO Filename}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
