@@ -27673,7 +27673,7 @@ fn picture_metadata_controls_do_not_corrupt_image_or_leak_payloads() {
                 && !diagnostic.message.contains("unsupported RTF control")
                 && !diagnostic
                     .message
-                    .contains("JPEG picture data was malformed")
+                    .contains("malformed JPEG picture data replaced")
         }),
         "picture metadata should not corrupt image decoding or produce unknown-control noise: {:?}",
         parsed.diagnostics
@@ -30512,6 +30512,11 @@ fn unsupported_picture_formats_are_placeholdered_without_payload_leakage() {
     );
     assert!(!text.contains("ABC"));
     assert!(!text.contains("METAPAYLOAD"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("unsupported picture format replaced with a passive geometry placeholder")
+    }));
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("unsupported-picture.rtf");

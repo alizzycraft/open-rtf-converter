@@ -12003,7 +12003,7 @@ impl Parser {
                 }
                 None => {
                     self.diagnostics.push(Diagnostic::warning(
-                        "JPEG picture data was malformed and replaced with a placeholder",
+                        "malformed JPEG picture data replaced with bounded passive geometry placeholder",
                         Some(offset),
                     ));
                     self.push_picture_placeholder_for_destination(
@@ -12053,7 +12053,7 @@ impl Parser {
                 }
                 None => {
                     self.diagnostics.push(Diagnostic::warning(
-                            "PNG picture data was unsupported or malformed and replaced with a placeholder",
+                            "unsupported or malformed PNG picture data replaced with bounded passive geometry placeholder",
                             Some(offset),
                         ));
                     self.push_picture_placeholder_for_destination(
@@ -12143,7 +12143,7 @@ impl Parser {
                         }
                         None => {
                             self.diagnostics.push(Diagnostic::warning(
-                                "DIB picture data was unsupported or malformed and replaced with a placeholder",
+                                "unsupported or malformed DIB picture data replaced with bounded passive geometry placeholder",
                                 Some(offset),
                             ));
                             self.push_picture_placeholder_for_destination(
@@ -49861,7 +49861,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("PNG picture data was unsupported or malformed")
+                .contains("unsupported or malformed PNG picture data replaced with bounded passive geometry placeholder")
         }));
     }
 
@@ -50327,6 +50327,16 @@ After\par}"#;
             &output.document.blocks[0],
             Block::Placeholder(text) if text.contains("unsupported PNG")
         ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("unsupported or malformed PNG picture data replaced with bounded passive geometry placeholder")
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("PNG picture data was unsupported or malformed")
+        }));
     }
 
     #[test]
@@ -50340,6 +50350,16 @@ After\par}"#;
             &output.document.blocks[0],
             Block::Placeholder(text) if text.contains("malformed JPEG")
         ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "malformed JPEG picture data replaced with bounded passive geometry placeholder",
+            )
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("JPEG picture data was malformed")
+        }));
     }
 
     #[test]
@@ -50353,6 +50373,16 @@ After\par}"#;
             &output.document.blocks[0],
             Block::Placeholder(text) if text.contains("unsupported PNG")
         ));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("unsupported or malformed PNG picture data replaced with bounded passive geometry placeholder")
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("PNG picture data was unsupported or malformed")
+        }));
     }
 
     #[test]
@@ -62415,7 +62445,12 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("DIB picture data was unsupported")
+                .contains("unsupported or malformed DIB picture data replaced with bounded passive geometry placeholder")
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("DIB picture data was unsupported or malformed")
         }));
     }
 
@@ -62433,7 +62468,12 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("DIB picture data was unsupported")
+                .contains("unsupported or malformed DIB picture data replaced with bounded passive geometry placeholder")
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("DIB picture data was unsupported or malformed")
         }));
     }
 
