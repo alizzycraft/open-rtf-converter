@@ -20905,17 +20905,17 @@ fn is_known_ignored_control(name: &str) -> bool {
 fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str> {
     match name {
         "jexpand" | "jcompress" => {
-            Some("Japanese text justification approximated by passive line layout")
+            Some("Japanese text justification interpreted through bounded passive line layout")
         }
         "asianbrkrule" => {
-            Some("Asian line-breaking rule approximated by passive Unicode line layout")
+            Some("Asian line-breaking rule interpreted through bounded passive Unicode line layout")
         }
         "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
             Some("section text grid approximated by passive paragraph layout")
         }
         "lytexcttp" | "lytprtmet" | "noextrasprl" | "notcvasp" | "notvatxbx" | "expshrtn"
         | "useltbaln" | "htmautsp" | "wraptrsp" | "sprsspbf" | "sprsbsp" => {
-            Some("Word typography compatibility option approximated by passive layout")
+            Some("Word typography compatibility option interpreted through bounded passive layout")
         }
         "vertdoc" => {
             Some("vertical document layout rendered through bounded passive horizontal fallback")

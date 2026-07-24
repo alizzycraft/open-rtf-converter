@@ -24055,7 +24055,12 @@ fn word_session_and_layout_flags_are_classified_without_payload_leakage() {
         )
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+        diagnostic.message.contains(
+            "Word typography compatibility option interpreted through bounded passive layout",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("Word typography compatibility option approximated")
     }));
@@ -24384,9 +24389,9 @@ fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
         parsed.diagnostics
     );
     for expected in [
-        "Japanese text justification approximated by passive line layout",
-        "Asian line-breaking rule approximated by passive Unicode line layout",
-        "Word typography compatibility option approximated by passive layout",
+        "Japanese text justification interpreted through bounded passive line layout",
+        "Asian line-breaking rule interpreted through bounded passive Unicode line layout",
+        "Word typography compatibility option interpreted through bounded passive layout",
     ] {
         assert!(
             parsed
@@ -24394,6 +24399,20 @@ fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains(expected)),
             "missing diagnostic: {expected}; diagnostics were {:?}",
+            parsed.diagnostics
+        );
+    }
+    for stale in [
+        "Japanese text justification approximated",
+        "Asian line-breaking rule approximated",
+        "Word typography compatibility option approximated",
+    ] {
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains(stale)),
+            "stale diagnostic present: {stale}; diagnostics were {:?}",
             parsed.diagnostics
         );
     }
