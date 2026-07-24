@@ -20894,9 +20894,7 @@ fn table_layout_compatibility_control_message(name: &str) -> Option<&'static str
             Some("table padding and spacing units interpreted through bounded twip layout")
         }
         "tposx" | "tposnegx" | "tposxc" | "tposxi" | "tposxl" | "tposxr" | "tposy" | "tposnegy"
-        | "tposyin" | "tposyout" => {
-            Some("floating table positioning approximated by passive table flow")
-        }
+        | "tposyin" | "tposyout" => None,
         _ => None,
     }
 }
