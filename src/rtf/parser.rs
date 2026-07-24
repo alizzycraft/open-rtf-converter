@@ -1310,6 +1310,7 @@ enum DocumentProperty {
     Manager,
     Company,
     Category,
+    HyperlinkBase,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -22057,6 +22058,7 @@ fn document_property_control(name: &str) -> Option<DocumentProperty> {
         "manager" => Some(DocumentProperty::Manager),
         "company" => Some(DocumentProperty::Company),
         "category" => Some(DocumentProperty::Category),
+        "hlinkbase" => Some(DocumentProperty::HyperlinkBase),
         _ => None,
     }
 }
@@ -23264,6 +23266,7 @@ fn document_property_field_name(name: &str) -> Option<DocumentProperty> {
         "manager" => Some(DocumentProperty::Manager),
         "company" => Some(DocumentProperty::Company),
         "category" => Some(DocumentProperty::Category),
+        "hyperlink base" | "hyperlinkbase" => Some(DocumentProperty::HyperlinkBase),
         _ => None,
     }
 }
@@ -45618,13 +45621,21 @@ After\par}"#;
     #[test]
     fn resultless_docproperty_fields_render_safe_metadata_values() {
         let output = parse_rtf(
-            r#"{\rtf1{\info{\title Visible \u937? Title}{\author Alice}{\operator Bob}{\doccomm Hidden comment}}Title: {\field{\*\fldinst DOCPROPERTY Title}} by {\field{\*\fldinst DOCPROPERTY Author \\* Upper}} saved by {\field{\*\fldinst DOCPROPERTY LastSavedBy}}\par}"#,
+            r#"{\rtf1{\info{\title Visible \u937? Title}{\author Alice}{\operator Bob}{\doccomm Hidden comment}{\hlinkbase https://example.test/base}}Title: {\field{\*\fldinst DOCPROPERTY Title}} by {\field{\*\fldinst DOCPROPERTY Author \\* Upper}} saved by {\field{\*\fldinst DOCPROPERTY LastSavedBy}} base {\field{\*\fldinst DOCPROPERTY "Hyperlink Base"}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Title: Visible \u{3a9} Title by ALICE saved by Bob"));
-        for forbidden in ["DOCPROPERTY", "fldinst", "Hidden comment"] {
+        assert!(text.contains(
+            "Title: Visible \u{3a9} Title by ALICE saved by Bob base https://example.test/base"
+        ));
+        for forbidden in [
+            "DOCPROPERTY",
+            "Hyperlink Base",
+            "hlinkbase",
+            "fldinst",
+            "Hidden comment",
+        ] {
             assert!(
                 !text.contains(forbidden),
                 "document property field leaked unsafe text: {forbidden}"
@@ -45810,19 +45821,28 @@ After\par}"#;
     #[test]
     fn resultless_info_fields_render_safe_metadata_values() {
         let output = parse_rtf(
-            r#"{\rtf1{\info{\title Info Title}{\author Alice}{\operator Bob}{\doccomm Comment text}}Doc {\field{\*\fldinst INFO Title}} by {\field{\*\fldinst INFO Author \\* Upper}} saved {\field{\*\fldinst INFO "Last Author"}} modified {\field{\*\fldinst INFO "Last Modified By" \\* Upper}} note {\field{\*\fldinst INFO Comments}} file {\field{\*\fldinst INFO Filename}}\par}"#,
+            r#"{\rtf1{\info{\title Info Title}{\author Alice}{\operator Bob}{\doccomm Comment text}{\hlinkbase https://example.test/base}}Doc {\field{\*\fldinst INFO Title}} by {\field{\*\fldinst INFO Author \\* Upper}} saved {\field{\*\fldinst INFO "Last Author"}} modified {\field{\*\fldinst INFO "Last Modified By" \\* Upper}} note {\field{\*\fldinst INFO Comments}} base {\field{\*\fldinst INFO "Hyperlink Base"}} file {\field{\*\fldinst INFO Filename}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
         assert!(
-            text.contains("Doc Info Title by ALICE saved Bob modified BOB note Comment text file")
+            text.contains(
+                "Doc Info Title by ALICE saved Bob modified BOB note Comment text base https://example.test/base file"
+            )
         );
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
             1
         );
-        for forbidden in ["fldinst", "Last Author", "Last Modified By", "Filename"] {
+        for forbidden in [
+            "fldinst",
+            "Last Author",
+            "Last Modified By",
+            "Hyperlink Base",
+            "hlinkbase",
+            "Filename",
+        ] {
             assert!(
                 !text.contains(forbidden),
                 "INFO field leaked unsafe text: {forbidden}"
