@@ -1779,6 +1779,27 @@ fn table_padding_unit_and_spacing_controls_warn_without_payload_leakage() {
             .message
             .contains("table cell spacing approximated")
     }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table cell spacing rendered as bounded passive border gaps")
+    }));
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    let text_x = |needle: &str| {
+        layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains(needle) => Some(fragment.x),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing layout text {needle}"))
+    };
+    assert!(
+        text_x("right") - text_x("left") > 80.0,
+        "cell spacing should keep passive cell content visibly separated"
+    );
 
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();

@@ -10568,6 +10568,7 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut() {
             row.current_cell_spacing.left_twips = Some(spacing);
         }
+        self.warn_table_cell_spacing_rendered(spacing, offset);
     }
 
     fn set_current_cell_spacing_right(&mut self, value: Option<i32>, offset: usize) {
@@ -10575,6 +10576,7 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut() {
             row.current_cell_spacing.right_twips = Some(spacing);
         }
+        self.warn_table_cell_spacing_rendered(spacing, offset);
     }
 
     fn set_current_cell_spacing_top(&mut self, value: Option<i32>, offset: usize) {
@@ -10582,6 +10584,7 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut() {
             row.current_cell_spacing.top_twips = Some(spacing);
         }
+        self.warn_table_cell_spacing_rendered(spacing, offset);
     }
 
     fn set_current_cell_spacing_bottom(&mut self, value: Option<i32>, offset: usize) {
@@ -10589,6 +10592,7 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut() {
             row.current_cell_spacing.bottom_twips = Some(spacing);
         }
+        self.warn_table_cell_spacing_rendered(spacing, offset);
     }
 
     fn set_current_cell_preferred_width_unit(&mut self, value: Option<i32>) {
@@ -10685,6 +10689,7 @@ impl Parser {
             row.default_cell_spacing.left_twips = Some(spacing);
             row.current_cell_spacing.left_twips = Some(spacing);
         }
+        self.warn_table_cell_spacing_rendered(spacing, offset);
     }
 
     fn set_current_table_row_spacing_right(&mut self, value: Option<i32>, offset: usize) {
@@ -10693,6 +10698,7 @@ impl Parser {
             row.default_cell_spacing.right_twips = Some(spacing);
             row.current_cell_spacing.right_twips = Some(spacing);
         }
+        self.warn_table_cell_spacing_rendered(spacing, offset);
     }
 
     fn set_current_table_row_spacing_top(&mut self, value: Option<i32>, offset: usize) {
@@ -10701,6 +10707,7 @@ impl Parser {
             row.default_cell_spacing.top_twips = Some(spacing);
             row.current_cell_spacing.top_twips = Some(spacing);
         }
+        self.warn_table_cell_spacing_rendered(spacing, offset);
     }
 
     fn set_current_table_row_spacing_bottom(&mut self, value: Option<i32>, offset: usize) {
@@ -10708,6 +10715,16 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut() {
             row.default_cell_spacing.bottom_twips = Some(spacing);
             row.current_cell_spacing.bottom_twips = Some(spacing);
+        }
+        self.warn_table_cell_spacing_rendered(spacing, offset);
+    }
+
+    fn warn_table_cell_spacing_rendered(&mut self, spacing_twips: i32, offset: usize) {
+        if spacing_twips > 0 {
+            self.diagnostics.push(Diagnostic::warning(
+                "table cell spacing rendered as bounded passive border gaps",
+                Some(offset),
+            ));
         }
     }
 
