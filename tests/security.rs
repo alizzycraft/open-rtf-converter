@@ -30553,6 +30553,92 @@ fn unsupported_picture_formats_are_placeholdered_without_payload_leakage() {
 }
 
 #[test]
+fn malformed_picture_hex_data_becomes_geometry_placeholder_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "pngblip",
+        "\\",
+        "picw100",
+        "\\",
+        "pich50",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal360 4142XX434448494444454e5041594c4f4144} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(!text.contains("HIDDENPAYLOAD"));
+    assert!(
+        parsed.document.blocks.iter().any(|block| matches!(
+            block,
+            Block::Image(image)
+                if image.format == ImageFormat::Placeholder
+                    && image.bytes.is_empty()
+                    && image.natural_width_px_hint == Some(100)
+                    && image.natural_height_px_hint == Some(50)
+                    && image.display_width_twips == Some(720)
+                    && image.display_height_twips == Some(360)
+        )),
+        "malformed picture hex should preserve bounded passive geometry"
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("non-hex picture data replaced with bounded passive geometry placeholder")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(content.operations.iter().any(|operation| {
+        operation.operator == "re" || operation.operator == "S" || operation.operator == "Tj"
+    }));
+    for forbidden in [
+        b"pngblip".as_slice(),
+        b"4142XX",
+        b"HIDDENPAYLOAD",
+        b"/Subtype /Image",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "malformed picture payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn simple_wmf_picture_renders_passive_vector_preview_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032a0000000100070000000000",

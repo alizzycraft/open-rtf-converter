@@ -11924,12 +11924,12 @@ impl Parser {
 
         if picture.pending_hex.is_some() {
             self.diagnostics.push(Diagnostic::warning(
-                "picture data had an odd trailing hex nibble and was skipped",
+                "malformed picture hex data replaced with bounded passive geometry placeholder",
                 Some(offset),
             ));
-            self.push_picture_placeholder_for_destination(
-                picture.owner_destination,
-                "[Image skipped: malformed picture data]".to_string(),
+            self.push_passive_picture_geometry_placeholder(
+                picture,
+                "[Image skipped: malformed picture data]",
                 offset,
             )?;
             return Ok(());
@@ -12472,6 +12472,36 @@ impl Parser {
             Ok(())
         } else {
             self.push_placeholder(text, offset)
+        }
+    }
+
+    fn push_passive_picture_geometry_placeholder(
+        &mut self,
+        picture: PictureBuilder,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if matches!(
+            picture.owner_destination,
+            Destination::Body
+                | Destination::Header
+                | Destination::FirstPageHeader
+                | Destination::EvenPageHeader
+                | Destination::Footer
+                | Destination::FirstPageFooter
+                | Destination::EvenPageFooter
+        ) {
+            let image = passive_picture_placeholder_image(&picture);
+            self.reserve_image_slot(offset)?;
+            self.push_static_image(picture.owner_destination, image, offset)?;
+            self.mark_shape_visual_result_rendered();
+            Ok(())
+        } else {
+            self.push_picture_placeholder_for_destination(
+                picture.owner_destination,
+                text.to_string(),
+                offset,
+            )
         }
     }
 
@@ -15155,14 +15185,16 @@ impl Parser {
             }
             let Some(value) = hex_value(byte) else {
                 self.diagnostics.push(Diagnostic::warning(
-                    "non-hex picture data ignored and picture replaced with placeholder",
+                    "non-hex picture data replaced with bounded passive geometry placeholder",
                     Some(offset),
                 ));
-                self.current_picture = None;
-                self.push_placeholder(
-                    "[Image skipped: malformed picture data]".to_string(),
-                    offset,
-                )?;
+                if let Some(picture) = self.current_picture.take() {
+                    self.push_passive_picture_geometry_placeholder(
+                        picture,
+                        "[Image skipped: malformed picture data]",
+                        offset,
+                    )?;
+                }
                 return Ok(());
             };
             let Some(picture) = self.current_picture.as_mut() else {
@@ -50336,6 +50368,80 @@ After\par}"#;
             !diagnostic
                 .message
                 .contains("PNG picture data was unsupported or malformed")
+        }));
+    }
+
+    #[test]
+    fn non_hex_picture_data_becomes_passive_geometry_placeholder() {
+        let output =
+            parse_rtf(r"{\rtf1 before {\pict\pngblip\picw100\pich50\picwgoal720\pichgoal360 4142XX4344} after\par}")
+                .unwrap();
+        let text = document_text(&output.document);
+        let image = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("passive geometry placeholder");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert!(!text.contains("XX4344"));
+        assert_eq!(image.format, ImageFormat::Placeholder);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.natural_width_px_hint, Some(100));
+        assert_eq!(image.natural_height_px_hint, Some(50));
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(360));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("non-hex picture data replaced with bounded passive geometry placeholder")
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("non-hex picture data ignored and picture replaced with placeholder")
+        }));
+    }
+
+    #[test]
+    fn odd_trailing_picture_hex_nibble_becomes_passive_geometry_placeholder() {
+        let output = parse_rtf(
+            r"{\rtf1 before {\pict\jpegblip\picw100\pich50\picwgoal720\pichgoal360 f} after\par}",
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+        let image = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("passive geometry placeholder");
+
+        assert!(text.contains("before"));
+        assert!(text.contains("after"));
+        assert_eq!(image.format, ImageFormat::Placeholder);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.natural_width_px_hint, Some(100));
+        assert_eq!(image.natural_height_px_hint, Some(50));
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(360));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "malformed picture hex data replaced with bounded passive geometry placeholder",
+            )
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("picture data had an odd trailing hex nibble and was skipped")
         }));
     }
 
