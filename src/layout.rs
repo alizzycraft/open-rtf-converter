@@ -163,6 +163,8 @@ pub enum LineStyle {
     Dotted,
     Dashed,
     Wavy,
+    Emboss,
+    Engrave,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -9212,6 +9214,8 @@ fn line_style_for_border_style(style: BorderStyle) -> LineStyle {
         BorderStyle::Dotted => LineStyle::Dotted,
         BorderStyle::Dashed => LineStyle::Dashed,
         BorderStyle::Wavy => LineStyle::Wavy,
+        BorderStyle::Emboss => LineStyle::Emboss,
+        BorderStyle::Engrave => LineStyle::Engrave,
     }
 }
 

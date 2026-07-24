@@ -850,6 +850,8 @@ pub enum BorderStyle {
     Dotted,
     Dashed,
     Wavy,
+    Emboss,
+    Engrave,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

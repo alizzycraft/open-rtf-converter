@@ -4785,6 +4785,8 @@ impl Parser {
             "brdrhair" => self.set_current_border_style(BorderStyle::Hairline),
             "brdrdb" => self.set_current_border_style(BorderStyle::Double),
             "brdrtriple" => self.set_current_border_style(BorderStyle::Triple),
+            "brdrinset" | "brdrengrave" => self.set_current_border_style(BorderStyle::Engrave),
+            "brdroutset" | "brdremboss" => self.set_current_border_style(BorderStyle::Emboss),
             name if word_double_border_variant_control(name) => {
                 self.set_current_border_style_approximation(name, BorderStyle::Double, offset);
             }
@@ -20678,6 +20680,8 @@ fn passive_border_style_label(style: BorderStyle) -> &'static str {
         BorderStyle::Dotted => "dotted",
         BorderStyle::Dashed => "dashed",
         BorderStyle::Wavy => "wavy",
+        BorderStyle::Emboss => "embossed",
+        BorderStyle::Engrave => "engraved",
     }
 }
 
@@ -48142,7 +48146,7 @@ After\par}"#;
     #[test]
     fn normalizes_extended_word_border_style_controls() {
         let output = parse_rtf(
-            r"{\rtf1\box\brdrhair Hairline paragraph\par\pard\brdrb\brdrdashdot Dash dot paragraph\par\pard\brdrt\brdrtriple Triple paragraph\par\pard\brdrl\brdrinset Inset paragraph\par\pard\brdrr\brdrs\brdrsh Shadow paragraph\par\trowd\clbrdrl\brdrdashdd\cellx1440 dashdd\cell\row}",
+            r"{\rtf1\box\brdrhair Hairline paragraph\par\pard\brdrb\brdrdashdot Dash dot paragraph\par\pard\brdrt\brdrtriple Triple paragraph\par\pard\brdrl\brdrinset Inset paragraph\par\pard\brdrr\brdroutset Outset paragraph\par\pard\brdrb\brdrengrave Engrave paragraph\par\pard\brdrt\brdremboss Emboss paragraph\par\pard\brdrr\brdrs\brdrsh Shadow paragraph\par\trowd\clbrdrl\brdrdashdd\cellx1440 dashdd\cell\row}",
         )
         .unwrap();
         let first = match &output.document.blocks[0] {
@@ -48165,7 +48169,19 @@ After\par}"#;
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected paragraph"),
         };
-        let table = match &output.document.blocks[5] {
+        let sixth = match &output.document.blocks[5] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let seventh = match &output.document.blocks[6] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let eighth = match &output.document.blocks[7] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let table = match &output.document.blocks[8] {
             Block::Table(table) => table,
             _ => panic!("expected table"),
         };
@@ -48176,31 +48192,26 @@ After\par}"#;
         assert_eq!(first.style.borders.bottom.style, BorderStyle::Hairline);
         assert_eq!(second.style.borders.bottom.style, BorderStyle::Dashed);
         assert_eq!(third.style.borders.top.style, BorderStyle::Triple);
-        assert_eq!(fourth.style.borders.left.style, BorderStyle::Single);
-        assert_eq!(fifth.style.borders.right.style, BorderStyle::Single);
+        assert_eq!(fourth.style.borders.left.style, BorderStyle::Engrave);
+        assert_eq!(fifth.style.borders.right.style, BorderStyle::Emboss);
+        assert_eq!(sixth.style.borders.bottom.style, BorderStyle::Engrave);
+        assert_eq!(seventh.style.borders.top.style, BorderStyle::Emboss);
+        assert_eq!(eighth.style.borders.right.style, BorderStyle::Single);
         assert_eq!(
             table.rows[0].cells[0].borders.left.style,
             BorderStyle::Dashed
         );
-        for expected in [
-            "Word border style \\brdrinset approximated as passive single border",
-            "Word border effect \\brdrsh flattened for passive static PDF output",
-        ] {
-            assert!(
-                output
-                    .diagnostics
-                    .iter()
-                    .any(|diagnostic| diagnostic.message.contains(expected)),
-                "missing diagnostic: {expected}; diagnostics were {:?}",
-                output.diagnostics
-            );
-        }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("Word border effect \\brdrsh flattened for passive static PDF output")
+        }));
         assert!(
             output
                 .diagnostics
                 .iter()
-                .all(|diagnostic| !diagnostic.message.contains("brdrtriple approximated")),
-            "brdrtriple should normalize as a passive triple border: {:?}",
+                .all(|diagnostic| !diagnostic.message.contains("approximated as passive")),
+            "extended border styles should normalize without border-style approximation: {:?}",
             output.diagnostics
         );
         assert!(

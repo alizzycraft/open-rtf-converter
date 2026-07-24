@@ -67905,6 +67905,30 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         "\\",
         "brdrb",
         "\\",
+        "brdroutset outset paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "pard",
+        "\\",
+        "brdrl",
+        "\\",
+        "brdrengrave engrave paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "pard",
+        "\\",
+        "brdrt",
+        "\\",
+        "brdremboss emboss paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "pard",
+        "\\",
+        "brdrb",
+        "\\",
         "brdrs",
         "\\",
         "brdrsh shadow paragraph",
@@ -67931,8 +67955,40 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
     assert!(text.contains("wavy paragraph"));
     assert!(text.contains("triple paragraph"));
     assert!(text.contains("inset paragraph"));
+    assert!(text.contains("outset paragraph"));
+    assert!(text.contains("engrave paragraph"));
+    assert!(text.contains("emboss paragraph"));
     assert!(text.contains("shadow paragraph"));
     assert!(text.contains("cell border"));
+    let paragraph_styles = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(&paragraph.style),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        paragraph_styles
+            .iter()
+            .any(|style| style.borders.right.style == BorderStyle::Engrave)
+    );
+    assert!(
+        paragraph_styles
+            .iter()
+            .any(|style| style.borders.bottom.style == BorderStyle::Emboss)
+    );
+    assert!(
+        paragraph_styles
+            .iter()
+            .any(|style| style.borders.left.style == BorderStyle::Engrave)
+    );
+    assert!(
+        paragraph_styles
+            .iter()
+            .any(|style| style.borders.top.style == BorderStyle::Emboss)
+    );
     assert!(
         parsed
             .diagnostics
@@ -67941,33 +67997,40 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         "extended Word border variants should not be unsupported: {:?}",
         parsed.diagnostics
     );
-    for expected in [
-        "Word border style \\brdrinset approximated as passive single border",
-        "Word border effect \\brdrsh flattened for passive static PDF output",
-    ] {
-        assert!(
-            parsed
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains(expected)),
-            "missing diagnostic: {expected}; diagnostics were {:?}",
-            parsed.diagnostics
-        );
-    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("Word border effect \\brdrsh flattened for passive static PDF output")
+    }));
     assert!(
         parsed
             .diagnostics
             .iter()
-            .all(|diagnostic| !diagnostic.message.contains("brdrtriple approximated")),
-        "brdrtriple should normalize as a passive triple border: {:?}",
+            .all(|diagnostic| !diagnostic.message.contains("approximated as passive")),
+        "extended border styles should normalize without border-style approximation: {:?}",
         parsed.diagnostics
     );
+    let layout = LayoutEngine::layout(&parsed.document);
+    let line_styles = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.items.iter())
+        .filter_map(|item| match item {
+            LayoutItem::Line { style, .. } => Some(*style),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(line_styles.contains(&LineStyle::Engrave));
+    assert!(line_styles.contains(&LineStyle::Emboss));
     for forbidden in [
         "brdrhair",
         "brdrdashdot",
         "brdrwavy",
         "brdrtriple",
         "brdrinset",
+        "brdroutset",
+        "brdrengrave",
+        "brdremboss",
         "brdrsh",
         "brdrdashdd",
     ] {
@@ -68009,6 +68072,9 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         b"brdrwavy",
         b"brdrtriple",
         b"brdrinset",
+        b"brdroutset",
+        b"brdrengrave",
+        b"brdremboss",
         b"brdrsh",
         b"brdrdashdd",
         b"/JavaScript",

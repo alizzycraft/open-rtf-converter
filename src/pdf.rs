@@ -2435,6 +2435,8 @@ fn vector_command_line_style(style: BorderStyle) -> LineStyle {
     match style {
         BorderStyle::Dotted => LineStyle::Dotted,
         BorderStyle::Dashed => LineStyle::Dashed,
+        BorderStyle::Emboss => LineStyle::Emboss,
+        BorderStyle::Engrave => LineStyle::Engrave,
         _ => LineStyle::Solid,
     }
 }
@@ -4156,6 +4158,8 @@ fn draw_passive_line(
         LineStyle::Double => draw_double_line(content, x1, y1, x2, y2, width),
         LineStyle::Triple => draw_triple_line(content, x1, y1, x2, y2, width),
         LineStyle::Wavy => stroke_wave_line(content, x1, y1, x2, y2, width),
+        LineStyle::Emboss => draw_relief_line(content, x1, y1, x2, y2, width, color, true),
+        LineStyle::Engrave => draw_relief_line(content, x1, y1, x2, y2, width, color, false),
     }
     content.restore_state();
 }
@@ -4208,7 +4212,12 @@ fn draw_passive_joined_polyline(
 
 fn set_passive_path_stroke_style(content: &mut Content, width: f32, style: LineStyle) {
     match style {
-        LineStyle::Solid | LineStyle::Double | LineStyle::Triple | LineStyle::Wavy => {}
+        LineStyle::Solid
+        | LineStyle::Double
+        | LineStyle::Triple
+        | LineStyle::Wavy
+        | LineStyle::Emboss
+        | LineStyle::Engrave => {}
         LineStyle::Dotted => {
             let dot = width.max(0.5);
             content.set_dash_pattern([dot, dot * 2.0], 0.0);
@@ -5288,6 +5297,36 @@ fn draw_triple_line(content: &mut Content, x1: f32, y1: f32, x2: f32, y2: f32, w
         stroke_line(content, x1 + offset, y1, x2 + offset, y2, stroke_width);
         stroke_line(content, x1, y1, x2, y2, stroke_width);
         stroke_line(content, x1 - offset, y1, x2 - offset, y2, stroke_width);
+    } else {
+        stroke_line(content, x1, y1, x2, y2, width);
+    }
+}
+
+fn draw_relief_line(
+    content: &mut Content,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    width: f32,
+    color: PdfColor,
+    raised: bool,
+) {
+    let stroke_width = (width * 0.45).clamp(0.25, width.max(0.25));
+    let offset = (width * 0.35).max(0.75);
+    let light = lighten_color(color);
+    let dark = shadow_color(color);
+    let (first_color, second_color) = if raised { (light, dark) } else { (dark, light) };
+    if (y1 - y2).abs() < 0.01 {
+        set_stroke_color(content, first_color);
+        stroke_line(content, x1, y1 + offset, x2, y2 + offset, stroke_width);
+        set_stroke_color(content, second_color);
+        stroke_line(content, x1, y1 - offset, x2, y2 - offset, stroke_width);
+    } else if (x1 - x2).abs() < 0.01 {
+        set_stroke_color(content, first_color);
+        stroke_line(content, x1 - offset, y1, x2 - offset, y2, stroke_width);
+        set_stroke_color(content, second_color);
+        stroke_line(content, x1 + offset, y1, x2 + offset, y2, stroke_width);
     } else {
         stroke_line(content, x1, y1, x2, y2, width);
     }
