@@ -27776,9 +27776,9 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
         parsed.diagnostics
     );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("JPEG picture bilevel property approximated by passive PDF grayscale blend")
+        diagnostic.message.contains(
+            "JPEG picture bilevel property rendered as passive PDF decode with luminosity blend",
+        )
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -27859,6 +27859,12 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
             .pdf
             .windows(b"/BM /Luminosity".len())
             .any(|window| window == b"/BM /Luminosity")
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/Decode [1 0 1 0 1 0]".len())
+            .any(|window| window == b"/Decode [1 0 1 0 1 0]")
     );
     for forbidden in [
         b"pictureGray".as_slice(),

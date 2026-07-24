@@ -880,13 +880,13 @@ fn write_passive_image_xobject(
                 (ImageFormat::JpegGrayscale, Some(tone_adjustment)) => {
                     image.decode([tone_adjustment.decode_low, tone_adjustment.decode_high]);
                 }
-                (ImageFormat::JpegInverted, _) => {
+                (ImageFormat::JpegInverted | ImageFormat::JpegPassiveBilevel, _) => {
                     image.decode([1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
                 }
                 (ImageFormat::JpegGrayscaleInverted, _) => {
                     image.decode([1.0, 0.0]);
                 }
-                (ImageFormat::JpegCmykInverted, _) => {
+                (ImageFormat::JpegCmykInverted | ImageFormat::JpegCmykPassiveBilevel, _) => {
                     image.decode([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
                 }
                 _ => {}
@@ -8023,6 +8023,59 @@ endstream
             !pdf.windows(b"/JavaScript".len())
                 .any(|window| window == b"/JavaScript")
         );
+    }
+
+    #[test]
+    fn writes_passive_jpeg_bilevel_decode_with_luminosity_blend() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::JpegPassiveBilevel,
+            bytes: minimal_jpeg_with_dimensions(1, 1),
+            palette: Vec::new(),
+            alpha_mask: None,
+            tone_adjustment: None,
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+
+        assert!(
+            pdf.windows(b"/Decode [1 0 1 0 1 0]".len())
+                .any(|window| window == b"/Decode [1 0 1 0 1 0]")
+        );
+        assert!(
+            pdf.windows(b"/BM /Luminosity".len())
+                .any(|window| window == b"/BM /Luminosity")
+        );
+        assert!(content.operations.iter().any(|operation| {
+            operation.operator == "gs"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_name().ok())
+                    .is_some_and(|name| name == b"GSImageLuminosity")
+        }));
+        for forbidden in [b"/JavaScript".as_slice(), b"/EmbeddedFile"] {
+            assert!(
+                !pdf.windows(forbidden.len())
+                    .any(|window| window == forbidden)
+            );
+        }
     }
 
     #[test]

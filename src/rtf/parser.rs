@@ -13977,7 +13977,7 @@ impl Parser {
         if apply_jpeg_passive_picture_color_mode(&mut image.format, grayscale, bilevel) {
             if bilevel {
                 self.diagnostics.push(Diagnostic::warning(
-                    "JPEG picture bilevel property approximated by passive PDF grayscale blend",
+                    "JPEG picture bilevel property rendered as passive PDF decode with luminosity blend",
                     Some(offset),
                 ));
             }
