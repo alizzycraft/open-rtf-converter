@@ -24937,6 +24937,9 @@ impl<'a> FormulaParser<'a> {
         }
 
         let negative = self.consume('-');
+        if !negative {
+            self.consume('+');
+        }
         if self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
             let value = self.parse_function()?;
             return if negative {
@@ -44162,6 +44165,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula function field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_unary_plus_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Positive {\field{\*\fldinst = +5}} sum {\field{\*\fldinst = SUM(+1, 2)}} fn {\field{\*\fldinst = +ABS(-3)}} malformed {\field{\*\fldinst = ++5}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Positive 5 sum 3 fn 3 malformed [Field removed: no passive result]")
+        );
+        for forbidden in ["+5", "+1", "+ABS", "++5", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula unary plus field leaked unsafe text: {forbidden}"
             );
         }
     }
