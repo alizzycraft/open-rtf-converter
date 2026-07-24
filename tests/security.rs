@@ -5711,6 +5711,124 @@ fn list_level_marker_character_border_renders_passively_without_control_leakage(
 }
 
 #[test]
+fn list_level_marker_relief_and_compound_borders_render_passively_without_control_leakage() {
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\chbrdr\brdrinset\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\chbrdr\brdroutset\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\chbrdr\brdrtnthsg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\chbrdr\brdrthtnmg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\chbrdr\brdrtnthtnlg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}}\pard\ls1\ilvl0 Engraved marker\par\pard\ls2\ilvl0 Embossed marker\par\pard\ls3\ilvl0 Thin thick marker\par\pard\ls4\ilvl0 Thick thin marker\par\pard\ls5\ilvl0 Thin thick thin marker\par}".to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(paragraphs.len(), 5);
+    assert_eq!(
+        paragraphs[0].runs[0].style.border.style,
+        BorderStyle::Engrave
+    );
+    assert_eq!(
+        paragraphs[1].runs[0].style.border.style,
+        BorderStyle::Emboss
+    );
+    assert_eq!(
+        paragraphs[2].runs[0].style.border.style,
+        BorderStyle::ThinThick
+    );
+    assert_eq!(
+        paragraphs[3].runs[0].style.border.style,
+        BorderStyle::ThickThin
+    );
+    assert_eq!(
+        paragraphs[4].runs[0].style.border.style,
+        BorderStyle::ThinThickThin
+    );
+    for paragraph in &paragraphs {
+        assert!(paragraph.runs[0].style.border.visible);
+        assert_eq!(paragraph.runs[0].style.border.width_twips, 60);
+    }
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("approximated as passive")),
+        "list marker border styles should normalize without stale approximation diagnostics: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "chbrdr",
+        "brdrinset",
+        "brdroutset",
+        "brdrtnthsg",
+        "brdrthtnmg",
+        "brdrtnthtnlg",
+        "leveltext",
+        "levelnumbers",
+        "listtable",
+        "listoverride",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden list-level marker border control leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for expected in [
+        "1.Engraved marker",
+        "1.Embossed marker",
+        "1.Thin thick marker",
+        "1.Thick thin marker",
+        "1.Thin thick thin marker",
+    ] {
+        assert!(
+            rendered_text.contains(expected),
+            "decoded PDF text did not contain passive marker text {expected:?}: {rendered_text:?}"
+        );
+    }
+    for forbidden in [
+        b"chbrdr".as_slice(),
+        b"brdrinset",
+        b"brdroutset",
+        b"brdrtnthsg",
+        b"brdrthtnmg",
+        b"brdrtnthtnlg",
+        b"leveltext",
+        b"levelnumbers",
+        b"listtable",
+        b"listoverride",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden list-level marker border content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn list_level_marker_plain_reset_renders_passively_without_control_leakage() {
     let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\b\ul\chbrdr\brdrs\brdrw80\plain\i\cf1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Reset item\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();

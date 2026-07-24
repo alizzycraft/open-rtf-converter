@@ -3568,15 +3568,6 @@ impl Parser {
                 let style = word_compound_border_variant_style(name).unwrap_or(BorderStyle::Double);
                 self.set_current_list_level_border_style(style);
             }
-            name if word_single_border_variant_control(name)
-                && self.is_parsing_list_level_definition() =>
-            {
-                self.set_current_list_level_border_style_approximation(
-                    name,
-                    BorderStyle::Single,
-                    offset,
-                );
-            }
             "brdrsh" if self.is_parsing_list_level_definition() => {
                 self.warn_border_effect_approximation("brdrsh", offset);
             }
@@ -4792,9 +4783,6 @@ impl Parser {
             "brdroutset" | "brdremboss" => self.set_current_border_style(BorderStyle::Emboss),
             name if let Some(style) = word_compound_border_variant_style(name) => {
                 self.set_current_border_style(style);
-            }
-            name if word_single_border_variant_control(name) => {
-                self.set_current_border_style_approximation(name, BorderStyle::Single, offset);
             }
             "brdrsh" => {
                 self.warn_border_effect_approximation("brdrsh", offset);
@@ -11082,31 +11070,6 @@ impl Parser {
         }
     }
 
-    fn set_current_border_style_approximation(
-        &mut self,
-        control_name: &str,
-        style: BorderStyle,
-        offset: usize,
-    ) {
-        self.set_current_border_style(style);
-        self.warn_border_style_approximation(control_name, style, offset);
-    }
-
-    fn warn_border_style_approximation(
-        &mut self,
-        control_name: &str,
-        style: BorderStyle,
-        offset: usize,
-    ) {
-        self.diagnostics.push(Diagnostic::warning(
-            format!(
-                "Word border style \\{control_name} approximated as passive {} border",
-                passive_border_style_label(style)
-            ),
-            Some(offset),
-        ));
-    }
-
     fn warn_border_effect_approximation(&mut self, control_name: &str, offset: usize) {
         self.diagnostics.push(Diagnostic::warning(
             format!("Word border effect \\{control_name} flattened for passive static PDF output"),
@@ -16044,16 +16007,6 @@ impl Parser {
         });
     }
 
-    fn set_current_list_level_border_style_approximation(
-        &mut self,
-        control_name: &str,
-        border_style: BorderStyle,
-        offset: usize,
-    ) {
-        self.set_current_list_level_border_style(border_style);
-        self.warn_border_style_approximation(control_name, border_style, offset);
-    }
-
     fn set_current_list_level_border_width(&mut self, value: Option<i32>, offset: usize) {
         let value = value
             .unwrap_or(TableCellBorder::default().width_twips)
@@ -20660,37 +20613,15 @@ fn word_compound_border_variant_style(name: &str) -> Option<BorderStyle> {
     }
 }
 
-fn word_single_border_variant_control(name: &str) -> bool {
-    matches!(
-        name,
-        "brdrinset" | "brdroutset" | "brdrengrave" | "brdremboss"
-    )
-}
-
-fn passive_border_style_label(style: BorderStyle) -> &'static str {
-    match style {
-        BorderStyle::Single => "single",
-        BorderStyle::Thick => "thick",
-        BorderStyle::Hairline => "hairline",
-        BorderStyle::Double => "double",
-        BorderStyle::Triple => "triple",
-        BorderStyle::Dotted => "dotted",
-        BorderStyle::Dashed => "dashed",
-        BorderStyle::Wavy => "wavy",
-        BorderStyle::Emboss => "embossed",
-        BorderStyle::Engrave => "engraved",
-        BorderStyle::ThinThick => "thin-thick",
-        BorderStyle::ThickThin => "thick-thin",
-        BorderStyle::ThinThickThin => "thin-thick-thin",
-    }
-}
-
 fn is_known_ignored_control(name: &str) -> bool {
     paragraph_shading_pattern_control(name).is_some()
         || table_cell_shading_pattern_control(name).is_some()
         || table_row_shading_pattern_control(name).is_some()
         || word_compound_border_variant_style(name).is_some()
-        || word_single_border_variant_control(name)
+        || matches!(
+            name,
+            "brdrinset" | "brdroutset" | "brdrengrave" | "brdremboss"
+        )
         || matches!(
             name,
             "ansicpg"
