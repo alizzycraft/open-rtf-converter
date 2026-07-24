@@ -5407,6 +5407,10 @@ impl Parser {
             "sectdefaultcl" => {
                 self.current_section_page.text_line_grid_twips = None;
                 self.upsert_current_section_settings();
+                self.diagnostics.push(Diagnostic::warning(
+                    "section default text grid cleared bounded passive paragraph line pitch",
+                    Some(offset),
+                ));
             }
             "titlepg" => {
                 self.current_section_page.title_page = control.parameter.unwrap_or(1) != 0;
@@ -46966,6 +46970,11 @@ After\par}"#;
         let output = parse_rtf(r"{\rtf1\sectd\sectlinegrid480\sectdefaultcl Body\par}").unwrap();
 
         assert_eq!(output.document.page.text_line_grid_twips, None);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("section default text grid cleared bounded passive paragraph line pitch")
+        }));
         assert!(
             output
                 .diagnostics

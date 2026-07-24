@@ -14004,6 +14004,7 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
     }));
     for expected in [
         "section line grid applied as bounded passive paragraph line pitch",
+        "section default text grid cleared bounded passive paragraph line pitch",
         "section text grid approximated by passive paragraph layout",
     ] {
         assert!(
