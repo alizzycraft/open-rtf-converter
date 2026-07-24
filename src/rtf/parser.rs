@@ -24994,6 +24994,14 @@ impl<'a> FormulaParser<'a> {
                 "ABS" if args == 0 => argument.checked_abs()?,
                 "ABS" => return None,
                 "PRODUCT" => value.checked_mul(argument)?,
+                "MOD" if args == 0 => argument,
+                "MOD" if args == 1 => {
+                    if argument == 0 {
+                        return None;
+                    }
+                    value.checked_rem(argument)?
+                }
+                "MOD" => return None,
                 _ => return None,
             };
             args += 1;
@@ -25003,6 +25011,9 @@ impl<'a> FormulaParser<'a> {
                 continue;
             }
             if self.consume(')') {
+                if name == "MOD" && args != 2 {
+                    return None;
+                }
                 return Some(value);
             }
             return None;
@@ -44134,6 +44145,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula PRODUCT field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_mod_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Remainder {\field{\*\fldinst = MOD(17 + 3, 6)}} zero {\field{\*\fldinst = MOD(5,0)}} extra {\field{\*\fldinst = MOD(5,2,1)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "Remainder 2 zero [Field removed: no passive result] extra [Field removed: no passive result]"
+        ));
+        for forbidden in ["MOD", "17 + 3", "5,0", "5,2,1", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula MOD field leaked unsafe text: {forbidden}"
             );
         }
     }
