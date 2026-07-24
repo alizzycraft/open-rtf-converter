@@ -214,7 +214,7 @@ fn passive_font_substitution_diagnostics(
             )
         } else {
             format!(
-                "font '{}' substituted with passive PDF base font {}",
+                "font '{}' rendered through bounded passive PDF base font {}; provide a passive font asset for closer Word-compatible metrics",
                 font.name,
                 passive_pdf_font_family_label(family)
             )

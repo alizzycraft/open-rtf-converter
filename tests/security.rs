@@ -18850,9 +18850,9 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
     )
     .unwrap();
     for expected in [
-        "font 'Calibri' substituted with passive PDF base font Helvetica",
-        "font 'Cambria' substituted with passive PDF base font Times-Roman",
-        "font 'Aptos Mono' substituted with passive PDF base font Courier",
+        "font 'Calibri' rendered through bounded passive PDF base font Helvetica",
+        "font 'Cambria' rendered through bounded passive PDF base font Times-Roman",
+        "font 'Aptos Mono' rendered through bounded passive PDF base font Courier",
     ] {
         assert!(
             report
@@ -18889,6 +18889,9 @@ fn office_font_names_substitute_to_passive_base14_without_font_payload() {
         "font 'Times New Roman CE' approximated",
         "font 'Arial' approximated",
         "font 'Courier New' approximated",
+        "font 'Calibri' substituted",
+        "font 'Cambria' substituted",
+        "font 'Aptos Mono' substituted",
         "font 'MS Sans Serif' substituted",
         "font 'MS Serif' substituted",
         "font 'Wingdings' substituted",
