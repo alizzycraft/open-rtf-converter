@@ -27970,6 +27970,135 @@ fn grayscale_jpeg_brightness_metadata_renders_passive_decode_without_payload_lea
 }
 
 #[test]
+fn rgb_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureGray}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBrightness}{",
+        "\\",
+        "sv 32768}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-rgb-gray-tone-payload}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+
+    assert_eq!(image.format, ImageFormat::JpegPassiveGrayscale);
+    assert_eq!(
+        image.tone_adjustment,
+        Some(ImageToneAdjustment {
+            decode_low: 127.0 / 255.0,
+            decode_high: 1.0,
+        })
+    );
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    for forbidden in [
+        "pictureGray",
+        "pictureBrightness",
+        "pFragments",
+        "hidden-rgb-gray-tone-payload",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "RGB JPEG grayscale/tone metadata leaked to normalized text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("picture grayscale property approximated")
+                && !diagnostic
+                    .message
+                    .contains("picture brightness/contrast property approximated")
+        }),
+        "RGB JPEG grayscale and brightness should normalize to passive PDF metadata: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(
+        output
+            .pdf
+            .windows(b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1]".len())
+            .any(|window| window == b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1]")
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/BM /Luminosity".len())
+            .any(|window| window == b"/BM /Luminosity")
+    );
+    for forbidden in [
+        b"pictureGray".as_slice(),
+        b"pictureBrightness",
+        b"pFragments",
+        b"hidden-rgb-gray-tone-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "RGB JPEG grayscale/tone metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn dib_picture_grayscale_metadata_renders_passively_without_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_24bit_dib_with_dimensions(2, 1));
     let input = rtf(&[

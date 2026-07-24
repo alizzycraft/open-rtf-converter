@@ -13928,14 +13928,16 @@ impl Parser {
             return;
         }
 
-        if matches!(image.format, ImageFormat::Jpeg | ImageFormat::JpegGrayscale)
-            && !grayscale
-            && !bilevel
-            && has_tone_adjustment
-            && let Some(tone_adjustment) = passive_jpeg_tone_adjustment(adjustments)
-        {
+        let passive_jpeg_tone_adjustment = if has_tone_adjustment && !bilevel {
+            passive_jpeg_tone_adjustment(image.format, adjustments)
+        } else {
+            None
+        };
+        if let Some(tone_adjustment) = passive_jpeg_tone_adjustment {
             image.tone_adjustment = Some(tone_adjustment);
-            return;
+            if !grayscale {
+                return;
+            }
         }
 
         if apply_jpeg_passive_picture_color_mode(&mut image.format, grayscale, bilevel) {
@@ -13945,7 +13947,7 @@ impl Parser {
                     Some(offset),
                 ));
             }
-            if has_tone_adjustment {
+            if has_tone_adjustment && passive_jpeg_tone_adjustment.is_none() {
                 self.diagnostics.push(Diagnostic::warning(
                     "JPEG picture brightness/contrast property approximated by passive original image",
                     Some(offset),
@@ -32694,9 +32696,17 @@ fn adjust_picture_sample(sample: u8, adjustments: PictureAdjustments) -> u8 {
     brightened.clamp(0, 255) as u8
 }
 
-fn passive_jpeg_tone_adjustment(adjustments: PictureAdjustments) -> Option<ImageToneAdjustment> {
-    if adjustments.grayscale
-        || adjustments.bilevel
+fn passive_jpeg_tone_adjustment(
+    format: ImageFormat,
+    adjustments: PictureAdjustments,
+) -> Option<ImageToneAdjustment> {
+    if !matches!(
+        format,
+        ImageFormat::Jpeg | ImageFormat::JpegGrayscale | ImageFormat::JpegPassiveGrayscale
+    ) {
+        return None;
+    }
+    if adjustments.bilevel
         || (adjustments.brightness_fixed.is_none() && adjustments.contrast_fixed.is_none())
     {
         return None;
