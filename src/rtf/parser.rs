@@ -9666,12 +9666,19 @@ impl Parser {
         let Some(style_index) = self.field_style_ref_index(instruction) else {
             return None;
         };
-        let wants_number = field_style_ref_wants_number_switch(instruction)?;
-        let text = if wants_number {
-            self.style_reference_number_texts
+        let number_mode = field_style_ref_number_mode(instruction)?;
+        let text = if let Some(number_mode) = number_mode {
+            let number_text = self
+                .style_reference_number_texts
                 .iter()
                 .rev()
-                .find_map(|(index, text)| (*index == style_index).then(|| text.clone()))?
+                .find_map(|(index, text)| (*index == style_index).then(|| text.clone()))?;
+            match number_mode {
+                StyleRefNumberMode::Rendered | StyleRefNumberMode::FullContext => number_text,
+                StyleRefNumberMode::RelativeContext => {
+                    trim_style_ref_trailing_number_delimiters(&number_text)?
+                }
+            }
         } else {
             self.style_reference_texts
                 .iter()
@@ -24390,6 +24397,13 @@ fn field_remainder_contains_only_passive_format_switches(input: &str) -> bool {
     true
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum StyleRefNumberMode {
+    Rendered,
+    RelativeContext,
+    FullContext,
+}
+
 fn field_remainder_contains_only_style_ref_switches(input: &str) -> bool {
     let mut rest = input.trim_start();
     while !rest.is_empty() {
@@ -24409,6 +24423,10 @@ fn field_remainder_contains_only_style_ref_switches(input: &str) -> bool {
             rest = after_picture.trim_start();
         } else if let Some(after_number) = strip_field_switch_letter(after_backslash, 'n') {
             rest = after_number.trim_start();
+        } else if let Some(after_relative) = strip_field_switch_letter(after_backslash, 'r') {
+            rest = after_relative.trim_start();
+        } else if let Some(after_full) = strip_field_switch_letter(after_backslash, 'w') {
+            rest = after_full.trim_start();
         } else {
             return false;
         }
@@ -24416,9 +24434,9 @@ fn field_remainder_contains_only_style_ref_switches(input: &str) -> bool {
     true
 }
 
-fn field_style_ref_wants_number_switch(instruction: &str) -> Option<bool> {
+fn field_style_ref_number_mode(instruction: &str) -> Option<Option<StyleRefNumberMode>> {
     let mut rest = field_rest_after_first_argument(instruction)?.trim_start();
-    let mut wants_number = false;
+    let mut mode = None;
     while !rest.is_empty() {
         let after_backslash = rest.strip_prefix('\\')?;
         if let Some(after_star) = after_backslash.strip_prefix('*') {
@@ -24428,13 +24446,19 @@ fn field_style_ref_wants_number_switch(instruction: &str) -> Option<bool> {
             let (_, after_picture) = field_numeric_picture_argument_with_rest(after_hash)?;
             rest = after_picture.trim_start();
         } else if let Some(after_number) = strip_field_switch_letter(after_backslash, 'n') {
-            wants_number = true;
+            mode = Some(StyleRefNumberMode::Rendered);
             rest = after_number.trim_start();
+        } else if let Some(after_relative) = strip_field_switch_letter(after_backslash, 'r') {
+            mode = Some(StyleRefNumberMode::RelativeContext);
+            rest = after_relative.trim_start();
+        } else if let Some(after_full) = strip_field_switch_letter(after_backslash, 'w') {
+            mode = Some(StyleRefNumberMode::FullContext);
+            rest = after_full.trim_start();
         } else {
             return None;
         }
     }
-    Some(wants_number)
+    Some(mode)
 }
 
 fn strip_field_switch_letter(input: &str, letter: char) -> Option<&str> {
@@ -25554,6 +25578,16 @@ fn paragraph_style_ref_number_text(paragraph: &Paragraph) -> Option<String> {
         return None;
     }
     Some(marker)
+}
+
+fn trim_style_ref_trailing_number_delimiters(text: &str) -> Option<String> {
+    let trimmed = text
+        .trim_end_matches(|ch: char| {
+            matches!(ch, '.' | ')' | ':' | '-' | '\u{2013}' | '\u{2014}') || ch.is_whitespace()
+        })
+        .trim()
+        .to_string();
+    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 fn push_text_to_runs(runs: &mut Vec<Run>, text: &str, character_style: &CharacterStyle) {
@@ -42496,6 +42530,36 @@ mod tests {
             assert!(
                 !text.contains(forbidden),
                 "STYLEREF number switch leaked style/list metadata: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_styleref_number_context_switches_render_passively() {
+        let output = parse_rtf(
+            r#"{\rtf1{\stylesheet{\s1 Heading One;}}{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\s1\ls1\ilvl0 Numbered heading\par\pard Full {\field{\*\fldinst STYLEREF "Heading One" \\w}} relative {\field{\*\fldinst STYLEREF "Heading One" \\r}} malformed {\field{\*\fldinst STYLEREF "Heading One" \\nfoo}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "1.\tNumbered headingFull 1. relative 1 malformed [Field removed: no passive result]"
+            ),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "STYLEREF",
+            "Heading One",
+            "nfoo",
+            "listtable",
+            "leveltext",
+            "levelnumbers",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "STYLEREF number-context switch leaked style/list metadata: {forbidden}"
             );
         }
     }
