@@ -25039,6 +25039,10 @@ impl<'a> FormulaParser<'a> {
                 "OR" => i64::from(value != 0 || argument != 0),
                 "NOT" if args == 0 => i64::from(argument == 0),
                 "NOT" => return None,
+                "XOR" => {
+                    let previous = if args == 0 { false } else { value != 0 };
+                    i64::from(previous ^ (argument != 0))
+                }
                 _ => return None,
             };
             args += 1;
@@ -44383,6 +44387,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula NOT field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_xor_function_renders_bounded_passive_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 Odd {\field{\*\fldinst = XOR(1, 0, 4 - 4)}} even {\field{\*\fldinst = XOR(1, -5)}} empty {\field{\*\fldinst = XOR()}} malformed {\field{\*\fldinst = XOR(1,)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "Odd 1 even 0 empty [Field removed: no passive result] malformed [Field removed: no passive result]"
+        ));
+        for forbidden in ["XOR", "4 - 4", "1,", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula XOR field leaked unsafe text: {forbidden}"
             );
         }
     }
