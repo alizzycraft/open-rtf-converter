@@ -9228,6 +9228,8 @@ impl Parser {
             }
         } else if let Some(property) = document_property_field_name(&name) {
             self.document_property_text(property)?.clone()
+        } else if let Some(text) = self.document_numeric_property_field_text(&name) {
+            text
         } else {
             self.custom_document_properties
                 .iter()
@@ -9327,6 +9329,14 @@ impl Parser {
             font_size_half_points: None,
             form_field: false,
         })
+    }
+
+    fn document_numeric_property_field_text(&self, name: &str) -> Option<String> {
+        match normalized_document_property_name(name).as_str() {
+            "revision number" | "revision" => Some(self.document_revision_number?.to_string()),
+            "total editing time" | "editing time" => Some(self.document_edit_minutes?.to_string()),
+            _ => None,
+        }
     }
 
     fn passive_set_field_result(
@@ -45593,6 +45603,39 @@ After\par}"#;
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn resultless_docproperty_numeric_aliases_render_from_metadata_only() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\version42}{\edmins17}}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Revision XLII edit 0017 missing 17"));
+        for forbidden in [
+            "DOCPROPERTY",
+            "Revision Number",
+            "Total Editing Time",
+            "Editing Time",
+            "version",
+            "edmins",
+            "fldinst",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "DOCPROPERTY numeric alias leaked unsafe text: {forbidden}"
+            );
+        }
+
+        let missing =
+            parse_rtf(r#"{\rtf1 Missing {\field{\*\fldinst DOCPROPERTY "Revision Number"}}\par}"#)
+                .unwrap();
+        let missing_text = document_text(&missing.document);
+        assert!(missing_text.contains("Missing [Field removed: no passive result]"));
+        assert!(!missing_text.contains("Revision Number"));
     }
 
     #[test]

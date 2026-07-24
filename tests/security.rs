@@ -9432,6 +9432,65 @@ fn docproperty_stat_aliases_resolve_layout_stats_without_instruction_leakage() {
 }
 
 #[test]
+fn docproperty_numeric_aliases_render_metadata_without_instruction_leakage() {
+    let input = br#"{\rtf1{\info{\version42}{\edmins17}}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Revision XLII edit 0017 missing 17"));
+    for forbidden in [
+        "DOCPROPERTY",
+        "Revision Number",
+        "Total Editing Time",
+        "Editing Time",
+        "version",
+        "edmins",
+        "fldinst",
+        "[Field removed",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "DOCPROPERTY numeric alias leaked instruction text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Revision XLII edit 0017 missing 17"),
+        "decoded PDF text did not contain passive numeric DOCPROPERTY values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"DOCPROPERTY".as_slice(),
+        b"Revision Number",
+        b"Total Editing Time",
+        b"Editing Time",
+        b"version",
+        b"edmins",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "DOCPROPERTY numeric alias leaked active/internal PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shortcut_document_property_fields_render_metadata_without_instruction_leakage() {
     let input = br#"{\rtf1{\info{\title Safe title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\author Alice}{\operator Bob}{\doccomm Comment text}}Doc {\field{\*\fldinst TITLE}} / {\field{\*\fldinst AUTHOR \\* Upper}} / {\field{\*\fldinst LASTSAVEDBY}} / {\field{\*\fldinst COMMENTS}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
