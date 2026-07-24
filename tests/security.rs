@@ -7089,6 +7089,10 @@ fn unsafe_only_object_result_falls_back_to_passive_placeholder_without_payload_l
     assert_eq!(images.len(), 1, "text={text:?}, images={images:?}");
     assert_eq!(images[0].format, ImageFormat::Placeholder);
     assert!(images[0].bytes.is_empty());
+    assert_eq!(images[0].width_px, 144);
+    assert_eq!(images[0].height_px, 48);
+    assert_eq!(images[0].natural_width_px_hint, Some(144));
+    assert_eq!(images[0].natural_height_px_hint, Some(48));
     assert_eq!(images[0].display_width_twips, Some(2160));
     assert_eq!(images[0].display_height_twips, Some(720));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {

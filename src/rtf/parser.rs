@@ -12562,6 +12562,8 @@ impl Parser {
         if width_twips <= 0 || height_twips <= 0 {
             return None;
         }
+        let width_px = twips_to_96dpi_px(width_twips);
+        let height_px = twips_to_96dpi_px(height_twips);
         Some(StaticImage {
             format: ImageFormat::Placeholder,
             bytes: Vec::new(),
@@ -12569,10 +12571,10 @@ impl Parser {
             alpha_mask: None,
             tone_adjustment: None,
             vector_commands: Vec::new(),
-            width_px: 1,
-            height_px: 1,
-            natural_width_px_hint: None,
-            natural_height_px_hint: None,
+            width_px,
+            height_px,
+            natural_width_px_hint: Some(width_px),
+            natural_height_px_hint: Some(height_px),
             display_width_twips: Some(width_twips),
             display_height_twips: Some(height_twips),
             scale_x_percent: None,
@@ -32746,6 +32748,12 @@ fn hundredth_mm_to_96dpi_px(value: Option<u32>) -> Option<u32> {
     u32::try_from(px.max(1)).ok()
 }
 
+fn twips_to_96dpi_px(value: i32) -> u32 {
+    let twips = u128::from(value.max(1) as u32);
+    let px = ((twips * 96) + 720) / 1440;
+    u32::try_from(px.max(1)).unwrap_or(u32::MAX)
+}
+
 fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
     StaticImage {
         format: ImageFormat::Placeholder,
@@ -50255,6 +50263,47 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("picture display height clamped")
+        }));
+    }
+
+    #[test]
+    fn clamps_object_placeholder_geometry_before_96dpi_hints() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_image_display_twips: 720,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let input = br"{\rtf1{\object\objw999999\objh999999{\objdata 414243}} after\par}".to_vec();
+        let output = parse_rtf_bytes_with_options(&input, &options).unwrap();
+        let image = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("expected passive object placeholder");
+
+        assert_eq!(image.format, ImageFormat::Placeholder);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.display_width_twips, Some(720));
+        assert_eq!(image.display_height_twips, Some(720));
+        assert_eq!(image.width_px, 48);
+        assert_eq!(image.height_px, 48);
+        assert_eq!(image.natural_width_px_hint, Some(48));
+        assert_eq!(image.natural_height_px_hint, Some(48));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("picture display object width clamped")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("picture display object height clamped")
         }));
     }
 
