@@ -24987,6 +24987,10 @@ impl<'a> FormulaParser<'a> {
             let argument = self.parse_expression()?;
             value = match name.as_str() {
                 "SUM" => value.checked_add(argument)?,
+                "MIN" if args == 0 => argument,
+                "MIN" => value.min(argument),
+                "MAX" if args == 0 => argument,
+                "MAX" => value.max(argument),
                 _ => return None,
             };
             args += 1;
@@ -44076,6 +44080,23 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula function field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_min_max_functions_render_bounded_passive_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 Range {\field{\*\fldinst = MIN(9, 2 + 3, -4)}} / {\field{\*\fldinst = MAX(9, 2 + 3, -4) \\* ROMAN}} malformed {\field{\*\fldinst = PRODUCT(2,3)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Range -4 / IX malformed [Field removed: no passive result]"));
+        for forbidden in ["MIN", "MAX", "PRODUCT", "2 + 3", "fldinst", "ROMAN"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula min/max field leaked unsafe text: {forbidden}"
             );
         }
     }

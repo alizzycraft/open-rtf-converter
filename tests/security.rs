@@ -12763,7 +12763,19 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "\\",
         "*",
         "\\",
-        "fldinst = SUM(1, 2 + 3, (4 * 5)) \\\\# \"000\"}} malformed {",
+        "fldinst = SUM(1, 2 + 3, (4 * 5)) \\\\# \"000\"}} min {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = MIN(9, 2 + 3, -4)}} max {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = MAX(9, 2 + 3, -4) \\\\* ROMAN}} malformed {",
         "\\",
         "field{",
         "\\",
@@ -12776,13 +12788,12 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(
-        text.contains(
-            "Total 30 and delta -2 sum 026 malformed [Field removed: no passive result]."
-        )
-    );
+    assert!(text.contains(
+        "Total 30 and delta -2 sum 026 min -4 max IX malformed [Field removed: no passive result]."
+    ));
     for forbidden in [
-        "fldinst", "\\#", "\"0\"", "\"000\"", "(6 + 4)", "3 * 2", "SUM", "AVG", "2 + 3", "4 * 5",
+        "fldinst", "\\#", "\"0\"", "\"000\"", "(6 + 4)", "3 * 2", "SUM", "MIN", "MAX", "AVG",
+        "ROMAN", "2 + 3", "4 * 5",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -12809,7 +12820,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let rendered_text = decoded_pdf_text(&content);
     assert!(
         rendered_text.contains(
-            "Total 30 and delta -2 sum 026 malformed [Field removed: no passive result]."
+            "Total 30 and delta -2 sum 026 min -4 max IX malformed [Field removed: no passive result]."
         ),
         "decoded PDF text did not contain passive formula values: {rendered_text:?}"
     );
@@ -12821,7 +12832,10 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         b"(6 + 4)",
         b"3 * 2",
         b"SUM",
+        b"MIN",
+        b"MAX",
         b"AVG",
+        b"ROMAN",
         b"2 + 3",
         b"4 * 5",
         b"/JavaScript",
