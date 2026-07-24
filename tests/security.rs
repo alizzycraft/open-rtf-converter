@@ -86345,7 +86345,131 @@ fn office_shape_named_double_line_style_alias_renders_passively() {
 }
 
 #[test]
-fn office_shape_triple_line_style_renders_passive_triple_without_property_leakage() {
+fn office_shape_named_weighted_line_style_aliases_render_passively() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineStyle}{",
+        "\\",
+        "sv msoLineThinThick}}}{",
+        "\\",
+        "do",
+        "\\",
+        "dpline",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy960",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn lineStyle}{",
+        "\\",
+        "sv msoLineThickThin}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shapes = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(shapes.len(), 2);
+    assert_eq!(
+        shapes[0].stroke_style,
+        open_rtf_converter::model::BorderStyle::ThinThick
+    );
+    assert_eq!(
+        shapes[1].stroke_style,
+        open_rtf_converter::model::BorderStyle::ThickThin
+    );
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")
+    }));
+    for forbidden in ["lineStyle", "msoLineThinThick", "msoLineThickThin"] {
+        assert!(
+            !text.contains(forbidden),
+            "named weighted lineStyle metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let layout = LayoutEngine::layout(&parsed.document);
+    let line_styles = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.items.iter())
+        .filter_map(|item| match item {
+            LayoutItem::Line { style, .. } => Some(*style),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(line_styles.contains(&LineStyle::ThinThick));
+    assert!(line_styles.contains(&LineStyle::ThickThin));
+    for forbidden in [
+        b"lineStyle".as_slice(),
+        b"msoLineThinThick",
+        b"msoLineThickThin",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "named weighted lineStyle metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn office_shape_weighted_line_style_renders_passively_without_property_leakage() {
     let input = rtf(&[
         "{",
         "\\",
@@ -86397,12 +86521,12 @@ fn office_shape_triple_line_style_renders_passive_triple_without_property_leakag
             Block::Shape(shape) => Some(shape),
             _ => None,
         })
-        .expect("triple line style shape");
+        .expect("weighted line style shape");
     let text = collect_text(&parsed.document);
 
     assert_eq!(
         shape.stroke_style,
-        open_rtf_converter::model::BorderStyle::Triple
+        open_rtf_converter::model::BorderStyle::ThinThickThin
     );
     assert!(
         output.diagnostics.iter().any(|warning| warning
@@ -86416,7 +86540,7 @@ fn office_shape_triple_line_style_renders_passive_triple_without_property_leakag
             .diagnostics
             .iter()
             .all(|warning| !warning.message.contains("lineStyle approximation")),
-        "supported triple Office line style should not be diagnosed as an approximation: {:?}",
+        "supported weighted Office line style should not be diagnosed as an approximation: {:?}",
         output.diagnostics
     );
     assert!(text.contains("Before"));
@@ -86429,7 +86553,7 @@ fn office_shape_triple_line_style_renders_passive_triple_without_property_leakag
     ] {
         assert!(
             !text.contains(forbidden),
-            "forbidden triple lineStyle drawing content leaked to text: {forbidden}"
+            "forbidden weighted lineStyle drawing content leaked to text: {forbidden}"
         );
     }
     for forbidden in [
@@ -86448,7 +86572,7 @@ fn office_shape_triple_line_style_renders_passive_triple_without_property_leakag
                 .pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
-            "forbidden triple lineStyle drawing content leaked to PDF: {:?}",
+            "forbidden weighted lineStyle drawing content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
@@ -86461,11 +86585,11 @@ fn office_shape_triple_line_style_renders_passive_triple_without_property_leakag
             .any(|item| matches!(
                 item,
                 LayoutItem::Line {
-                    style: LineStyle::Triple,
+                    style: LineStyle::ThinThickThin,
                     ..
                 }
             )),
-        "triple Office line style should normalize to a passive triple line"
+        "weighted Office line style should normalize to a passive thin-thick-thin line"
     );
 }
 
