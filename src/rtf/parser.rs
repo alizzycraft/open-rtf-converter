@@ -25037,6 +25037,8 @@ impl<'a> FormulaParser<'a> {
                     }
                 }
                 "OR" => i64::from(value != 0 || argument != 0),
+                "NOT" if args == 0 => i64::from(argument == 0),
+                "NOT" => return None,
                 _ => return None,
             };
             args += 1;
@@ -44362,6 +44364,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula boolean field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_not_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 True {\field{\*\fldinst = NOT(0)}} false {\field{\*\fldinst = NOT(2 + 3)}} zeroexpr {\field{\*\fldinst = NOT(4 - 4)}} empty {\field{\*\fldinst = NOT()}} extra {\field{\*\fldinst = NOT(1,0)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "True 1 false 0 zeroexpr 1 empty [Field removed: no passive result] extra [Field removed: no passive result]"
+        ));
+        for forbidden in ["NOT", "2 + 3", "4 - 4", "1,0", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula NOT field leaked unsafe text: {forbidden}"
             );
         }
     }
