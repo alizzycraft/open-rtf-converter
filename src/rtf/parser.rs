@@ -25002,6 +25002,15 @@ impl<'a> FormulaParser<'a> {
                     value.checked_rem(argument)?
                 }
                 "MOD" => return None,
+                "ROUND" if args == 0 => argument,
+                "ROUND" if args == 1 => {
+                    if argument == 0 {
+                        value
+                    } else {
+                        return None;
+                    }
+                }
+                "ROUND" => return None,
                 _ => return None,
             };
             args += 1;
@@ -25011,7 +25020,7 @@ impl<'a> FormulaParser<'a> {
                 continue;
             }
             if self.consume(')') {
-                if name == "MOD" && args != 2 {
+                if matches!(name.as_str(), "MOD" | "ROUND") && args != 2 {
                     return None;
                 }
                 return Some(value);
@@ -44164,6 +44173,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula MOD field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_round_zero_precision_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Rounded {\field{\*\fldinst = ROUND(17 + 3, 0)}} precision {\field{\*\fldinst = ROUND(5,1)}} extra {\field{\*\fldinst = ROUND(5,0,1)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "Rounded 20 precision [Field removed: no passive result] extra [Field removed: no passive result]"
+        ));
+        for forbidden in ["ROUND", "17 + 3", "5,1", "5,0,1", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula ROUND field leaked unsafe text: {forbidden}"
             );
         }
     }
