@@ -15809,6 +15809,16 @@ fn formshade_applies_to_stored_form_field_result_without_pdf_form() {
             .message
             .contains("form-field shading rendered as bounded passive fill")
     }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "rendering stored result for passive form field FORMTEXT without creating PDF form actions",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic.message.contains(
+            "rendering stored result for field FORMTEXT without executing field instruction",
+        )
+    }));
     for forbidden in [
         "FORMTEXT",
         "HiddenName",

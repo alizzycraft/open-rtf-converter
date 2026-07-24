@@ -16690,11 +16690,7 @@ impl Parser {
     }
 
     fn warn_stored_field_result(&mut self, instruction: &str, offset: usize) {
-        let message = if let Some(name) = field_instruction_name(instruction) {
-            format!("rendering stored result for field {name} without executing field instruction")
-        } else {
-            "rendering stored field result without executing field instruction".to_string()
-        };
+        let message = stored_field_result_diagnostic(instruction);
         self.diagnostics
             .push(Diagnostic::warning(message, Some(offset)));
     }
@@ -22930,6 +22926,20 @@ fn passive_field_result_diagnostic(instruction: &str) -> String {
             format!("rendering passive form field {name} without creating PDF form actions")
         }
         name => format!("rendering passive field {name} without executing field instruction"),
+    }
+}
+
+fn stored_field_result_diagnostic(instruction: &str) -> String {
+    match field_instruction_name(instruction) {
+        Some(name @ ("FORMTEXT" | "FORMDROPDOWN" | "FORMCHECKBOX")) => {
+            format!(
+                "rendering stored result for passive form field {name} without creating PDF form actions"
+            )
+        }
+        Some(name) => {
+            format!("rendering stored result for field {name} without executing field instruction")
+        }
+        None => "rendering stored field result without executing field instruction".to_string(),
     }
 }
 
