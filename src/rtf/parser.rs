@@ -25026,6 +25026,8 @@ impl<'a> FormulaParser<'a> {
                 "INT" => return None,
                 "SIGN" if args == 0 => argument.signum(),
                 "SIGN" => return None,
+                "SQRT" if args == 0 => checked_exact_integer_sqrt(argument)?,
+                "SQRT" => return None,
                 "AVERAGE" => value.checked_add(argument)?,
                 _ => return None,
             };
@@ -25092,6 +25094,21 @@ impl<'a> FormulaParser<'a> {
     fn peek(&self) -> Option<char> {
         self.input[self.pos..].chars().next()
     }
+}
+
+fn checked_exact_integer_sqrt(value: i64) -> Option<i64> {
+    let value = u64::try_from(value).ok()?;
+    let mut low = 0u64;
+    let mut high = value.min(i64::MAX as u64);
+    while low <= high {
+        let mid = low + (high - low) / 2;
+        match mid.checked_mul(mid)?.cmp(&value) {
+            std::cmp::Ordering::Equal => return i64::try_from(mid).ok(),
+            std::cmp::Ordering::Less => low = mid.checked_add(1)?,
+            std::cmp::Ordering::Greater => high = mid.checked_sub(1)?,
+        }
+    }
+    None
 }
 
 fn field_sequence_instruction(instruction: &str) -> Option<FieldSequenceInstruction> {
@@ -44299,6 +44316,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula INT field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_sqrt_exact_integer_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Root {\field{\*\fldinst = SQRT(9 + 7)}} nonsquare {\field{\*\fldinst = SQRT(2)}} negative {\field{\*\fldinst = SQRT(-1)}} extra {\field{\*\fldinst = SQRT(4,1)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "Root 4 nonsquare [Field removed: no passive result] negative [Field removed: no passive result] extra [Field removed: no passive result]"
+        ));
+        for forbidden in ["SQRT", "9 + 7", "SQRT(2)", "-1", "4,1", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula SQRT field leaked unsafe text: {forbidden}"
             );
         }
     }
