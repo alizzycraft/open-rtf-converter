@@ -14010,7 +14010,7 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
     for expected in [
         "section line grid applied as bounded passive paragraph line pitch",
         "section default text grid cleared bounded passive paragraph line pitch",
-        "section text grid approximated by passive paragraph layout",
+        "section text grid interpreted through bounded passive paragraph layout",
     ] {
         assert!(
             parsed
@@ -14021,6 +14021,11 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
             parsed.diagnostics
         );
     }
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("section text grid approximated")
+    }));
 
     let output = convert_rtf_to_pdf(
         &input,

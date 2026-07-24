@@ -20911,7 +20911,7 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
             Some("Asian line-breaking rule interpreted through bounded passive Unicode line layout")
         }
         "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
-            Some("section text grid approximated by passive paragraph layout")
+            Some("section text grid interpreted through bounded passive paragraph layout")
         }
         "lytexcttp" | "lytprtmet" | "noextrasprl" | "notcvasp" | "notvatxbx" | "expshrtn"
         | "useltbaln" | "htmautsp" | "wraptrsp" | "sprsspbf" | "sprsbsp" => {
