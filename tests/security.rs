@@ -14228,6 +14228,26 @@ visible after\par}"#
         text.matches("[Field removed: no passive result]").count(),
         8
     );
+    for name in [
+        "INCLUDEPICTURE",
+        "INCLUDETEXT",
+        "HYPERLINK",
+        "LINK",
+        "DDEAUTO",
+        "DDE",
+        "IMPORT",
+        "DATABASE",
+    ] {
+        assert!(
+            parsed.diagnostics.iter().any(|diagnostic| diagnostic.message.contains(
+                &format!(
+                    "external field {name} rendered as passive placeholder without fetching external resource"
+                )
+            )),
+            "missing passive external-field diagnostic for {name}: {:?}",
+            parsed.diagnostics
+        );
+    }
     for forbidden in [
         "INCLUDEPICTURE",
         "INCLUDETEXT",

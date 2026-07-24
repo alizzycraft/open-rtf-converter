@@ -2188,7 +2188,7 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "external field {name} removed without fetching external resource"
+                                "external field {name} rendered as passive placeholder without fetching external resource"
                             ),
                             Some(offset),
                         ));
@@ -42562,9 +42562,9 @@ After\par}"#;
         ] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
-                    diagnostic
-                        .message
-                        .contains(&format!("external field {name} removed"))
+                    diagnostic.message.contains(&format!(
+                        "external field {name} rendered as passive placeholder without fetching external resource"
+                    ))
                 }),
                 "missing diagnostic for {name}"
             );
