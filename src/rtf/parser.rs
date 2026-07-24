@@ -5233,6 +5233,12 @@ impl Parser {
             }
             "formshade" => {
                 self.form_field_shading = control.parameter.unwrap_or(1) != 0;
+                if self.form_field_shading {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "form-field shading rendered as bounded passive fill",
+                        Some(offset),
+                    ));
+                }
             }
             "ftntj" => self.set_footnote_placement(FootnotePlacement::BeneathText, offset),
             "ftnbj" => self.set_footnote_placement(FootnotePlacement::BottomOfPage, offset),

@@ -15636,6 +15636,11 @@ fn formshade_renders_passive_form_field_background_without_pdf_form() {
             .message
             .contains("form-field shading approximated")
     }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("form-field shading rendered as bounded passive fill")
+    }));
     for forbidden in [
         "FORMTEXT",
         "HiddenName",
@@ -15750,6 +15755,11 @@ fn formshade_applies_to_stored_form_field_result_without_pdf_form() {
         form_run.style.form_field_shading,
         "stored form-field result should carry passive shading style"
     );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("form-field shading rendered as bounded passive fill")
+    }));
     for forbidden in [
         "FORMTEXT",
         "HiddenName",
