@@ -9317,6 +9317,48 @@ fn docproperty_fields_render_metadata_without_leaking_nested_active_content() {
 }
 
 #[test]
+fn docproperty_timestamp_aliases_render_metadata_without_instruction_or_payload_leakage() {
+    let input = br#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30\sec9}{\revtim\yr2025\mo1\dy2\hr9\min4\sec5}{\printim\yr2026\mo12\dy31}}Created {\field{\*\fldinst DOCPROPERTY "Creation Date" \\@ "MMMM d, yyyy"}} saved {\field{\*\fldinst DOCPROPERTY "Last Save Time" \\@ "yyyy-MM-dd h:mm A/P"}} printed {\field{\*\fldinst DOCPROPERTY "Last Printed"}} malformed {\field{\*\fldinst DOCPROPERTY "Last Saved Date" \\@ "bad-token"}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Created July 5, 2024"));
+    assert!(rendered_text.contains("saved 2025-01-02 9:04 A"));
+    assert!(rendered_text.contains("printed 2026-12-31 00:00:00"));
+    assert!(rendered_text.contains("malformed [Field removed: no passive result]"));
+    for forbidden in [
+        b"DOCPROPERTY".as_slice(),
+        b"Creation Date",
+        b"Last Save Time",
+        b"Last Printed",
+        b"Last Saved Date",
+        b"bad-token",
+        b"creatim",
+        b"revtim",
+        b"printim",
+        b"fldinst",
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "DOCPROPERTY timestamp alias leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn shortcut_document_property_fields_render_metadata_without_instruction_leakage() {
     let input = br#"{\rtf1{\info{\title Safe title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\author Alice}{\operator Bob}{\doccomm Comment text}}Doc {\field{\*\fldinst TITLE}} / {\field{\*\fldinst AUTHOR \\* Upper}} / {\field{\*\fldinst LASTSAVEDBY}} / {\field{\*\fldinst COMMENTS}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();

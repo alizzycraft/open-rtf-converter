@@ -9214,17 +9214,28 @@ impl Parser {
 
     fn passive_doc_property_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
-        let text = if let Some(property) = document_property_field_name(&name) {
-            self.document_property_text(property)?
+        let text = if let Some(kind) = document_timestamp_property_field_name(&name) {
+            let timestamp = self
+                .document_timestamps
+                .iter()
+                .find_map(|(stored_kind, timestamp)| (*stored_kind == kind).then_some(timestamp))?;
+            if let Some(picture) = field_date_picture_switch(instruction)? {
+                apply_field_date_picture(timestamp, &picture)?
+            } else {
+                format_default_document_timestamp(timestamp)
+            }
+        } else if let Some(property) = document_property_field_name(&name) {
+            self.document_property_text(property)?.clone()
         } else {
             self.custom_document_properties
                 .iter()
                 .find_map(|(stored_name, text)| {
                     stored_name.eq_ignore_ascii_case(&name).then(|| text)
                 })?
+                .clone()
         };
         Some(PassiveFieldResult {
-            text: text.clone(),
+            text,
             font_name: None,
             font_size_half_points: None,
             form_field: false,
@@ -23163,6 +23174,25 @@ fn document_timestamp_field_name(name: &str) -> Option<DocumentTimestampKind> {
         "CREATEDATE" => Some(DocumentTimestampKind::Created),
         "SAVEDATE" => Some(DocumentTimestampKind::Saved),
         "PRINTDATE" => Some(DocumentTimestampKind::Printed),
+        _ => None,
+    }
+}
+
+fn document_timestamp_property_field_name(name: &str) -> Option<DocumentTimestampKind> {
+    match name
+        .trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .as_str()
+    {
+        "create time" | "creation date" | "creation time" => Some(DocumentTimestampKind::Created),
+        "last save time" | "last saved time" | "last save date" | "last saved date" => {
+            Some(DocumentTimestampKind::Saved)
+        }
+        "last printed" | "last print time" | "last printed time" | "last print date"
+        | "last printed date" => Some(DocumentTimestampKind::Printed),
         _ => None,
     }
 }
@@ -45464,6 +45494,42 @@ After\par}"#;
                 .message
                 .contains("rendering passive field DOCPROPERTY without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_docproperty_timestamp_aliases_render_from_metadata_only() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30\sec9}{\revtim\yr2025\mo1\dy2\hr9\min4\sec5}{\printim\yr2026\mo12\dy31}}Created {\field{\*\fldinst DOCPROPERTY "Creation Date" \\@ "MMMM d, yyyy"}} saved {\field{\*\fldinst DOCPROPERTY "Last Save Time" \\@ "yyyy-MM-dd h:mm A/P"}} printed {\field{\*\fldinst DOCPROPERTY "Last Printed"}} missing {\field{\*\fldinst DOCPROPERTY "Last Saved Date" \\@ "bad-token"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Created July 5, 2024 saved 2025-01-02 9:04 A printed 2026-12-31 00:00:00"
+            )
+        );
+        assert_eq!(
+            text.matches("[Field removed: no passive result]").count(),
+            1
+        );
+        for forbidden in [
+            "DOCPROPERTY",
+            "Creation Date",
+            "Last Save Time",
+            "Last Printed",
+            "Last Saved Date",
+            "bad-token",
+            "creatim",
+            "revtim",
+            "printim",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "DOCPROPERTY timestamp alias leaked unsafe text: {forbidden}"
+            );
+        }
     }
 
     #[test]
