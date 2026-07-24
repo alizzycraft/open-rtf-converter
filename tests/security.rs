@@ -86537,6 +86537,11 @@ fn office_shape_named_weighted_line_style_aliases_render_passively() {
             .message
             .contains("unsupported/active drawing properties")
     }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
     for forbidden in ["lineStyle", "msoLineThinThick", "msoLineThickThin"] {
         assert!(
             !text.contains(forbidden),

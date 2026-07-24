@@ -13622,12 +13622,9 @@ impl Parser {
                 }
             }
             "lineStyle" => {
-                if let Some((style, approximated)) = parse_shape_line_style_property(value) {
+                if let Some(style) = parse_shape_line_style_property(value) {
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.stroke_style = style;
-                    }
-                    if approximated {
-                        self.mark_current_shape_unsupported_or_active_property_stripped();
                     }
                 } else {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
@@ -22226,7 +22223,7 @@ fn parse_shape_line_dashing_property(value: &str) -> Option<BorderStyle> {
     }
 }
 
-fn parse_shape_line_style_property(value: &str) -> Option<(BorderStyle, bool)> {
+fn parse_shape_line_style_property(value: &str) -> Option<BorderStyle> {
     let normalized = value
         .trim()
         .chars()
@@ -22234,15 +22231,13 @@ fn parse_shape_line_style_property(value: &str) -> Option<(BorderStyle, bool)> {
         .flat_map(char::to_lowercase)
         .collect::<String>();
     match normalized.as_str() {
-        "0" | "1" | "single" | "msolinesingle" => Some((BorderStyle::Single, false)),
+        "0" | "1" | "single" | "msolinesingle" => Some(BorderStyle::Single),
         "2" | "double" | "msolinedouble" | "thinthin" | "msolinethinthin" => {
-            Some((BorderStyle::Double, false))
+            Some(BorderStyle::Double)
         }
-        "3" | "thinthick" | "msolinethinthick" => Some((BorderStyle::ThinThick, false)),
-        "4" | "thickthin" | "msolinethickthin" => Some((BorderStyle::ThickThin, false)),
-        "5" | "thickbetweenthin" | "msolinethickbetweenthin" => {
-            Some((BorderStyle::ThinThickThin, false))
-        }
+        "3" | "thinthick" | "msolinethinthick" => Some(BorderStyle::ThinThick),
+        "4" | "thickthin" | "msolinethickthin" => Some(BorderStyle::ThickThin),
+        "5" | "thickbetweenthin" | "msolinethickbetweenthin" => Some(BorderStyle::ThinThickThin),
         _ => None,
     }
 }
