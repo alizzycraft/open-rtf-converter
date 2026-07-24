@@ -25114,10 +25114,15 @@ impl<'a> FormulaParser<'a> {
 
     fn finalize_function_value(&self, name: &str, value: i64, args: usize) -> Option<i64> {
         if args == 0 {
-            return None;
+            return match name {
+                "TRUE" => Some(1),
+                "FALSE" => Some(0),
+                _ => None,
+            };
         }
         match name {
             "MOD" | "POWER" | "ROUND" if args != 2 => None,
+            "TRUE" | "FALSE" => None,
             "AVERAGE" => {
                 let divisor = i64::try_from(args).ok()?;
                 (value % divisor == 0).then_some(value / divisor)
@@ -44346,14 +44351,14 @@ After\par}"#;
     #[test]
     fn resultless_formula_boolean_constants_render_bounded_passive_values() {
         let output = parse_rtf(
-            r#"{\rtf1 True {\field{\*\fldinst = TRUE}} false {\field{\*\fldinst = FALSE}} sum {\field{\*\fldinst = TRUE + 4}} cmp {\field{\*\fldinst = TRUE > FALSE}} not {\field{\*\fldinst = NOT(FALSE)}} neg {\field{\*\fldinst = -TRUE}} malformed {\field{\*\fldinst = MAYBE}}\par}"#,
+            r#"{\rtf1 True {\field{\*\fldinst = TRUE}} false {\field{\*\fldinst = FALSE}} truefn {\field{\*\fldinst = TRUE()}} falsefn {\field{\*\fldinst = FALSE()}} sum {\field{\*\fldinst = TRUE() + 4}} cmp {\field{\*\fldinst = TRUE > FALSE()}} not {\field{\*\fldinst = NOT(FALSE())}} neg {\field{\*\fldinst = -TRUE}} badarity {\field{\*\fldinst = TRUE(1)}} malformed {\field{\*\fldinst = MAYBE()}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
         assert!(
             text.contains(
-                "True 1 false 0 sum 5 cmp 1 not 1 neg -1 malformed [Field removed: no passive result]"
+                "True 1 false 0 truefn 1 falsefn 0 sum 5 cmp 1 not 1 neg -1 badarity [Field removed: no passive result] malformed [Field removed: no passive result]"
             ),
             "normalized text was {text:?}"
         );
@@ -44362,8 +44367,10 @@ After\par}"#;
             "FALSE",
             "MAYBE",
             "NOT",
-            "TRUE + 4",
-            "TRUE > FALSE",
+            "TRUE() + 4",
+            "TRUE > FALSE()",
+            "TRUE(1)",
+            "MAYBE()",
             "fldinst",
         ] {
             assert!(
