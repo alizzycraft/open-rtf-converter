@@ -2329,10 +2329,7 @@ impl Parser {
                     )? {
                         if passive_field_result_needs_diagnostic(&field_instruction) {
                             self.diagnostics.push(Diagnostic::warning(
-                                format!(
-                                    "rendering passive field {} without executing field instruction",
-                                    field_instruction_name(&field_instruction).unwrap_or("unknown")
-                                ),
+                                passive_field_result_diagnostic(&field_instruction),
                                 Some(offset),
                             ));
                         }
@@ -2489,10 +2486,7 @@ impl Parser {
                         )? {
                             if passive_field_result_needs_diagnostic(&field_instruction) {
                                 self.diagnostics.push(Diagnostic::warning(
-                                    format!(
-                                        "rendering passive field {} without executing field instruction",
-                                        field_instruction_name(&field_instruction).unwrap_or("unknown")
-                                    ),
+                                    passive_field_result_diagnostic(&field_instruction),
                                     Some(offset),
                                 ));
                             }
@@ -22920,6 +22914,15 @@ fn passive_field_result(
 
 fn passive_field_result_needs_diagnostic(instruction: &str) -> bool {
     !matches!(field_instruction_name(instruction), Some("SYMBOL"))
+}
+
+fn passive_field_result_diagnostic(instruction: &str) -> String {
+    match field_instruction_name(instruction).unwrap_or("unknown") {
+        name @ ("FORMTEXT" | "FORMDROPDOWN" | "FORMCHECKBOX") => {
+            format!("rendering passive form field {name} without creating PDF form actions")
+        }
+        name => format!("rendering passive field {name} without executing field instruction"),
+    }
 }
 
 fn is_form_field_instruction_name(name: &str) -> bool {

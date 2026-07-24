@@ -15571,6 +15571,11 @@ fn resultless_form_text_renders_default_without_metadata_or_pdf_form() {
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("Before Default value After"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive form field FORMTEXT without creating PDF form actions")
+    }));
     for forbidden in [
         "FORMTEXT",
         "HiddenName",
@@ -15904,6 +15909,11 @@ fn resultless_form_checkbox_renders_passively_without_metadata_or_pdf_form() {
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("Before \u{2611} After"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive form field FORMCHECKBOX without creating PDF form actions")
+    }));
     assert!(
         parsed
             .document
@@ -16119,6 +16129,11 @@ fn resultless_form_dropdown_renders_selected_entry_without_metadata_or_pdf_form(
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("Before Second choice After"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive form field FORMDROPDOWN without creating PDF form actions")
+    }));
     for forbidden in [
         "FORMDROPDOWN",
         "HiddenName",
