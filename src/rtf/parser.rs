@@ -9121,7 +9121,7 @@ impl Parser {
             }
             if advance.horizontal_twips == 0 && advance.vertical_twips == 0 {
                 self.diagnostics.push(Diagnostic::warning(
-                    "layout field ADVANCE stripped without applying cursor positioning",
+                    "layout field ADVANCE normalized with no visible passive cursor movement",
                     Some(offset),
                 ));
             }
@@ -9129,7 +9129,7 @@ impl Parser {
         }
 
         self.diagnostics.push(Diagnostic::warning(
-            format!("layout field {name} stripped without applying cursor positioning"),
+            format!("layout field {name} stripped before passive cursor positioning"),
             Some(offset),
         ));
         Ok(())
@@ -42584,6 +42584,11 @@ After\par}"#;
                 "layout field ADVANCE interpreted as bounded passive vertical cursor advance",
             )
         }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("ADVANCE stripped without applying cursor positioning")
+        }));
     }
 
     #[test]
@@ -42612,6 +42617,39 @@ After\par}"#;
 
         assert_eq!(advance.style.character_spacing_twips, 120);
         assert_eq!(advance.style.baseline_shift_half_points, 12);
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("ADVANCE stripped without applying cursor positioning")
+        }));
+    }
+
+    #[test]
+    fn resultless_layout_advance_zero_offsets_normalize_without_stale_strip_warning() {
+        let output =
+            parse_rtf(r"{\rtf1 Before {\field{\*\fldinst ADVANCE \\r 0 \\d 0}} after\par}")
+                .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert!(
+            paragraph
+                .runs
+                .iter()
+                .all(|run| run.text != PASSIVE_ADVANCE_MARKER)
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("layout field ADVANCE normalized with no visible passive cursor movement")
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("ADVANCE stripped without applying cursor positioning")
+        }));
     }
 
     #[test]

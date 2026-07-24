@@ -14725,7 +14725,7 @@ visible after\par}"#
 #[test]
 fn resultless_layout_and_clock_fields_do_not_leak_to_pdf() {
     let input = br#"{\rtf1 Visible before
-{\field{\*\fldinst ADVANCE \r 240 \d 120}}
+{\field{\*\fldinst ADVANCE \\r 240 \\d 120}}
 after advance
 date {\field{\*\fldinst DATE \\@ "yyyy-MM-dd host-sentinel"}}
 time {\field{\*\fldinst TIME \\@ "HH:mm host-sentinel"}}
@@ -14753,6 +14753,21 @@ visible after\par}"#
             "forbidden layout/clock field leaked to text: {forbidden}"
         );
     }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "layout field ADVANCE interpreted as bounded passive horizontal cursor advance",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("layout field ADVANCE interpreted as bounded passive vertical cursor advance")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("ADVANCE stripped without applying cursor positioning")
+    }));
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -14772,6 +14787,21 @@ visible after\par}"#
     assert!(rendered_text.contains("date [Field removed: no passive result]"));
     assert!(rendered_text.contains("time [Field removed: no passive result]"));
     assert!(rendered_text.contains("visible after"));
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "layout field ADVANCE interpreted as bounded passive horizontal cursor advance",
+        )
+    }));
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("layout field ADVANCE interpreted as bounded passive vertical cursor advance")
+    }));
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("ADVANCE stripped without applying cursor positioning")
+    }));
     for forbidden in [
         b"ADVANCE".as_slice(),
         b"DATE",
