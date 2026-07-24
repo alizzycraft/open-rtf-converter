@@ -1475,6 +1475,11 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
             .message
             .contains("table cell fit-text approximated")
     }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table cell fit-text rendered as bounded passive horizontal scaling")
+    }));
 
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
@@ -1519,6 +1524,113 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden floating table content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn table_cell_fit_text_renders_bounded_passive_scaling_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw7200",
+        "\\",
+        "margl720",
+        "\\",
+        "margr720",
+        "\\",
+        "trowd",
+        "\\",
+        "clFitText",
+        "\\",
+        "clftsWidth3",
+        "\\",
+        "clwWidth720",
+        "\\",
+        "cellx720 Fit text stays on one visual row without wrapping",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "\\",
+        "par}",
+    ]);
+
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+    assert!(table.rows[0].cells[0].fit_text);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table cell fit-text rendered as bounded passive horizontal scaling")
+    }));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("table cell fit-text approximated")),
+        "fit-text should be reported as rendered, not approximated: {:?}",
+        parsed.diagnostics
+    );
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    let fragments = layout.pages[0]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            LayoutItem::Text(fragment)
+                if fragment.text.contains("Fit")
+                    || fragment.text.contains("visual")
+                    || fragment.text.contains("wrapping") =>
+            {
+                Some(fragment)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let first_baseline = fragments
+        .first()
+        .map(|fragment| fragment.baseline_y)
+        .expect("fit-text fragments");
+    assert!(
+        fragments.iter().all(|fragment| {
+            fragment.style.character_scaling_percent < 100
+                && (fragment.baseline_y - first_baseline).abs() < 0.01
+        }),
+        "fit-text should render as one passively scaled row: {fragments:?}"
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("Fit text stays"));
+    for forbidden in [
+        b"clFitText".as_slice(),
+        b"clftsWidth",
+        b"clwWidth",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "fit-text control leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

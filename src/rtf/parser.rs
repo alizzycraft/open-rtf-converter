@@ -4714,7 +4714,7 @@ impl Parser {
                 self.set_current_cell_no_wrap(control.parameter.unwrap_or(1) != 0)
             }
             "clFitText" | "clfittext" => {
-                self.set_current_cell_fit_text(control.parameter.unwrap_or(1) != 0)
+                self.set_current_cell_fit_text(control.parameter.unwrap_or(1) != 0, offset)
             }
             "cltxlrtb" => {
                 self.set_current_cell_text_direction(TableCellTextDirection::LeftToRightTopToBottom)
@@ -10629,9 +10629,15 @@ impl Parser {
         }
     }
 
-    fn set_current_cell_fit_text(&mut self, fit_text: bool) {
+    fn set_current_cell_fit_text(&mut self, fit_text: bool, offset: usize) {
         if let Some(row) = self.current_table_row.as_mut() {
             row.current_cell_fit_text = fit_text;
+        }
+        if fit_text {
+            self.diagnostics.push(Diagnostic::warning(
+                "table cell fit-text rendered as bounded passive horizontal scaling",
+                Some(offset),
+            ));
         }
     }
 
