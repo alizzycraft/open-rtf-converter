@@ -22906,6 +22906,16 @@ struct FormulaParser<'a> {
     pos: usize,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FormulaComparisonOperator {
+    Equal,
+    NotEqual,
+    Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
+}
+
 const MAX_PASSIVE_FORMULA_FUNCTION_ARGS: usize = 32;
 const MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS: usize = 4096;
 const MAX_PASSIVE_FIELD_NUMERIC_PICTURE_CHARS: usize = 64;
@@ -24891,7 +24901,18 @@ impl<'a> FormulaParser<'a> {
     }
 
     fn parse(mut self) -> Option<i64> {
-        let value = self.parse_expression()?;
+        let left = self.parse_expression()?;
+        self.skip_ws();
+        let value = if let Some(operator) = self.parse_comparison_operator() {
+            let right = self.parse_expression()?;
+            if formula_comparison_matches(left, operator, right) {
+                1
+            } else {
+                0
+            }
+        } else {
+            left
+        };
         self.skip_ws();
         (self.pos == self.input.len()).then_some(value)
     }
@@ -25108,8 +25129,47 @@ impl<'a> FormulaParser<'a> {
         }
     }
 
+    fn consume_str(&mut self, expected: &str) -> bool {
+        if self.input[self.pos..].starts_with(expected) {
+            self.pos += expected.len();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn parse_comparison_operator(&mut self) -> Option<FormulaComparisonOperator> {
+        self.skip_ws();
+        if self.consume_str("<=") {
+            Some(FormulaComparisonOperator::LessOrEqual)
+        } else if self.consume_str(">=") {
+            Some(FormulaComparisonOperator::GreaterOrEqual)
+        } else if self.consume_str("<>") {
+            Some(FormulaComparisonOperator::NotEqual)
+        } else if self.consume_str("=") {
+            Some(FormulaComparisonOperator::Equal)
+        } else if self.consume_str("<") {
+            Some(FormulaComparisonOperator::Less)
+        } else if self.consume_str(">") {
+            Some(FormulaComparisonOperator::Greater)
+        } else {
+            None
+        }
+    }
+
     fn peek(&self) -> Option<char> {
         self.input[self.pos..].chars().next()
+    }
+}
+
+fn formula_comparison_matches(left: i64, operator: FormulaComparisonOperator, right: i64) -> bool {
+    match operator {
+        FormulaComparisonOperator::Equal => left == right,
+        FormulaComparisonOperator::NotEqual => left != right,
+        FormulaComparisonOperator::Less => left < right,
+        FormulaComparisonOperator::LessOrEqual => left <= right,
+        FormulaComparisonOperator::Greater => left > right,
+        FormulaComparisonOperator::GreaterOrEqual => left >= right,
     }
 }
 
@@ -44184,6 +44244,38 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula unary plus field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_comparisons_render_bounded_passive_boolean_numbers() {
+        let output = parse_rtf(
+            r#"{\rtf1 Equal {\field{\*\fldinst = 2 + 2 = 4}} neq {\field{\*\fldinst = 3 <> 3}} less {\field{\*\fldinst = 2 < 5}} le {\field{\*\fldinst = 5 <= 5 \\* ROMAN}} gt {\field{\*\fldinst = 6 > 9}} ge {\field{\*\fldinst = 9 >= 6}} malformed {\field{\*\fldinst = 1 < 2 < 3}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Equal 1 neq 0 less 1 le I gt 0 ge 1 malformed [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "2 + 2",
+            "3 <> 3",
+            "2 < 5",
+            "5 <= 5",
+            "6 > 9",
+            "9 >= 6",
+            "1 < 2 < 3",
+            "ROMAN",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula comparison field leaked unsafe text: {forbidden}"
             );
         }
     }
