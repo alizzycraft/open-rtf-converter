@@ -24962,7 +24962,7 @@ impl<'a> FormulaParser<'a> {
             self.consume('+');
         }
         if self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
-            let value = self.parse_function()?;
+            let value = self.parse_identifier_value()?;
             return if negative {
                 value.checked_neg()
             } else {
@@ -24974,6 +24974,19 @@ impl<'a> FormulaParser<'a> {
             value.checked_neg()
         } else {
             Some(value)
+        }
+    }
+
+    fn parse_identifier_value(&mut self) -> Option<i64> {
+        let name = self.parse_identifier()?;
+        self.skip_ws();
+        if self.peek() == Some('(') {
+            return self.parse_function_arguments(&name);
+        }
+        match name.as_str() {
+            "TRUE" => Some(1),
+            "FALSE" => Some(0),
+            _ => None,
         }
     }
 
@@ -24990,8 +25003,7 @@ impl<'a> FormulaParser<'a> {
         (self.pos > start).then(|| self.input[start..self.pos].parse::<i64>().ok())?
     }
 
-    fn parse_function(&mut self) -> Option<i64> {
-        let name = self.parse_identifier()?;
+    fn parse_function_arguments(&mut self, name: &str) -> Option<i64> {
         self.skip_ws();
         if !self.consume('(') {
             return None;
@@ -25006,14 +25018,14 @@ impl<'a> FormulaParser<'a> {
                 if expecting_argument {
                     return None;
                 }
-                return self.finalize_function_value(&name, value, args);
+                return self.finalize_function_value(name, value, args);
             }
 
             if args >= MAX_PASSIVE_FORMULA_FUNCTION_ARGS {
                 return None;
             }
             let argument = self.parse_expression()?;
-            value = match name.as_str() {
+            value = match name {
                 "SUM" => value.checked_add(argument)?,
                 "MIN" if args == 0 => argument,
                 "MIN" => value.min(argument),
@@ -25077,7 +25089,7 @@ impl<'a> FormulaParser<'a> {
                 continue;
             }
             if self.consume(')') {
-                return self.finalize_function_value(&name, value, args);
+                return self.finalize_function_value(name, value, args);
             }
             return None;
         }
@@ -44276,6 +44288,36 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula comparison field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_boolean_constants_render_bounded_passive_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 True {\field{\*\fldinst = TRUE}} false {\field{\*\fldinst = FALSE}} sum {\field{\*\fldinst = TRUE + 4}} cmp {\field{\*\fldinst = TRUE > FALSE}} not {\field{\*\fldinst = NOT(FALSE)}} neg {\field{\*\fldinst = -TRUE}} malformed {\field{\*\fldinst = MAYBE}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "True 1 false 0 sum 5 cmp 1 not 1 neg -1 malformed [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "TRUE",
+            "FALSE",
+            "MAYBE",
+            "NOT",
+            "TRUE + 4",
+            "TRUE > FALSE",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula boolean constant field leaked unsafe text: {forbidden}"
             );
         }
     }
