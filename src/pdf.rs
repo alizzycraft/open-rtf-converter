@@ -1152,13 +1152,20 @@ fn draw_text_layout_item(
         draw_passive_vector_only_dingbat_text(content, fragment);
         return;
     }
-    let supplied_encoding =
-        encode_supplied_text_fragment(fragment, layout, font_provider, supplied_fonts);
+    let visual_text = passive_visual_text_for_fragment(fragment);
+    let text = visual_text.as_deref().unwrap_or(&fragment.text);
+    let supplied_encoding = encode_supplied_text_fragment_with_text(
+        fragment,
+        text,
+        layout,
+        font_provider,
+        supplied_fonts,
+    );
     let mut base_encoded = Vec::new();
     let font_resource = if let Some(supplied) = supplied_encoding.as_ref() {
         supplied_fonts[supplied.font_index].resource_name.as_slice()
     } else {
-        base_encoded = encode_pdf_text_for_font(&fragment.text, fragment.font_family);
+        base_encoded = encode_pdf_text_for_font(text, fragment.font_family);
         font_name_for_style(fragment.font_family, &fragment.style).0
     };
     let passive_kerning_family = supplied_encoding.is_none().then_some(fragment.font_family);
@@ -1170,7 +1177,7 @@ fn draw_text_layout_item(
         set_fill_color(content, shadow_color(fragment.color));
         write_text_fragment(
             content,
-            &fragment.text,
+            text,
             font_resource,
             passive_kerning_family,
             &fragment.style,
@@ -1189,7 +1196,7 @@ fn draw_text_layout_item(
         set_fill_color(content, first_color);
         write_text_fragment(
             content,
-            &fragment.text,
+            text,
             font_resource,
             passive_kerning_family,
             &fragment.style,
@@ -1203,7 +1210,7 @@ fn draw_text_layout_item(
         set_fill_color(content, second_color);
         write_text_fragment(
             content,
-            &fragment.text,
+            text,
             font_resource,
             passive_kerning_family,
             &fragment.style,
@@ -1222,7 +1229,7 @@ fn draw_text_layout_item(
     }
     write_text_fragment(
         content,
-        &fragment.text,
+        text,
         font_resource,
         passive_kerning_family,
         &fragment.style,
@@ -1597,9 +1604,25 @@ fn encode_supplied_text_fragment(
     font_provider: Option<&FontProvider>,
     supplied_fonts: &[SuppliedPdfFont],
 ) -> Option<SuppliedTextEncoding> {
+    encode_supplied_text_fragment_with_text(
+        fragment,
+        &fragment.text,
+        layout,
+        font_provider,
+        supplied_fonts,
+    )
+}
+
+fn encode_supplied_text_fragment_with_text(
+    fragment: &TextFragment,
+    text: &str,
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+    supplied_fonts: &[SuppliedPdfFont],
+) -> Option<SuppliedTextEncoding> {
     let font_provider = font_provider?;
     let (asset_index, _glyphs, encoded) =
-        supplied_text_encoding_parts(fragment, layout, font_provider)?;
+        supplied_text_encoding_parts_for_text(fragment, text, layout, font_provider)?;
     let font_index = supplied_fonts
         .iter()
         .position(|font| font.asset_index == asset_index)?;
@@ -1614,7 +1637,16 @@ fn supplied_text_encoding_parts(
     layout: &LayoutDocument,
     font_provider: &FontProvider,
 ) -> Option<(usize, Vec<SuppliedGlyph>, Vec<u8>)> {
-    if fragment.text.is_empty() {
+    supplied_text_encoding_parts_for_text(fragment, &fragment.text, layout, font_provider)
+}
+
+fn supplied_text_encoding_parts_for_text(
+    fragment: &TextFragment,
+    text: &str,
+    layout: &LayoutDocument,
+    font_provider: &FontProvider,
+) -> Option<(usize, Vec<SuppliedGlyph>, Vec<u8>)> {
+    if text.is_empty() {
         return None;
     }
     let source_font = layout
@@ -1627,7 +1659,7 @@ fn supplied_text_encoding_parts(
         .enumerate()
         .filter(|(_, asset)| supplied_font_asset_matches_font(asset, source_font))
         .filter_map(|(asset_index, asset)| {
-            let (glyphs, encoded) = encode_text_with_font_asset(&fragment.text, asset)?;
+            let (glyphs, encoded) = encode_text_with_font_asset(text, asset)?;
             (!glyphs.is_empty()).then(|| {
                 (
                     supplied_font_style_mismatch_score(asset.style, &fragment.style),
@@ -2469,6 +2501,29 @@ fn draw_passive_vector_line(
         stroke_style,
         LineCap::Flat,
     );
+}
+
+fn passive_visual_text_for_fragment(fragment: &TextFragment) -> Option<String> {
+    if !fragment.style.right_to_left || !text_has_strong_rtl_script(&fragment.text) {
+        return None;
+    }
+    Some(fragment.text.chars().rev().collect())
+}
+
+fn text_has_strong_rtl_script(text: &str) -> bool {
+    text.chars().any(is_strong_rtl_script_char)
+}
+
+fn is_strong_rtl_script_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{0590}'..='\u{05ff}'
+            | '\u{0600}'..='\u{06ff}'
+            | '\u{0750}'..='\u{077f}'
+            | '\u{08a0}'..='\u{08ff}'
+            | '\u{fb1d}'..='\u{fdff}'
+            | '\u{fe70}'..='\u{fefc}'
+    )
 }
 
 fn draw_passive_vector_polyline(
@@ -9251,6 +9306,33 @@ endstream
                 .iter()
                 .any(|operation| operation.operator == "S")
         );
+    }
+
+    #[test]
+    fn rtl_script_fragments_use_passive_visual_order_without_reversing_latin_runs() {
+        let mut rtl_style = CharacterStyle::default();
+        rtl_style.right_to_left = true;
+        let rtl_fragment = TextFragment {
+            text: "שלום".to_string(),
+            x: 0.0,
+            baseline_y: 0.0,
+            rotation: TextRotation::None,
+            color: Default::default(),
+            font_family: PdfFontFamily::Helvetica,
+            word_spacing: 0.0,
+            style: rtl_style.clone(),
+        };
+        let latin_fragment = TextFragment {
+            text: "LTR".to_string(),
+            style: rtl_style,
+            ..rtl_fragment.clone()
+        };
+
+        assert_eq!(
+            passive_visual_text_for_fragment(&rtl_fragment).as_deref(),
+            Some("םולש")
+        );
+        assert_eq!(passive_visual_text_for_fragment(&latin_fragment), None);
     }
 
     #[test]

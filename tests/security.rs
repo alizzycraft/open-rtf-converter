@@ -66347,13 +66347,21 @@ fn paragraph_direction_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
-fn character_direction_controls_are_explicit_passive_approximations_without_control_leakage() {
+fn character_direction_controls_render_bounded_passive_metadata_without_control_leakage() {
     let input = rtf(&[
         "{",
         "\\",
         "rtf1 Normal {",
         "\\",
-        "rtlch RTL text} {",
+        "rtlch ",
+        "\\",
+        "u1513?",
+        "\\",
+        "u1500?",
+        "\\",
+        "u1493?",
+        "\\",
+        "u1501?} {",
         "\\",
         "ltrch LTR text}",
         "\\",
@@ -66361,17 +66369,38 @@ fn character_direction_controls_are_explicit_passive_approximations_without_cont
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("Normal RTL text LTR text"));
+    assert!(text.contains("Normal שלום LTR text"));
     for forbidden in ["rtlch", "ltrch"] {
         assert!(
             !text.contains(forbidden),
             "forbidden character direction control leaked to text: {forbidden}"
         );
     }
+    let paragraph = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            open_rtf_converter::model::Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .expect("paragraph");
+    let rtl_run = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.contains("שלום"))
+        .expect("RTL run");
+    let ltr_run = paragraph
+        .runs
+        .iter()
+        .find(|run| run.text.contains("LTR text"))
+        .expect("LTR run");
+    assert!(rtl_run.style.right_to_left);
+    assert!(!ltr_run.style.right_to_left);
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("right-to-left character direction approximated")
+        diagnostic.message.contains(
+            "right-to-left character direction rendered by bounded passive visual text order",
+        )
     }));
     assert!(
         parsed
@@ -66392,9 +66421,9 @@ fn character_direction_controls_are_explicit_passive_approximations_without_cont
     .unwrap();
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
     assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("right-to-left character direction approximated")
+        diagnostic.message.contains(
+            "right-to-left character direction rendered by bounded passive visual text order",
+        )
     }));
 
     for forbidden in [

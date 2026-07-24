@@ -4944,12 +4944,15 @@ impl Parser {
                 }
             }
             "rtlch" => {
-                self.diagnostics.push(Diagnostic::warning(
-                    "right-to-left character direction approximated by passive logical text order",
-                    Some(offset),
-                ));
+                self.state.character.right_to_left = control.parameter.unwrap_or(1) != 0;
+                if self.state.character.right_to_left {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "right-to-left character direction rendered by bounded passive visual text order",
+                        Some(offset),
+                    ));
+                }
             }
-            "ltrch" => {}
+            "ltrch" => self.state.character.right_to_left = false,
             "v" | "vanish" | "webhidden" => {
                 self.state.character.hidden = control.parameter.unwrap_or(1) != 0
             }
@@ -21285,6 +21288,9 @@ fn inherit_character_style(base: &CharacterStyle, derived: &CharacterStyle) -> C
     }
     if output.small_caps == default.small_caps {
         output.small_caps = base.small_caps;
+    }
+    if output.right_to_left == default.right_to_left {
+        output.right_to_left = base.right_to_left;
     }
     if output.hidden == default.hidden {
         output.hidden = base.hidden;
@@ -47072,17 +47078,36 @@ After\par}"#;
     }
 
     #[test]
-    fn right_to_left_character_direction_is_explicit_passive_approximation() {
-        let output = parse_rtf(r"{\rtf1 Normal {\rtlch RTL text} {\ltrch LTR text}\par}").unwrap();
+    fn right_to_left_character_direction_is_bounded_passive_visual_metadata() {
+        let output = parse_rtf(
+            r"{\rtf1 Normal {\rtlch \u1513?\u1500?\u1493?\u1501?} {\ltrch LTR text}\par}",
+        )
+        .unwrap();
         let text = document_text(&output.document);
 
-        assert_eq!(text, "Normal RTL text LTR text");
+        assert_eq!(text, "Normal שלום LTR text");
         assert!(!text.contains("rtlch"));
         assert!(!text.contains("ltrch"));
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            other => panic!("expected paragraph, got {other:?}"),
+        };
+        let rtl_run = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.contains("שלום"))
+            .expect("RTL run");
+        let ltr_run = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.contains("LTR text"))
+            .expect("LTR run");
+        assert!(rtl_run.style.right_to_left);
+        assert!(!ltr_run.style.right_to_left);
         assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("right-to-left character direction approximated")
+            diagnostic.message.contains(
+                "right-to-left character direction rendered by bounded passive visual text order",
+            )
         }));
         assert!(
             output
