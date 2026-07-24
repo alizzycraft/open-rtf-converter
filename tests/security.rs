@@ -23747,7 +23747,12 @@ fn common_word_metadata_controls_do_not_warn_or_leak_to_pdf() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("character kerning approximated by passive pair spacing")
+            .contains("character kerning rendered as bounded passive pair spacing")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("character kerning approximated")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic

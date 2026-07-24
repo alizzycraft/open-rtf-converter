@@ -5027,7 +5027,7 @@ impl Parser {
                 self.state.character.character_kerning_half_points =
                     self.clamp_character_kerning(control.parameter.unwrap_or(0), offset);
                 self.diagnostics.push(Diagnostic::warning(
-                    "character kerning approximated by passive pair spacing",
+                    "character kerning rendered as bounded passive pair spacing",
                     Some(offset),
                 ));
             }
@@ -15958,7 +15958,7 @@ impl Parser {
             style.character_kerning_half_points = threshold_half_points
         });
         self.diagnostics.push(Diagnostic::warning(
-            "character kerning approximated by passive pair spacing",
+            "character kerning rendered as bounded passive pair spacing",
             Some(offset),
         ));
     }
@@ -46440,7 +46440,12 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("character kerning approximated by passive pair spacing")
+                .contains("character kerning rendered as bounded passive pair spacing")
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("character kerning approximated")
         }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
