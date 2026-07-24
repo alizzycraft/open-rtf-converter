@@ -13945,12 +13945,24 @@ impl Parser {
                 adjustments,
             )
         {
+            self.warn_passive_picture_color_mode_rendered(
+                "DIB",
+                "image pixels",
+                adjustments,
+                offset,
+            );
             return;
         }
 
         if image.format == ImageFormat::PngIndexed
             && apply_indexed_palette_picture_color_mode(&mut image.palette, adjustments)
         {
+            self.warn_passive_picture_color_mode_rendered(
+                "indexed PNG",
+                "palette",
+                adjustments,
+                offset,
+            );
             return;
         }
 
@@ -13963,6 +13975,12 @@ impl Parser {
                 adjustments,
             )
         {
+            self.warn_passive_picture_color_mode_rendered(
+                "PNG",
+                "image pixels",
+                adjustments,
+                offset,
+            );
             return;
         }
 
@@ -14019,6 +14037,40 @@ impl Parser {
         if has_tone_adjustment {
             self.diagnostics.push(Diagnostic::warning(
                 "picture brightness/contrast property approximated by passive original image",
+                Some(offset),
+            ));
+        }
+    }
+
+    fn warn_passive_picture_color_mode_rendered(
+        &mut self,
+        format_name: &'static str,
+        target_name: &'static str,
+        adjustments: PictureAdjustments,
+        offset: usize,
+    ) {
+        if adjustments.bilevel {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "{format_name} picture bilevel property rendered as bounded passive {target_name}"
+                ),
+                Some(offset),
+            ));
+            return;
+        }
+        if adjustments.grayscale {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "{format_name} picture grayscale property rendered as bounded passive {target_name}"
+                ),
+                Some(offset),
+            ));
+        }
+        if adjustments.brightness_fixed.is_some() || adjustments.contrast_fixed.is_some() {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "{format_name} picture brightness/contrast property rendered as bounded passive {target_name}"
+                ),
                 Some(offset),
             ));
         }
@@ -48852,6 +48904,11 @@ After\par}"#;
             "RGB PNG grayscale should be applied to stored scanlines: {:?}",
             output.diagnostics
         );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("PNG picture grayscale property rendered as bounded passive image pixels")
+        }));
         let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
             .expect("PNG scanline");
         assert_eq!(scanlines, vec![0, 77, 77, 77]);
@@ -48906,6 +48963,11 @@ After\par}"#;
             "grayscale PNG bilevel should be applied to stored scanlines: {:?}",
             output.diagnostics
         );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("PNG picture bilevel property rendered as bounded passive image pixels")
+        }));
         let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 2)
             .expect("PNG scanline");
         assert_eq!(scanlines, vec![0, 255]);
@@ -48933,6 +48995,11 @@ After\par}"#;
             "RGB PNG brightness/contrast should be applied to stored scanlines: {:?}",
             output.diagnostics
         );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "PNG picture brightness/contrast property rendered as bounded passive image pixels",
+            )
+        }));
         let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
             .expect("PNG scanline");
         assert_eq!(scanlines, vec![0, 255, 128, 255]);
@@ -48956,6 +49023,11 @@ After\par}"#;
 
         assert_eq!(image.format, ImageFormat::Rgb8);
         assert_eq!(image.bytes, vec![1, 0, 65, 0, 0, 33]);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "DIB picture brightness/contrast property rendered as bounded passive image pixels",
+            )
+        }));
     }
 
     #[test]

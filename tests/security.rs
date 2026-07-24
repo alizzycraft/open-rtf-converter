@@ -27103,6 +27103,11 @@ fn indexed_png_grayscale_metadata_updates_palette_without_payload_leakage() {
         "indexed PNG grayscale should be applied to the safe palette: {:?}",
         parsed.diagnostics
     );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("indexed PNG picture grayscale property rendered as bounded passive palette")
+    }));
     let image = parsed
         .document
         .blocks
@@ -27210,6 +27215,11 @@ fn indexed_png_bilevel_metadata_updates_palette_without_payload_leakage() {
         "indexed PNG bilevel should be applied to the safe palette: {:?}",
         parsed.diagnostics
     );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("indexed PNG picture bilevel property rendered as bounded passive palette")
+    }));
     let image = parsed
         .document
         .blocks
