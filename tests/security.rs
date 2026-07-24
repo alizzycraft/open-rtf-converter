@@ -24564,7 +24564,12 @@ fn paragraph_hyphenation_renders_passive_soft_breaks_without_control_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("paragraph hyphenation approximated by bounded passive soft hyphenation")
+            .contains("paragraph hyphenation rendered as bounded passive soft hyphenation")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("paragraph hyphenation approximated")
     }));
 
     let output = convert_rtf_to_pdf(
@@ -24648,7 +24653,12 @@ fn document_hyphenation_default_renders_passively_without_control_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("document hyphenation approximated by bounded passive soft hyphenation")
+            .contains("document hyphenation rendered as bounded passive soft hyphenation")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("document hyphenation approximated")
     }));
 
     let output = convert_rtf_to_pdf(
@@ -24722,6 +24732,11 @@ fn capital_word_hyphenation_control_renders_passively_without_control_leakage() 
     assert!(!text.contains("hyphcaps"));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
+            .message
+            .contains("document hyphenation rendered as bounded passive soft hyphenation")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("document hyphenation approximated")
     }));

@@ -5188,7 +5188,7 @@ impl Parser {
                 self.state.paragraph.auto_hyphenation =
                     self.default_paragraph_style.auto_hyphenation;
                 let message = if self.default_paragraph_style.auto_hyphenation {
-                    "document hyphenation approximated by bounded passive soft hyphenation"
+                    "document hyphenation rendered as bounded passive soft hyphenation"
                 } else {
                     "document hyphenation disabled"
                 };
@@ -5224,7 +5224,7 @@ impl Parser {
             "hyphpar" => {
                 self.state.paragraph.auto_hyphenation = control.parameter.unwrap_or(1) != 0;
                 let message = if self.state.paragraph.auto_hyphenation {
-                    "paragraph hyphenation approximated by bounded passive soft hyphenation"
+                    "paragraph hyphenation rendered as bounded passive soft hyphenation"
                 } else {
                     "paragraph hyphenation disabled"
                 };
@@ -47362,7 +47362,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("paragraph hyphenation approximated by bounded passive soft hyphenation")
+                .contains("paragraph hyphenation rendered as bounded passive soft hyphenation")
         }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
@@ -47389,7 +47389,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("document hyphenation approximated by bounded passive soft hyphenation")
+                .contains("document hyphenation rendered as bounded passive soft hyphenation")
         }));
         assert!(
             output
@@ -47417,7 +47417,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("document hyphenation approximated")
+                .contains("document hyphenation rendered as bounded passive soft hyphenation")
         }));
         assert!(
             output
