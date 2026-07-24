@@ -374,6 +374,7 @@ pub struct StaticImage {
     pub bytes: Vec<u8>,
     pub palette: Vec<u8>,
     pub alpha_mask: Option<StaticImageAlphaMask>,
+    pub tone_adjustment: Option<ImageToneAdjustment>,
     pub vector_commands: Vec<StaticImageVectorCommand>,
     pub width_px: u32,
     pub height_px: u32,
@@ -392,6 +393,12 @@ pub struct StaticImageAlphaMask {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct ImageToneAdjustment {
+    pub decode_low: f32,
+    pub decode_high: f32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StaticImageVectorRaster {
     pub format: ImageFormat,
@@ -400,6 +407,7 @@ pub struct StaticImageVectorRaster {
     pub bytes: Vec<u8>,
     pub palette: Vec<u8>,
     pub alpha_mask: Option<StaticImageAlphaMask>,
+    pub tone_adjustment: Option<ImageToneAdjustment>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

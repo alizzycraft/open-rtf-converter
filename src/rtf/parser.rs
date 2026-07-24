@@ -8,15 +8,15 @@ use crate::model::{
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER,
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
     FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnotePlacement,
-    ImageCrop, ImageFormat, LineNumberRestart, NoteNumberRestart, PAGE_NUMBER_MARKER,
-    PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph,
-    ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
-    StaticImageAlphaMask, StaticImagePlacement, StaticImageTextHorizontalAlign,
-    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageVectorPathSegment, StaticImageVectorRaster, StaticImageVectorTextBounds,
-    StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapePoint,
-    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    ImageCrop, ImageFormat, ImageToneAdjustment, LineNumberRestart, NoteNumberRestart,
+    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
+    PageVerticalAlignment, Paragraph, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageVectorRaster,
+    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
     TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
@@ -11906,6 +11906,7 @@ impl Parser {
                         bytes: picture.bytes[..jpeg.data_end].to_vec(),
                         palette: Vec::new(),
                         alpha_mask: None,
+                        tone_adjustment: None,
                         vector_commands: Vec::new(),
                         width_px,
                         height_px,
@@ -11955,6 +11956,7 @@ impl Parser {
                         bytes: png.idat,
                         palette: png.palette,
                         alpha_mask: png.alpha_mask,
+                        tone_adjustment: None,
                         vector_commands: Vec::new(),
                         width_px: png.width_px,
                         height_px: png.height_px,
@@ -12006,6 +12008,7 @@ impl Parser {
                         bytes: compressed.bytes,
                         palette: compressed.palette,
                         alpha_mask: compressed.alpha_mask,
+                        tone_adjustment: None,
                         vector_commands: Vec::new(),
                         width_px: compressed.width_px,
                         height_px: compressed.height_px,
@@ -12043,6 +12046,7 @@ impl Parser {
                                 bytes: dib.rgb,
                                 palette: Vec::new(),
                                 alpha_mask: None,
+                                tone_adjustment: None,
                                 vector_commands: Vec::new(),
                                 width_px: dib.width_px,
                                 height_px: dib.height_px,
@@ -12105,6 +12109,7 @@ impl Parser {
                             bytes: Vec::new(),
                             palette: Vec::new(),
                             alpha_mask: None,
+                            tone_adjustment: None,
                             vector_commands: wmf.commands,
                             width_px: wmf.width_px,
                             height_px: wmf.height_px,
@@ -12152,6 +12157,7 @@ impl Parser {
                             bytes: Vec::new(),
                             palette: Vec::new(),
                             alpha_mask: None,
+                            tone_adjustment: None,
                             vector_commands: emf.commands,
                             width_px: emf.width_px,
                             height_px: emf.height_px,
@@ -12462,6 +12468,7 @@ impl Parser {
             bytes: Vec::new(),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -13918,6 +13925,16 @@ impl Parser {
                 adjustments,
             )
         {
+            return;
+        }
+
+        if image.format == ImageFormat::Jpeg
+            && !grayscale
+            && !bilevel
+            && has_tone_adjustment
+            && let Some(tone_adjustment) = passive_jpeg_tone_adjustment(adjustments)
+        {
+            image.tone_adjustment = Some(tone_adjustment);
             return;
         }
 
@@ -30873,6 +30890,7 @@ fn parse_emf_setdibitstodevice_srcopy(
                     bytes: image.bytes,
                     palette: image.palette,
                     alpha_mask: image.alpha_mask,
+                    tone_adjustment: None,
                 },
             },
         ));
@@ -30984,6 +31002,7 @@ fn parse_emf_alphablend_passive(
             bytes: image.bytes,
             palette: image.palette,
             alpha_mask: image.alpha_mask,
+            tone_adjustment: None,
         },
     })
 }
@@ -31125,6 +31144,7 @@ fn parse_emf_transparentblt_keyed(
             bytes: image.bytes,
             palette: image.palette,
             alpha_mask: image.alpha_mask,
+            tone_adjustment: None,
         },
     })
 }
@@ -32554,6 +32574,7 @@ fn passive_picture_placeholder_image(picture: &PictureBuilder) -> StaticImage {
         bytes: Vec::new(),
         palette: Vec::new(),
         alpha_mask: None,
+        tone_adjustment: None,
         vector_commands: Vec::new(),
         width_px: picture.width_px_hint.unwrap_or(1).max(1),
         height_px: picture.height_px_hint.unwrap_or(1).max(1),
@@ -32671,6 +32692,19 @@ fn adjust_picture_sample(sample: u8, adjustments: PictureAdjustments) -> u8 {
     };
     let brightened = contrasted + ((brightness * 255) / 65_536);
     brightened.clamp(0, 255) as u8
+}
+
+fn passive_jpeg_tone_adjustment(adjustments: PictureAdjustments) -> Option<ImageToneAdjustment> {
+    if adjustments.grayscale
+        || adjustments.bilevel
+        || (adjustments.brightness_fixed.is_none() && adjustments.contrast_fixed.is_none())
+    {
+        return None;
+    }
+    Some(ImageToneAdjustment {
+        decode_low: f32::from(adjust_picture_sample(0, adjustments)) / 255.0,
+        decode_high: f32::from(adjust_picture_sample(255, adjustments)) / 255.0,
+    })
 }
 
 fn apply_picture_adjustments_to_rgb(pixel: &mut [u8], adjustments: PictureAdjustments) {
@@ -34005,6 +34039,7 @@ fn clipped_compressed_jpeg_source_raster_command(
                 bytes: image.bytes,
                 palette: image.palette,
                 alpha_mask: None,
+                tone_adjustment: None,
             },
         },
         StaticImageVectorCommand::RestoreState,
@@ -36424,6 +36459,7 @@ fn wmf_raster_image_command(
             bytes: image.bytes,
             palette: image.palette,
             alpha_mask: image.alpha_mask,
+            tone_adjustment: None,
         },
     })
 }
@@ -36720,6 +36756,7 @@ fn passive_source_raster_command(
                     bytes: image.bytes,
                     palette: image.palette,
                     alpha_mask: image.alpha_mask,
+                    tone_adjustment: None,
                 },
             })
         }

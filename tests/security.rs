@@ -11,13 +11,13 @@ use open_rtf_converter::model::{
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, ENDNOTE_REFERENCE_MARKER,
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
-    FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, PAGE_NUMBER_MARKER,
-    PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER,
-    ShadingPattern, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
-    StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap,
-    StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment,
-    TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
+    FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, ImageToneAdjustment,
+    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
+    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
+    StaticImageVectorPathSegment, StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind,
+    StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER,
+    TabAlignment, TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -27730,6 +27730,129 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "visible picture metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBrightness}{",
+        "\\",
+        "sv 32768}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-tone-payload {",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+
+    assert_eq!(image.format, ImageFormat::Jpeg);
+    assert_eq!(
+        image.tone_adjustment,
+        Some(ImageToneAdjustment {
+            decode_low: 127.0 / 255.0,
+            decode_high: 1.0,
+        })
+    );
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    for forbidden in [
+        "pictureBrightness",
+        "pFragments",
+        "hidden-tone-payload",
+        "objdata",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "picture tone metadata leaked to normalized text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("picture brightness/contrast property approximated")),
+        "JPEG brightness should normalize to passive PDF decode metadata: {:?}",
+        parsed.diagnostics
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("active content removed: object payload in metadata")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(
+        output
+            .pdf
+            .windows(b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1]".len())
+            .any(|window| window == b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1]"),
+        "JPEG tone metadata should render as a passive PDF decode array"
+    );
+    for forbidden in [
+        b"pictureBrightness".as_slice(),
+        b"pFragments",
+        b"hidden-tone-payload",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "picture tone metadata leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

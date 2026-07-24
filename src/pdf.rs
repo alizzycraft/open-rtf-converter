@@ -15,9 +15,10 @@ use crate::layout::{
     twips_to_points,
 };
 use crate::model::{
-    BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ShadingPattern,
-    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticImageVectorPathSegment, TextRelief, UnderlineStyle,
+    BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ImageToneAdjustment,
+    ShadingPattern, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment, TextRelief,
+    UnderlineStyle,
 };
 
 const HELVETICA_REGULAR: &[u8] = b"F1";
@@ -738,6 +739,7 @@ pub fn render_pdf_with_font_provider(
                             image.height_px,
                             &image.bytes,
                             &image.palette,
+                            image.tone_adjustment,
                             image_ref.alpha_mask_id,
                         );
                         if let (Some(alpha_mask), Some(alpha_mask_id)) =
@@ -781,6 +783,7 @@ pub fn render_pdf_with_font_provider(
                     fragment.image.height_px,
                     &fragment.image.bytes,
                     &fragment.image.palette,
+                    fragment.image.tone_adjustment,
                     image_ref.alpha_mask_id,
                 ),
                 ImageFormat::WmfVector | ImageFormat::Placeholder => {}
@@ -830,6 +833,7 @@ fn write_passive_image_xobject(
     height_px: u32,
     bytes: &[u8],
     palette: &[u8],
+    tone_adjustment: Option<ImageToneAdjustment>,
     alpha_mask_id: Option<Ref>,
 ) {
     match format {
@@ -862,14 +866,24 @@ fn write_passive_image_xobject(
             }
             image.bits_per_component(8);
             image.filter(Filter::DctDecode);
-            match format {
-                ImageFormat::JpegInverted => {
+            match (format, tone_adjustment) {
+                (ImageFormat::Jpeg, Some(tone_adjustment)) => {
+                    image.decode([
+                        tone_adjustment.decode_low,
+                        tone_adjustment.decode_high,
+                        tone_adjustment.decode_low,
+                        tone_adjustment.decode_high,
+                        tone_adjustment.decode_low,
+                        tone_adjustment.decode_high,
+                    ]);
+                }
+                (ImageFormat::JpegInverted, _) => {
                     image.decode([1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
                 }
-                ImageFormat::JpegGrayscaleInverted => {
+                (ImageFormat::JpegGrayscaleInverted, _) => {
                     image.decode([1.0, 0.0]);
                 }
-                ImageFormat::JpegCmykInverted => {
+                (ImageFormat::JpegCmykInverted, _) => {
                     image.decode([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
                 }
                 _ => {}
@@ -6017,11 +6031,11 @@ mod tests {
     use crate::layout::{DrawingFragment, LayoutEngine, LayoutItem};
     use crate::model::{
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
-        FontPitch, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER, PageSettings, Paragraph,
-        ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticImageAlphaMask, StaticShape,
-        StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-        StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, Table, TableCell, TableCellBorder,
-        TableRow, TableRowWrapMargins, UnderlineStyle,
+        FontPitch, ImageCrop, ImageFormat, ImageToneAdjustment, PAGE_NUMBER_MARKER, PageSettings,
+        Paragraph, ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticImageAlphaMask,
+        StaticShape, StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap,
+        StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, Table, TableCell,
+        TableCellBorder, TableRow, TableRowWrapMargins, UnderlineStyle,
     };
     use lopdf::{Dictionary, Object};
 
@@ -6154,6 +6168,7 @@ mod tests {
                 bytes: vec![255, 0, 0, 0, 0, 255],
                 palette: Vec::new(),
                 alpha_mask: None,
+                tone_adjustment: None,
                 vector_commands: Vec::new(),
                 width_px: 2,
                 height_px: 1,
@@ -6256,6 +6271,7 @@ mod tests {
             bytes: Vec::new(),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -6305,6 +6321,7 @@ mod tests {
             bytes: vec![255, 0, 0, 0, 0, 255],
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
@@ -6359,6 +6376,7 @@ mod tests {
             bytes: vec![255, 0, 0, 0, 0, 255],
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
@@ -6417,6 +6435,7 @@ mod tests {
             bytes: vec![255, 0, 0, 0, 0, 255],
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
@@ -7681,6 +7700,7 @@ endstream
             bytes: minimal_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -7725,6 +7745,7 @@ endstream
             bytes: minimal_grayscale_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -7769,6 +7790,7 @@ endstream
             bytes: minimal_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -7806,6 +7828,50 @@ endstream
     }
 
     #[test]
+    fn writes_passive_jpeg_tone_adjustment_as_decode_array() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Jpeg,
+            bytes: minimal_jpeg_with_dimensions(1, 1),
+            palette: Vec::new(),
+            alpha_mask: None,
+            tone_adjustment: Some(ImageToneAdjustment {
+                decode_low: 128.0 / 255.0,
+                decode_high: 1.0,
+            }),
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        assert!(
+            pdf.windows(b"/Decode [0.5019608 1 0.5019608 1 0.5019608 1]".len())
+                .any(|window| window == b"/Decode [0.5019608 1 0.5019608 1 0.5019608 1]")
+        );
+        assert!(
+            !pdf.windows(b"/JavaScript".len())
+                .any(|window| window == b"/JavaScript")
+        );
+        assert!(
+            !pdf.windows(b"/EmbeddedFile".len())
+                .any(|window| window == b"/EmbeddedFile")
+        );
+    }
+
+    #[test]
     fn writes_passive_jpeg_luminosity_blend_for_authored_grayscale_metadata() {
         let mut document = Document::default();
         document.blocks = vec![Block::Image(StaticImage {
@@ -7813,6 +7879,7 @@ endstream
             bytes: minimal_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -7867,6 +7934,7 @@ endstream
             bytes: minimal_cmyk_jpeg_with_dimensions(1, 1),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -7911,6 +7979,7 @@ endstream
             bytes: minimal_png_idat_for_1x1_rgb(),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -7961,6 +8030,7 @@ endstream
             alpha_mask: Some(StaticImageAlphaMask {
                 bytes: miniz_oxide::deflate::compress_to_vec_zlib(&[0, 128], 6),
             }),
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -8011,6 +8081,7 @@ endstream
             bytes: minimal_png_idat_for_1x1_indexed(),
             palette: vec![255, 0, 0, 0, 255, 0],
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 1,
             height_px: 1,
@@ -8063,6 +8134,7 @@ endstream
             bytes: vec![255, 0, 0, 0, 255, 0],
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
@@ -8111,6 +8183,7 @@ endstream
             bytes: minimal_jpeg_with_dimensions(100, 100),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 100,
             height_px: 100,
@@ -8165,6 +8238,7 @@ endstream
             bytes: minimal_jpeg_with_dimensions(2, 1),
             palette: Vec::new(),
             alpha_mask: None,
+            tone_adjustment: None,
             vector_commands: Vec::new(),
             width_px: 2,
             height_px: 1,
