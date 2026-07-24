@@ -1125,6 +1125,11 @@ fn nogrowautofit_preserves_authored_table_widths_without_control_leakage() {
             .message
             .contains("table autofit growth compatibility approximated")
     }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table autofit growth disabled through bounded passive authored widths")
+    }));
 
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
@@ -24391,6 +24396,11 @@ fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
         !diagnostic
             .message
             .contains("table autofit growth compatibility approximated")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table autofit growth disabled through bounded passive authored widths")
     }));
 
     let output = convert_rtf_to_pdf(

@@ -5494,6 +5494,12 @@ impl Parser {
                 if let Some(table) = self.current_table.as_mut() {
                     table.preserve_authored_widths = self.preserve_authored_table_widths;
                 }
+                if self.preserve_authored_table_widths {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "table autofit growth disabled through bounded passive authored widths",
+                        Some(offset),
+                    ));
+                }
             }
             "trautofit" => {
                 self.preserve_authored_table_widths = control.parameter.unwrap_or(1) == 0;
@@ -40898,6 +40904,11 @@ mod tests {
             !diagnostic
                 .message
                 .contains("table autofit growth compatibility approximated")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("table autofit growth disabled through bounded passive authored widths")
         }));
 
         let output =
