@@ -20090,7 +20090,12 @@ fn office_math_text_renders_passively_without_math_control_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("Office math layout approximated as passive text")
+            .contains("Office math rendered as bounded passive math text")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("Office math layout approximated")
     }));
 
     let output = convert_rtf_to_pdf(
@@ -22826,7 +22831,12 @@ fn office_math_delimiters_render_passive_text_without_control_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("Office math layout approximated as passive text")
+            .contains("Office math rendered as bounded passive math text")
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("Office math layout approximated")
     }));
 
     let output = convert_rtf_to_pdf(

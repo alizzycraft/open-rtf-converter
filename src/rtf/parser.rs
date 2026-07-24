@@ -2992,7 +2992,7 @@ impl Parser {
             {
                 if name == "mmath" || name == "moMath" {
                     self.diagnostics.push(Diagnostic::warning(
-                        "Office math layout approximated as passive text",
+                        "Office math rendered as bounded passive math text",
                         Some(offset),
                     ));
                 }
