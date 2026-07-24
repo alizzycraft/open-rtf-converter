@@ -2202,7 +2202,7 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
-                                "environment field {name} removed without exposing converter host state"
+                                "environment field {name} rendered as passive placeholder without exposing converter host state"
                             ),
                             Some(offset),
                         ));
@@ -2215,7 +2215,9 @@ impl Parser {
                         && is_dynamic_clock_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
-                            format!("dynamic field {name} removed without reading converter clock"),
+                            format!(
+                                "dynamic field {name} rendered as passive placeholder without reading converter clock"
+                            ),
                             Some(offset),
                         ));
                         self.push_placeholder_for_destination(
@@ -42616,13 +42618,18 @@ After\par}"#;
         ] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
-                    diagnostic
-                        .message
-                        .contains(&format!("environment field {name} removed"))
+                    diagnostic.message.contains(&format!(
+                        "environment field {name} rendered as passive placeholder without exposing converter host state"
+                    ))
                 }),
                 "missing diagnostic for {name}"
             );
         }
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("environment field FILENAME removed")
+        }));
 
         let strip_options = RtfParseOptions {
             active_content_policy: ActiveContentPolicy::Strip,
@@ -42766,11 +42773,17 @@ After\par}"#;
         }
         for name in ["DATE", "TIME"] {
             assert!(output.diagnostics.iter().any(|diagnostic| {
-                diagnostic
-                    .message
-                    .contains(&format!("dynamic field {name} removed"))
+                diagnostic.message.contains(&format!(
+                    "dynamic field {name} rendered as passive placeholder without reading converter clock"
+                ))
             }));
         }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| { !diagnostic.message.contains("dynamic field DATE removed") })
+        );
 
         let strip_options = RtfParseOptions {
             active_content_policy: ActiveContentPolicy::Strip,
@@ -43713,7 +43726,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("dynamic field DATE removed without reading converter clock")
+                .contains("dynamic field DATE rendered as passive placeholder without reading converter clock")
         }));
     }
 

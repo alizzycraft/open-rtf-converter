@@ -9604,7 +9604,12 @@ fn date_fields_use_stored_results_and_never_update_or_leak_instructions() {
     assert!(!resultless_text.contains("DATE"));
     assert!(!resultless_text.contains("current-date-sentinel"));
     assert!(resultless.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+        diagnostic.message.contains(
+            "dynamic field DATE rendered as passive placeholder without reading converter clock",
+        )
+    }));
+    assert!(resultless.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("dynamic field DATE removed without reading converter clock")
     }));
@@ -14717,6 +14722,28 @@ visible after\par}"#
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("visible after"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for name in [
+        "FILENAME",
+        "FILESIZE",
+        "TEMPLATE",
+        "USERNAME",
+        "USERINITIALS",
+        "USERADDRESS",
+    ] {
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "environment field {name} rendered as passive placeholder without exposing converter host state"
+                ))
+            }),
+            "missing environment field diagnostic for {name}"
+        );
+    }
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("environment field FILENAME removed")
+    }));
     for forbidden in [
         b"FILENAME".as_slice(),
         b"FILESIZE",
@@ -14825,6 +14852,21 @@ visible after\par}"#
         !diagnostic
             .message
             .contains("ADVANCE stripped without applying cursor positioning")
+    }));
+    for name in ["DATE", "TIME"] {
+        assert!(
+            output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "dynamic field {name} rendered as passive placeholder without reading converter clock"
+                ))
+            }),
+            "missing dynamic clock diagnostic for {name}"
+        );
+    }
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("dynamic field DATE removed without reading converter clock")
     }));
     for forbidden in [
         b"ADVANCE".as_slice(),
