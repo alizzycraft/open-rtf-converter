@@ -24901,20 +24901,24 @@ impl<'a> FormulaParser<'a> {
     }
 
     fn parse(mut self) -> Option<i64> {
-        let left = self.parse_expression()?;
-        self.skip_ws();
-        let value = if let Some(operator) = self.parse_comparison_operator() {
-            let right = self.parse_expression()?;
-            if formula_comparison_matches(left, operator, right) {
-                1
-            } else {
-                0
-            }
-        } else {
-            left
-        };
+        let value = self.parse_comparison_expression()?;
         self.skip_ws();
         (self.pos == self.input.len()).then_some(value)
+    }
+
+    fn parse_comparison_expression(&mut self) -> Option<i64> {
+        let left = self.parse_expression()?;
+        self.skip_ws();
+        if let Some(operator) = self.parse_comparison_operator() {
+            let right = self.parse_expression()?;
+            if formula_comparison_matches(left, operator, right) {
+                Some(1)
+            } else {
+                Some(0)
+            }
+        } else {
+            Some(left)
+        }
     }
 
     fn parse_expression(&mut self) -> Option<i64> {
@@ -24965,7 +24969,7 @@ impl<'a> FormulaParser<'a> {
     fn parse_factor(&mut self) -> Option<i64> {
         self.skip_ws();
         if self.consume('(') {
-            let value = self.parse_expression()?;
+            let value = self.parse_comparison_expression()?;
             self.skip_ws();
             return self.consume(')').then_some(value);
         }
@@ -25037,7 +25041,7 @@ impl<'a> FormulaParser<'a> {
             if args >= MAX_PASSIVE_FORMULA_FUNCTION_ARGS {
                 return None;
             }
-            let argument = self.parse_expression()?;
+            let argument = self.parse_comparison_expression()?;
             value = match name {
                 "SUM" => value.checked_add(argument)?,
                 "MIN" if args == 0 => argument,
@@ -44301,6 +44305,40 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula comparison field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_nested_comparisons_render_bounded_passive_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 Arithmetic {\field{\*\fldinst = (2 > 1) + 4}} and {\field{\*\fldinst = AND(1 < 2, TRUE)}} or {\field{\*\fldinst = OR(2 < 1, 3 = 3)}} not {\field{\*\fldinst = NOT(2 <> 2)}} malformed {\field{\*\fldinst = AND(1 < 2 < 3, TRUE)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Arithmetic 5 and 1 or 1 not 1 malformed [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "2 > 1",
+            "1 < 2",
+            "TRUE",
+            "2 < 1",
+            "3 = 3",
+            "2 <> 2",
+            "1 < 2 < 3",
+            "AND",
+            "OR",
+            "NOT",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "nested formula comparison leaked unsafe text: {forbidden}"
             );
         }
     }
