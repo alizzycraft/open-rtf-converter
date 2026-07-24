@@ -12757,21 +12757,32 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "\\",
         "*",
         "\\",
-        "fldinst = -8 + 3 * 2}}.",
+        "fldinst = -8 + 3 * 2}} sum {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = SUM(1, 2 + 3, (4 * 5)) \\\\# \"000\"}} malformed {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = AVG(1,2)}}.",
         "\\",
         "par}",
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Total 30 and delta -2."));
+    assert!(
+        text.contains(
+            "Total 30 and delta -2 sum 026 malformed [Field removed: no passive result]."
+        )
+    );
     for forbidden in [
-        "fldinst",
-        "\\#",
-        "\"0\"",
-        "(6 + 4)",
-        "3 * 2",
-        "[Field removed",
+        "fldinst", "\\#", "\"0\"", "\"000\"", "(6 + 4)", "3 * 2", "SUM", "AVG", "2 + 3", "4 * 5",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -12797,15 +12808,22 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     assert!(
-        rendered_text.contains("Total 30 and delta -2."),
+        rendered_text.contains(
+            "Total 30 and delta -2 sum 026 malformed [Field removed: no passive result]."
+        ),
         "decoded PDF text did not contain passive formula values: {rendered_text:?}"
     );
     for forbidden in [
         b"fldinst".as_slice(),
         b"\\#",
         b"\"0\"",
+        b"\"000\"",
         b"(6 + 4)",
         b"3 * 2",
+        b"SUM",
+        b"AVG",
+        b"2 + 3",
+        b"4 * 5",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

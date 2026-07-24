@@ -22906,6 +22906,7 @@ struct FormulaParser<'a> {
     pos: usize,
 }
 
+const MAX_PASSIVE_FORMULA_FUNCTION_ARGS: usize = 32;
 const MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS: usize = 4096;
 const MAX_PASSIVE_FIELD_NUMERIC_PICTURE_CHARS: usize = 64;
 const MAX_PASSIVE_FIELD_DATE_PICTURE_CHARS: usize = 96;
@@ -24936,6 +24937,14 @@ impl<'a> FormulaParser<'a> {
         }
 
         let negative = self.consume('-');
+        if self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
+            let value = self.parse_function()?;
+            return if negative {
+                value.checked_neg()
+            } else {
+                Some(value)
+            };
+        }
         let value = self.parse_number()?;
         if negative {
             value.checked_neg()
@@ -24955,6 +24964,55 @@ impl<'a> FormulaParser<'a> {
             }
         }
         (self.pos > start).then(|| self.input[start..self.pos].parse::<i64>().ok())?
+    }
+
+    fn parse_function(&mut self) -> Option<i64> {
+        let name = self.parse_identifier()?;
+        self.skip_ws();
+        if !self.consume('(') {
+            return None;
+        }
+
+        let mut value = 0i64;
+        let mut args = 0usize;
+        loop {
+            self.skip_ws();
+            if self.consume(')') {
+                return (args > 0).then_some(value);
+            }
+
+            if args >= MAX_PASSIVE_FORMULA_FUNCTION_ARGS {
+                return None;
+            }
+            let argument = self.parse_expression()?;
+            value = match name.as_str() {
+                "SUM" => value.checked_add(argument)?,
+                _ => return None,
+            };
+            args += 1;
+
+            self.skip_ws();
+            if self.consume(',') {
+                continue;
+            }
+            if self.consume(')') {
+                return Some(value);
+            }
+            return None;
+        }
+    }
+
+    fn parse_identifier(&mut self) -> Option<String> {
+        self.skip_ws();
+        let start = self.pos;
+        while let Some(ch) = self.peek() {
+            if ch.is_ascii_alphabetic() {
+                self.pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        (self.pos > start).then(|| self.input[start..self.pos].to_ascii_uppercase())
     }
 
     fn skip_ws(&mut self) {
@@ -44001,6 +44059,23 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "forbidden field number-switch content leaked to text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_sum_function_renders_bounded_passive_total() {
+        let output = parse_rtf(
+            r#"{\rtf1 Total {\field{\*\fldinst = SUM(1, 2 + 3, (4 * 5)) \\# "000"}} malformed {\field{\*\fldinst = AVG(1,2)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Total 026 malformed [Field removed: no passive result]"));
+        for forbidden in ["SUM", "AVG", "1,2", "2 + 3", "4 * 5", "fldinst", "\\#"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula function field leaked unsafe text: {forbidden}"
             );
         }
     }
