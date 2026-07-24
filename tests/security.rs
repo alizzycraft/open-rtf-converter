@@ -27832,6 +27832,12 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
         "\\",
         "sp{",
         "\\",
+        "sn pictureBrightness}{",
+        "\\",
+        "sv 32768}}{",
+        "\\",
+        "sp{",
+        "\\",
         "sn pFragments}{",
         "\\",
         "sv hostile-visible-picture-metadata {",
@@ -27864,6 +27870,16 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
         diagnostic.message.contains(
             "JPEG picture bilevel property rendered as passive PDF decode with luminosity blend",
         )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "JPEG picture brightness/contrast property preserved as bounded passive original image",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("JPEG picture brightness/contrast property approximated")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -27954,6 +27970,7 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
     for forbidden in [
         b"pictureGray".as_slice(),
         b"pictureBiLevel",
+        b"pictureBrightness",
         b"pFragments",
         b"hostile-visible-picture-metadata",
         b"objdata",

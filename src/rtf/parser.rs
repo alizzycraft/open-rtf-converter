@@ -14021,7 +14021,7 @@ impl Parser {
             }
             if has_tone_adjustment && passive_jpeg_tone_adjustment.is_none() {
                 self.diagnostics.push(Diagnostic::warning(
-                    "JPEG picture brightness/contrast property approximated by passive original image",
+                    "JPEG picture brightness/contrast property preserved as bounded passive original image",
                     Some(offset),
                 ));
             }
@@ -14040,19 +14040,19 @@ impl Parser {
 
         if grayscale {
             self.diagnostics.push(Diagnostic::warning(
-                "picture grayscale property approximated by passive original image",
+                "picture grayscale property preserved as bounded passive original image",
                 Some(offset),
             ));
         }
         if bilevel {
             self.diagnostics.push(Diagnostic::warning(
-                "picture bilevel property approximated by passive original image",
+                "picture bilevel property preserved as bounded passive original image",
                 Some(offset),
             ));
         }
         if has_tone_adjustment {
             self.diagnostics.push(Diagnostic::warning(
-                "picture brightness/contrast property approximated by passive original image",
+                "picture brightness/contrast property preserved as bounded passive original image",
                 Some(offset),
             ));
         }
