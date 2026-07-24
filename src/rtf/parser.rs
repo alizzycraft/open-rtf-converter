@@ -14003,6 +14003,10 @@ impl Parser {
         };
         if let Some(tone_adjustment) = passive_jpeg_tone_adjustment {
             image.tone_adjustment = Some(tone_adjustment);
+            self.diagnostics.push(Diagnostic::warning(
+                "JPEG picture brightness/contrast property rendered as passive PDF decode",
+                Some(offset),
+            ));
             if !grayscale {
                 return;
             }

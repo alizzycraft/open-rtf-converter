@@ -28056,6 +28056,11 @@ fn jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
+            .contains("JPEG picture brightness/contrast property rendered as passive PDF decode")
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
             .contains("active content removed: object payload in metadata")
     }));
 
@@ -28171,6 +28176,11 @@ fn grayscale_jpeg_brightness_metadata_renders_passive_decode_without_payload_lea
         "grayscale JPEG brightness should normalize to passive PDF decode metadata: {:?}",
         parsed.diagnostics
     );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("JPEG picture brightness/contrast property rendered as passive PDF decode")
+    }));
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -28294,6 +28304,11 @@ fn rgb_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leaka
         "RGB JPEG grayscale and brightness should normalize to passive PDF metadata: {:?}",
         parsed.diagnostics
     );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("JPEG picture brightness/contrast property rendered as passive PDF decode")
+    }));
 
     let output = convert_rtf_to_pdf(
         &input,
