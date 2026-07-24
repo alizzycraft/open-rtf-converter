@@ -16721,7 +16721,7 @@ impl Parser {
             ActiveContentPolicy::Placeholder => {
                 self.diagnostics.push(Diagnostic::warning(
                     format!(
-                        "dynamic date/time control {control_name} placeholdered without evaluating current time"
+                        "dynamic date/time control {control_name} rendered as passive placeholder without evaluating current time"
                     ),
                     Some(offset),
                 ));
@@ -43880,7 +43880,12 @@ After\par}"#;
         assert!(!text.contains("chdpa"));
         assert!(!text.contains("chdpl"));
         assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
+            diagnostic.message.contains(
+                "dynamic date/time control chdate rendered as passive placeholder without evaluating current time",
+            )
+        }));
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
                 .message
                 .contains("dynamic date/time control chdate placeholdered")
         }));

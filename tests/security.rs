@@ -16539,6 +16539,16 @@ fn dynamic_date_time_controls_do_not_evaluate_or_leak_to_pdf() {
     let rendered_text = decoded_pdf_text(&content);
 
     assert!(rendered_text.contains("[Dynamic date/time removed]"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "dynamic date/time control chdate rendered as passive placeholder without evaluating current time",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("dynamic date/time control chdate placeholdered")
+    }));
     for forbidden in [
         b"chdate".as_slice(),
         b"chtime",
