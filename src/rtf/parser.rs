@@ -1408,6 +1408,8 @@ struct Parser {
     document_timestamps: Vec<(DocumentTimestampKind, DocumentTimestamp)>,
     document_edit_minutes: Option<i32>,
     document_revision_number: Option<i32>,
+    document_paragraph_count: Option<i32>,
+    document_line_count: Option<i32>,
     field_bookmark_values: Vec<(String, String)>,
     style_reference_texts: Vec<(i32, String)>,
     style_reference_number_texts: Vec<(i32, String)>,
@@ -1606,6 +1608,8 @@ impl Parser {
             document_timestamps: Vec::new(),
             document_edit_minutes: None,
             document_revision_number: None,
+            document_paragraph_count: None,
+            document_line_count: None,
             field_bookmark_values: Vec::new(),
             style_reference_texts: Vec::new(),
             style_reference_number_texts: Vec::new(),
@@ -3206,6 +3210,18 @@ impl Parser {
                     && self.state.destination == Destination::Metadata =>
             {
                 self.set_document_revision_number(control.parameter, offset)?;
+            }
+            "nofparas"
+                if self.state.inside_document_info
+                    && self.state.destination == Destination::Metadata =>
+            {
+                self.set_document_paragraph_count(control.parameter, offset)?;
+            }
+            "noflines"
+                if self.state.inside_document_info
+                    && self.state.destination == Destination::Metadata =>
+            {
+                self.set_document_line_count(control.parameter, offset)?;
             }
             "propname"
                 if control_starts_group
@@ -8808,20 +8824,11 @@ impl Parser {
         offset: usize,
     ) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes("edmins".len(), offset)?;
-        let Some(value) = value else {
-            return Ok(());
-        };
-        if value < 0 {
-            return Ok(());
+        if let Some(value) =
+            self.bounded_document_metadata_count(value, "document edit minutes", offset)?
+        {
+            self.document_edit_minutes = Some(value);
         }
-        let max = self.limits().max_output_text_chars.min(i32::MAX as usize) as i32;
-        if value > max {
-            return Err(ParseError::ResourceLimitExceeded {
-                resource: "document edit minutes".to_string(),
-                offset,
-            });
-        }
-        self.document_edit_minutes = Some(value);
         Ok(())
     }
 
@@ -8831,21 +8838,62 @@ impl Parser {
         offset: usize,
     ) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes("version".len(), offset)?;
+        if let Some(value) =
+            self.bounded_document_metadata_count(value, "document revision number", offset)?
+        {
+            self.document_revision_number = Some(value);
+        }
+        Ok(())
+    }
+
+    fn set_document_paragraph_count(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes("nofparas".len(), offset)?;
+        if let Some(value) =
+            self.bounded_document_metadata_count(value, "document paragraph count", offset)?
+        {
+            self.document_paragraph_count = Some(value);
+        }
+        Ok(())
+    }
+
+    fn set_document_line_count(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes("noflines".len(), offset)?;
+        if let Some(value) =
+            self.bounded_document_metadata_count(value, "document line count", offset)?
+        {
+            self.document_line_count = Some(value);
+        }
+        Ok(())
+    }
+
+    fn bounded_document_metadata_count(
+        &self,
+        value: Option<i32>,
+        resource: &str,
+        offset: usize,
+    ) -> Result<Option<i32>, ParseError> {
         let Some(value) = value else {
-            return Ok(());
+            return Ok(None);
         };
         if value < 0 {
-            return Ok(());
+            return Ok(None);
         }
         let max = self.limits().max_output_text_chars.min(i32::MAX as usize) as i32;
         if value > max {
             return Err(ParseError::ResourceLimitExceeded {
-                resource: "document revision number".to_string(),
+                resource: resource.to_string(),
                 offset,
             });
         }
-        self.document_revision_number = Some(value);
-        Ok(())
+        Ok(Some(value))
     }
 
     fn push_user_property_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
@@ -9346,6 +9394,10 @@ impl Parser {
         match normalized_document_property_name(name).as_str() {
             "revision number" | "revision" => Some(self.document_revision_number?.to_string()),
             "total editing time" | "editing time" => Some(self.document_edit_minutes?.to_string()),
+            "number of paragraphs" | "paragraphs" => {
+                Some(self.document_paragraph_count?.to_string())
+            }
+            "number of lines" | "lines" => Some(self.document_line_count?.to_string()),
             _ => None,
         }
     }
@@ -45624,19 +45676,23 @@ After\par}"#;
     #[test]
     fn resultless_docproperty_numeric_aliases_render_from_metadata_only() {
         let output = parse_rtf(
-            r#"{\rtf1{\info{\version42}{\edmins17}}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"#,
+            r#"{\rtf1{\info{\version42}{\edmins17}\nofparas3\noflines12}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} paragraphs {\field{\*\fldinst DOCPROPERTY "Number of Paragraphs"}} lines {\field{\*\fldinst DOCPROPERTY "Number of Lines" \\# "000"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Revision XLII edit 0017 missing 17"));
+        assert!(text.contains("Revision XLII edit 0017 paragraphs 3 lines 012 missing 17"));
         for forbidden in [
             "DOCPROPERTY",
             "Revision Number",
             "Total Editing Time",
+            "Number of Paragraphs",
+            "Number of Lines",
             "Editing Time",
             "version",
             "edmins",
+            "nofparas",
+            "noflines",
             "fldinst",
             "[Field removed",
         ] {
@@ -45730,13 +45786,14 @@ After\par}"#;
     #[test]
     fn resultless_info_metadata_aliases_render_passive_values() {
         let output = parse_rtf(
-            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30}{\revtim\yr2025\mo1\dy2}{\version9}{\edmins17}}Alpha beta Gamma info created {\field{\*\fldinst INFO "Creation Date" \\@ "yyyy-MM-dd"}} saved {\field{\*\fldinst INFO "Last Save Time"}} revision {\field{\*\fldinst INFO "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst INFO "Total Editing Time" \\# "0000"}} words {\field{\*\fldinst INFO "Number of Words"}} file {\field{\*\fldinst INFO Filename}}\par}"#,
+            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30}{\revtim\yr2025\mo1\dy2}{\version9}{\edmins17}\nofparas3\noflines12}Alpha beta Gamma info created {\field{\*\fldinst INFO "Creation Date" \\@ "yyyy-MM-dd"}} saved {\field{\*\fldinst INFO "Last Save Time"}} revision {\field{\*\fldinst INFO "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst INFO "Total Editing Time" \\# "0000"}} words {\field{\*\fldinst INFO "Number of Words"}} paragraphs {\field{\*\fldinst INFO "Number of Paragraphs"}} lines {\field{\*\fldinst INFO "Number of Lines" \\# "000"}} file {\field{\*\fldinst INFO Filename}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
         assert!(text.contains("created 2024-07-05 saved 2025-01-02 00:00:00"));
         assert!(text.contains("revision IX edit 0017"));
+        assert!(text.contains("paragraphs 3 lines 012"));
         assert!(text.contains(DOCUMENT_WORDS_MARKER));
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
@@ -45749,11 +45806,15 @@ After\par}"#;
             "Revision Number",
             "Total Editing Time",
             "Number of Words",
+            "Number of Paragraphs",
+            "Number of Lines",
             "Filename",
             "creatim",
             "revtim",
             "version",
             "edmins",
+            "nofparas",
+            "noflines",
             "fldinst",
         ] {
             assert!(

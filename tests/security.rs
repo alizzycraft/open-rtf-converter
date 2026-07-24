@@ -9433,18 +9433,22 @@ fn docproperty_stat_aliases_resolve_layout_stats_without_instruction_leakage() {
 
 #[test]
 fn docproperty_numeric_aliases_render_metadata_without_instruction_leakage() {
-    let input = br#"{\rtf1{\info{\version42}{\edmins17}}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"#.to_vec();
+    let input = br#"{\rtf1{\info{\version42}{\edmins17}\nofparas3\noflines12}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} paragraphs {\field{\*\fldinst DOCPROPERTY "Number of Paragraphs"}} lines {\field{\*\fldinst DOCPROPERTY "Number of Lines" \\# "000"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Revision XLII edit 0017 missing 17"));
+    assert!(text.contains("Revision XLII edit 0017 paragraphs 3 lines 012 missing 17"));
     for forbidden in [
         "DOCPROPERTY",
         "Revision Number",
         "Total Editing Time",
+        "Number of Paragraphs",
+        "Number of Lines",
         "Editing Time",
         "version",
         "edmins",
+        "nofparas",
+        "noflines",
         "fldinst",
         "[Field removed",
     ] {
@@ -9461,16 +9465,20 @@ fn docproperty_numeric_aliases_render_metadata_without_instruction_leakage() {
     let rendered_text = decoded_pdf_text(&content);
 
     assert!(
-        rendered_text.contains("Revision XLII edit 0017 missing 17"),
+        rendered_text.contains("Revision XLII edit 0017 paragraphs 3 lines 012 missing 17"),
         "decoded PDF text did not contain passive numeric DOCPROPERTY values: {rendered_text:?}"
     );
     for forbidden in [
         b"DOCPROPERTY".as_slice(),
         b"Revision Number",
         b"Total Editing Time",
+        b"Number of Paragraphs",
+        b"Number of Lines",
         b"Editing Time",
         b"version",
         b"edmins",
+        b"nofparas",
+        b"noflines",
         b"fldinst",
         b"/Action",
         b"/Annots",
@@ -9605,7 +9613,7 @@ fn info_fields_render_metadata_without_instruction_or_active_payload_leakage() {
 
 #[test]
 fn info_metadata_aliases_render_passively_without_instruction_leakage() {
-    let input = br#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30}{\revtim\yr2025\mo1\dy2}{\version9}{\edmins17}}Alpha beta Gamma info created {\field{\*\fldinst INFO "Creation Date" \\@ "yyyy-MM-dd"}} saved {\field{\*\fldinst INFO "Last Save Time"}} revision {\field{\*\fldinst INFO "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst INFO "Total Editing Time" \\# "0000"}} words {\field{\*\fldinst INFO "Number of Words"}} file {\field{\*\fldinst INFO Filename}}\par}"#.to_vec();
+    let input = br#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30}{\revtim\yr2025\mo1\dy2}{\version9}{\edmins17}\nofparas3\noflines12}Alpha beta Gamma info created {\field{\*\fldinst INFO "Creation Date" \\@ "yyyy-MM-dd"}} saved {\field{\*\fldinst INFO "Last Save Time"}} revision {\field{\*\fldinst INFO "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst INFO "Total Editing Time" \\# "0000"}} words {\field{\*\fldinst INFO "Number of Words"}} paragraphs {\field{\*\fldinst INFO "Number of Paragraphs"}} lines {\field{\*\fldinst INFO "Number of Lines" \\# "000"}} file {\field{\*\fldinst INFO Filename}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
@@ -9615,6 +9623,7 @@ fn info_metadata_aliases_render_passively_without_instruction_leakage() {
     assert!(rendered_text.contains("created 2024-07-05"));
     assert!(rendered_text.contains("saved 2025-01-02 00:00:00"));
     assert!(rendered_text.contains("revision IX edit 0017"));
+    assert!(rendered_text.contains("paragraphs 3 lines 012"));
     assert!(rendered_text.contains("words"));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
     for forbidden in [
@@ -9624,11 +9633,15 @@ fn info_metadata_aliases_render_passively_without_instruction_leakage() {
         "Revision Number",
         "Total Editing Time",
         "Number of Words",
+        "Number of Paragraphs",
+        "Number of Lines",
         "Filename",
         "creatim",
         "revtim",
         "version",
         "edmins",
+        "nofparas",
+        "noflines",
         "fldinst",
     ] {
         assert!(
@@ -9638,6 +9651,8 @@ fn info_metadata_aliases_render_passively_without_instruction_leakage() {
     }
     for forbidden in [
         b"INFO".as_slice(),
+        b"nofparas",
+        b"noflines",
         b"/Action",
         b"/Annots",
         b"/JavaScript",
