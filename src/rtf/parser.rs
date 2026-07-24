@@ -24998,6 +24998,12 @@ impl<'a> FormulaParser<'a> {
                 "ABS" if args == 0 => argument.checked_abs()?,
                 "ABS" => return None,
                 "PRODUCT" => value.checked_mul(argument)?,
+                "POWER" if args == 0 => argument,
+                "POWER" if args == 1 => {
+                    let exponent = u32::try_from(argument).ok()?;
+                    value.checked_pow(exponent)?
+                }
+                "POWER" => return None,
                 "MOD" if args == 0 => argument,
                 "MOD" if args == 1 => {
                     if argument == 0 {
@@ -25042,7 +25048,7 @@ impl<'a> FormulaParser<'a> {
             return None;
         }
         match name {
-            "MOD" | "ROUND" if args != 2 => None,
+            "MOD" | "POWER" | "ROUND" if args != 2 => None,
             "AVERAGE" => {
                 let divisor = i64::try_from(args).ok()?;
                 (value % divisor == 0).then_some(value / divisor)
@@ -44176,6 +44182,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula PRODUCT field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_power_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Power {\field{\*\fldinst = POWER(2 + 1, 4)}} negative {\field{\*\fldinst = POWER(2,-1)}} extra {\field{\*\fldinst = POWER(2,3,1)}} overflow {\field{\*\fldinst = POWER(999999999,9)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "Power 81 negative [Field removed: no passive result] extra [Field removed: no passive result] overflow [Field removed: no passive result]"
+        ));
+        for forbidden in ["POWER", "2 + 1", "2,-1", "2,3,1", "999999999", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula POWER field leaked unsafe text: {forbidden}"
             );
         }
     }
