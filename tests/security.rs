@@ -9604,6 +9604,59 @@ fn info_fields_render_metadata_without_instruction_or_active_payload_leakage() {
 }
 
 #[test]
+fn info_metadata_aliases_render_passively_without_instruction_leakage() {
+    let input = br#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30}{\revtim\yr2025\mo1\dy2}{\version9}{\edmins17}}Alpha beta Gamma info created {\field{\*\fldinst INFO "Creation Date" \\@ "yyyy-MM-dd"}} saved {\field{\*\fldinst INFO "Last Save Time"}} revision {\field{\*\fldinst INFO "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst INFO "Total Editing Time" \\# "0000"}} words {\field{\*\fldinst INFO "Number of Words"}} file {\field{\*\fldinst INFO Filename}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("created 2024-07-05"));
+    assert!(rendered_text.contains("saved 2025-01-02 00:00:00"));
+    assert!(rendered_text.contains("revision IX edit 0017"));
+    assert!(rendered_text.contains("words"));
+    assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for forbidden in [
+        "INFO",
+        "Creation Date",
+        "Last Save Time",
+        "Revision Number",
+        "Total Editing Time",
+        "Number of Words",
+        "Filename",
+        "creatim",
+        "revtim",
+        "version",
+        "edmins",
+        "fldinst",
+    ] {
+        assert!(
+            !rendered_text.contains(forbidden),
+            "INFO metadata alias leaked instruction text: {forbidden}"
+        );
+    }
+    for forbidden in [
+        b"INFO".as_slice(),
+        b"/Action",
+        b"/Annots",
+        b"/JavaScript",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "INFO metadata alias leaked active PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn docproperty_fields_render_custom_properties_without_leaking_linked_or_active_content() {
     let input = br#"{\rtf1{\*\userprops{\propname Client Name}{\proptype30}{\staticval Contoso {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}} tail}{\linkval Hidden linked value}}Client {\field{\*\fldinst DOCPROPERTY "Client Name"}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();

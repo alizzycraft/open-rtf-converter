@@ -9214,21 +9214,8 @@ impl Parser {
 
     fn passive_doc_property_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
-        let text = if let Some(marker) = document_stat_property_field_marker(&name) {
-            marker.to_string()
-        } else if let Some(kind) = document_timestamp_property_field_name(&name) {
-            let timestamp = self
-                .document_timestamps
-                .iter()
-                .find_map(|(stored_kind, timestamp)| (*stored_kind == kind).then_some(timestamp))?;
-            if let Some(picture) = field_date_picture_switch(instruction)? {
-                apply_field_date_picture(timestamp, &picture)?
-            } else {
-                format_default_document_timestamp(timestamp)
-            }
-        } else if let Some(property) = document_property_field_name(&name) {
-            self.document_property_text(property)?.clone()
-        } else if let Some(text) = self.document_numeric_property_field_text(&name) {
+        let text = if let Some(text) = self.passive_document_property_field_text(&name, instruction)
+        {
             text
         } else {
             self.custom_document_properties
@@ -9264,9 +9251,8 @@ impl Parser {
 
     fn passive_info_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
-        let property = document_property_field_name(&name)?;
         Some(PassiveFieldResult {
-            text: self.document_property_text(property)?.clone(),
+            text: self.passive_document_property_field_text(&name, instruction)?,
             font_name: None,
             font_size_half_points: None,
             form_field: false,
@@ -9289,6 +9275,31 @@ impl Parser {
         self.document_properties
             .iter()
             .find_map(|(stored_property, text)| (*stored_property == property).then(|| text))
+    }
+
+    fn passive_document_property_field_text(
+        &self,
+        name: &str,
+        instruction: &str,
+    ) -> Option<String> {
+        if let Some(marker) = document_stat_property_field_marker(name) {
+            return Some(marker.to_string());
+        }
+        if let Some(kind) = document_timestamp_property_field_name(name) {
+            let timestamp = self
+                .document_timestamps
+                .iter()
+                .find_map(|(stored_kind, timestamp)| (*stored_kind == kind).then_some(timestamp))?;
+            return if let Some(picture) = field_date_picture_switch(instruction)? {
+                apply_field_date_picture(timestamp, &picture)
+            } else {
+                Some(format_default_document_timestamp(timestamp))
+            };
+        }
+        if let Some(property) = document_property_field_name(name) {
+            return self.document_property_text(property).cloned();
+        }
+        self.document_numeric_property_field_text(name)
     }
 
     fn passive_document_timestamp_field_result(
@@ -22943,6 +22954,7 @@ fn field_result_allows_internal_marker(instruction: &str, text: &str) -> bool {
         Some("SECTIONPAGES") => text == SECTION_PAGES_MARKER,
         Some("PAGEREF") => is_bookmark_page_marker(text),
         Some("DOCPROPERTY") => field_docproperty_result_allows_internal_marker(instruction, text),
+        Some("INFO") => field_document_property_result_allows_internal_marker(instruction, text),
         _ => false,
     }
 }
@@ -23216,6 +23228,10 @@ fn document_stat_property_field_marker(name: &str) -> Option<&'static str> {
 }
 
 fn field_docproperty_result_allows_internal_marker(instruction: &str, text: &str) -> bool {
+    field_document_property_result_allows_internal_marker(instruction, text)
+}
+
+fn field_document_property_result_allows_internal_marker(instruction: &str, text: &str) -> bool {
     field_first_argument(instruction)
         .and_then(|name| document_stat_property_field_marker(&name))
         .is_some_and(|marker| marker == text)
@@ -45707,6 +45723,42 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "INFO field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_info_metadata_aliases_render_passive_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30}{\revtim\yr2025\mo1\dy2}{\version9}{\edmins17}}Alpha beta Gamma info created {\field{\*\fldinst INFO "Creation Date" \\@ "yyyy-MM-dd"}} saved {\field{\*\fldinst INFO "Last Save Time"}} revision {\field{\*\fldinst INFO "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst INFO "Total Editing Time" \\# "0000"}} words {\field{\*\fldinst INFO "Number of Words"}} file {\field{\*\fldinst INFO Filename}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("created 2024-07-05 saved 2025-01-02 00:00:00"));
+        assert!(text.contains("revision IX edit 0017"));
+        assert!(text.contains(DOCUMENT_WORDS_MARKER));
+        assert_eq!(
+            text.matches("[Field removed: no passive result]").count(),
+            1
+        );
+        for forbidden in [
+            "INFO",
+            "Creation Date",
+            "Last Save Time",
+            "Revision Number",
+            "Total Editing Time",
+            "Number of Words",
+            "Filename",
+            "creatim",
+            "revtim",
+            "version",
+            "edmins",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "INFO metadata alias leaked unsafe text: {forbidden}"
             );
         }
     }
