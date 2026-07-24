@@ -3915,9 +3915,21 @@ impl Parser {
             }
             "dodhgt" | "shpz" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_z_order(control.parameter, offset);
+                if control.parameter.unwrap_or(0) != 0 {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "shape z-order rendered through bounded passive drawing order",
+                        Some(offset),
+                    ));
+                }
             }
             "shpfblwtxt" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_below_text(control.parameter);
+                if control.parameter.unwrap_or(1) != 0 {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "shape below-text flag rendered through bounded passive drawing order",
+                        Some(offset),
+                    ));
+                }
             }
             name if self.state.destination == Destination::Shape
                 && is_shape_layout_compatibility_control(name) =>

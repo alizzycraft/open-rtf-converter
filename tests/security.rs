@@ -84367,6 +84367,15 @@ fn shape_z_order_controls_are_bounded_and_do_not_leak() {
         "oversized z-order should be reported as clamped: {:?}",
         parsed.diagnostics
     );
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("shape z-order rendered through bounded passive drawing order")
+        }),
+        "nonzero modern z-order should be reported as applied passive ordering: {:?}",
+        parsed.diagnostics
+    );
 
     let legacy = parse_rtf_bytes(&rtf(&[
         "{",
@@ -84399,6 +84408,15 @@ fn shape_z_order_controls_are_bounded_and_do_not_leak() {
         .expect("legacy z-ordered shape");
 
     assert_eq!(legacy_shape.z_order, 17);
+    assert!(
+        legacy.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("shape z-order rendered through bounded passive drawing order")
+        }),
+        "legacy z-order should be reported as applied passive ordering: {:?}",
+        legacy.diagnostics
+    );
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let shape_picture = parse_rtf_bytes(&rtf(&[
         "{",
@@ -84441,6 +84459,15 @@ fn shape_z_order_controls_are_bounded_and_do_not_leak() {
         .expect("shape picture placement z-order");
 
     assert_eq!(picture_z_order, 23);
+    assert!(
+        shape_picture.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("shape z-order rendered through bounded passive drawing order")
+        }),
+        "shape picture z-order should be reported as applied passive ordering: {:?}",
+        shape_picture.diagnostics
+    );
     for text in [
         collect_text(&parsed.document),
         collect_text(&legacy.document),
@@ -84468,6 +84495,15 @@ fn shape_z_order_controls_are_bounded_and_do_not_leak() {
             .iter()
             .all(|diagnostic| !diagnostic.message.contains("shape z-order approximated")),
         "nonzero normalized z-order should not be reported as ignored: {:?}",
+        output.diagnostics
+    );
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("shape z-order rendered through bounded passive drawing order")
+        }),
+        "PDF conversion should report z-order as bounded passive ordering: {:?}",
         output.diagnostics
     );
     for forbidden in [
@@ -84726,6 +84762,15 @@ fn shape_below_text_controls_are_normalized_without_leakage() {
         .expect("below-text shape");
 
     assert!(shape.below_text);
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("shape below-text flag rendered through bounded passive drawing order")
+        }),
+        "below-text shape should report passive drawing order: {:?}",
+        parsed.diagnostics
+    );
 
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let shape_picture = parse_rtf_bytes(&rtf(&[
@@ -84769,6 +84814,15 @@ fn shape_below_text_controls_are_normalized_without_leakage() {
         .expect("shape picture below-text placement");
 
     assert!(placement_below_text);
+    assert!(
+        shape_picture.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("shape below-text flag rendered through bounded passive drawing order")
+        }),
+        "below-text shape picture should report passive drawing order: {:?}",
+        shape_picture.diagnostics
+    );
     for text in [
         collect_text(&parsed.document),
         collect_text(&shape_picture.document),
@@ -84796,6 +84850,15 @@ fn shape_below_text_controls_are_normalized_without_leakage() {
                 .contains("shape text wrapping approximated")
         }),
         "below-text shape ordering should not be reported as an ignored wrap approximation: {:?}",
+        output.diagnostics
+    );
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("shape below-text flag rendered through bounded passive drawing order")
+        }),
+        "PDF conversion should report below-text as bounded passive ordering: {:?}",
         output.diagnostics
     );
     for forbidden in [
