@@ -28003,6 +28003,131 @@ fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
 }
 
 #[test]
+fn decodable_jpeg_bilevel_metadata_rewrites_safe_pixels_without_decode_fallback() {
+    let image_hex = bytes_to_hex(&valid_rgb_jpeg_1x1());
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBiLevel}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-decodable-jpeg-bilevel-payload}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+
+    assert_eq!(image.format, ImageFormat::Rgb8);
+    assert_eq!(image.width_px, 1);
+    assert_eq!(image.height_px, 1);
+    assert_eq!(image.bytes, vec![0, 0, 0]);
+    assert_eq!(image.tone_adjustment, None);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    for forbidden in [
+        "pictureBiLevel",
+        "pFragments",
+        "hidden-decodable-jpeg-bilevel-payload",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "JPEG bilevel metadata leaked to normalized text: {forbidden}"
+        );
+    }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "JPEG picture bilevel property rendered as bounded passive decoded image pixels",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("JPEG picture bilevel property rendered as passive PDF decode")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    assert!(
+        !output
+            .pdf
+            .windows(b"/DCTDecode".len())
+            .any(|window| window == b"/DCTDecode"),
+        "decoded JPEG bilevel output should not preserve compressed JPEG bytes"
+    );
+    assert!(
+        !output
+            .pdf
+            .windows(b"/BM /Luminosity".len())
+            .any(|window| window == b"/BM /Luminosity"),
+        "exact JPEG bilevel output should not require passive luminosity blend fallback"
+    );
+    assert!(
+        !output
+            .pdf
+            .windows(b"/Decode [1 0 1 0 1 0]".len())
+            .any(|window| window == b"/Decode [1 0 1 0 1 0]"),
+        "exact JPEG bilevel output should not use approximate PDF decode inversion"
+    );
+    for forbidden in [
+        b"pictureBiLevel".as_slice(),
+        b"pFragments",
+        b"hidden-decodable-jpeg-bilevel-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "JPEG bilevel metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
@@ -89835,6 +89960,17 @@ fn minimal_grayscale_jpeg_with_dimensions(width: u16, height: u16) -> Vec<u8> {
     minimal_jpeg_with_components(width, height, 1)
 }
 
+fn valid_rgb_jpeg_1x1() -> Vec<u8> {
+    const JPEG_HEX: &str = concat!(
+        "ffd8ffe000104a46494600010101006000600000ffdb0043000302020302020303030304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e0b0b1016101113141515150c0f171816141812141514",
+        "ffdb00430103040405040509050509140d0b0d1414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414",
+        "ffc00011080001000103012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9fa",
+        "ffc4001f0100030101010101010101010000000000000102030405060708090a0bffc400b51100020102040403040705040400010277000102031104052131061241510761711322328108144291a1b1c109233352f0156272d10a162434e125f11718191a262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a82838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9fa",
+        "ffda000c03010002110311003f00f9d28a28af8a3fbacfffd9"
+    );
+    hex_bytes(JPEG_HEX)
+}
+
 fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<u8> {
     let [height_hi, height_lo] = height.to_be_bytes();
     let [width_hi, width_lo] = width.to_be_bytes();
@@ -89849,6 +89985,14 @@ fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<
     }
     jpeg.extend_from_slice(&[0xff, 0xd9]);
     jpeg
+}
+
+fn hex_bytes(hex: &str) -> Vec<u8> {
+    assert_eq!(hex.len() % 2, 0);
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+        .collect()
 }
 
 fn minimal_emf_with_bounds_and_frame(

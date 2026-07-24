@@ -1,3 +1,4 @@
+use jpeg_decoder::{Decoder as JpegDecoder, PixelFormat as JpegPixelFormat};
 use thiserror::Error;
 
 use crate::config::{ActiveContentPolicy, RtfLimits, RtfParseOptions};
@@ -35,6 +36,8 @@ const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
 const DEFAULT_SHAPE_TEXT_MARGIN_TWIPS: i32 = 80;
 const DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS: i32 = DEFAULT_SHAPE_WRAP_MARGIN_TWIPS;
 const MAX_PASSIVE_SHAPE_Z_ORDER: i32 = 65_535;
+const MAX_EXACT_JPEG_COLOR_MODE_BYTES: usize = 256 * 1024;
+const MAX_EXACT_JPEG_COLOR_MODE_PIXELS: u64 = 1_000_000;
 const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
 
 #[derive(Debug, Error)]
@@ -13990,6 +13993,25 @@ impl Parser {
             self.warn_passive_picture_color_mode_rendered(
                 "PNG",
                 "image pixels",
+                adjustments,
+                offset,
+            );
+            return;
+        }
+
+        if matches!(
+            image.format,
+            ImageFormat::Jpeg
+                | ImageFormat::JpegInverted
+                | ImageFormat::JpegGrayscale
+                | ImageFormat::JpegGrayscaleInverted
+                | ImageFormat::JpegCmyk
+                | ImageFormat::JpegCmykInverted
+        ) && apply_jpeg_picture_color_mode_as_rgb8(image, adjustments)
+        {
+            self.warn_passive_picture_color_mode_rendered(
+                "JPEG",
+                "decoded image pixels",
                 adjustments,
                 offset,
             );
@@ -32800,6 +32822,85 @@ fn adjust_picture_sample(sample: u8, adjustments: PictureAdjustments) -> u8 {
     };
     let brightened = contrasted + ((brightness * 255) / 65_536);
     brightened.clamp(0, 255) as u8
+}
+
+fn apply_jpeg_picture_color_mode_as_rgb8(
+    image: &mut StaticImage,
+    adjustments: PictureAdjustments,
+) -> bool {
+    if !adjustments.grayscale
+        && !adjustments.bilevel
+        && adjustments.brightness_fixed.is_none()
+        && adjustments.contrast_fixed.is_none()
+    {
+        return true;
+    }
+    let Some(pixel_count) = u64::from(image.width_px).checked_mul(u64::from(image.height_px))
+    else {
+        return false;
+    };
+    if image.bytes.len() > MAX_EXACT_JPEG_COLOR_MODE_BYTES
+        || pixel_count > MAX_EXACT_JPEG_COLOR_MODE_PIXELS
+    {
+        return false;
+    }
+    let mut decoder = JpegDecoder::new(image.bytes.as_slice());
+    let Ok(decoded) = decoder.decode() else {
+        return false;
+    };
+    let Some(info) = decoder.info() else {
+        return false;
+    };
+    if u32::from(info.width) != image.width_px || u32::from(info.height) != image.height_px {
+        return false;
+    }
+    let Some(pixel_count) = usize::from(info.width).checked_mul(usize::from(info.height)) else {
+        return false;
+    };
+    let Some(expected_rgb_len) = pixel_count.checked_mul(3) else {
+        return false;
+    };
+    let inverted = matches!(
+        image.format,
+        ImageFormat::JpegInverted
+            | ImageFormat::JpegGrayscaleInverted
+            | ImageFormat::JpegCmykInverted
+    );
+    let mut rgb = Vec::with_capacity(expected_rgb_len);
+    match info.pixel_format {
+        JpegPixelFormat::RGB24 if decoded.len() == expected_rgb_len => {
+            rgb.extend_from_slice(&decoded);
+        }
+        JpegPixelFormat::L8 if decoded.len() == pixel_count => {
+            for sample in decoded {
+                rgb.extend_from_slice(&[sample, sample, sample]);
+            }
+        }
+        JpegPixelFormat::CMYK32 if decoded.len() == pixel_count.saturating_mul(4) => {
+            for pixel in decoded.chunks_exact(4) {
+                let cyan = u16::from(pixel[0]);
+                let magenta = u16::from(pixel[1]);
+                let yellow = u16::from(pixel[2]);
+                let black = u16::from(pixel[3]);
+                rgb.push((((255 - cyan) * (255 - black) + 127) / 255) as u8);
+                rgb.push((((255 - magenta) * (255 - black) + 127) / 255) as u8);
+                rgb.push((((255 - yellow) * (255 - black) + 127) / 255) as u8);
+            }
+        }
+        _ => return false,
+    }
+    if inverted {
+        for component in &mut rgb {
+            *component = 255 - *component;
+        }
+    }
+    for pixel in rgb.chunks_exact_mut(3) {
+        apply_picture_adjustments_to_rgb(pixel, adjustments);
+    }
+    image.format = ImageFormat::Rgb8;
+    image.bytes = rgb;
+    image.tone_adjustment = None;
+    true
 }
 
 fn passive_jpeg_tone_adjustment(
