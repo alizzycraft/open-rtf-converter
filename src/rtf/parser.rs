@@ -25016,6 +25016,8 @@ impl<'a> FormulaParser<'a> {
                 }
                 "ROUND" => return None,
                 "COUNT" => i64::try_from(args + 1).ok()?,
+                "INT" if args == 0 => argument,
+                "INT" => return None,
                 "SIGN" if args == 0 => argument.signum(),
                 "SIGN" => return None,
                 _ => return None,
@@ -44241,6 +44243,25 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula SIGN field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_int_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Integer {\field{\*\fldinst = INT(17 + 3)}} negative {\field{\*\fldinst = INT(-5)}} decimal {\field{\*\fldinst = INT(1.5)}} extra {\field{\*\fldinst = INT(1,2)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains(
+            "Integer 20 negative -5 decimal [Field removed: no passive result] extra [Field removed: no passive result]"
+        ));
+        for forbidden in ["INT", "17 + 3", "1.5", "1,2", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula INT field leaked unsafe text: {forbidden}"
             );
         }
     }
