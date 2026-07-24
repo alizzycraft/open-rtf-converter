@@ -24973,7 +24973,7 @@ impl<'a> FormulaParser<'a> {
             return None;
         }
 
-        let mut value = 0i64;
+        let mut value = if name == "PRODUCT" { 1i64 } else { 0i64 };
         let mut args = 0usize;
         loop {
             self.skip_ws();
@@ -24993,6 +24993,7 @@ impl<'a> FormulaParser<'a> {
                 "MAX" => value.max(argument),
                 "ABS" if args == 0 => argument.checked_abs()?,
                 "ABS" => return None,
+                "PRODUCT" => value.checked_mul(argument)?,
                 _ => return None,
             };
             args += 1;
@@ -44116,6 +44117,23 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula ABS field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_product_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Product {\field{\*\fldinst = PRODUCT(2, 3 + 1, -5)}} malformed {\field{\*\fldinst = ROUND(2,0)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(text.contains("Product -40 malformed [Field removed: no passive result]"));
+        for forbidden in ["PRODUCT", "ROUND", "3 + 1", "2,0", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "formula PRODUCT field leaked unsafe text: {forbidden}"
             );
         }
     }

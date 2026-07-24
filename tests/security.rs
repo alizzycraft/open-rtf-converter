@@ -12787,13 +12787,19 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "\\",
         "*",
         "\\",
-        "fldinst = ABS(1,2)}} unsupported {",
+        "fldinst = ABS(1,2)}} product {",
         "\\",
         "field{",
         "\\",
         "*",
         "\\",
-        "fldinst = AVG(1,2)}}.",
+        "fldinst = PRODUCT(2, 3 + 1, -5)}} unsupported {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = ROUND(2,0)}}.",
         "\\",
         "par}",
     ]);
@@ -12801,11 +12807,11 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let text = collect_text(&parsed.document);
 
     assert!(text.contains(
-        "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] unsupported [Field removed: no passive result]."
+        "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 unsupported [Field removed: no passive result]."
     ));
     for forbidden in [
         "fldinst", "\\#", "\"0\"", "\"000\"", "\"00\"", "(6 + 4)", "3 * 2", "SUM", "MIN", "MAX",
-        "ABS", "AVG", "ROMAN", "2 + 3", "4 * 5", "-8 + 3",
+        "ABS", "PRODUCT", "ROUND", "ROMAN", "2 + 3", "4 * 5", "-8 + 3", "3 + 1",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -12832,7 +12838,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let rendered_text = decoded_pdf_text(&content);
     assert!(
         rendered_text.contains(
-            "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] unsupported [Field removed: no passive result]."
+            "Total 30 and delta -2 sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 unsupported [Field removed: no passive result]."
         ),
         "decoded PDF text did not contain passive formula values: {rendered_text:?}"
     );
@@ -12847,11 +12853,13 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         b"MIN",
         b"MAX",
         b"ABS",
-        b"AVG",
+        b"PRODUCT",
+        b"ROUND",
         b"ROMAN",
         b"2 + 3",
         b"4 * 5",
         b"-8 + 3",
+        b"3 + 1",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
