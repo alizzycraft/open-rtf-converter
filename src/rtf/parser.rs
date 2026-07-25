@@ -25026,8 +25026,7 @@ impl<'a> FormulaParser<'a> {
             return None;
         }
 
-        let mut value = if name == "PRODUCT" { 1i64 } else { 0i64 };
-        let mut args = 0usize;
+        let mut args = Vec::new();
         let mut expecting_argument = false;
         loop {
             self.skip_ws();
@@ -25035,70 +25034,14 @@ impl<'a> FormulaParser<'a> {
                 if expecting_argument {
                     return None;
                 }
-                return self.finalize_function_value(name, value, args);
+                return evaluate_formula_function(name, &args);
             }
 
-            if args >= MAX_PASSIVE_FORMULA_FUNCTION_ARGS {
+            if args.len() >= MAX_PASSIVE_FORMULA_FUNCTION_ARGS {
                 return None;
             }
             let argument = self.parse_comparison_expression()?;
-            value = match name {
-                "SUM" => value.checked_add(argument)?,
-                "MIN" if args == 0 => argument,
-                "MIN" => value.min(argument),
-                "MAX" if args == 0 => argument,
-                "MAX" => value.max(argument),
-                "ABS" if args == 0 => argument.checked_abs()?,
-                "ABS" => return None,
-                "PRODUCT" => value.checked_mul(argument)?,
-                "POWER" if args == 0 => argument,
-                "POWER" if args == 1 => {
-                    let exponent = u32::try_from(argument).ok()?;
-                    value.checked_pow(exponent)?
-                }
-                "POWER" => return None,
-                "MOD" if args == 0 => argument,
-                "MOD" if args == 1 => {
-                    if argument == 0 {
-                        return None;
-                    }
-                    value.checked_rem(argument)?
-                }
-                "MOD" => return None,
-                "ROUND" if args == 0 => argument,
-                "ROUND" if args == 1 => {
-                    if argument == 0 {
-                        value
-                    } else {
-                        return None;
-                    }
-                }
-                "ROUND" => return None,
-                "COUNT" => i64::try_from(args + 1).ok()?,
-                "INT" if args == 0 => argument,
-                "INT" => return None,
-                "SIGN" if args == 0 => argument.signum(),
-                "SIGN" => return None,
-                "SQRT" if args == 0 => checked_exact_integer_sqrt(argument)?,
-                "SQRT" => return None,
-                "AVERAGE" => value.checked_add(argument)?,
-                "AND" => {
-                    if args == 0 {
-                        i64::from(argument != 0)
-                    } else {
-                        i64::from(value != 0 && argument != 0)
-                    }
-                }
-                "OR" => i64::from(value != 0 || argument != 0),
-                "NOT" if args == 0 => i64::from(argument == 0),
-                "NOT" => return None,
-                "XOR" => {
-                    let previous = if args == 0 { false } else { value != 0 };
-                    i64::from(previous ^ (argument != 0))
-                }
-                _ => return None,
-            };
-            args += 1;
+            args.push(argument);
 
             self.skip_ws();
             if self.consume_argument_separator() {
@@ -25106,28 +25049,9 @@ impl<'a> FormulaParser<'a> {
                 continue;
             }
             if self.consume(')') {
-                return self.finalize_function_value(name, value, args);
+                return evaluate_formula_function(name, &args);
             }
             return None;
-        }
-    }
-
-    fn finalize_function_value(&self, name: &str, value: i64, args: usize) -> Option<i64> {
-        if args == 0 {
-            return match name {
-                "TRUE" => Some(1),
-                "FALSE" => Some(0),
-                _ => None,
-            };
-        }
-        match name {
-            "MOD" | "POWER" | "ROUND" if args != 2 => None,
-            "TRUE" | "FALSE" => None,
-            "AVERAGE" => {
-                let divisor = i64::try_from(args).ok()?;
-                (value % divisor == 0).then_some(value / divisor)
-            }
-            _ => Some(value),
         }
     }
 
@@ -25208,6 +25132,53 @@ fn formula_comparison_matches(left: i64, operator: FormulaComparisonOperator, ri
         FormulaComparisonOperator::LessOrEqual => left <= right,
         FormulaComparisonOperator::Greater => left > right,
         FormulaComparisonOperator::GreaterOrEqual => left >= right,
+    }
+}
+
+fn evaluate_formula_function(name: &str, args: &[i64]) -> Option<i64> {
+    match name {
+        "TRUE" if args.is_empty() => Some(1),
+        "FALSE" if args.is_empty() => Some(0),
+        "SUM" if !args.is_empty() => args
+            .iter()
+            .try_fold(0i64, |value, argument| value.checked_add(*argument)),
+        "MIN" if !args.is_empty() => args.iter().copied().min(),
+        "MAX" if !args.is_empty() => args.iter().copied().max(),
+        "ABS" if args.len() == 1 => args[0].checked_abs(),
+        "PRODUCT" if !args.is_empty() => args
+            .iter()
+            .try_fold(1i64, |value, argument| value.checked_mul(*argument)),
+        "POWER" if args.len() == 2 => {
+            let exponent = u32::try_from(args[1]).ok()?;
+            args[0].checked_pow(exponent)
+        }
+        "MOD" if args.len() == 2 => {
+            if args[1] == 0 {
+                None
+            } else {
+                args[0].checked_rem(args[1])
+            }
+        }
+        "ROUND" if args.len() == 2 => (args[1] == 0).then_some(args[0]),
+        "COUNT" if !args.is_empty() => i64::try_from(args.len()).ok(),
+        "INT" if args.len() == 1 => Some(args[0]),
+        "SIGN" if args.len() == 1 => Some(args[0].signum()),
+        "SQRT" if args.len() == 1 => checked_exact_integer_sqrt(args[0]),
+        "AVERAGE" if !args.is_empty() => {
+            let sum = args
+                .iter()
+                .try_fold(0i64, |value, argument| value.checked_add(*argument))?;
+            let divisor = i64::try_from(args.len()).ok()?;
+            (sum % divisor == 0).then_some(sum / divisor)
+        }
+        "AND" if !args.is_empty() => Some(i64::from(args.iter().all(|argument| *argument != 0))),
+        "OR" if !args.is_empty() => Some(i64::from(args.iter().any(|argument| *argument != 0))),
+        "NOT" if args.len() == 1 => Some(i64::from(args[0] == 0)),
+        "XOR" if !args.is_empty() => Some(i64::from(
+            args.iter().filter(|argument| **argument != 0).count() % 2 == 1,
+        )),
+        "IF" if args.len() == 3 => Some(if args[0] != 0 { args[1] } else { args[2] }),
+        _ => None,
     }
 }
 
@@ -44402,6 +44373,41 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula boolean constant field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_if_function_renders_bounded_passive_branch_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 True {\field{\*\fldinst = IF(2 > 1, 7 + 3, 4)}} false {\field{\*\fldinst = IF(FALSE(); 1; 9) \\# "000"}} nested {\field{\*\fldinst = IF(AND(1 < 2, TRUE()), POWER(2,3), 0)}} arity {\field{\*\fldinst = IF(1,2)}} malformed {\field{\*\fldinst = IF(1 < 2 < 3, 7, 0)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "True 10 false 009 nested 8 arity [Field removed: no passive result] malformed [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "IF",
+            "2 > 1",
+            "7 + 3",
+            "FALSE()",
+            "AND",
+            "1 < 2",
+            "TRUE()",
+            "POWER",
+            "1 < 2 < 3",
+            "\\#",
+            "\"000\"",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula IF field leaked unsafe text: {forbidden}"
             );
         }
     }
