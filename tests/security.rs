@@ -14272,6 +14272,79 @@ fn resultless_quote_field_instruction_unicode_renders_without_control_leakage() 
 }
 
 #[test]
+fn resultless_instruction_literal_fields_reject_active_pdf_markers_before_pdf() {
+    let input = br#"{\rtf1 quote {\field{\*\fldinst QUOTE "/JavaScript"}} if {\field{\*\fldinst IF 1 = 1 "/EmbeddedFile" "Safe"}} macro {\field{\*\fldinst MACROBUTTON LaunchPayload "/Launch"}} go {\field{\*\fldinst GOTOBUTTON Target "/OpenAction"}} merge {\field{\*\fldinst MERGEFIELD "/URI"}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains(
+            "quote [Field removed: no passive result] if [Field removed: no passive result] macro [Field removed: no passive result] go [Field removed: no passive result] merge [Field removed: no passive result]"
+        ),
+        "normalized text did not contain passive placeholders: {text:?}"
+    );
+    for forbidden in [
+        "QUOTE",
+        "IF",
+        "MACROBUTTON",
+        "GOTOBUTTON",
+        "MERGEFIELD",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/URI",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "active marker field literal leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains(
+            "quote [Field removed: no passive result] if [Field removed: no passive result] macro [Field removed: no passive result] go [Field removed: no passive result] merge [Field removed: no passive result]"
+        ),
+        "decoded PDF text did not contain passive placeholders: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"QUOTE".as_slice(),
+        b"IF",
+        b"MACROBUTTON",
+        b"GOTOBUTTON",
+        b"MERGEFIELD",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+        b"fldinst",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "active marker field literal leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_macrobutton_fields_render_without_executing_macro() {
     let input = rtf(&[
         "{",

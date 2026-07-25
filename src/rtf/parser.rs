@@ -23864,6 +23864,7 @@ fn passive_if_field_result_with_resolver(
     if text.chars().count() > 1024
         || text.chars().any(|ch| ch.is_control())
         || contains_internal_marker(&text)
+        || contains_active_pdf_marker_text(&text)
     {
         return None;
     }
@@ -23926,7 +23927,7 @@ fn passive_compare_resolved_operand(
 
 fn passive_quote_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     let text = field_first_quoted_argument(instruction)?;
-    if text.chars().any(|ch| ch.is_control()) {
+    if text.chars().any(|ch| ch.is_control()) || contains_active_pdf_marker_text(&text) {
         return None;
     }
     Some(PassiveFieldResult {
@@ -24020,7 +24021,10 @@ fn passive_macrobutton_field_result(instruction: &str) -> Option<PassiveFieldRes
     } else {
         display.trim_end().to_string()
     };
-    if text.is_empty() || text.chars().any(|ch| ch.is_control()) {
+    if text.is_empty()
+        || text.chars().any(|ch| ch.is_control())
+        || contains_active_pdf_marker_text(&text)
+    {
         return None;
     }
 
@@ -24049,6 +24053,7 @@ fn passive_gotobutton_field_result(instruction: &str) -> Option<PassiveFieldResu
         || text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
         || text.chars().any(|ch| ch.is_control())
         || contains_internal_marker(&text)
+        || contains_active_pdf_marker_text(&text)
     {
         return None;
     }
@@ -24063,7 +24068,10 @@ fn passive_gotobutton_field_result(instruction: &str) -> Option<PassiveFieldResu
 
 fn passive_mergefield_result(instruction: &str) -> Option<PassiveFieldResult> {
     let name = field_first_argument(instruction)?;
-    if name.is_empty() || name.chars().any(|ch| ch.is_control()) || contains_internal_marker(&name)
+    if name.is_empty()
+        || name.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(&name)
+        || contains_active_pdf_marker_text(&name)
     {
         return None;
     }
@@ -44377,6 +44385,40 @@ After\par}"#;
         assert!(!text.contains("fldinst"));
         assert!(!text.contains('?'));
         assert!(!text.contains("[Field removed"));
+    }
+
+    #[test]
+    fn resultless_instruction_literal_fields_reject_active_pdf_markers() {
+        let output = parse_rtf(
+            r#"{\rtf1 quote {\field{\*\fldinst QUOTE "/JavaScript"}} if {\field{\*\fldinst IF 1 = 1 "/EmbeddedFile" "Safe"}} macro {\field{\*\fldinst MACROBUTTON LaunchPayload "/Launch"}} go {\field{\*\fldinst GOTOBUTTON Target "/OpenAction"}} merge {\field{\*\fldinst MERGEFIELD "/URI"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "quote [Field removed: no passive result] if [Field removed: no passive result] macro [Field removed: no passive result] go [Field removed: no passive result] merge [Field removed: no passive result]"
+            ),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "QUOTE",
+            "IF",
+            "MACROBUTTON",
+            "GOTOBUTTON",
+            "MERGEFIELD",
+            "/JavaScript",
+            "/EmbeddedFile",
+            "/Launch",
+            "/OpenAction",
+            "/URI",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "active marker field literal leaked to text: {forbidden}"
+            );
+        }
     }
 
     #[test]
