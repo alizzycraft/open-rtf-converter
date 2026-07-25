@@ -13443,6 +13443,72 @@ fn resultless_eq_root_fields_render_passively_without_instruction_leakage() {
 }
 
 #[test]
+fn resultless_eq_fields_reject_active_pdf_marker_components_before_pdf() {
+    let input = br#"{\rtf1 frac {\field{\*\fldinst EQ \f(/JavaScript,2)}} root {\field{\*\fldinst EQ \r(3,/EmbeddedFile)}} ok {\field{\*\fldinst EQ \f(1,2)}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains(
+            "frac [Field removed: no passive result] root [Field removed: no passive result] ok 1\u{2044}2"
+        ),
+        "normalized text did not contain passive EQ placeholders: {text:?}"
+    );
+    for forbidden in [
+        "EQ",
+        "\\f",
+        "\\r",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "active marker EQ component leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains(
+            "frac [Field removed: no passive result] root [Field removed: no passive result] ok"
+        ),
+        "decoded PDF text did not contain passive EQ placeholders: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"EQ".as_slice(),
+        b"fldinst",
+        b"\\f",
+        b"\\r",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "active marker EQ component leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_if_fields_render_passive_branches_without_instruction_leakage() {
     let input = rtf(&[
         "{",

@@ -24226,6 +24226,7 @@ fn is_safe_passive_eq_component(text: &str) -> bool {
         && text.chars().count() <= MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
         && !text.chars().any(|ch| ch.is_control())
         && !contains_internal_marker(text)
+        && !contains_active_pdf_marker_text(text)
         && !text.contains('\\')
         && !text.contains('{')
         && !text.contains('}')
@@ -44069,6 +44070,35 @@ After\par}"#;
                 .message
                 .contains("embedded object field EMBED stripped")
         }));
+    }
+
+    #[test]
+    fn resultless_eq_fields_reject_active_pdf_marker_components() {
+        let output = parse_rtf(
+            r#"{\rtf1 frac {\field{\*\fldinst EQ \f(/JavaScript,2)}} root {\field{\*\fldinst EQ \r(3,/EmbeddedFile)}} ok {\field{\*\fldinst EQ \f(1,2)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "frac [Field removed: no passive result] root [Field removed: no passive result] ok 1\u{2044}2"
+            ),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "EQ",
+            "\\f",
+            "\\r",
+            "/JavaScript",
+            "/EmbeddedFile",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "active marker EQ component leaked to text: {forbidden}"
+            );
+        }
     }
 
     #[test]
