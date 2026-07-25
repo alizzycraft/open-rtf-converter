@@ -14648,6 +14648,58 @@ fn quoted_symbol_payload_does_not_act_as_font_switch() {
 }
 
 #[test]
+fn symbol_font_switch_rejects_active_marker_text_before_pdf() {
+    let input =
+        br#"{\rtf1 Before {\field{\*\fldinst SYMBOL 65 \\f "/JavaScript"}} After\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Before A After"),
+        "hostile SYMBOL font switch should be ignored while preserving the passive value, got {text:?}"
+    );
+    for forbidden in ["fldinst", "SYMBOL", "/JavaScript"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden hostile-symbol font switch content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before A After"));
+    for forbidden in [
+        b"SYMBOL".as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden hostile-symbol font switch content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn empty_stored_symbol_result_falls_back_to_passive_symbol_rendering() {
     let input =
         br#"{\rtf1{\fonttbl{\f0 Arial;}{\f14 Wingdings;}}\f0 Before ({\field{\*\fldinst SYMBOL 74 \\f "Wingdings" \\s 12}{\fldrslt\f14\fs24}}) After\par}"#.to_vec();

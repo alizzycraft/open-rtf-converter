@@ -24112,7 +24112,8 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
     let font_size_half_points = field_switch_i32_value(rest_after_value.as_str(), 's')
         .and_then(|points| points.checked_mul(2))
         .filter(|half_points| *half_points > 0);
-    let font_name = field_switch_string_value(instruction, b'f');
+    let font_name = field_switch_string_value(instruction, b'f')
+        .filter(|name| !contains_active_pdf_marker_text(name));
     let mut passive_font_name = font_name.clone();
     let text = if let Some(name) = font_name.as_deref()
         && name.eq_ignore_ascii_case("Symbol")
