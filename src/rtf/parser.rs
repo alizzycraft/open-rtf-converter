@@ -25161,6 +25161,7 @@ fn evaluate_formula_function(name: &str, args: &[i64]) -> Option<i64> {
         }
         "ROUND" if args.len() == 2 => (args[1] == 0).then_some(args[0]),
         "COUNT" if !args.is_empty() => i64::try_from(args.len()).ok(),
+        "N" if args.len() == 1 => Some(args[0]),
         "INT" if args.len() == 1 => Some(args[0]),
         "SIGN" if args.len() == 1 => Some(args[0].signum()),
         "SQRT" if args.len() == 1 => checked_exact_integer_sqrt(args[0]),
@@ -44569,6 +44570,30 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula COUNT field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_n_function_renders_bounded_passive_numeric_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Number {\field{\*\fldinst = N(7 + 3)}} bool {\field{\*\fldinst = N(TRUE())}} cmp {\field{\*\fldinst = N(2 > 1) \\# "000"}} empty {\field{\*\fldinst = N()}} extra {\field{\*\fldinst = N(1,2)}} malformed {\field{\*\fldinst = N(MAYBE)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Number 10 bool 1 cmp 001 empty [Field removed: no passive result] extra [Field removed: no passive result] malformed [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "N(", "7 + 3", "TRUE()", "2 > 1", "MAYBE", "\\#", "\"000\"", "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula N field leaked unsafe text: {forbidden}"
             );
         }
     }
