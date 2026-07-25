@@ -28862,11 +28862,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         },
                         ShadingPattern::None,
                     )?;
-                } else if let Some(bounds) = rects.first().copied()
-                    && rects.len() == 1
-                    && bounds_is_visible(bounds)
-                    && apply_passive_same_bounds_invert_fill(&mut commands, bounds)
-                {
+                } else if apply_passive_same_bounds_invert_fills(&mut commands, &rects) {
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -38322,28 +38318,45 @@ fn apply_passive_solid_backdrop_raster_transfer(
     true
 }
 
-fn apply_passive_same_bounds_invert_fill(
+fn apply_passive_same_bounds_invert_fills(
     commands: &mut [StaticImageVectorCommand],
-    bounds: (f32, f32, f32, f32),
+    rects: &[(f32, f32, f32, f32)],
 ) -> bool {
-    let Some(StaticImageVectorCommand::Rectangle {
-        left,
-        top,
-        right,
-        bottom,
-        stroke_color: None,
-        fill_pattern: ShadingPattern::None,
-        fill_color: Some(fill_color),
-        ..
-    }) = commands.last_mut()
-    else {
-        return false;
-    };
-    if (*left, *top, *right, *bottom) != bounds {
+    if rects.is_empty() || rects.iter().any(|bounds| !bounds_is_visible(*bounds)) {
         return false;
     }
+    let Some(command_start) = commands.len().checked_sub(rects.len()) else {
+        return false;
+    };
 
-    *fill_color = inverted_color(*fill_color);
+    for (command, bounds) in commands[command_start..].iter().zip(rects) {
+        let StaticImageVectorCommand::Rectangle {
+            left,
+            top,
+            right,
+            bottom,
+            stroke_color: None,
+            fill_pattern: ShadingPattern::None,
+            fill_color: Some(_),
+            ..
+        } = command
+        else {
+            return false;
+        };
+        if (*left, *top, *right, *bottom) != *bounds {
+            return false;
+        }
+    }
+
+    for command in &mut commands[command_start..] {
+        if let StaticImageVectorCommand::Rectangle {
+            fill_color: Some(fill_color),
+            ..
+        } = command
+        {
+            *fill_color = inverted_color(*fill_color);
+        }
+    }
     true
 }
 
@@ -56498,6 +56511,53 @@ After\par}"#;
                 ..
             }
         ));
+        assert_eq!(output.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn emf_multi_rect_same_bounds_invertrgn_after_solid_paint_inverts_fill_colors() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                0,
+                Color {
+                    red: 40,
+                    green: 120,
+                    blue: 210,
+                },
+                0,
+            ),
+            emf_select_object_record(3),
+            emf_fillrgn_record(3, &[(20, 15, 70, 35), (90, 20, 140, 50)]),
+            emf_invertrgn_record(&[(20, 15, 70, 35), (90, 20, 140, 50)]),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\emfblip {}}}}}",
+            bytes_to_hex(&minimal_emf_with_records(180, 90, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected partial passive EMF vector image"),
+        };
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(image.bytes.is_empty());
+        assert_eq!(image.vector_commands.len(), 2);
+        for command in &image.vector_commands {
+            assert!(matches!(
+                command,
+                StaticImageVectorCommand::Rectangle {
+                    stroke_color: None,
+                    fill_color: Some(Color {
+                        red: 215,
+                        green: 135,
+                        blue: 45
+                    }),
+                    ..
+                }
+            ));
+        }
         assert_eq!(output.diagnostics.len(), 0);
     }
 

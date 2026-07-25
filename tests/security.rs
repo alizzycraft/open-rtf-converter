@@ -57521,6 +57521,124 @@ fn emf_same_bounds_invertrgn_after_solid_paint_reduces_without_payload_leakage()
 }
 
 #[test]
+fn emf_multi_rect_same_bounds_invertrgn_reduces_without_payload_leakage() {
+    let payload = b"MULTI-SAME-BOUNDS-EMF-INVERTRGN /OpenAction";
+    let records = [
+        emf_create_brush_record(
+            3,
+            0,
+            Color {
+                red: 40,
+                green: 120,
+                blue: 210,
+            },
+            0,
+        ),
+        emf_select_object_record(3),
+        emf_fillrgn_record(3, &[(20, 15, 70, 35), (90, 20, 140, 50)]),
+        {
+            let mut record = emf_invertrgn_record(&[(20, 15, 70, 35), (90, 20, 140, 50)]);
+            record.extend_from_slice(payload);
+            record.resize(record.len().next_multiple_of(4), 0);
+            let record_len = record.len() as u32;
+            write_test_le_u32(&mut record, 4, record_len);
+            record
+        },
+    ];
+    let emf = minimal_emf_with_records(180, 90, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("partial passive multi-rect EMF INVERTRGN vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 2);
+    assert!(image.vector_commands.iter().all(|command| matches!(
+        command,
+        StaticImageVectorCommand::Rectangle {
+            stroke_color: None,
+            fill_color: Some(Color {
+                red: 215,
+                green: 135,
+                blue: 45
+            }),
+            ..
+        }
+    )));
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "INVERTRGN",
+        "RGNDATA",
+        "MULTI-SAME-BOUNDS-EMF-INVERTRGN",
+        "OpenAction",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "multi-rect same-bounds EMF INVERTRGN payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 2,
+        "multi-rect same-bounds EMF INVERTRGN should render passive rectangle paths"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        payload.as_slice(),
+        b" EMF",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Subtype /Image",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "multi-rect same-bounds EMF INVERTRGN payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_backdrop_dependent_invertrgn_is_skipped_without_payload_leakage() {
     let records = [
         emf_rect_record(43, 0, 0, 30, 30),
