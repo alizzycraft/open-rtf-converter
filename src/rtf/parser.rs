@@ -25159,6 +25159,13 @@ fn evaluate_formula_function(name: &str, args: &[i64]) -> Option<i64> {
                 args[0].checked_rem(args[1])
             }
         }
+        "QUOTIENT" if args.len() == 2 => {
+            if args[1] == 0 {
+                None
+            } else {
+                args[0].checked_div(args[1])
+            }
+        }
         "ROUND" if args.len() == 2 => (args[1] == 0).then_some(args[0]),
         "COUNT" if !args.is_empty() => i64::try_from(args.len()).ok(),
         "N" if args.len() == 1 => Some(args[0]),
@@ -44553,6 +44560,38 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula MOD field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_quotient_function_renders_bounded_passive_value() {
+        let output = parse_rtf(
+            r#"{\rtf1 Quotient {\field{\*\fldinst = QUOTIENT(17 + 3, 6)}} neg {\field{\*\fldinst = QUOTIENT(-20; 6) \\# "00"}} zero {\field{\*\fldinst = QUOTIENT(5,0)}} extra {\field{\*\fldinst = QUOTIENT(5,2,1)}} overflow {\field{\*\fldinst = QUOTIENT(-9223372036854775808,-1)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Quotient 3 neg -03 zero [Field removed: no passive result] extra [Field removed: no passive result] overflow [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "QUOTIENT",
+            "17 + 3",
+            "-20; 6",
+            "5,0",
+            "5,2,1",
+            "-9223372036854775808",
+            "\\#",
+            "\"00\"",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula QUOTIENT field leaked unsafe text: {forbidden}"
             );
         }
     }
