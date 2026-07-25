@@ -9258,6 +9258,8 @@ impl Parser {
             self.passive_doc_variable_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("INFO") {
             self.passive_info_field_result(instruction)
+        } else if field_instruction_name(instruction) == Some("FORMULA") {
+            self.passive_formula_field_result(instruction)
         } else if let Some(property) =
             field_instruction_name(instruction).and_then(document_shortcut_property_field_name)
         {
@@ -9665,6 +9667,46 @@ impl Parser {
             font_size_half_points: None,
             form_field: false,
         })
+    }
+
+    fn passive_formula_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
+        let expression = field_formula_expression(instruction)?;
+        if expression.is_empty() || expression.len() > 1024 {
+            return None;
+        }
+        let value = FormulaParser::new(expression)
+            .with_identifier_resolver(&|name| self.passive_formula_identifier_value(name))
+            .parse()?;
+        Some(PassiveFieldResult {
+            text: value.to_string(),
+            font_name: None,
+            font_size_half_points: None,
+            form_field: false,
+        })
+    }
+
+    fn passive_formula_identifier_value(&self, name: &str) -> Option<i64> {
+        let text = self
+            .field_bookmark_value(name)
+            .or_else(|| self.passive_formula_bookmark_text(name))?;
+        passive_formula_reference_value(&text)
+    }
+
+    fn passive_formula_bookmark_text(&self, name: &str) -> Option<String> {
+        let name = clean_bookmark_name(name.to_string())?;
+        let text = self
+            .bookmark_captures
+            .iter()
+            .find(|bookmark| {
+                bookmark.name.eq_ignore_ascii_case(&name)
+                    && !bookmark.active
+                    && !bookmark.text.is_empty()
+            })
+            .map(|bookmark| bookmark.text.clone())?;
+        if contains_internal_marker(&text) || text.chars().any(|ch| ch.is_control()) {
+            return None;
+        }
+        strip_bookmark_page_markers(&text)
     }
 
     fn passive_noteref_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
@@ -22901,9 +22943,10 @@ struct FieldListNumberInstruction {
     reset_value: Option<i32>,
 }
 
-struct FormulaParser<'a> {
+struct FormulaParser<'a, 'resolver> {
     input: &'a str,
     pos: usize,
+    identifier_resolver: Option<&'resolver dyn Fn(&str) -> Option<i64>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -23607,6 +23650,18 @@ fn passive_formula_field_result(instruction: &str) -> Option<PassiveFieldResult>
         font_size_half_points: None,
         form_field: false,
     })
+}
+
+fn passive_formula_reference_value(text: &str) -> Option<i64> {
+    let text = text.trim();
+    if text.is_empty()
+        || text.len() > 128
+        || text.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(text)
+    {
+        return None;
+    }
+    FormulaParser::new(text).parse()
 }
 
 fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
@@ -24895,9 +24950,21 @@ fn bookmark_page_ref_marker(id: usize) -> String {
     format!("{BOOKMARK_PAGE_REF_MARKER}{id}{BOOKMARK_PAGE_MARKER_END}")
 }
 
-impl<'a> FormulaParser<'a> {
+impl<'a, 'resolver> FormulaParser<'a, 'resolver> {
     fn new(input: &'a str) -> Self {
-        Self { input, pos: 0 }
+        Self {
+            input,
+            pos: 0,
+            identifier_resolver: None,
+        }
+    }
+
+    fn with_identifier_resolver(
+        mut self,
+        identifier_resolver: &'resolver dyn Fn(&str) -> Option<i64>,
+    ) -> Self {
+        self.identifier_resolver = Some(identifier_resolver);
+        self
     }
 
     fn parse(mut self) -> Option<i64> {
@@ -25003,7 +25070,9 @@ impl<'a> FormulaParser<'a> {
         match name.as_str() {
             "TRUE" => Some(1),
             "FALSE" => Some(0),
-            _ => None,
+            _ => self
+                .identifier_resolver
+                .and_then(|resolver| resolver(name.as_str())),
         }
     }
 
@@ -25059,7 +25128,7 @@ impl<'a> FormulaParser<'a> {
         self.skip_ws();
         let start = self.pos;
         while let Some(ch) = self.peek() {
-            if ch.is_ascii_alphabetic() {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
                 self.pos += ch.len_utf8();
             } else {
                 break;
@@ -44266,6 +44335,36 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula function field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_resolves_bounded_set_and_bookmark_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\field{\*\fldinst SET Units "7"}}Units {\field{\*\fldinst = Units * 3 \\# "00"}} {\*\bkmkstart Rate}4{\*\bkmkend Rate} rate {\field{\*\fldinst = Rate + 2}} bad {\field{\*\fldinst = Missing + 1}} expr {\field{\*\fldinst SET Expr "2 + 3"}}{\field{\*\fldinst = Expr * 4}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Units 21 4 rate 6 bad [Field removed: no passive result] expr 20"),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "SET",
+            "Units * 3",
+            "Rate + 2",
+            "Missing + 1",
+            "Expr * 4",
+            "2 + 3",
+            "\\#",
+            "\"00\"",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula reference field leaked unsafe text: {forbidden}"
             );
         }
     }

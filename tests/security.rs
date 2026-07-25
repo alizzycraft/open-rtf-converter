@@ -13196,6 +13196,85 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
 }
 
 #[test]
+fn resultless_formula_fields_resolve_passive_references_without_instruction_leakage() {
+    let input = br#"{\rtf1{\field{\*\fldinst SET Units "7"}}Units {\field{\*\fldinst = Units * 3 \\# "00"}} {\*\bkmkstart Rate}4{\*\bkmkend Rate} rate {\field{\*\fldinst = Rate + 2}} bad {\field{\*\fldinst = Missing + 1}}{\field{\*\fldinst SET Bad "PAYLOAD /JavaScript"}} unsafe {\field{\*\fldinst = Bad + 1}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = strip_bookmark_page_markers(&collect_text(&parsed.document));
+
+    assert!(
+        text.contains(
+            "Units 21 4 rate 6 bad [Field removed: no passive result] unsafe [Field removed: no passive result]"
+        ),
+        "normalized text did not contain passive formula reference values: {text:?}"
+    );
+    for forbidden in [
+        "SET",
+        "Units * 3",
+        "Rate + 2",
+        "Missing + 1",
+        "Bad + 1",
+        "PAYLOAD",
+        "/JavaScript",
+        "\\#",
+        "\"00\"",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "formula reference field leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains(
+            "Units 21 4 rate 6 bad [Field removed: no passive result] unsafe [Field removed: no passive result]"
+        ),
+        "decoded PDF text did not contain passive formula reference values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"SET".as_slice(),
+        b"Units * 3",
+        b"Rate + 2",
+        b"Missing + 1",
+        b"Bad + 1",
+        b"PAYLOAD",
+        b"/JavaScript",
+        b"\\#",
+        b"\"00\"",
+        b"fldinst",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "formula reference field leaked unsafe PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() {
     let input = br"{\rtf1 Equation {\field{\*\fldinst EQ \f(1,2)}} and escaped {\field{\*\fldinst EQ \\f(alpha,beta)}}\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
