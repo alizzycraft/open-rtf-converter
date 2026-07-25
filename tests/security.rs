@@ -12829,7 +12829,19 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "\\",
         "*",
         "\\",
-        "fldinst = SUM(1, 2 + 3, (4 * 5)) \\\\# \"000\"}} min {",
+        "fldinst = SUM(1, 2 + 3, (4 * 5)) \\\\# \"000\"}} semisum {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = SUM(1; 2 + 3; (4 * 5)) \\\\# \"000\"}} badsemi {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = SUM(1;)}} min {",
         "\\",
         "field{",
         "\\",
@@ -12963,7 +12975,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let text = collect_text(&parsed.document);
 
     assert!(text.contains(
-        "Total 30 and delta -2 plus 5 compare 1 neq 0 le I badcmp [Field removed: no passive result] true 5 false 1 badboolfn [Field removed: no passive result] nested 1 badnested [Field removed: no passive result] badconst [Field removed: no passive result] sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 exp 18 badexp [Field removed: no passive result] mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 sqrt 4 and 1 or 1 not 1 xor 1 average 4 unsupported [Field removed: no passive result]."
+        "Total 30 and delta -2 plus 5 compare 1 neq 0 le I badcmp [Field removed: no passive result] true 5 false 1 badboolfn [Field removed: no passive result] nested 1 badnested [Field removed: no passive result] badconst [Field removed: no passive result] sum 026 semisum 026 badsemi [Field removed: no passive result] min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 exp 18 badexp [Field removed: no passive result] mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 sqrt 4 and 1 or 1 not 1 xor 1 average 4 unsupported [Field removed: no passive result]."
     ));
     for forbidden in [
         "fldinst",
@@ -12974,6 +12986,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "(6 + 4)",
         "3 * 2",
         "SUM",
+        "1;",
         "MIN",
         "MAX",
         "ABS",
@@ -13042,7 +13055,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let rendered_text = decoded_pdf_text(&content);
     assert!(
         rendered_text.contains(
-            "Total 30 and delta -2 plus 5 compare 1 neq 0 le I badcmp [Field removed: no passive result] true 5 false 1 badboolfn [Field removed: no passive result] nested 1 badnested [Field removed: no passive result] badconst [Field removed: no passive result] sum 026 min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 exp 18 badexp [Field removed: no passive result] mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 sqrt 4 and 1 or 1 not 1 xor 1 average 4 unsupported [Field removed: no passive result]."
+            "Total 30 and delta -2 plus 5 compare 1 neq 0 le I badcmp [Field removed: no passive result] true 5 false 1 badboolfn [Field removed: no passive result] nested 1 badnested [Field removed: no passive result] badconst [Field removed: no passive result] sum 026 semisum 026 badsemi [Field removed: no passive result] min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 exp 18 badexp [Field removed: no passive result] mod 2 modzero [Field removed: no passive result] round 5 count 3 sign -1 int 20 sqrt 4 and 1 or 1 not 1 xor 1 average 4 unsupported [Field removed: no passive result]."
         ),
         "decoded PDF text did not contain passive formula values: {rendered_text:?}"
     );
@@ -13054,6 +13067,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         b"(6 + 4)",
         b"3 * 2",
         b"SUM",
+        b"1;",
         b"MIN",
         b"MAX",
         b"ABS",

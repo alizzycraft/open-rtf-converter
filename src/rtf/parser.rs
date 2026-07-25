@@ -25101,7 +25101,7 @@ impl<'a> FormulaParser<'a> {
             args += 1;
 
             self.skip_ws();
-            if self.consume(',') {
+            if self.consume_argument_separator() {
                 expecting_argument = true;
                 continue;
             }
@@ -25170,6 +25170,10 @@ impl<'a> FormulaParser<'a> {
         } else {
             false
         }
+    }
+
+    fn consume_argument_separator(&mut self) -> bool {
+        self.consume(',') || self.consume(';')
     }
 
     fn parse_comparison_operator(&mut self) -> Option<FormulaComparisonOperator> {
@@ -44259,6 +44263,28 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula function field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_semicolon_arguments_render_bounded_passive_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 Sum {\field{\*\fldinst = SUM(1; 2 + 3; (4 * 5)) \\# "000"}} min {\field{\*\fldinst = MIN(9; 2 + 3; -4)}} bool {\field{\*\fldinst = AND(1 < 2; TRUE())}} malformed {\field{\*\fldinst = SUM(1;)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Sum 026 min -4 bool 1 malformed [Field removed: no passive result]"),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "SUM", "MIN", "AND", "1;", "2 + 3", "4 * 5", "TRUE()", "\\#", "\"000\"", "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula semicolon-argument field leaked unsafe text: {forbidden}"
             );
         }
     }
