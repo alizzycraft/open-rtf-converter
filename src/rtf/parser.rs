@@ -25164,6 +25164,8 @@ fn evaluate_formula_function(name: &str, args: &[i64]) -> Option<i64> {
         "N" if args.len() == 1 => Some(args[0]),
         "INT" if args.len() == 1 => Some(args[0]),
         "SIGN" if args.len() == 1 => Some(args[0].signum()),
+        "EVEN" if args.len() == 1 => checked_formula_even(args[0]),
+        "ODD" if args.len() == 1 => checked_formula_odd(args[0]),
         "SQRT" if args.len() == 1 => checked_exact_integer_sqrt(args[0]),
         "AVERAGE" if !args.is_empty() => {
             let sum = args
@@ -25180,6 +25182,28 @@ fn evaluate_formula_function(name: &str, args: &[i64]) -> Option<i64> {
         )),
         "IF" if args.len() == 3 => Some(if args[0] != 0 { args[1] } else { args[2] }),
         _ => None,
+    }
+}
+
+fn checked_formula_even(value: i64) -> Option<i64> {
+    if value % 2 == 0 {
+        Some(value)
+    } else if value > 0 {
+        value.checked_add(1)
+    } else {
+        value.checked_sub(1)
+    }
+}
+
+fn checked_formula_odd(value: i64) -> Option<i64> {
+    if value % 2 != 0 {
+        Some(value)
+    } else if value > 0 {
+        value.checked_add(1)
+    } else if value < 0 {
+        value.checked_sub(1)
+    } else {
+        Some(1)
     }
 }
 
@@ -44594,6 +44618,36 @@ After\par}"#;
             assert!(
                 !text.contains(forbidden),
                 "formula N field leaked unsafe text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_formula_even_odd_functions_render_bounded_passive_values() {
+        let output = parse_rtf(
+            r#"{\rtf1 Even {\field{\*\fldinst = EVEN(5)}} neg {\field{\*\fldinst = EVEN(-5)}} same {\field{\*\fldinst = EVEN(4) \\# "000"}} Odd {\field{\*\fldinst = ODD(4)}} zero {\field{\*\fldinst = ODD(0)}} negodd {\field{\*\fldinst = ODD(-4)}} extra {\field{\*\fldinst = EVEN(1,2)}} overflow {\field{\*\fldinst = EVEN(9223372036854775807)}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains(
+                "Even 6 neg -6 same 004 Odd 5 zero 1 negodd -5 extra [Field removed: no passive result] overflow [Field removed: no passive result]"
+            ),
+            "normalized text was {text:?}"
+        );
+        for forbidden in [
+            "EVEN",
+            "ODD",
+            "9223372036854775807",
+            "1,2",
+            "\\#",
+            "\"000\"",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "formula EVEN/ODD field leaked unsafe text: {forbidden}"
             );
         }
     }

@@ -12937,7 +12937,25 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "\\",
         "*",
         "\\",
-        "fldinst = N(1,2)}} sign {",
+        "fldinst = N(1,2)}} even {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = EVEN(5)}} odd {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = ODD(-4) \\\\# \"00\"}} badeven {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst = EVEN(9223372036854775807)}} sign {",
         "\\",
         "field{",
         "\\",
@@ -12999,7 +13017,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let text = collect_text(&parsed.document);
 
     assert!(text.contains(
-        "Total 30 and delta -2 plus 5 compare 1 neq 0 le I badcmp [Field removed: no passive result] true 5 false 1 badboolfn [Field removed: no passive result] nested 1 badnested [Field removed: no passive result] iffn 10 badif [Field removed: no passive result] badconst [Field removed: no passive result] sum 026 semisum 026 badsemi [Field removed: no passive result] min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 exp 18 badexp [Field removed: no passive result] mod 2 modzero [Field removed: no passive result] round 5 count 3 n 010 badn [Field removed: no passive result] sign -1 int 20 sqrt 4 and 1 or 1 not 1 xor 1 average 4 unsupported [Field removed: no passive result]."
+        "Total 30 and delta -2 plus 5 compare 1 neq 0 le I badcmp [Field removed: no passive result] true 5 false 1 badboolfn [Field removed: no passive result] nested 1 badnested [Field removed: no passive result] iffn 10 badif [Field removed: no passive result] badconst [Field removed: no passive result] sum 026 semisum 026 badsemi [Field removed: no passive result] min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 exp 18 badexp [Field removed: no passive result] mod 2 modzero [Field removed: no passive result] round 5 count 3 n 010 badn [Field removed: no passive result] even 6 odd -05 badeven [Field removed: no passive result] sign -1 int 20 sqrt 4 and 1 or 1 not 1 xor 1 average 4 unsupported [Field removed: no passive result]."
     ));
     for forbidden in [
         "fldinst",
@@ -13022,6 +13040,9 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         "ROUND",
         "COUNT",
         "N(",
+        "EVEN",
+        "ODD",
+        "9223372036854775807",
         "SIGN",
         "INT",
         "SQRT",
@@ -13083,7 +13104,7 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
     let rendered_text = decoded_pdf_text(&content);
     assert!(
         rendered_text.contains(
-            "Total 30 and delta -2 plus 5 compare 1 neq 0 le I badcmp [Field removed: no passive result] true 5 false 1 badboolfn [Field removed: no passive result] nested 1 badnested [Field removed: no passive result] iffn 10 badif [Field removed: no passive result] badconst [Field removed: no passive result] sum 026 semisum 026 badsemi [Field removed: no passive result] min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 exp 18 badexp [Field removed: no passive result] mod 2 modzero [Field removed: no passive result] round 5 count 3 n 010 badn [Field removed: no passive result] sign -1 int 20 sqrt 4 and 1 or 1 not 1 xor 1 average 4 unsupported [Field removed: no passive result]."
+            "Total 30 and delta -2 plus 5 compare 1 neq 0 le I badcmp [Field removed: no passive result] true 5 false 1 badboolfn [Field removed: no passive result] nested 1 badnested [Field removed: no passive result] iffn 10 badif [Field removed: no passive result] badconst [Field removed: no passive result] sum 026 semisum 026 badsemi [Field removed: no passive result] min -4 max IX abs 05 malformed [Field removed: no passive result] product -40 power 81 exp 18 badexp [Field removed: no passive result] mod 2 modzero [Field removed: no passive result] round 5 count 3 n 010 badn [Field removed: no passive result] even 6 odd -05 badeven [Field removed: no passive result] sign -1 int 20 sqrt 4 and 1 or 1 not 1 xor 1 average 4 unsupported [Field removed: no passive result]."
         ),
         "decoded PDF text did not contain passive formula values: {rendered_text:?}"
     );
@@ -13107,6 +13128,9 @@ fn resultless_formula_fields_render_bounded_passive_arithmetic_without_instructi
         b"ROUND",
         b"COUNT",
         b"N(",
+        b"EVEN",
+        b"ODD",
+        b"9223372036854775807",
         b"SIGN",
         b"INT",
         b"SQRT",
