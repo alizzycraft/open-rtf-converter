@@ -16070,6 +16070,7 @@ fn resultless_prompt_fields_do_not_request_input_or_leak_to_pdf() {
 {\field{\*\fldinst ASK Client "Hidden prompt" \d "Hidden default"}}
 ask-ref {\field{\*\fldinst REF Client}}
 fill {\field{\*\fldinst FILLIN "Secret prompt" \d "Secret default"}}
+unsafe-fill {\field{\*\fldinst FILLIN "Unsafe prompt" \d "/JavaScript"}}
 visible after\par}"#
         .to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -16077,7 +16078,8 @@ visible after\par}"#
 
     assert!(text.contains("Visible before"));
     assert!(text.contains("ask-ref [Field removed: no passive result]"));
-    assert!(text.contains("fill [Field removed: no passive result]"));
+    assert!(text.contains("fill Secret default"));
+    assert!(text.contains("unsafe-fill [Field removed: no passive result]"));
     assert!(text.contains("visible after"));
     for forbidden in [
         "ASK",
@@ -16086,7 +16088,8 @@ visible after\par}"#
         "Hidden prompt",
         "Hidden default",
         "Secret prompt",
-        "Secret default",
+        "Unsafe prompt",
+        "/JavaScript",
         "fldinst",
     ] {
         assert!(
@@ -16110,11 +16113,12 @@ visible after\par}"#
 
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("ask-ref [Field removed: no passive result]"));
-    assert!(rendered_text.contains("fill [Field removed: no passive result]"));
+    assert!(rendered_text.contains("fill Secret default"));
+    assert!(rendered_text.contains("unsafe-fill [Field removed: no passive result]"));
     assert!(rendered_text.contains("visible after"));
     assert!(output.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains(
-            "prompt field FILLIN rendered as passive placeholder without requesting user input",
+            "prompt field FILLIN rendered from passive default without requesting user input",
         )
     }));
     assert!(output.diagnostics.iter().all(|diagnostic| {
@@ -16129,7 +16133,7 @@ visible after\par}"#
         b"Hidden prompt",
         b"Hidden default",
         b"Secret prompt",
-        b"Secret default",
+        b"Unsafe prompt",
         b"fldinst",
         b"/Action",
         b"/Annots",

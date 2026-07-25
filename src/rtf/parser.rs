@@ -2236,6 +2236,22 @@ impl Parser {
                         )?;
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_prompt_resultless_field(name)
+                        && let Some(result) = passive_fillin_field_result(&field_instruction)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "prompt field {name} rendered from passive default without requesting user input"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_passive_field_result(
+                            field_owner_destination,
+                            result,
+                            &field_instruction,
+                            offset,
+                        )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_prompt_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
@@ -5564,6 +5580,11 @@ impl Parser {
                 self.count_skipped_destination_bytes(name.len(), offset)?;
                 self.state.destination = Destination::Ignored;
             }
+            name if self.state.destination == Destination::FieldInstruction
+                && is_passive_field_instruction_control(name) =>
+            {
+                self.push_field_instruction_control_word(name, offset)?;
+            }
             name if is_known_ignored_control(name) => {}
             name if self.state.destination == Destination::Ignored => {
                 self.count_skipped_destination_bytes(name.len(), offset)?;
@@ -8128,6 +8149,17 @@ impl Parser {
         self.count_skipped_destination_bytes(text.len(), offset)?;
         let limit = self.limits().max_field_instruction_chars;
         append_field_instruction(&mut self.state.field_instruction, text, limit, offset)
+    }
+
+    fn push_field_instruction_control_word(
+        &mut self,
+        name: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes(name.len(), offset)?;
+        let text = format!("\\{name} ");
+        let limit = self.limits().max_field_instruction_chars;
+        append_field_instruction(&mut self.state.field_instruction, &text, limit, offset)
     }
 
     fn push_field_instruction_unicode(
@@ -23559,6 +23591,10 @@ fn is_prompt_resultless_field(name: &str) -> bool {
     matches!(name, "FILLIN")
 }
 
+fn is_passive_field_instruction_control(name: &str) -> bool {
+    matches!(name, "d")
+}
+
 fn is_mail_merge_data_resultless_field(name: &str) -> bool {
     matches!(
         name,
@@ -23883,6 +23919,43 @@ fn passive_quote_field_result(instruction: &str) -> Option<PassiveFieldResult> {
         font_size_half_points: None,
         form_field: false,
     })
+}
+
+fn passive_fillin_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    let text = field_switch_string_value(instruction, b'd')
+        .or_else(|| field_second_quoted_argument(instruction))?;
+    if contains_active_pdf_marker_text(&text) {
+        return None;
+    }
+    Some(PassiveFieldResult {
+        text,
+        font_name: None,
+        font_size_half_points: None,
+        form_field: false,
+    })
+}
+
+fn field_second_quoted_argument(instruction: &str) -> Option<String> {
+    let rest = field_rest_after_name(instruction)?;
+    let rest = skip_field_argument(rest)?;
+    let rest = rest.trim_start();
+    field_quoted_prefix(rest)
+}
+
+fn contains_active_pdf_marker_text(text: &str) -> bool {
+    [
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AA",
+        "/AcroForm",
+        "/Widget",
+        "/URI",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
 }
 
 fn passive_macrobutton_field_result(instruction: &str) -> Option<PassiveFieldResult> {
@@ -43581,7 +43654,9 @@ After\par}"#;
         let text = document_text(&output.document);
 
         assert!(
-            text.contains("Before  ask-ref [Field removed: no passive result] fill [Field removed: no passive result] After"),
+            text.contains(
+                "Before  ask-ref [Field removed: no passive result] fill Secret default After"
+            ),
             "text was {text:?}"
         );
         for forbidden in [
@@ -43591,7 +43666,6 @@ After\par}"#;
             "Hidden prompt",
             "Hidden default",
             "Secret prompt",
-            "Secret default",
             "fldinst",
         ] {
             assert!(
@@ -43606,7 +43680,7 @@ After\par}"#;
         }));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains(
-                "prompt field FILLIN rendered as passive placeholder without requesting user input",
+                "prompt field FILLIN rendered from passive default without requesting user input",
             )
         }));
         assert!(output.diagnostics.iter().all(|diagnostic| {
@@ -43628,6 +43702,25 @@ After\par}"#;
                 .message
                 .contains("prompt field FILLIN stripped without requesting user input")
         }));
+    }
+
+    #[test]
+    fn resultless_fillin_unsafe_default_renders_prompt_placeholder() {
+        let output =
+            parse_rtf(r#"{\rtf1 Fill {\field{\*\fldinst FILLIN "Prompt" \d "/JavaScript"}}\par}"#)
+                .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Fill [Field removed: no passive result]"),
+            "text was {text:?}"
+        );
+        for forbidden in ["FILLIN", "Prompt", "/JavaScript", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "unsafe FILLIN default leaked prompt text: {forbidden}"
+            );
+        }
     }
 
     #[test]
