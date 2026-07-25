@@ -23461,7 +23461,10 @@ fn clean_document_property_text(
     limits: &RtfLimits,
 ) -> Result<Option<String>, ParseError> {
     let text = text.trim().to_string();
-    if text.is_empty() || text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&text)
+    if text.is_empty()
+        || text.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(&text)
+        || contains_active_pdf_marker_text(&text)
     {
         return Ok(None);
     }
@@ -23480,7 +23483,10 @@ fn clean_field_bookmark_value(
     limits: &RtfLimits,
 ) -> Result<Option<String>, ParseError> {
     let text = text.trim().to_string();
-    if text.is_empty() || text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&text)
+    if text.is_empty()
+        || text.chars().any(|ch| ch.is_control())
+        || contains_internal_marker(&text)
+        || contains_active_pdf_marker_text(&text)
     {
         return Ok(None);
     }
@@ -25120,6 +25126,7 @@ fn clean_bookmark_name(name: String) -> Option<String> {
         || name.starts_with('_')
         || name.chars().any(|ch| ch.is_control())
         || contains_internal_marker(&name)
+        || contains_active_pdf_marker_text(&name)
     {
         return None;
     }
@@ -42963,6 +42970,46 @@ mod tests {
                 .message
                 .contains("rendering passive field REF without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_set_values_reject_active_pdf_markers_before_refs() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\field{\*\fldinst SET Unsafe "PAYLOAD /JavaScript"}} ref {\field{\*\fldinst REF Unsafe}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before  ref [Field removed: no passive result]"),
+            "text was {text:?}"
+        );
+        for forbidden in ["PAYLOAD", "/JavaScript", "SET", "REF Unsafe", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "unsafe SET/REF field leaked text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn bookmark_names_reject_active_pdf_markers_before_refs() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\*\bkmkstart "/JavaScript"}Hidden{\*\bkmkend "/JavaScript"} ref {\field{\*\fldinst REF "/JavaScript"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before Hidden ref [Field removed: no passive result]"),
+            "text was {text:?}"
+        );
+        for forbidden in ["/JavaScript", "bkmkstart", "bkmkend", "REF", "fldinst"] {
+            assert!(
+                !text.contains(forbidden),
+                "unsafe bookmark/REF field leaked text: {forbidden}"
+            );
+        }
     }
 
     #[test]

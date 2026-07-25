@@ -9778,6 +9778,51 @@ fn linked_custom_property_values_are_never_rendered_or_preserved() {
 }
 
 #[test]
+fn metadata_field_values_reject_active_markers_before_pdf_output() {
+    let input = br#"{\rtf1{\*\userprops{\propname Client Name}{\proptype30}{\staticval PAYLOAD /JavaScript}}{\*\docvar {Client Var}{PAYLOAD /EmbeddedFile}}Property {\field{\*\fldinst DOCPROPERTY "Client Name"}} variable {\field{\*\fldinst DOCVARIABLE "Client Var"}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Property [Field removed: no passive result]"));
+    assert!(rendered_text.contains("variable [Field removed: no passive result]"));
+    for forbidden in [
+        b"PAYLOAD".as_slice(),
+        b"Client Name",
+        b"Client Var",
+        b"DOCPROPERTY",
+        b"DOCVARIABLE",
+        b"staticval",
+        b"docvar",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "metadata field active marker content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn docvariable_fields_render_metadata_without_leaking_nested_active_content() {
     let input = br#"{\rtf1{\*\docvar {Client Name}{Contoso {\field{\*\fldinst HYPERLINK "https://example.com/docvar"}{\fldrslt Hidden link}} tail}}Client {\field{\*\fldinst DOCVARIABLE "Client Name"}} missing {\field{\*\fldinst DOCVARIABLE Missing}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
@@ -12070,6 +12115,97 @@ fn resultless_set_fields_feed_refs_without_instruction_or_payload_leakage() {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden SET-field content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn set_field_values_reject_active_markers_before_ref_pdf_output() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Output {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst SET Safe \"Visible value\"}} safe {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst REF Safe}} unsafe {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst SET Unsafe \"PAYLOAD /JavaScript\"}} ref {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst REF Unsafe}}",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Output  safe Visible value unsafe  ref [Field removed: no passive result]"),
+        "unsafe SET value should not seed REF output: {text:?}"
+    );
+    for forbidden in [
+        "PAYLOAD",
+        "/JavaScript",
+        "SET Unsafe",
+        "REF Unsafe",
+        "fldinst",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "unsafe SET/REF content leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("safe Visible value unsafe  ref"));
+    assert!(rendered_text.contains("[Field removed: no passive result]"));
+    for forbidden in [
+        b"PAYLOAD".as_slice(),
+        b"SET Unsafe",
+        b"REF Unsafe",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "unsafe SET/REF content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }
