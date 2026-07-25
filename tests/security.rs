@@ -13624,6 +13624,83 @@ fn resultless_compare_fields_render_bounded_passive_values_without_instruction_l
 }
 
 #[test]
+fn resultless_compare_fields_resolve_passive_references_without_instruction_leakage() {
+    let input = br#"{\rtf1{\field{\*\fldinst SET Units "7"}}Compare {\field{\*\fldinst COMPARE Units > 5}} {\*\bkmkstart Rate}4{\*\bkmkend Rate} rate {\field{\*\fldinst COMPARE Rate = 4 \\* ROMAN}} missing {\field{\*\fldinst COMPARE Missing = 1}} unsafe {\field{\*\fldinst SET Bad "PAYLOAD /JavaScript"}}{\field{\*\fldinst COMPARE Bad = 1}}\par}"#.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = strip_bookmark_page_markers(&collect_text(&parsed.document));
+
+    assert!(
+        text.contains("Compare 1 4 rate I missing 0 unsafe 0"),
+        "text did not contain passive COMPARE reference values: {text:?}"
+    );
+    for forbidden in [
+        "SET",
+        "COMPARE",
+        "Units > 5",
+        "Rate = 4",
+        "Missing = 1",
+        "Bad = 1",
+        "PAYLOAD",
+        "/JavaScript",
+        "ROMAN",
+        "fldinst",
+        "[Field removed",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "referenced COMPARE field leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Compare 1 4 rate I missing 0 unsafe 0"),
+        "decoded PDF text did not contain passive COMPARE reference values: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"SET".as_slice(),
+        b"COMPARE",
+        b"Units > 5",
+        b"Rate = 4",
+        b"Missing = 1",
+        b"Bad = 1",
+        b"PAYLOAD",
+        b"/JavaScript",
+        b"ROMAN",
+        b"fldinst",
+        b"[Field removed",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/URI",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "referenced COMPARE field leaked unsafe PDF content: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_field_case_switches_render_passively_without_instruction_leakage() {
     let input = rtf(&[
         "{",

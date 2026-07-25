@@ -9260,6 +9260,8 @@ impl Parser {
             self.passive_info_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("FORMULA") {
             self.passive_formula_field_result(instruction)
+        } else if field_instruction_name(instruction) == Some("COMPARE") {
+            self.passive_compare_field_result(instruction)
         } else if let Some(property) =
             field_instruction_name(instruction).and_then(document_shortcut_property_field_name)
         {
@@ -9707,6 +9709,12 @@ impl Parser {
             return None;
         }
         strip_bookmark_page_markers(&text)
+    }
+
+    fn passive_compare_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
+        passive_compare_field_result_with_resolver(instruction, &|name| {
+            self.passive_formula_identifier_value(name)
+        })
     }
 
     fn passive_noteref_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
@@ -23799,6 +23807,13 @@ fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {
 }
 
 fn passive_compare_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    passive_compare_field_result_with_resolver(instruction, &|_| None)
+}
+
+fn passive_compare_field_result_with_resolver(
+    instruction: &str,
+    identifier_resolver: &dyn Fn(&str) -> Option<i64>,
+) -> Option<PassiveFieldResult> {
     let rest = field_rest_after_name(instruction)?.trim_start();
     let (left, rest) = field_if_operand(rest)?;
     let (operator, rest) = field_if_operator(rest.trim_start())?;
@@ -23807,6 +23822,8 @@ fn passive_compare_field_result(instruction: &str) -> Option<PassiveFieldResult>
         return None;
     }
 
+    let left = passive_compare_resolved_operand(left, identifier_resolver);
+    let right = passive_compare_resolved_operand(right, identifier_resolver);
     Some(PassiveFieldResult {
         text: if field_if_condition_matches(&left, operator, &right) {
             "1"
@@ -23818,6 +23835,24 @@ fn passive_compare_field_result(instruction: &str) -> Option<PassiveFieldResult>
         font_size_half_points: None,
         form_field: false,
     })
+}
+
+fn passive_compare_resolved_operand(
+    operand: String,
+    identifier_resolver: &dyn Fn(&str) -> Option<i64>,
+) -> String {
+    if operand
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_alphabetic())
+        && operand
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        && let Some(value) = identifier_resolver(&operand)
+    {
+        return value.to_string();
+    }
+    operand
 }
 
 fn passive_quote_field_result(instruction: &str) -> Option<PassiveFieldResult> {
@@ -44232,6 +44267,38 @@ After\par}"#;
                 .message
                 .contains("rendering passive field COMPARE without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_compare_fields_resolve_bounded_set_and_bookmark_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\field{\*\fldinst SET Units "7"}}Compare {\field{\*\fldinst COMPARE Units > 5}} {\*\bkmkstart Rate}4{\*\bkmkend Rate} rate {\field{\*\fldinst COMPARE Rate = 4 \\* ROMAN}} missing {\field{\*\fldinst COMPARE Missing = 1}} unsafe {\field{\*\fldinst SET Bad "PAYLOAD /JavaScript"}}{\field{\*\fldinst COMPARE Bad = 1}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Compare 1 4 rate I missing 0 unsafe 0"),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "SET",
+            "COMPARE",
+            "Units > 5",
+            "Rate = 4",
+            "Missing = 1",
+            "Bad = 1",
+            "PAYLOAD",
+            "/JavaScript",
+            "ROMAN",
+            "fldinst",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "referenced COMPARE field leaked unsafe text: {forbidden}"
+            );
+        }
     }
 
     #[test]
