@@ -2266,6 +2266,22 @@ impl Parser {
                         )?;
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_mail_merge_data_resultless_field(name)
+                        && let Some(result) = passive_greetingline_field_result(&field_instruction)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "mail-merge field {name} rendered from passive fallback without executing merge data source"
+                            ),
+                            Some(offset),
+                        ));
+                        self.push_passive_field_result(
+                            field_owner_destination,
+                            result,
+                            &field_instruction,
+                            offset,
+                        )?;
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && is_mail_merge_data_resultless_field(name)
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             format!(
@@ -23592,7 +23608,7 @@ fn is_prompt_resultless_field(name: &str) -> bool {
 }
 
 fn is_passive_field_instruction_control(name: &str) -> bool {
-    matches!(name, "d")
+    matches!(name, "d" | "e")
 }
 
 fn is_mail_merge_data_resultless_field(name: &str) -> bool {
@@ -23935,11 +23951,44 @@ fn passive_fillin_field_result(instruction: &str) -> Option<PassiveFieldResult> 
     })
 }
 
+fn passive_greetingline_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    if field_instruction_name(instruction) != Some("GREETINGLINE") {
+        return None;
+    }
+    let text = field_switch_string_value(instruction, b'e')
+        .or_else(|| field_last_quoted_argument_after_name(instruction))?;
+    if contains_active_pdf_marker_text(&text) {
+        return None;
+    }
+    Some(PassiveFieldResult {
+        text,
+        font_name: None,
+        font_size_half_points: None,
+        form_field: false,
+    })
+}
+
 fn field_second_quoted_argument(instruction: &str) -> Option<String> {
     let rest = field_rest_after_name(instruction)?;
     let rest = skip_field_argument(rest)?;
     let rest = rest.trim_start();
     field_quoted_prefix(rest)
+}
+
+fn field_last_quoted_argument_after_name(instruction: &str) -> Option<String> {
+    let mut rest = field_rest_after_name(instruction)?.trim_start();
+    let mut last = None;
+    while !rest.is_empty() {
+        if rest.starts_with('"') {
+            last = Some(field_quoted_prefix(rest)?);
+        }
+        let next = skip_field_argument(rest)?;
+        if next.len() == rest.len() {
+            break;
+        }
+        rest = next.trim_start();
+    }
+    last
 }
 
 fn contains_active_pdf_marker_text(text: &str) -> bool {
@@ -43777,13 +43826,13 @@ After\par}"#;
 
     #[test]
     fn resultless_mail_merge_address_fields_do_not_execute_data_source() {
-        let input = r#"{\rtf1 Before address {\field{\*\fldinst ADDRESSBLOCK \f "<<_COMPANY_>>\r<<_ADDRESS1_>>" \l 1033}} greeting {\field{\*\fldinst GREETINGLINE \f "<<_TITLE0_>> <<_LAST0_>>" \e "Dear Sir or Madam,"}} After\par}"#;
+        let input = r#"{\rtf1 Before address {\field{\*\fldinst ADDRESSBLOCK \f "<<_COMPANY_>>\r<<_ADDRESS1_>>" \l 1033}} greeting {\field{\*\fldinst GREETINGLINE \f "<<_TITLE0_>> <<_LAST0_>>" \e "Dear Sir or Madam,"}} unsafe {\field{\*\fldinst GREETINGLINE \e "/JavaScript"}} After\par}"#;
         let output = parse_rtf(input).unwrap();
         let text = document_text(&output.document);
 
         assert!(
             text.contains(
-                "Before address [Field removed: no passive result] greeting [Field removed: no passive result] After"
+                "Before address [Field removed: no passive result] greeting Dear Sir or Madam, unsafe [Field removed: no passive result] After"
             ),
             "text was {text:?}"
         );
@@ -43794,7 +43843,7 @@ After\par}"#;
             "_ADDRESS1_",
             "_TITLE0_",
             "_LAST0_",
-            "Dear Sir",
+            "/JavaScript",
             "fldinst",
         ] {
             assert!(
@@ -43802,7 +43851,12 @@ After\par}"#;
                 "mail-merge address field leaked data-source text: {forbidden}"
             );
         }
-        for name in ["ADDRESSBLOCK", "GREETINGLINE"] {
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "mail-merge field GREETINGLINE rendered from passive fallback without executing merge data source",
+            )
+        }));
+        for name in ["ADDRESSBLOCK"] {
             assert!(
                 output.diagnostics.iter().any(|diagnostic| {
                     diagnostic.message.contains(&format!(
@@ -43825,7 +43879,7 @@ After\par}"#;
         let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
         let stripped_text = document_text(&stripped.document);
         assert!(
-            stripped_text.contains("Before address  greeting  After"),
+            stripped_text.contains("Before address  greeting  unsafe  After"),
             "stripped text was {stripped_text:?}"
         );
         assert!(!stripped_text.contains("[Field removed"));

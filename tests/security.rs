@@ -16259,6 +16259,7 @@ fn resultless_mail_merge_address_fields_do_not_execute_or_leak_to_pdf() {
     let input = br#"{\rtf1 Visible before
 address {\field{\*\fldinst ADDRESSBLOCK \f "<<_COMPANY_>>\r<<_ADDRESS1_>>" \l 1033}}
 greeting {\field{\*\fldinst GREETINGLINE \f "<<_TITLE0_>> <<_LAST0_>>" \e "Dear Sir or Madam,"}}
+unsafe-greeting {\field{\*\fldinst GREETINGLINE \e "/JavaScript"}}
 visible after\par}"#
         .to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -16266,7 +16267,8 @@ visible after\par}"#
 
     assert!(text.contains("Visible before"));
     assert!(text.contains("address [Field removed: no passive result]"));
-    assert!(text.contains("greeting [Field removed: no passive result]"));
+    assert!(text.contains("greeting Dear Sir or Madam,"));
+    assert!(text.contains("unsafe-greeting [Field removed: no passive result]"));
     assert!(text.contains("visible after"));
     for forbidden in [
         "ADDRESSBLOCK",
@@ -16275,7 +16277,7 @@ visible after\par}"#
         "_ADDRESS1_",
         "_TITLE0_",
         "_LAST0_",
-        "Dear Sir",
+        "/JavaScript",
         "fldinst",
     ] {
         assert!(
@@ -16299,9 +16301,15 @@ visible after\par}"#
 
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("address [Field removed: no passive result]"));
-    assert!(rendered_text.contains("greeting [Field removed: no passive result]"));
+    assert!(rendered_text.contains("greeting Dear Sir or Madam,"));
+    assert!(rendered_text.contains("unsafe-greeting [Field removed: no passive result]"));
     assert!(rendered_text.contains("visible after"));
-    for name in ["ADDRESSBLOCK", "GREETINGLINE"] {
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "mail-merge field GREETINGLINE rendered from passive fallback without executing merge data source",
+        )
+    }));
+    for name in ["ADDRESSBLOCK"] {
         assert!(
             output.diagnostics.iter().any(|diagnostic| {
                 diagnostic.message.contains(&format!(
@@ -16323,7 +16331,6 @@ visible after\par}"#
         b"_ADDRESS1_",
         b"_TITLE0_",
         b"_LAST0_",
-        b"Dear Sir",
         b"fldinst",
         b"/Action",
         b"/Annots",
