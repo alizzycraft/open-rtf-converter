@@ -9262,6 +9262,8 @@ impl Parser {
             self.passive_formula_field_result(instruction)
         } else if field_instruction_name(instruction) == Some("COMPARE") {
             self.passive_compare_field_result(instruction)
+        } else if field_instruction_name(instruction) == Some("IF") {
+            self.passive_if_field_result(instruction)
         } else if let Some(property) =
             field_instruction_name(instruction).and_then(document_shortcut_property_field_name)
         {
@@ -9713,6 +9715,12 @@ impl Parser {
 
     fn passive_compare_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         passive_compare_field_result_with_resolver(instruction, &|name| {
+            self.passive_formula_identifier_value(name)
+        })
+    }
+
+    fn passive_if_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
+        passive_if_field_result_with_resolver(instruction, &|name| {
             self.passive_formula_identifier_value(name)
         })
     }
@@ -23777,6 +23785,13 @@ fn passive_eq_root_segments(degree: Option<String>, radicand: String) -> Vec<Pas
 }
 
 fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    passive_if_field_result_with_resolver(instruction, &|_| None)
+}
+
+fn passive_if_field_result_with_resolver(
+    instruction: &str,
+    identifier_resolver: &dyn Fn(&str) -> Option<i64>,
+) -> Option<PassiveFieldResult> {
     let rest = field_rest_after_name(instruction)?.trim_start();
     let (left, rest) = field_if_operand(rest)?;
     let (operator, rest) = field_if_operator(rest.trim_start())?;
@@ -23787,6 +23802,8 @@ fn passive_if_field_result(instruction: &str) -> Option<PassiveFieldResult> {
         return None;
     }
 
+    let left = passive_compare_resolved_operand(left, identifier_resolver);
+    let right = passive_compare_resolved_operand(right, identifier_resolver);
     let text = if field_if_condition_matches(&left, operator, &right) {
         true_text
     } else {
@@ -44235,6 +44252,36 @@ After\par}"#;
                 .message
                 .contains("rendering passive field IF without executing field instruction")
         }));
+    }
+
+    #[test]
+    fn resultless_if_fields_resolve_bounded_set_and_bookmark_values() {
+        let output = parse_rtf(
+            r#"{\rtf1{\field{\*\fldinst SET Units "7"}}If {\field{\*\fldinst IF Units > 5 "High" "Low"}} {\*\bkmkstart Rate}4{\*\bkmkend Rate} rate {\field{\*\fldinst IF Rate = 4 "Match" "Miss" \\* Upper}} missing {\field{\*\fldinst IF Missing = 1 "Yes" "No"}} unsafe {\field{\*\fldinst SET Bad "PAYLOAD /JavaScript"}}{\field{\*\fldinst IF Bad = 1 "Yes" "No"}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("If High 4 rate MATCH missing No unsafe No"),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "SET",
+            "IF",
+            "Units > 5",
+            "Rate = 4",
+            "Missing = 1",
+            "Bad = 1",
+            "PAYLOAD",
+            "fldinst",
+            "[Field removed",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "referenced IF field leaked unsafe text: {forbidden}"
+            );
+        }
     }
 
     #[test]
