@@ -29277,7 +29277,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                 } else if let Some(command) =
                     parse_emf_transparentblt_keyed(data, &header, &coordinates)
                 {
-                    commands.push(command);
+                    push_passive_source_raster_command(&mut commands, command)?;
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -32148,7 +32148,7 @@ fn parse_emf_transparentblt_keyed(
     data: &[u8],
     header: &ParsedEmfHeader,
     coordinates: &EmfCoordinateState,
-) -> Option<StaticImageVectorCommand> {
+) -> Option<PassiveSourceRasterCommand> {
     const DIB_RGB_COLORS: u32 = 0;
 
     if data.len() < 100 {
@@ -32176,7 +32176,110 @@ fn parse_emf_transparentblt_keyed(
 
     let dib_bytes =
         emf_stretchdibits_dib_bytes(data, off_bmi_src, cb_bmi_src, off_bits_src, cb_bits_src)?;
-    let mut image = parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)?;
+    let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
+    let left_top = normalized_emf_point(x_dest, y_dest, header, coordinates);
+    let right_bottom = normalized_emf_point(
+        x_dest.saturating_add(width),
+        y_dest.saturating_add(height),
+        header,
+        coordinates,
+    );
+    let left = left_top.0.min(right_bottom.0);
+    let top = left_top.1.min(right_bottom.1);
+    let right = left_top.0.max(right_bottom.0);
+    let bottom = left_top.1.max(right_bottom.1);
+
+    if let Some(mut image) =
+        parse_vector_raster_dib_image(&dib_bytes, x_src, y_src, cx_src, cy_src, false)
+    {
+        image.alpha_mask = keyed_vector_raster_alpha_mask(
+            image.format,
+            &image.bytes,
+            image.width_px,
+            image.height_px,
+            transparent,
+            &image.palette,
+            image.alpha_mask,
+        )?;
+        return Some(PassiveSourceRasterCommand::Draw(
+            StaticImageVectorCommand::RasterImage {
+                left,
+                top,
+                right,
+                bottom,
+                image: StaticImageVectorRaster {
+                    format: image.format,
+                    width_px: image.width_px,
+                    height_px: image.height_px,
+                    bytes: image.bytes,
+                    palette: image.palette,
+                    alpha_mask: image.alpha_mask,
+                    tone_adjustment: None,
+                },
+            },
+        ));
+    }
+
+    clipped_compressed_jpeg_transparentblt_command(
+        &dib_bytes,
+        x_src,
+        y_src,
+        cx_src,
+        cy_src,
+        left,
+        top,
+        right,
+        bottom,
+        transparent,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn clipped_compressed_jpeg_transparentblt_command(
+    bytes: &[u8],
+    source_x: i32,
+    source_y: i32,
+    source_width: i32,
+    source_height: i32,
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+    transparent: Color,
+) -> Option<PassiveSourceRasterCommand> {
+    if source_x < 0 || source_y < 0 || source_width <= 0 || source_height <= 0 {
+        return None;
+    }
+    let mut image = parse_compressed_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
+    if !matches!(
+        image.format,
+        ImageFormat::Jpeg
+            | ImageFormat::JpegGrayscale
+            | ImageFormat::JpegCmyk
+            | ImageFormat::JpegInverted
+            | ImageFormat::JpegGrayscaleInverted
+            | ImageFormat::JpegCmykInverted
+    ) {
+        return None;
+    }
+    let source_x = u32::try_from(source_x).ok()?;
+    let source_y = u32::try_from(source_y).ok()?;
+    let source_width = u32::try_from(source_width).ok()?;
+    let source_height = u32::try_from(source_height).ok()?;
+    let source_right = source_x.checked_add(source_width)?;
+    let source_bottom = source_y.checked_add(source_height)?;
+    if source_right > image.width_px || source_bottom > image.height_px {
+        return None;
+    }
+    if source_x == 0
+        && source_y == 0
+        && source_width == image.width_px
+        && source_height == image.height_px
+    {
+        return None;
+    }
+
     image.alpha_mask = keyed_vector_raster_alpha_mask(
         image.format,
         &image.bytes,
@@ -32187,30 +32290,43 @@ fn parse_emf_transparentblt_keyed(
         image.alpha_mask,
     )?;
 
-    let width = i32::try_from(cx_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
-    let height = i32::try_from(cy_dest.unsigned_abs().max(1)).unwrap_or(i32::MAX);
-    let left_top = normalized_emf_point(x_dest, y_dest, header, coordinates);
-    let right_bottom = normalized_emf_point(
-        x_dest.saturating_add(width),
-        y_dest.saturating_add(height),
-        header,
-        coordinates,
-    );
-    Some(StaticImageVectorCommand::RasterImage {
-        left: left_top.0.min(right_bottom.0),
-        top: left_top.1.min(right_bottom.1),
-        right: left_top.0.max(right_bottom.0),
-        bottom: left_top.1.max(right_bottom.1),
-        image: StaticImageVectorRaster {
-            format: image.format,
-            width_px: image.width_px,
-            height_px: image.height_px,
-            bytes: image.bytes,
-            palette: image.palette,
-            alpha_mask: image.alpha_mask,
-            tone_adjustment: None,
+    let dest_width = right - left;
+    let dest_height = bottom - top;
+    if dest_width <= 0.0 || dest_height <= 0.0 {
+        return None;
+    }
+    let scale_x = dest_width / source_width as f32;
+    let scale_y = dest_height / source_height as f32;
+    let full_left = left - (source_x as f32 * scale_x);
+    let full_top = top - (source_y as f32 * scale_y);
+    let full_right = full_left + (image.width_px as f32 * scale_x);
+    let full_bottom = full_top + (image.height_px as f32 * scale_y);
+
+    Some(PassiveSourceRasterCommand::DrawMany(vec![
+        StaticImageVectorCommand::SaveState,
+        StaticImageVectorCommand::ClipRect {
+            left,
+            top,
+            right,
+            bottom,
         },
-    })
+        StaticImageVectorCommand::RasterImage {
+            left: full_left,
+            top: full_top,
+            right: full_right,
+            bottom: full_bottom,
+            image: StaticImageVectorRaster {
+                format: image.format,
+                width_px: image.width_px,
+                height_px: image.height_px,
+                bytes: image.bytes,
+                palette: image.palette,
+                alpha_mask: image.alpha_mask,
+                tone_adjustment: None,
+            },
+        },
+        StaticImageVectorCommand::RestoreState,
+    ]))
 }
 
 fn keyed_vector_raster_alpha_mask(
