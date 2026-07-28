@@ -58570,6 +58570,19 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
             28,
             0xff,
             1,
+            &minimal_16bit_alpha_bitfields_dib_with_rgba_pixels(
+                2,
+                1,
+                &[[255, 0, 0, 0], [0, 255, 0, 255]],
+            ),
+        ),
+        emf_alphablend_dib_record(
+            140,
+            49,
+            48,
+            28,
+            0xff,
+            1,
             &minimal_compressed_dib_with_payload(
                 2,
                 1,
@@ -58599,7 +58612,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
     assert!(text.contains("after"));
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
-    assert_eq!(image.vector_commands.len(), 7);
+    assert_eq!(image.vector_commands.len(), 8);
     assert!(matches!(
         &image.vector_commands[0],
         StaticImageVectorCommand::RasterImage {
@@ -58664,7 +58677,22 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
         .unwrap(),
         vec![0, 48, 208]
     );
-    let compressed_png_alpha_mask = match &image.vector_commands[5] {
+    let alpha_bitfield_16bit_alpha_mask = match &image.vector_commands[5] {
+        StaticImageVectorCommand::RasterImage { image, .. } => image
+            .alpha_mask
+            .as_ref()
+            .expect("16-bit alpha-bitfield EMF ALPHABLEND should render as a passive alpha mask"),
+        _ => panic!("expected 16-bit alpha-bitfield alpha raster image"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+            &alpha_bitfield_16bit_alpha_mask.bytes,
+            3,
+        )
+        .unwrap(),
+        vec![0, 0, 255]
+    );
+    let compressed_png_alpha_mask = match &image.vector_commands[6] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -58680,7 +58708,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
         vec![0, 16, 240]
     );
     assert!(matches!(
-        &image.vector_commands[6],
+        &image.vector_commands[7],
             StaticImageVectorCommand::RasterImage {
             left: 10.0,
             top: 50.0,
@@ -58692,7 +58720,7 @@ fn emf_constant_alpha_alphablend_dib_renders_with_passive_alpha_mask_without_pay
             && image.height_px == 1
             && image.bytes == jpeg
     ));
-    let jpeg_alpha_mask = match &image.vector_commands[6] {
+    let jpeg_alpha_mask = match &image.vector_commands[7] {
         StaticImageVectorCommand::RasterImage { image, .. } => image
             .alpha_mask
             .as_ref()
@@ -94650,6 +94678,47 @@ fn minimal_16bit_bitfields_dib_with_dimensions(width: u32, height: u32) -> Vec<u
         let mut row = Vec::with_capacity(row_stride);
         for x in 0..width {
             let pixel = if x % 2 == 0 { 0xf800u16 } else { 0x07e0u16 };
+            row.extend_from_slice(&pixel.to_le_bytes());
+        }
+        row.resize(row_stride, 0);
+        dib.extend_from_slice(&row);
+    }
+    dib
+}
+
+fn minimal_16bit_alpha_bitfields_dib_with_rgba_pixels(
+    width: u32,
+    height: u32,
+    pixels: &[[u8; 4]],
+) -> Vec<u8> {
+    assert_eq!(pixels.len(), (width as usize) * (height as usize));
+    let row_stride = ((width as usize * 16).div_ceil(32)) * 4;
+    let pixel_bytes = row_stride * height as usize;
+    let mut dib = Vec::with_capacity(56 + pixel_bytes);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&16u16.to_le_bytes());
+    dib.extend_from_slice(&6u32.to_le_bytes());
+    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0i32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&0x7c00u32.to_le_bytes());
+    dib.extend_from_slice(&0x03e0u32.to_le_bytes());
+    dib.extend_from_slice(&0x001fu32.to_le_bytes());
+    dib.extend_from_slice(&0x8000u32.to_le_bytes());
+
+    for y in (0..height).rev() {
+        let mut row = Vec::with_capacity(row_stride);
+        for x in 0..width {
+            let [red, green, blue, alpha] = pixels[(y as usize * width as usize) + x as usize];
+            let pixel = (if alpha >= 128 { 0x8000u16 } else { 0 })
+                | (u16::from(red >> 3) << 10)
+                | (u16::from(green >> 3) << 5)
+                | u16::from(blue >> 3);
             row.extend_from_slice(&pixel.to_le_bytes());
         }
         row.resize(row_stride, 0);

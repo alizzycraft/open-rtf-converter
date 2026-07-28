@@ -34795,8 +34795,8 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         } else {
             return None;
         };
-        let has_alpha_mask =
-            bits_per_pixel == 32 && (compression == BI_ALPHABITFIELDS || header_size >= 56);
+        let has_alpha_mask = matches!(bits_per_pixel, 16 | 32)
+            && (compression == BI_ALPHABITFIELDS || header_size >= 56);
         let masks = DibColorMasks {
             red: read_le_u32(bytes, mask_offset)?,
             green: read_le_u32(bytes, mask_offset + 4)?,
@@ -34815,7 +34815,7 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         None
     };
     let bitfield_mask_bytes = if uses_bitfields && header_size == BITMAPINFOHEADER_SIZE {
-        if compression == BI_ALPHABITFIELDS && bits_per_pixel == 32 {
+        if compression == BI_ALPHABITFIELDS && matches!(bits_per_pixel, 16 | 32) {
             16
         } else {
             12
@@ -35465,8 +35465,8 @@ fn decode_uncompressed_dib_pixels(
     let pixels = width.checked_mul(height)?;
     let output_len = pixels.checked_mul(3)?;
     let mut rgb = vec![0; output_len];
-    let mut alpha = if bits_per_pixel == 32
-        && (color_masks.is_none() || color_masks.and_then(|masks| masks.alpha).is_some())
+    let mut alpha = if (bits_per_pixel == 32 && color_masks.is_none())
+        || color_masks.and_then(|masks| masks.alpha).is_some()
     {
         Some(vec![0; pixels])
     } else {
@@ -35536,6 +35536,10 @@ fn decode_uncompressed_dib_pixels(
                             expand_masked_color_channel(u32::from(pixel), masks.green)?;
                         rgb[output + 2] =
                             expand_masked_color_channel(u32::from(pixel), masks.blue)?;
+                        if let (Some(alpha_mask), Some(alpha)) = (alpha.as_mut(), masks.alpha) {
+                            alpha_mask[output_y.checked_mul(width)?.checked_add(x)?] =
+                                expand_masked_color_channel(u32::from(pixel), alpha)?;
+                        }
                     } else {
                         let red = ((pixel >> 10) & 0x1f) as u8;
                         let green = ((pixel >> 5) & 0x1f) as u8;
