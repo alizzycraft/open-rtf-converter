@@ -31719,6 +31719,7 @@ fn parse_emf_bitmap_blt_srcopy(
 ) -> Option<PassiveSourceRasterCommand> {
     const EMR_BITBLT: u32 = 76;
     const EMR_STRETCHBLT: u32 = 77;
+    const DIB_RGB_COLORS: u32 = 0;
 
     if data.len() < 92 {
         return None;
@@ -31761,6 +31762,7 @@ fn parse_emf_bitmap_blt_srcopy(
     }
     let x_src = read_le_i32(data, 36)?;
     let y_src = read_le_i32(data, 40)?;
+    let usage_src = read_le_u32(data, 72)?;
     let off_bmi_src = emf_record_offset_to_data_offset(read_le_u32(data, 76)?)?;
     let cb_bmi_src = usize::try_from(read_le_u32(data, 80)?).ok()?;
     let off_bits_src = emf_record_offset_to_data_offset(read_le_u32(data, 84)?)?;
@@ -31778,7 +31780,7 @@ fn parse_emf_bitmap_blt_srcopy(
         }
         _ => return None,
     };
-    if cx_src <= 0 || cy_src <= 0 {
+    if usage_src != DIB_RGB_COLORS || cx_src <= 0 || cy_src <= 0 {
         return None;
     }
     let dib_bytes =
@@ -31815,6 +31817,8 @@ fn parse_emf_stretchdibits_srcopy(
     selected_fill_color: Option<Color>,
     blank_destination: bool,
 ) -> Option<PassiveSourceRasterCommand> {
+    const DIB_RGB_COLORS: u32 = 0;
+
     if data.len() < 72 {
         return None;
     }
@@ -31861,7 +31865,8 @@ fn parse_emf_stretchdibits_srcopy(
     let cb_bmi_src = usize::try_from(read_le_u32(data, 44)?).ok()?;
     let off_bits_src = emf_record_offset_to_data_offset(read_le_u32(data, 48)?)?;
     let cb_bits_src = usize::try_from(read_le_u32(data, 52)?).ok()?;
-    if cx_src <= 0 || cy_src <= 0 {
+    let usage_src = read_le_u32(data, 64)?;
+    if usage_src != DIB_RGB_COLORS || cx_src <= 0 || cy_src <= 0 {
         return None;
     }
     let dib_bytes =

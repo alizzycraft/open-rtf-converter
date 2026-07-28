@@ -59334,6 +59334,120 @@ fn emf_zero_source_extent_stretch_rasters_are_noops_without_payload_leakage() {
 }
 
 #[test]
+fn emf_palette_usage_bitmap_transfers_stay_partial_without_payload_leakage() {
+    let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
+    dib.extend_from_slice(b"PALETTE-USAGE-EMF-RASTER-DIB /JavaScript /EmbeddedFile /Launch");
+    let mut bitblt = emf_bitblt_dib_record(18, 24, 48, 28, 0x00cc_0020, &dib);
+    write_test_le_u32(&mut bitblt, 80, 1);
+    let mut stretchblt = emf_stretchblt_dib_record(70, 24, 48, 28, 0x00cc_0020, &dib);
+    write_test_le_u32(&mut stretchblt, 80, 1);
+    let mut stretchdibits = emf_stretchdibits_dib_record(18, 54, 48, 28, 0x00cc_0020, &dib);
+    write_test_le_u32(&mut stretchdibits, 72, 1);
+    let records = [
+        emf_rect_record(43, 0, 0, 80, 40),
+        bitblt,
+        stretchblt,
+        stretchdibits,
+    ];
+    let emf = minimal_emf_with_records(160, 100, 2540, 1588, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("partial passive EMF palette-usage raster vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    assert!(matches!(
+        image.vector_commands[0],
+        StaticImageVectorCommand::Rectangle { .. }
+    ));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("3 unsupported record(s) skipped")
+    }));
+    for forbidden in [
+        "emfblip",
+        "PALETTE-USAGE-EMF-RASTER-DIB",
+        "BITBLT",
+        "STRETCHBLT",
+        "STRETCHDIBITS",
+        "JavaScript",
+        "EmbeddedFile",
+        "Launch",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "palette-usage EMF raster payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("3 unsupported record(s) skipped")
+    }));
+    assert!(
+        content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "re")
+            .count()
+            >= 1,
+        "preexisting paint before palette-usage EMF raster records should still render"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"PALETTE-USAGE-EMF-RASTER-DIB",
+        b"BITBLT",
+        b"STRETCHBLT",
+        b"STRETCHDIBITS",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "palette-usage EMF raster payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payload_leakage() {
     let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
     dib.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT /JavaScript");
