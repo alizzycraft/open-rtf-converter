@@ -34746,6 +34746,7 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     const BI_RLE8: u32 = 1;
     const BI_RLE4: u32 = 2;
     const BI_BITFIELDS: u32 = 3;
+    const BI_ALPHABITFIELDS: u32 = 6;
 
     if bytes.len() < 4 {
         return None;
@@ -34767,7 +34768,8 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
     if width <= 0 || raw_height == 0 || planes != 1 {
         return None;
     }
-    let uses_bitfields = compression == BI_BITFIELDS && matches!(bits_per_pixel, 16 | 32);
+    let uses_bitfields = matches!(compression, BI_BITFIELDS | BI_ALPHABITFIELDS)
+        && matches!(bits_per_pixel, 16 | 32);
     let uses_rle8 = compression == BI_RLE8 && bits_per_pixel == 8 && raw_height > 0;
     let uses_rle4 = compression == BI_RLE4 && bits_per_pixel == 4 && raw_height > 0;
     if compression != BI_RGB && !uses_bitfields && !uses_rle8 && !uses_rle4 {
@@ -34793,11 +34795,13 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         } else {
             return None;
         };
+        let has_alpha_mask =
+            bits_per_pixel == 32 && (compression == BI_ALPHABITFIELDS || header_size >= 56);
         let masks = DibColorMasks {
             red: read_le_u32(bytes, mask_offset)?,
             green: read_le_u32(bytes, mask_offset + 4)?,
             blue: read_le_u32(bytes, mask_offset + 8)?,
-            alpha: if bits_per_pixel == 32 && header_size >= BITMAPINFOHEADER_SIZE + 16 {
+            alpha: if has_alpha_mask {
                 Some(read_le_u32(bytes, mask_offset + 12)?)
             } else {
                 None
@@ -34811,7 +34815,11 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         None
     };
     let bitfield_mask_bytes = if uses_bitfields && header_size == BITMAPINFOHEADER_SIZE {
-        12
+        if compression == BI_ALPHABITFIELDS && bits_per_pixel == 32 {
+            16
+        } else {
+            12
+        }
     } else {
         0
     };
