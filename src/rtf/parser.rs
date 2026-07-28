@@ -1141,6 +1141,19 @@ impl Default for ShapeBuilder {
     }
 }
 
+fn passive_old_drawing_default_shape_kind(shape: &ShapeBuilder) -> Option<StaticShapeKind> {
+    if shape.width_twips <= 0 || shape.height_twips <= 0 {
+        return None;
+    }
+    if shape.fill_enabled && shape.fill_color.is_some() {
+        return Some(StaticShapeKind::Rectangle);
+    }
+    if shape.stroke_enabled && shape.stroke_width_twips > 0 {
+        return Some(StaticShapeKind::Rectangle);
+    }
+    None
+}
+
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 enum PictureKind {
     #[default]
@@ -12893,7 +12906,10 @@ impl Parser {
             ));
             return Ok(true);
         }
-        let Some(mut kind) = shape.kind else {
+        let Some(mut kind) = shape
+            .kind
+            .or_else(|| passive_old_drawing_default_shape_kind(&shape))
+        else {
             return self.push_shape_text_fallback(
                 shape.owner_destination,
                 shape.text,

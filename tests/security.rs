@@ -92047,6 +92047,128 @@ fn old_drawing_fill_patterns_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn old_drawing_without_explicit_kind_defaults_to_passive_rectangle_without_property_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dpfillfgcr255",
+        "\\",
+        "dpfillfgcg255",
+        "\\",
+        "dpfillfgcb255",
+        "\\",
+        "dplinehollow}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("passive default rectangle old drawing");
+
+    assert_eq!(
+        shape.kind,
+        open_rtf_converter::model::StaticShapeKind::Rectangle
+    );
+    assert_eq!(shape.width_twips, 1440);
+    assert_eq!(shape.height_twips, 720);
+    assert_eq!(
+        shape.fill_color,
+        Some(open_rtf_converter::model::Color {
+            red: 255,
+            green: 255,
+            blue: 255,
+        })
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported/active drawing properties")),
+        "default old drawing rectangle should not strip safe drawing metadata: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "dpxsize",
+        "dpysize",
+        "dpfillfg",
+        "dplinehollow",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "old drawing default rectangle metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "re"),
+        "default old drawing rectangle should render as passive PDF rectangle geometry"
+    );
+    for forbidden in [
+        b"dpxsize".as_slice(),
+        b"dpysize",
+        b"dpfillfg",
+        b"dplinehollow",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "old drawing default rectangle metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_drawing_static_ellipse_renders_passively_without_property_leakage() {
     let input = rtf(&[
         "{",
