@@ -92101,6 +92101,7 @@ fn old_drawing_without_explicit_kind_defaults_to_passive_rectangle_without_prope
             blue: 255,
         })
     );
+    assert_eq!(shape.stroke_width_twips, 0);
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert!(
@@ -92145,6 +92146,20 @@ fn old_drawing_without_explicit_kind_defaults_to_passive_rectangle_without_prope
             .iter()
             .any(|operation| operation.operator == "re"),
         "default old drawing rectangle should render as passive PDF rectangle geometry"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "f"),
+        "hollow-line default rectangle should still render its passive fill"
+    );
+    assert!(
+        !content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S" || operation.operator == "B"),
+        "hollow-line default rectangle should not render an outline stroke"
     );
     for forbidden in [
         b"dpxsize".as_slice(),

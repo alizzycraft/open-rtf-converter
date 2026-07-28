@@ -3933,7 +3933,7 @@ impl Parser {
                 self.set_current_shape_stroke_style(BorderStyle::Dashed);
             }
             "dplinehollow" if self.state.destination == Destination::Shape => {
-                self.set_current_shape_stroke_style(BorderStyle::Double);
+                self.set_current_shape_stroke_enabled(false);
             }
             "dplinecor" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_stroke_red(control.parameter);
@@ -13613,6 +13613,12 @@ impl Parser {
         let value = self.clamp_shape_stroke_width(value.unwrap_or(15), offset);
         if let Some(shape) = self.current_shape.as_mut() {
             shape.stroke_width_twips = value;
+        }
+    }
+
+    fn set_current_shape_stroke_enabled(&mut self, enabled: bool) {
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.stroke_enabled = enabled;
         }
     }
 
