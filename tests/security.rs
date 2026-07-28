@@ -2,6 +2,7 @@ use std::fs;
 #[cfg(not(feature = "cli"))]
 use std::path::Path;
 
+use jpeg_decoder::{Decoder as TestJpegDecoder, PixelFormat as TestJpegPixelFormat};
 use lopdf::Document as PdfDocument;
 #[cfg(feature = "cli")]
 use open_rtf_converter::convert_rtf_file_to_pdf;
@@ -59601,6 +59602,132 @@ fn emf_transparentblt_keyed_color_renders_with_passive_alpha_mask_without_payloa
 }
 
 #[test]
+fn emf_transparentblt_jpeg_keyed_color_gets_passive_alpha_mask_without_decoded_payload_leakage() {
+    let jpeg = valid_rgb_jpeg_1x1();
+    let transparent = valid_rgb_jpeg_1x1_color();
+    let mut jpeg_payload = jpeg.clone();
+    jpeg_payload.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT-DECODED-JPEG /JavaScript");
+    let mut jpeg_dib = minimal_compressed_dib_with_payload(1, 1, 4, &jpeg_payload);
+    jpeg_dib.extend_from_slice(b"TRAILING-EMF-TRANSPARENTBLT-DECODED-JPEG-DIB /EmbeddedFile");
+    let records = [emf_transparentblt_dib_record(
+        24,
+        18,
+        40,
+        30,
+        transparent,
+        &jpeg_dib,
+    )];
+    let emf = minimal_emf_with_records(120, 80, 2540, 1270, &records);
+    let emf_hex = bytes_to_hex(&emf);
+    let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("passive EMF TRANSPARENTBLT JPEG vector image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::WmfVector);
+    assert!(image.bytes.is_empty());
+    assert_eq!(image.vector_commands.len(), 1);
+    let alpha_mask = match &image.vector_commands[0] {
+        StaticImageVectorCommand::RasterImage {
+            left: 24.0,
+            top: 18.0,
+            right: 64.0,
+            bottom: 48.0,
+            image,
+        } if image.format == ImageFormat::Jpeg
+            && image.width_px == 1
+            && image.height_px == 1
+            && image.bytes == jpeg =>
+        {
+            image
+                .alpha_mask
+                .as_ref()
+                .expect("decoded JPEG transparent color key alpha mask")
+        }
+        other => panic!("expected keyed JPEG transparent raster image, got {other:?}"),
+    };
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&alpha_mask.bytes, 2).unwrap(),
+        vec![0, 0]
+    );
+    assert_eq!(parsed.diagnostics.len(), 0);
+    for forbidden in [
+        "emfblip",
+        "TRANSPARENTBLT",
+        "TRAILING-EMF-TRANSPARENTBLT-DECODED-JPEG",
+        "TRAILING-EMF-TRANSPARENTBLT-DECODED-JPEG-DIB",
+        "JavaScript",
+        "EmbeddedFile",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "EMF TRANSPARENTBLT decoded JPEG payload/control leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        output
+            .pdf
+            .windows(b"/DCTDecode".len())
+            .any(|window| window == b"/DCTDecode"),
+        "transparent JPEG source should remain a passive JPEG image stream"
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/SMask".len())
+            .any(|window| window == b"/SMask"),
+        "decoded-keyed JPEG TRANSPARENTBLT should render transparency as a passive PDF soft mask"
+    );
+    for forbidden in [
+        b"emfblip".as_slice(),
+        emf_hex.as_bytes(),
+        b"TRANSPARENTBLT",
+        b"TRAILING-EMF-TRANSPARENTBLT-DECODED-JPEG",
+        b"TRAILING-EMF-TRANSPARENTBLT-DECODED-JPEG-DIB",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "EMF TRANSPARENTBLT decoded JPEG DIB payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn emf_patcopy_stretchdibits_records_render_passively_without_payload_leakage() {
     let payload = b"STRETCHDIBITS-SOURCE-PAYLOAD";
     let records = [
@@ -91947,6 +92074,26 @@ fn valid_rgb_jpeg_1x1() -> Vec<u8> {
         "ffda000c03010002110311003f00f9d28a28af8a3fbacfffd9"
     );
     hex_bytes(JPEG_HEX)
+}
+
+fn valid_rgb_jpeg_1x1_color() -> Color {
+    let jpeg = valid_rgb_jpeg_1x1();
+    let mut decoder = TestJpegDecoder::new(jpeg.as_slice());
+    let decoded = decoder.decode().expect("valid RGB JPEG should decode");
+    let info = decoder.info().expect("valid RGB JPEG should report info");
+    assert_eq!(info.width, 1);
+    assert_eq!(info.height, 1);
+    match info.pixel_format {
+        TestJpegPixelFormat::RGB24 => {
+            assert_eq!(decoded.len(), 3);
+            Color {
+                red: decoded[0],
+                green: decoded[1],
+                blue: decoded[2],
+            }
+        }
+        other => panic!("valid RGB JPEG should decode as RGB24, got {other:?}"),
+    }
 }
 
 fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<u8> {

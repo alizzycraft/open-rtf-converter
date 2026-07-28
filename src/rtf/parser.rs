@@ -32242,9 +32242,29 @@ fn keyed_vector_raster_alpha_mask(
             existing_mask,
             keyed_png_grayscale_alpha_mask(bytes, width_px, height_px, transparent)?,
         ),
-        ImageFormat::Jpeg => Some(existing_mask),
+        ImageFormat::Jpeg
+        | ImageFormat::JpegGrayscale
+        | ImageFormat::JpegCmyk
+        | ImageFormat::JpegInverted
+        | ImageFormat::JpegGrayscaleInverted
+        | ImageFormat::JpegCmykInverted => {
+            let keyed = keyed_jpeg_alpha_mask(bytes, width_px, height_px, format, transparent)
+                .unwrap_or(None);
+            combine_keyed_alpha_mask(width_px, height_px, existing_mask, keyed)
+        }
         _ => None,
     }
+}
+
+fn keyed_jpeg_alpha_mask(
+    bytes: &[u8],
+    width_px: u32,
+    height_px: u32,
+    format: ImageFormat,
+    transparent: Color,
+) -> Option<Option<StaticImageAlphaMask>> {
+    let rgb = decode_bounded_jpeg_to_rgb8(bytes, width_px, height_px, format)?;
+    keyed_rgb_alpha_mask(&rgb, width_px, height_px, transparent)
 }
 
 fn keyed_rgb_alpha_mask(
@@ -33788,33 +33808,42 @@ fn apply_jpeg_picture_color_mode_as_rgb8(
     {
         return true;
     }
-    let Some(pixel_count) = u64::from(image.width_px).checked_mul(u64::from(image.height_px))
+    let Some(mut rgb) =
+        decode_bounded_jpeg_to_rgb8(&image.bytes, image.width_px, image.height_px, image.format)
     else {
         return false;
     };
-    if image.bytes.len() > MAX_EXACT_JPEG_COLOR_MODE_BYTES
-        || pixel_count > MAX_EXACT_JPEG_COLOR_MODE_PIXELS
+    for pixel in rgb.chunks_exact_mut(3) {
+        apply_picture_adjustments_to_rgb(pixel, adjustments);
+    }
+    image.format = ImageFormat::Rgb8;
+    image.bytes = rgb;
+    image.tone_adjustment = None;
+    true
+}
+
+fn decode_bounded_jpeg_to_rgb8(
+    bytes: &[u8],
+    width_px: u32,
+    height_px: u32,
+    format: ImageFormat,
+) -> Option<Vec<u8>> {
+    let pixel_count_u64 = u64::from(width_px).checked_mul(u64::from(height_px))?;
+    if bytes.len() > MAX_EXACT_JPEG_COLOR_MODE_BYTES
+        || pixel_count_u64 > MAX_EXACT_JPEG_COLOR_MODE_PIXELS
     {
-        return false;
+        return None;
     }
-    let mut decoder = JpegDecoder::new(image.bytes.as_slice());
-    let Ok(decoded) = decoder.decode() else {
-        return false;
-    };
-    let Some(info) = decoder.info() else {
-        return false;
-    };
-    if u32::from(info.width) != image.width_px || u32::from(info.height) != image.height_px {
-        return false;
+    let mut decoder = JpegDecoder::new(bytes);
+    let decoded = decoder.decode().ok()?;
+    let info = decoder.info()?;
+    if u32::from(info.width) != width_px || u32::from(info.height) != height_px {
+        return None;
     }
-    let Some(pixel_count) = usize::from(info.width).checked_mul(usize::from(info.height)) else {
-        return false;
-    };
-    let Some(expected_rgb_len) = pixel_count.checked_mul(3) else {
-        return false;
-    };
+    let pixel_count = usize::from(info.width).checked_mul(usize::from(info.height))?;
+    let expected_rgb_len = pixel_count.checked_mul(3)?;
     let inverted = matches!(
-        image.format,
+        format,
         ImageFormat::JpegInverted
             | ImageFormat::JpegGrayscaleInverted
             | ImageFormat::JpegCmykInverted
@@ -33840,20 +33869,14 @@ fn apply_jpeg_picture_color_mode_as_rgb8(
                 rgb.push((((255 - yellow) * (255 - black) + 127) / 255) as u8);
             }
         }
-        _ => return false,
+        _ => return None,
     }
     if inverted {
         for component in &mut rgb {
             *component = 255 - *component;
         }
     }
-    for pixel in rgb.chunks_exact_mut(3) {
-        apply_picture_adjustments_to_rgb(pixel, adjustments);
-    }
-    image.format = ImageFormat::Rgb8;
-    image.bytes = rgb;
-    image.tone_adjustment = None;
-    true
+    Some(rgb)
 }
 
 fn passive_jpeg_tone_adjustment(
