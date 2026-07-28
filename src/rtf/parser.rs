@@ -35296,7 +35296,16 @@ fn clipped_compressed_jpeg_source_raster_command(
         return None;
     }
     let image = parse_compressed_dib_image_data(bytes, MAX_PASSIVE_VECTOR_RASTER_PIXELS)?;
-    if image.format != ImageFormat::Jpeg || image.alpha_mask.is_some() {
+    if !matches!(
+        image.format,
+        ImageFormat::Jpeg
+            | ImageFormat::JpegGrayscale
+            | ImageFormat::JpegCmyk
+            | ImageFormat::JpegInverted
+            | ImageFormat::JpegGrayscaleInverted
+            | ImageFormat::JpegCmykInverted
+    ) || image.alpha_mask.is_some()
+    {
         return None;
     }
     let source_x = u32::try_from(source_x).ok()?;
