@@ -81228,7 +81228,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 12);
-    let expected_point_counts = [5, 18, 24, 24, 6, 4, 10, 15, 32, 10, 6, 22];
+    let expected_point_counts = [5, 34, 24, 24, 6, 4, 10, 15, 32, 10, 6, 22];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81243,6 +81243,24 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
         );
     }
     assert_eq!(shapes[0].points[0].x_twips, shapes[0].width_twips / 5);
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| point.y_twips < shapes[1].height_twips / 8)
+            .count()
+            >= 8,
+        "flowchart punched tape should preserve a bounded passive top wave"
+    );
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| point.y_twips > shapes[1].height_twips - (shapes[1].height_twips / 8))
+            .count()
+            >= 8,
+        "flowchart punched tape should preserve a bounded passive bottom wave"
+    );
     assert_eq!(
         shapes[5].overlay_paths.len(),
         1,
