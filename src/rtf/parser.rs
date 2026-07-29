@@ -4763,6 +4763,13 @@ impl Parser {
             "trkeep" => {
                 self.set_current_table_row_keep_together(control.parameter.unwrap_or(1) != 0)
             }
+            "trkeepfollow" => {
+                self.set_current_table_row_keep_together(control.parameter.unwrap_or(1) != 0);
+                self.diagnostics.push(Diagnostic::warning(
+                    "table row keep-with-following approximated as bounded passive keep-together pagination",
+                    Some(offset),
+                ));
+            }
             "trftsWidth" => self.set_current_table_row_preferred_width_unit(control.parameter),
             "trwWidth" => self.set_current_table_row_preferred_width(control.parameter),
             "trpaddl" => self.set_current_table_row_padding_left(control.parameter, offset),
@@ -23248,6 +23255,7 @@ fn is_nested_table_structural_control(name: &str) -> bool {
                 | "ltrrow"
                 | "trhdr"
                 | "trkeep"
+                | "trkeepfollow"
                 | "trpaddfl"
                 | "trpaddfr"
                 | "trpaddft"
@@ -43693,6 +43701,32 @@ mod tests {
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
+    }
+
+    #[test]
+    fn normalizes_table_row_keep_following_as_passive_keep_together_approximation() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\trkeepfollow\cellx2000 Kept\cell\row\trowd\trkeepfollow0\cellx2000 Normal\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert!(table.rows[0].keep_together);
+        assert!(!table.rows[1].keep_together);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("table row keep-with-following approximated")
+        }));
     }
 
     #[test]

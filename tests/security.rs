@@ -2156,6 +2156,103 @@ fn table_row_keep_together_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn table_row_keep_following_is_bounded_passive_approximation_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "trowd",
+        "\\",
+        "trkeepfollow",
+        "\\",
+        "cellx1440 Kept follow",
+        "\\",
+        "cell",
+        "\\",
+        "row",
+        "\\",
+        "trowd",
+        "\\",
+        "trkeepfollow0",
+        "\\",
+        "cellx1440 Normal follow",
+        "\\",
+        "cell",
+        "\\",
+        "row} explicit-payload",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("table");
+
+    assert!(text.contains("Kept follow"));
+    assert!(text.contains("Normal follow"));
+    assert!(text.contains("explicit-payload"));
+    assert!(table.rows[0].keep_together);
+    assert!(!table.rows[1].keep_together);
+    assert!(!text.contains("trkeepfollow"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table row keep-with-following approximated")
+    }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "trkeepfollow should be consumed as bounded passive table metadata: {:?}",
+        parsed.diagnostics
+    );
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("table-row-keep-following.rtf");
+    let output_path = dir.path().join("table-row-keep-following.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Kept follow"));
+    assert!(rendered_text.contains("Normal follow"));
+    assert!(rendered_text.contains("explicit-payload"));
+    for forbidden in [
+        b"trkeepfollow".as_slice(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden table row keep-following content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn table_header_rows_repeat_passively_without_control_leakage() {
     let mut input =
         String::from("{\\rtf1\\trowd\\trhdr\\trrh720\\clcbpat1\\cellx3000 Header row\\cell\\row");
