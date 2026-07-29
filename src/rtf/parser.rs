@@ -20753,15 +20753,35 @@ fn can_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint
     let bottom_y = height_twips.saturating_sub(inset_y);
     [
         (width_twips / 2, 0),
+        ((width_twips * 5) / 8, half_inset_y / 2),
         (three_quarter_x, half_inset_y),
+        ((width_twips * 7) / 8, (half_inset_y * 3) / 2),
         (width_twips, inset_y),
         (width_twips, bottom_y),
+        (
+            (width_twips * 7) / 8,
+            height_twips.saturating_sub((half_inset_y * 3) / 2),
+        ),
         (three_quarter_x, height_twips.saturating_sub(half_inset_y)),
+        (
+            (width_twips * 5) / 8,
+            height_twips.saturating_sub(half_inset_y / 2),
+        ),
         (width_twips / 2, height_twips),
+        (
+            (width_twips * 3) / 8,
+            height_twips.saturating_sub(half_inset_y / 2),
+        ),
         (quarter_x, height_twips.saturating_sub(half_inset_y)),
+        (
+            width_twips / 8,
+            height_twips.saturating_sub((half_inset_y * 3) / 2),
+        ),
         (0, bottom_y),
         (0, inset_y),
+        (width_twips / 8, (half_inset_y * 3) / 2),
         (quarter_x, half_inset_y),
+        ((width_twips * 3) / 8, half_inset_y / 2),
     ]
     .into_iter()
     .map(|(x, y)| StaticShapePoint {
@@ -20777,12 +20797,20 @@ fn can_shape_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<Stati
         height_twips,
         &[
             (0, 125),
+            (125, 94),
+            (125, 94),
             (250, 62),
             (250, 62),
+            (375, 31),
+            (375, 31),
             (500, 0),
             (500, 0),
+            (625, 31),
+            (625, 31),
             (750, 62),
             (750, 62),
+            (875, 94),
+            (875, 94),
             (1000, 125),
         ],
     )

@@ -81241,7 +81241,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 12);
-    let expected_point_counts = [5, 34, 24, 24, 6, 4, 10, 25, 32, 10, 6, 40];
+    let expected_point_counts = [5, 34, 24, 24, 6, 4, 18, 25, 32, 18, 6, 40];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81312,7 +81312,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     for shape in [&shapes[6], &shapes[9]] {
         assert_eq!(
             shape.overlay_paths.len(),
-            4,
+            8,
             "can-style storage shapes should preserve Word-visible top-face strokes"
         );
         assert!(
@@ -81327,6 +81327,24 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
                     && point.y_twips <= shape.height_twips
             }),
             "can-style storage face overlays must stay inside passive frame"
+        );
+        assert!(
+            shape
+                .points
+                .iter()
+                .filter(|point| point.y_twips <= shape.height_twips / 8)
+                .count()
+                >= 6,
+            "can-style storage should preserve a bounded passive top ellipse"
+        );
+        assert!(
+            shape
+                .points
+                .iter()
+                .filter(|point| point.y_twips >= shape.height_twips - (shape.height_twips / 8))
+                .count()
+                >= 6,
+            "can-style storage should preserve a bounded passive bottom ellipse"
         );
     }
     assert!(
