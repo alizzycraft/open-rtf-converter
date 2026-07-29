@@ -83691,7 +83691,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         "left circular arrow should preserve a bounded passive circular body"
     );
     assert!(
-        shapes[2].overlay_paths.iter().all(|path| path.len() >= 28),
+        shapes[2].overlay_paths.iter().all(|path| path.len() >= 34),
         "left circular arrow inner arc should keep dense bounded passive samples"
     );
     assert!(
@@ -83719,7 +83719,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         "left-right circular arrow should preserve a bounded passive lower circular band"
     );
     assert!(
-        shapes[3].overlay_paths.iter().all(|path| path.len() >= 16),
+        shapes[3].overlay_paths.iter().all(|path| path.len() >= 18),
         "left-right circular arrow inner arcs should keep dense bounded passive samples"
     );
     for shape in [&shapes[2], &shapes[3]] {
