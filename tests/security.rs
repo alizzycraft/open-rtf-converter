@@ -81228,7 +81228,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 12);
-    let expected_point_counts = [5, 34, 24, 24, 6, 4, 10, 15, 32, 10, 6, 22];
+    let expected_point_counts = [5, 34, 24, 24, 6, 4, 10, 25, 32, 10, 6, 22];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81322,6 +81322,27 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
             .iter()
             .any(|point| point.x_twips == shapes[7].width_twips),
         "flowchart delay curve should reach the right edge of the passive frame"
+    );
+    assert!(
+        shapes[7]
+            .points
+            .iter()
+            .filter(|point| point.x_twips > shapes[7].width_twips / 2)
+            .count()
+            >= 16,
+        "flowchart delay should preserve a bounded passive rounded side"
+    );
+    assert!(
+        shapes[7]
+            .points
+            .iter()
+            .any(|point| point.x_twips > (shapes[7].width_twips * 9) / 10
+                && point.y_twips < shapes[7].height_twips / 3)
+            && shapes[7].points.iter().any(|point| {
+                point.x_twips > (shapes[7].width_twips * 9) / 10
+                    && point.y_twips > (shapes[7].height_twips * 2) / 3
+            }),
+        "flowchart delay should preserve bounded passive upper and lower curve shoulders"
     );
     assert!(
         shapes[11]
