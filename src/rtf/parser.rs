@@ -17586,6 +17586,9 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::FlowchartMultidocument => {
             flowchart_multidocument_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::FlowchartSort => {
+            flowchart_sort_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::RightArrowCallout => {
             right_arrow_callout_overlay_paths(width_twips, height_twips)
         }
@@ -17984,6 +17987,19 @@ fn flowchart_sort_shape_points(width_twips: i32, height_twips: i32) -> Vec<Stati
         y_twips: y,
     })
     .collect()
+}
+
+fn flowchart_sort_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![vec![
+        StaticShapePoint {
+            x_twips: 0,
+            y_twips: height_twips / 2,
+        },
+        StaticShapePoint {
+            x_twips: width_twips,
+            y_twips: height_twips / 2,
+        },
+    ]]
 }
 
 fn flowchart_delay_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
