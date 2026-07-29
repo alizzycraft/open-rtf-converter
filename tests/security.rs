@@ -83248,7 +83248,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         (StaticShapeKind::Polygon, 68),
         (StaticShapeKind::Polygon, 77),
         (StaticShapeKind::Polygon, 35),
-        (StaticShapeKind::Polygon, 44),
+        (StaticShapeKind::Polygon, 64),
         (StaticShapeKind::Polygon, 4),
         (StaticShapeKind::Polygon, 4),
         (StaticShapeKind::Polygon, 4),
@@ -83389,6 +83389,44 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
             .points
             .iter()
             .any(|point| point.x_twips == shapes[5].width_twips)
+    );
+    assert!(
+        shapes[5]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[5].height_twips / 5
+                    && point.x_twips >= shapes[5].width_twips / 4
+            })
+            .count()
+            >= 12,
+        "cloud should preserve bounded passive top lobes"
+    );
+    assert!(
+        shapes[5]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= (shapes[5].width_twips * 4) / 5
+                    && point.y_twips >= shapes[5].height_twips / 4
+                    && point.y_twips <= (shapes[5].height_twips * 3) / 4
+            })
+            .count()
+            >= 8,
+        "cloud should preserve bounded passive right lobes"
+    );
+    assert!(
+        shapes[5]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips >= (shapes[5].height_twips * 3) / 4
+                    && point.x_twips >= shapes[5].width_twips / 4
+                    && point.x_twips <= (shapes[5].width_twips * 4) / 5
+            })
+            .count()
+            >= 10,
+        "cloud should preserve bounded passive lower lobes"
     );
     for shape in [&shapes[6], &shapes[7], &shapes[8]] {
         assert_eq!(
