@@ -80893,7 +80893,7 @@ fn office_sun_and_moon_shapes_render_as_passive_polygons_without_payload_leakage
     assert_eq!(shapes[0].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[0].points.len(), 32);
     assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
-    assert_eq!(shapes[1].points.len(), 36);
+    assert_eq!(shapes[1].points.len(), 43);
     for shape in &shapes {
         assert!(
             shape.points.iter().all(|point| {
@@ -80922,6 +80922,29 @@ fn office_sun_and_moon_shapes_render_as_passive_polygons_without_payload_leakage
                 && point.y_twips <= shapes[0].height_twips
         }),
         "sun inner disk boundary must stay inside the passive shape frame"
+    );
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= shapes[1].width_twips / 3
+                    && point.x_twips <= shapes[1].width_twips / 2
+                    && point.y_twips >= (shapes[1].height_twips * 2) / 5
+                    && point.y_twips <= (shapes[1].height_twips * 3) / 5
+            })
+            .count()
+            >= 5,
+        "moon should preserve bounded passive inner crescent samples"
+    );
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| point.y_twips >= (shapes[1].height_twips * 19) / 20)
+            .count()
+            >= 5,
+        "moon should preserve bounded passive lower outer curve samples"
     );
     for forbidden in [
         "shapeType",
