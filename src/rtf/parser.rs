@@ -35711,7 +35711,10 @@ fn passive_jpeg_tone_adjustment(
 ) -> Option<ImageToneAdjustment> {
     if !matches!(
         format,
-        ImageFormat::Jpeg | ImageFormat::JpegGrayscale | ImageFormat::JpegPassiveGrayscale
+        ImageFormat::Jpeg
+            | ImageFormat::JpegGrayscale
+            | ImageFormat::JpegPassiveGrayscale
+            | ImageFormat::JpegCmyk
     ) {
         return None;
     }
