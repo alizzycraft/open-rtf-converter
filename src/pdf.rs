@@ -258,10 +258,13 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/RichMedia", "/RichMedia"),
     (b"/Screen", "/Screen"),
     (b"/SetOCGState", "/SetOCGState"),
+    (b"/Sig", "/Sig"),
+    (b"/SigFlags", "/SigFlags"),
     (b"/Sound", "/Sound"),
     (b"/SubmitForm", "/SubmitForm"),
     (b"/Trans", "/Trans"),
     (b"/URI", "/URI"),
+    (b"/UseAttachments", "/UseAttachments"),
     (b"/Widget", "/Widget"),
     (b"/XRef", "/XRef"),
     (b"/XFA", "/XFA"),
@@ -6750,6 +6753,12 @@ endobj
 15 0 obj
 << /Names << /EmbeddedFiles [(payload.bin) 4 0 R] >> >>
 endobj
+16 0 obj
+<< /SigFlags 3 /Fields [17 0 R] /PageMode /UseAttachments >>
+endobj
+17 0 obj
+<< /FT /Sig /T (signature) >>
+endobj
 %%EOF";
 
         let error = audit_passive_pdf_bytes(pdf).expect_err("active PDF names must be rejected");
@@ -6811,7 +6820,15 @@ endobj
                 .iter()
                 .any(|issue| issue.token == "/SetOCGState")
         );
+        assert!(error.issues.iter().any(|issue| issue.token == "/Sig"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/SigFlags"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Trans"));
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == "/UseAttachments")
+        );
         assert!(
             error
                 .issues
