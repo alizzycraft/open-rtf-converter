@@ -22305,7 +22305,7 @@ fn smiley_face_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<Sta
 }
 
 fn sun_shape_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
-    let mut center_ring = regular_polygon_inset_shape_points(width_twips, height_twips, 32, 500);
+    let mut center_ring = regular_polygon_inset_shape_points(width_twips, height_twips, 48, 500);
     if let Some(first) = center_ring.first().copied() {
         center_ring.push(first);
     }

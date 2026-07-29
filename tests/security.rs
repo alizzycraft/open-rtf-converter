@@ -80942,7 +80942,7 @@ fn office_sun_and_moon_shapes_render_as_passive_polygons_without_payload_leakage
         "sun should preserve a passive inner disk boundary"
     );
     assert!(
-        shapes[0].overlay_paths[0].len() >= 32,
+        shapes[0].overlay_paths[0].len() >= 49,
         "sun inner disk boundary should be a bounded passive polyline"
     );
     assert!(
