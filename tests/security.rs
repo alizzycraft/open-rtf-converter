@@ -83624,7 +83624,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         (StaticShapeKind::Polygon, 34),
         (StaticShapeKind::Polygon, 68),
         (StaticShapeKind::Polygon, 77),
-        (StaticShapeKind::Polygon, 35),
+        (StaticShapeKind::Polygon, 42),
         (StaticShapeKind::Polygon, 64),
         (StaticShapeKind::Polygon, 4),
         (StaticShapeKind::Polygon, 4),
@@ -83746,7 +83746,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
                     && point.x_twips <= shapes[4].width_twips
             })
             .count()
-            >= 16,
+            >= 21,
         "swoosh arrow should preserve a bounded passive upper sweep"
     );
     assert!(
@@ -83758,7 +83758,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
                     && point.x_twips <= shapes[4].width_twips
             })
             .count()
-            >= 12,
+            >= 15,
         "swoosh arrow should preserve a bounded passive lower return edge"
     );
     assert!(
