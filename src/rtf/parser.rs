@@ -926,6 +926,7 @@ enum ShapePolygonPreset {
     OvalCallout,
     CloudCallout,
     LineCalloutBorder,
+    LineCalloutBorderAccentBar,
     ActionButtonBlank,
     ActionButtonHome,
     ActionButtonHelp,
@@ -14836,8 +14837,14 @@ impl Parser {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::CloudCallout);
                 true
             }
-            109 | 110 | 111 | 112 | 121 | 122 | 123 | 124 => {
+            109 | 110 | 111 | 112 => {
                 self.set_current_shape_polygon_preset(ShapePolygonPreset::LineCalloutBorder);
+                true
+            }
+            121 | 122 | 123 | 124 => {
+                self.set_current_shape_polygon_preset(
+                    ShapePolygonPreset::LineCalloutBorderAccentBar,
+                );
                 true
             }
             113 => {
@@ -17368,7 +17375,7 @@ fn polygon_preset_shape_points(
         }
         ShapePolygonPreset::OvalCallout => oval_callout_shape_points(width_twips, height_twips),
         ShapePolygonPreset::CloudCallout => cloud_callout_shape_points(width_twips, height_twips),
-        ShapePolygonPreset::LineCalloutBorder => {
+        ShapePolygonPreset::LineCalloutBorder | ShapePolygonPreset::LineCalloutBorderAccentBar => {
             line_callout_border_shape_points(width_twips, height_twips)
         }
         ShapePolygonPreset::ActionButtonBlank => {
@@ -17560,6 +17567,9 @@ fn polygon_preset_shape_overlay_paths(
         }
         ShapePolygonPreset::FoldedCorner | ShapePolygonPreset::ActionButtonDocument => {
             folded_corner_shape_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::LineCalloutBorderAccentBar => {
+            line_callout_border_accent_bar_overlay_paths(width_twips, height_twips)
         }
         _ => Vec::new(),
     }
@@ -18411,6 +18421,17 @@ fn line_callout_border_shape_points(width_twips: i32, height_twips: i32) -> Vec<
             (0, 620),
         ],
     )
+}
+
+fn line_callout_border_accent_bar_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(160, 0), (160, 620)],
+    )]
 }
 
 fn line_callout_horizontal_shape_points(
