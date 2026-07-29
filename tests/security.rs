@@ -82464,7 +82464,7 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 12);
-    let expected_point_counts = [8, 11, 26, 8, 7, 7, 8, 8, 9, 5, 6, 9];
+    let expected_point_counts = [8, 11, 32, 8, 7, 7, 8, 8, 9, 5, 6, 9];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -82479,6 +82479,30 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
         );
     }
     assert_eq!(shapes[1].points[1].y_twips, 0);
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[2].height_twips / 3
+                    && point.x_twips >= shapes[2].width_twips / 2
+            })
+            .count()
+            >= 8,
+        "action-button help mark should preserve a bounded passive upper curve"
+    );
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips >= shapes[2].height_twips / 2
+                    && point.y_twips <= (shapes[2].height_twips * 3) / 4
+            })
+            .count()
+            >= 5,
+        "action-button help mark should preserve a bounded passive lower hook"
+    );
     assert_eq!(shapes[2].point_paths.len(), 1);
     assert_eq!(shapes[2].point_paths[0].len(), 4);
     assert!(
