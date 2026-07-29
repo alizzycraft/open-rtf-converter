@@ -80260,7 +80260,7 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
     assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[1].points.len(), 12);
     assert_eq!(shapes[2].kind, StaticShapeKind::Polygon);
-    assert_eq!(shapes[2].points.len(), 32);
+    assert_eq!(shapes[2].points.len(), 52);
     for shape in &shapes {
         assert!(
             shape.points.iter().all(|point| {
@@ -80272,6 +80272,44 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
             "arc/double-brace/double-bracket points must stay inside the passive shape frame"
         );
     }
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[2].width_twips / 8
+                    && point.y_twips >= (shapes[2].height_twips * 2) / 5
+                    && point.y_twips <= (shapes[2].height_twips * 3) / 5
+            })
+            .count()
+            >= 3,
+        "double brace should preserve the bounded passive left waist curve"
+    );
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= shapes[2].width_twips - (shapes[2].width_twips / 8)
+                    && point.y_twips >= (shapes[2].height_twips * 2) / 5
+                    && point.y_twips <= (shapes[2].height_twips * 3) / 5
+            })
+            .count()
+            >= 3,
+        "double brace should preserve the bounded passive right waist curve"
+    );
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[2].height_twips / 5
+                    || point.y_twips >= shapes[2].height_twips - (shapes[2].height_twips / 5)
+            })
+            .count()
+            >= 16,
+        "double brace should preserve bounded passive upper and lower shoulder curves"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
