@@ -81739,6 +81739,29 @@ fn office_no_border_line_callouts_render_as_passive_polylines_without_payload_le
             "no-border line callout points must stay inside passive frame: {shape:?}"
         );
     }
+    for shape in shapes.iter().take(4) {
+        assert!(
+            shape.overlay_paths.is_empty(),
+            "plain no-border line callouts should not gain accent-bar overlays"
+        );
+    }
+    for shape in shapes.iter().skip(4) {
+        assert_eq!(
+            shape.overlay_paths.len(),
+            1,
+            "no-border accent-bar line callouts should preserve the passive accent stroke"
+        );
+        assert_eq!(shape.overlay_paths[0].len(), 2);
+        assert!(
+            shape.overlay_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "no-border line callout accent bar must stay inside passive frame"
+        );
+    }
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -81784,8 +81807,8 @@ fn office_no_border_line_callouts_render_as_passive_polylines_without_payload_le
     assert!(rendered_text.contains("Before"));
     assert!(rendered_text.contains("After"));
     assert!(
-        passive_strokes >= 8,
-        "no-border line callouts should render passive stroked polylines"
+        passive_strokes >= 12,
+        "no-border line callouts and accent bars should render passive stroked polylines"
     );
     for forbidden in [
         b"shapeType".as_slice(),

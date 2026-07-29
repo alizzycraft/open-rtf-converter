@@ -990,6 +990,10 @@ enum ShapePolylinePreset {
     LineCalloutDiagonal,
     LineCalloutAngled,
     LineCalloutUShape,
+    LineCalloutHorizontalAccentBar,
+    LineCalloutDiagonalAccentBar,
+    LineCalloutAngledAccentBar,
+    LineCalloutUShapeAccentBar,
     LineInverse,
 }
 
@@ -12948,8 +12952,8 @@ impl Parser {
                 .map(polygon_preset_shape_fill_rule)
                 .unwrap_or(StaticImageVectorFillRule::Winding)
         };
-        let mut overlay_paths = if kind == StaticShapeKind::Polygon {
-            shape
+        let mut overlay_paths = match kind {
+            StaticShapeKind::Polygon => shape
                 .polygon_preset
                 .map(|preset| {
                     polygon_preset_shape_overlay_paths(
@@ -12958,9 +12962,18 @@ impl Parser {
                         shape.height_twips,
                     )
                 })
-                .unwrap_or_default()
-        } else {
-            Vec::new()
+                .unwrap_or_default(),
+            StaticShapeKind::Polyline => shape
+                .polyline_preset
+                .map(|preset| {
+                    polyline_preset_shape_overlay_paths(
+                        preset,
+                        shape.width_twips,
+                        shape.height_twips,
+                    )
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
         };
         if kind == StaticShapeKind::Polyline && points.is_empty() {
             if let Some(preset) = shape.polyline_preset {
@@ -14864,19 +14877,27 @@ impl Parser {
                 true
             }
             117 => {
-                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutHorizontal);
+                self.set_current_shape_polyline_preset(
+                    ShapePolylinePreset::LineCalloutHorizontalAccentBar,
+                );
                 true
             }
             118 => {
-                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutDiagonal);
+                self.set_current_shape_polyline_preset(
+                    ShapePolylinePreset::LineCalloutDiagonalAccentBar,
+                );
                 true
             }
             119 => {
-                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutAngled);
+                self.set_current_shape_polyline_preset(
+                    ShapePolylinePreset::LineCalloutAngledAccentBar,
+                );
                 true
             }
             120 => {
-                self.set_current_shape_polyline_preset(ShapePolylinePreset::LineCalloutUShape);
+                self.set_current_shape_polyline_preset(
+                    ShapePolylinePreset::LineCalloutUShapeAccentBar,
+                );
                 true
             }
             125 => {
@@ -17585,16 +17606,44 @@ fn polyline_preset_shape_points(
         ShapePolylinePreset::LineCalloutHorizontal => {
             line_callout_horizontal_shape_points(width_twips, height_twips)
         }
+        ShapePolylinePreset::LineCalloutHorizontalAccentBar => {
+            line_callout_horizontal_shape_points(width_twips, height_twips)
+        }
         ShapePolylinePreset::LineCalloutDiagonal => {
+            line_callout_diagonal_shape_points(width_twips, height_twips)
+        }
+        ShapePolylinePreset::LineCalloutDiagonalAccentBar => {
             line_callout_diagonal_shape_points(width_twips, height_twips)
         }
         ShapePolylinePreset::LineCalloutAngled => {
             line_callout_angled_shape_points(width_twips, height_twips)
         }
+        ShapePolylinePreset::LineCalloutAngledAccentBar => {
+            line_callout_angled_shape_points(width_twips, height_twips)
+        }
         ShapePolylinePreset::LineCalloutUShape => {
             line_callout_ushape_points(width_twips, height_twips)
         }
+        ShapePolylinePreset::LineCalloutUShapeAccentBar => {
+            line_callout_ushape_points(width_twips, height_twips)
+        }
         ShapePolylinePreset::LineInverse => line_inverse_shape_points(width_twips, height_twips),
+    }
+}
+
+fn polyline_preset_shape_overlay_paths(
+    preset: ShapePolylinePreset,
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    match preset {
+        ShapePolylinePreset::LineCalloutHorizontalAccentBar
+        | ShapePolylinePreset::LineCalloutDiagonalAccentBar
+        | ShapePolylinePreset::LineCalloutAngledAccentBar
+        | ShapePolylinePreset::LineCalloutUShapeAccentBar => {
+            line_callout_border_accent_bar_overlay_paths(width_twips, height_twips)
+        }
+        _ => Vec::new(),
     }
 }
 

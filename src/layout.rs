@@ -2533,6 +2533,36 @@ fn layout_shape(
                         color,
                     );
                 }
+                for overlay_path in &shape.overlay_paths {
+                    let overlay_points = overlay_path
+                        .iter()
+                        .map(|point| LayoutPoint {
+                            x: shape_point_x(
+                                x,
+                                width,
+                                twips_to_points(point.x_twips) * scale_x,
+                                shape.flip_horizontal,
+                            ),
+                            y: shape_point_y(
+                                top_y,
+                                height,
+                                twips_to_points(point.y_twips) * scale_y,
+                                shape.flip_vertical,
+                            ),
+                        })
+                        .collect::<Vec<_>>();
+                    for segment in overlay_points.windows(2) {
+                        push_shape_line(
+                            page,
+                            segment[0],
+                            segment[1],
+                            width_points,
+                            color,
+                            stroke_style,
+                            stroke_cap,
+                        );
+                    }
+                }
             }
         }
         StaticShapeKind::Polygon => {
