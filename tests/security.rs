@@ -82681,7 +82681,7 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 10);
-    let expected_point_counts = [10, 16, 16, 17, 5, 6, 6, 4, 6, 28];
+    let expected_point_counts = [10, 16, 16, 17, 5, 6, 6, 4, 6, 55];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -82753,6 +82753,37 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
     );
     assert_eq!(shapes[8].points[2].x_twips, shapes[8].width_twips);
     assert!(shapes[9].points.iter().any(|point| point.y_twips == 0));
+    assert!(
+        shapes[9]
+            .points
+            .iter()
+            .filter(|point| point.y_twips <= shapes[9].height_twips / 8)
+            .count()
+            >= 6,
+        "tear should preserve a bounded passive top taper"
+    );
+    assert!(
+        shapes[9]
+            .points
+            .iter()
+            .filter(|point| point.y_twips >= (shapes[9].height_twips * 7) / 8)
+            .count()
+            >= 8,
+        "tear should preserve a bounded passive lower lobe"
+    );
+    assert!(
+        shapes[9]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[9].width_twips / 8
+                    && point.y_twips > shapes[9].height_twips / 4
+                    && point.y_twips < (shapes[9].height_twips * 3) / 4
+            })
+            .count()
+            >= 6,
+        "tear should preserve a bounded passive left-side sweep"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
