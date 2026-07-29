@@ -83231,7 +83231,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     assert_eq!(shapes.len(), 10);
     let expected = [
         (StaticShapeKind::Polygon, 6),
-        (StaticShapeKind::Polygon, 19),
+        (StaticShapeKind::Polygon, 34),
         (StaticShapeKind::Polygon, 40),
         (StaticShapeKind::Polygon, 49),
         (StaticShapeKind::Polygon, 23),
@@ -83255,6 +83255,26 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         );
     }
     assert_eq!(shapes[0].points[0].x_twips, 0);
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[1].height_twips / 2
+                    || point.x_twips >= shapes[1].width_twips / 2
+            })
+            .count()
+            >= 24,
+        "pie wedge should preserve a bounded passive quarter-circle arc"
+    );
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .any(|point| point.x_twips == shapes[1].width_twips
+                && point.y_twips == shapes[1].height_twips),
+        "pie wedge should preserve the passive arc endpoint at the right edge"
+    );
     assert!(shapes[3].points.iter().any(|point| point.x_twips == 0));
     assert_eq!(
         shapes[2].overlay_paths.len(),
