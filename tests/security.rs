@@ -83246,7 +83246,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         (StaticShapeKind::Polygon, 6),
         (StaticShapeKind::Polygon, 34),
         (StaticShapeKind::Polygon, 68),
-        (StaticShapeKind::Polygon, 49),
+        (StaticShapeKind::Polygon, 77),
         (StaticShapeKind::Polygon, 23),
         (StaticShapeKind::Polygon, 44),
         (StaticShapeKind::Polygon, 4),
@@ -83316,6 +83316,34 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     assert!(
         shapes[2].overlay_paths.iter().all(|path| path.len() >= 28),
         "left circular arrow inner arc should keep dense bounded passive samples"
+    );
+    assert!(
+        shapes[3]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[3].height_twips / 2
+                    && point.x_twips >= shapes[3].width_twips / 5
+            })
+            .count()
+            >= 24,
+        "left-right circular arrow should preserve a bounded passive upper circular band"
+    );
+    assert!(
+        shapes[3]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips >= shapes[3].height_twips / 2
+                    && point.x_twips <= (shapes[3].width_twips * 4) / 5
+            })
+            .count()
+            >= 24,
+        "left-right circular arrow should preserve a bounded passive lower circular band"
+    );
+    assert!(
+        shapes[3].overlay_paths.iter().all(|path| path.len() >= 16),
+        "left-right circular arrow inner arcs should keep dense bounded passive samples"
     );
     for shape in [&shapes[2], &shapes[3]] {
         assert!(
