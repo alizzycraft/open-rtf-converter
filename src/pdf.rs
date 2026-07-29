@@ -3549,6 +3549,19 @@ fn pdf_color_from_model(color: crate::model::Color) -> PdfColor {
     }
 }
 
+const PASSIVE_IMAGE_PLACEHOLDER_LABEL: &str = "Image skipped";
+const PASSIVE_IMAGE_PLACEHOLDER_LABEL_FONT_SIZE: f32 = 9.0;
+const PASSIVE_IMAGE_PLACEHOLDER_LABEL_PADDING: f32 = 6.0;
+
+fn passive_image_placeholder_label_fits(width: f32, height: f32) -> bool {
+    height >= 24.0
+        && width
+            >= estimated_passive_vector_text_width(
+                PASSIVE_IMAGE_PLACEHOLDER_LABEL,
+                PASSIVE_IMAGE_PLACEHOLDER_LABEL_FONT_SIZE,
+            ) + (PASSIVE_IMAGE_PLACEHOLDER_LABEL_PADDING * 2.0)
+}
+
 fn draw_passive_image_placeholder(content: &mut Content, fragment: &crate::layout::ImageFragment) {
     let width = fragment.width.max(1.0);
     let height = fragment.height.max(1.0);
@@ -3591,13 +3604,13 @@ fn draw_passive_image_placeholder(content: &mut Content, fragment: &crate::layou
             0.5,
         );
     }
-    if width < 96.0 || height < 24.0 {
+    if !passive_image_placeholder_label_fits(width, height) {
         return;
     }
 
     let mut style = CharacterStyle::default();
-    style.font_size_half_points = 18;
-    let label = "Image skipped";
+    style.font_size_half_points = (PASSIVE_IMAGE_PLACEHOLDER_LABEL_FONT_SIZE * 2.0) as i32;
+    let label = PASSIVE_IMAGE_PLACEHOLDER_LABEL;
     let encoded = encode_pdf_text_for_font(label, PdfFontFamily::Helvetica);
     set_fill_color(
         content,
@@ -3614,7 +3627,7 @@ fn draw_passive_image_placeholder(content: &mut Content, fragment: &crate::layou
         Some(PdfFontFamily::Helvetica),
         &style,
         0.0,
-        fragment.x + 6.0,
+        fragment.x + PASSIVE_IMAGE_PLACEHOLDER_LABEL_PADDING,
         fragment.y + (height / 2.0) - 3.0,
         TextRotation::None,
         &encoded,
@@ -6342,6 +6355,38 @@ mod tests {
                 .any(|operation| operation.operator == "S"),
             "drawing-wrapped placeholder image should render passive frame"
         );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn compact_placeholder_image_renders_label_when_it_fits() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::Placeholder,
+            bytes: Vec::new(),
+            palette: Vec::new(),
+            alpha_mask: None,
+            tone_adjustment: None,
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(1600),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+
+        assert_eq!(content_text(&content), "Image skipped");
         audit_passive_pdf_bytes(&pdf).unwrap();
     }
 

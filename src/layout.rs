@@ -7423,7 +7423,7 @@ fn image_placeholder_label_is_visible(image: &StaticImage, content_width: f32) -
         return false;
     }
     let (_, _, width, height) = image_layout_frame(image, content_width);
-    width >= 96.0 && height >= 24.0
+    width >= 74.0 && height >= 24.0
 }
 
 fn push_shape_stats(builder: &mut DocumentStatsBuilder, shape: &StaticShape) {
