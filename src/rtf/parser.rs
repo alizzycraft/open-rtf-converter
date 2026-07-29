@@ -17825,8 +17825,18 @@ fn rounded_rectangle_polygon_shape_points(
     let radius = (width_twips.min(height_twips) / 6).max(1);
     let right = width_twips.max(1);
     let bottom = height_twips.max(1);
-    let samples: [(i32, i32); 5] = [(0, 1000), (76, 617), (293, 293), (617, 76), (1000, 0)];
-    let mut points = Vec::with_capacity(20);
+    let samples: [(i32, i32); 9] = [
+        (0, 1000),
+        (20, 805),
+        (76, 617),
+        (169, 444),
+        (293, 293),
+        (444, 169),
+        (617, 76),
+        (805, 20),
+        (1000, 0),
+    ];
+    let mut points = Vec::with_capacity(40);
     points.push(StaticShapePoint {
         x_twips: radius,
         y_twips: 0,

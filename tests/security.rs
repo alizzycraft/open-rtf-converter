@@ -78760,8 +78760,8 @@ fn rotated_office_round_rectangles_lower_to_passive_polygon_without_payload_leak
     assert!(text.contains("After"));
     assert_eq!(shape.kind, StaticShapeKind::Polygon);
     assert!(
-        shape.points.len() >= 20,
-        "rotated rounded rectangle should preserve a sampled passive rounded outline"
+        shape.points.len() >= 36,
+        "rotated rounded rectangle should preserve a dense sampled passive rounded outline"
     );
     assert!(
         shape.points.iter().all(|point| {
@@ -78771,6 +78771,18 @@ fn rotated_office_round_rectangles_lower_to_passive_polygon_without_payload_leak
                 && point.y_twips <= shape.height_twips
         }),
         "rotated rounded rectangle points must stay inside normalized passive frame: {shape:?}"
+    );
+    assert!(
+        shape
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shape.width_twips / 5
+                    || point.x_twips >= (shape.width_twips * 4) / 5
+            })
+            .count()
+            >= 12,
+        "rotated rounded rectangle should keep bounded passive rounded side samples"
     );
     assert_eq!(
         shape.fill_color,
