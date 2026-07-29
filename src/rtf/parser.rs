@@ -17586,6 +17586,27 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::FlowchartMultidocument => {
             flowchart_multidocument_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::RightArrowCallout => {
+            right_arrow_callout_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::LeftArrowCallout => {
+            left_arrow_callout_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::UpArrowCallout => {
+            up_arrow_callout_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::DownArrowCallout => {
+            down_arrow_callout_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::LeftRightArrowCallout => {
+            left_right_arrow_callout_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::UpDownArrowCallout => {
+            up_down_arrow_callout_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::QuadArrowCallout => {
+            quad_arrow_callout_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::FoldedCorner | ShapePolygonPreset::ActionButtonDocument => {
             folded_corner_shape_overlay_paths(width_twips, height_twips)
         }
@@ -20525,6 +20546,23 @@ fn right_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<
     .collect()
 }
 
+fn right_arrow_callout_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let body_right = (width_twips * 2) / 3;
+    vec![vec![
+        StaticShapePoint {
+            x_twips: body_right,
+            y_twips: 0,
+        },
+        StaticShapePoint {
+            x_twips: body_right,
+            y_twips: height_twips,
+        },
+    ]]
+}
+
 fn left_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     let body_left = width_twips / 3;
     let mid_y = height_twips / 2;
@@ -20545,6 +20583,23 @@ fn left_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<S
         y_twips: y,
     })
     .collect()
+}
+
+fn left_arrow_callout_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let body_left = width_twips / 3;
+    vec![vec![
+        StaticShapePoint {
+            x_twips: body_left,
+            y_twips: 0,
+        },
+        StaticShapePoint {
+            x_twips: body_left,
+            y_twips: height_twips,
+        },
+    ]]
 }
 
 fn up_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
@@ -20569,6 +20624,23 @@ fn up_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<Sta
     .collect()
 }
 
+fn up_arrow_callout_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let body_top = height_twips / 3;
+    vec![vec![
+        StaticShapePoint {
+            x_twips: 0,
+            y_twips: body_top,
+        },
+        StaticShapePoint {
+            x_twips: width_twips,
+            y_twips: body_top,
+        },
+    ]]
+}
+
 fn down_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     let body_bottom = (height_twips * 2) / 3;
     let mid_x = width_twips / 2;
@@ -20589,6 +20661,23 @@ fn down_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<S
         y_twips: y,
     })
     .collect()
+}
+
+fn down_arrow_callout_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let body_bottom = (height_twips * 2) / 3;
+    vec![vec![
+        StaticShapePoint {
+            x_twips: 0,
+            y_twips: body_bottom,
+        },
+        StaticShapePoint {
+            x_twips: width_twips,
+            y_twips: body_bottom,
+        },
+    ]]
 }
 
 fn left_right_arrow_callout_shape_points(
@@ -20619,6 +20708,35 @@ fn left_right_arrow_callout_shape_points(
     .collect()
 }
 
+fn left_right_arrow_callout_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let head_width = width_twips / 4;
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: head_width,
+                y_twips: 0,
+            },
+            StaticShapePoint {
+                x_twips: head_width,
+                y_twips: height_twips,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: width_twips.saturating_sub(head_width),
+                y_twips: 0,
+            },
+            StaticShapePoint {
+                x_twips: width_twips.saturating_sub(head_width),
+                y_twips: height_twips,
+            },
+        ],
+    ]
+}
+
 fn up_down_arrow_callout_shape_points(
     width_twips: i32,
     height_twips: i32,
@@ -20645,6 +20763,35 @@ fn up_down_arrow_callout_shape_points(
         y_twips: y,
     })
     .collect()
+}
+
+fn up_down_arrow_callout_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let head_height = height_twips / 4;
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: 0,
+                y_twips: head_height,
+            },
+            StaticShapePoint {
+                x_twips: width_twips,
+                y_twips: head_height,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: 0,
+                y_twips: height_twips.saturating_sub(head_height),
+            },
+            StaticShapePoint {
+                x_twips: width_twips,
+                y_twips: height_twips.saturating_sub(head_height),
+            },
+        ],
+    ]
 }
 
 fn quad_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
@@ -20674,6 +20821,58 @@ fn quad_arrow_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<S
         y_twips: y,
     })
     .collect()
+}
+
+fn quad_arrow_callout_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let body_left = width_twips / 3;
+    let body_right = width_twips.saturating_sub(body_left);
+    let body_top = height_twips / 3;
+    let body_bottom = height_twips.saturating_sub(body_top);
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: body_left,
+                y_twips: body_top,
+            },
+            StaticShapePoint {
+                x_twips: body_right,
+                y_twips: body_top,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: body_right,
+                y_twips: body_top,
+            },
+            StaticShapePoint {
+                x_twips: body_right,
+                y_twips: body_bottom,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: body_right,
+                y_twips: body_bottom,
+            },
+            StaticShapePoint {
+                x_twips: body_left,
+                y_twips: body_bottom,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: body_left,
+                y_twips: body_bottom,
+            },
+            StaticShapePoint {
+                x_twips: body_left,
+                y_twips: body_top,
+            },
+        ],
+    ]
 }
 
 fn left_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

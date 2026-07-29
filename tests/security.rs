@@ -85212,6 +85212,21 @@ fn office_right_arrow_callouts_render_as_passive_polygon_without_payload_leakage
         "right arrow callout should preserve the full-height callout body"
     );
     assert_eq!(
+        shape.overlay_paths.len(),
+        1,
+        "right arrow callout should preserve the passive body/head separator"
+    );
+    assert_eq!(shape.overlay_paths[0].len(), 2);
+    assert!(
+        shape.overlay_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shape.width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shape.height_twips
+        }),
+        "right arrow callout separator must stay inside passive frame"
+    );
+    assert_eq!(
         shape.fill_color,
         Some(open_rtf_converter::model::Color {
             red: 0,
@@ -85254,6 +85269,13 @@ fn office_right_arrow_callouts_render_as_passive_polygon_without_payload_leakage
             .iter()
             .any(|operation| operation.operator == "B"),
         "right arrow callout fill/stroke should render passively"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S"),
+        "right arrow callout separator should render as a passive stroke"
     );
     for forbidden in [
         b"shapeType".as_slice(),
