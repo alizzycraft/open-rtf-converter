@@ -79897,6 +79897,36 @@ fn office_3d_and_folded_shapes_render_as_passive_polygons_without_payload_leakag
             "3D/folded shape points must stay inside the passive shape frame"
         );
     }
+    assert_eq!(
+        shapes[0].overlay_paths.len(),
+        4,
+        "can should preserve passive top-face strokes"
+    );
+    assert_eq!(
+        shapes[1].overlay_paths.len(),
+        3,
+        "cube should preserve passive internal face strokes"
+    );
+    assert_eq!(
+        shapes[3].overlay_paths.len(),
+        2,
+        "folded corner should preserve passive crease strokes"
+    );
+    for shape in [&shapes[0], &shapes[1], &shapes[3]] {
+        assert!(
+            shape.overlay_paths.iter().all(|path| path.len() == 2),
+            "3D/folded overlays should be passive line segments"
+        );
+        assert!(
+            shape.overlay_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "3D/folded overlay points must stay inside the passive shape frame"
+        );
+    }
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -79925,6 +79955,7 @@ fn office_3d_and_folded_shapes_render_as_passive_polygons_without_payload_leakag
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0;
+    let mut passive_overlay_strokes = 0;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -79933,6 +79964,11 @@ fn office_3d_and_folded_shapes_render_as_passive_polygons_without_payload_leakag
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_overlay_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -79940,6 +79976,10 @@ fn office_3d_and_folded_shapes_render_as_passive_polygons_without_payload_leakag
     assert!(
         passive_shape_paints >= 4,
         "3D/folded shapes should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_overlay_strokes >= 9,
+        "3D/folded face details should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),

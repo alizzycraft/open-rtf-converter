@@ -17547,6 +17547,7 @@ fn polygon_preset_shape_overlay_paths(
         | ShapePolygonPreset::FlowchartMagneticDisk => {
             can_shape_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::Cube => cube_shape_overlay_paths(width_twips, height_twips),
         ShapePolygonPreset::FlowchartPredefinedProcess => {
             flowchart_predefined_process_overlay_paths(width_twips, height_twips)
         }
@@ -20030,6 +20031,44 @@ fn cube_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoin
         y_twips: y,
     })
     .collect()
+}
+
+fn cube_shape_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    let inset_x = width_twips / 4;
+    let inset_y = height_twips / 4;
+    let front_right_x = width_twips.saturating_sub(inset_x);
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: 0,
+                y_twips: inset_y,
+            },
+            StaticShapePoint {
+                x_twips: front_right_x,
+                y_twips: inset_y,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: front_right_x,
+                y_twips: inset_y,
+            },
+            StaticShapePoint {
+                x_twips: front_right_x,
+                y_twips: height_twips,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: front_right_x,
+                y_twips: inset_y,
+            },
+            StaticShapePoint {
+                x_twips: width_twips,
+                y_twips: 0,
+            },
+        ],
+    ]
 }
 
 fn bevel_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
