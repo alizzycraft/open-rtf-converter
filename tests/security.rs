@@ -82163,23 +82163,36 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
                 && point.y_twips <= shapes[8].height_twips),
         "action-button return inner corner must stay inside passive frame"
     );
+    for (index, shape) in shapes.iter().enumerate() {
+        let expected_overlay_count = if index == 9 { 6 } else { 4 };
+        assert_eq!(
+            shape.overlay_paths.len(),
+            expected_overlay_count,
+            "action button {index} should include bounded passive bevel frame overlays"
+        );
+        assert!(
+            shape.overlay_paths.iter().all(|path| path.len() == 2),
+            "action button {index} frame details should use bounded passive line segments"
+        );
+        assert!(
+            shape.overlay_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "action button {index} frame overlays must stay inside passive frame"
+        );
+    }
     assert_eq!(shapes[9].points[3].y_twips, shapes[9].height_twips);
-    assert_eq!(shapes[9].overlay_paths.len(), 2);
     assert!(
-        shapes[9].overlay_paths.iter().all(|path| path.len() == 2),
-        "action-button document fold should use bounded passive line segments"
-    );
-    assert! {
         shapes[9]
             .overlay_paths
             .iter()
-            .flatten()
-            .all(|point| point.x_twips >= 0
-                && point.x_twips <= shapes[9].width_twips
-                && point.y_twips >= 0
-                && point.y_twips <= shapes[9].height_twips),
-        "action-button document fold overlay must stay inside passive frame"
-    };
+            .skip(4)
+            .all(|path| path.len() == 2),
+        "action-button document fold should append bounded passive line segments"
+    );
     assert_eq!(shapes[10].point_paths.len(), 2);
     assert_eq!(shapes[10].point_paths[0].len(), 14);
     assert_eq!(shapes[10].point_paths[1].len(), 17);

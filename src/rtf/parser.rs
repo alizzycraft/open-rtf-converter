@@ -17588,6 +17588,19 @@ fn polygon_preset_shape_overlay_paths(
         }
         ShapePolygonPreset::Cube => cube_shape_overlay_paths(width_twips, height_twips),
         ShapePolygonPreset::Bevel => bevel_shape_overlay_paths(width_twips, height_twips),
+        ShapePolygonPreset::ActionButtonBlank
+        | ShapePolygonPreset::ActionButtonHome
+        | ShapePolygonPreset::ActionButtonHelp
+        | ShapePolygonPreset::ActionButtonInformation
+        | ShapePolygonPreset::ActionButtonBackPrevious
+        | ShapePolygonPreset::ActionButtonForwardNext
+        | ShapePolygonPreset::ActionButtonBeginning
+        | ShapePolygonPreset::ActionButtonEnd
+        | ShapePolygonPreset::ActionButtonReturn
+        | ShapePolygonPreset::ActionButtonSound
+        | ShapePolygonPreset::ActionButtonMovie => {
+            action_button_frame_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::FlowchartPredefinedProcess => {
             flowchart_predefined_process_overlay_paths(width_twips, height_twips)
         }
@@ -17642,8 +17655,11 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::QuadArrowCallout => {
             quad_arrow_callout_overlay_paths(width_twips, height_twips)
         }
-        ShapePolygonPreset::FoldedCorner | ShapePolygonPreset::ActionButtonDocument => {
+        ShapePolygonPreset::FoldedCorner => {
             folded_corner_shape_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonDocument => {
+            action_button_document_overlay_paths(width_twips, height_twips)
         }
         ShapePolygonPreset::LineCalloutBorderAccentBar => {
             line_callout_border_accent_bar_overlay_paths(width_twips, height_twips)
@@ -18701,6 +18717,22 @@ fn line_callout_ushape_points(width_twips: i32, height_twips: i32) -> Vec<Static
 
 fn action_button_blank_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     bevel_shape_points(width_twips, height_twips)
+}
+
+fn action_button_frame_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    bevel_shape_overlay_paths(width_twips, height_twips)
+}
+
+fn action_button_document_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let mut paths = action_button_frame_overlay_paths(width_twips, height_twips);
+    paths.extend(folded_corner_shape_overlay_paths(width_twips, height_twips));
+    paths
 }
 
 fn action_button_home_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
