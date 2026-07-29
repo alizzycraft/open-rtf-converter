@@ -91830,6 +91830,134 @@ fn old_drawing_polyline_renders_passively_without_coordinate_or_payload_leakage(
 }
 
 #[test]
+fn old_drawing_arc_renders_as_bounded_passive_polyline_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "do",
+        "\\",
+        "dparc",
+        "\\",
+        "dpx360",
+        "\\",
+        "dpy480",
+        "\\",
+        "dpxsize1440",
+        "\\",
+        "dpysize720",
+        "\\",
+        "dplinew30",
+        "{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hostile-arc-payload}}}After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("arc shape");
+    let text = collect_text(&parsed.document);
+
+    assert_eq!(
+        shape.kind,
+        open_rtf_converter::model::StaticShapeKind::Polyline
+    );
+    assert!(
+        shape.points.len() > 8,
+        "legacy arc should normalize to sampled passive points"
+    );
+    assert!(text.contains("Before"));
+    assert!(text.contains("After"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("stripping unsupported/active drawing properties")
+    }));
+    for forbidden in [
+        "dparc",
+        "dpxsize",
+        "dpysize",
+        "pFragments",
+        "hostile-arc-payload",
+        "[Shape skipped",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden arc drawing content leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    let line_count = content
+        .operations
+        .iter()
+        .filter(|operation| operation.operator == "l")
+        .count();
+
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
+    assert!(
+        line_count > 8,
+        "legacy arc should render as bounded passive line segments"
+    );
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "S")
+    );
+    for forbidden in [
+        b"dparc".as_slice(),
+        b"dpxsize",
+        b"dpysize",
+        b"pFragments",
+        b"hostile-arc-payload",
+        b"[Shape skipped",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden arc drawing content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn old_drawing_polygon_renders_passively_without_coordinate_or_payload_leakage() {
     let input = rtf(&[
         "{",

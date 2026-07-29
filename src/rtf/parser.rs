@@ -3864,6 +3864,9 @@ impl Parser {
             "dppolyline" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_kind(StaticShapeKind::Polyline);
             }
+            "dparc" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_polyline_preset(ShapePolylinePreset::Arc);
+            }
             "dppolygon" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_kind(StaticShapeKind::Polygon);
             }
