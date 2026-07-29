@@ -82544,7 +82544,7 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 10);
-    let expected_point_counts = [10, 10, 10, 11, 5, 6, 6, 4, 6, 28];
+    let expected_point_counts = [10, 16, 16, 17, 5, 6, 6, 4, 6, 28];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -82570,6 +82570,33 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
             >= 5,
         "round-one rectangle should preserve a bounded passive rounded-corner arc"
     );
+    for (index, shape) in [(1usize, shapes[1]), (2, shapes[2]), (3, shapes[3])] {
+        assert!(
+            shape
+                .points
+                .iter()
+                .filter(|point| {
+                    point.x_twips <= shape.width_twips / 6
+                        && point.y_twips <= shape.height_twips / 6
+                })
+                .count()
+                >= 5,
+            "rounded/snip rectangle {index} should preserve a bounded passive top-left arc"
+        );
+        assert!(
+            shape
+                .points
+                .iter()
+                .filter(|point| {
+                    point.x_twips >= shape.width_twips - (shape.width_twips / 6)
+                        && (point.y_twips <= shape.height_twips / 6
+                            || point.y_twips >= shape.height_twips - (shape.height_twips / 6))
+                })
+                .count()
+                >= 5,
+            "rounded/snip rectangle {index} should preserve a bounded passive opposite-corner arc"
+        );
+    }
     assert_eq!(shapes[7].points[0].x_twips, 0);
     assert_eq!(
         shapes[7].fill_rule,
