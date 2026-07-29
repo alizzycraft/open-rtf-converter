@@ -1033,6 +1033,84 @@ fn browser_safe_defaults_embed_bundled_metric_fonts_for_common_word_families() {
 }
 
 #[test]
+fn browser_safe_defaults_embed_bundled_metric_fonts_for_office_theme_families() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f0 Calibri;}{\f1 Cambria;}{\f2 Calibri Light;}{\f3 Cambria Math;}}\f0 Sans AB\par\f1 Serif \u337?D\par\f2 Light EF\par\f3 Math GH\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected bundled Office theme passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    for family in ["Calibri", "Cambria", "Calibri Light", "Cambria Math"] {
+        assert!(
+            output.diagnostics.iter().all(|diagnostic| !diagnostic
+                .message
+                .contains(&format!("font '{family}' approximated"))
+                && !diagnostic
+                    .message
+                    .contains(&format!("font '{family}' substituted"))),
+            "bundled Office theme asset should suppress {family} base-font diagnostics: {:?}",
+            output.diagnostics
+        );
+        assert!(
+            !output
+                .pdf
+                .windows(family.as_bytes().len())
+                .any(|window| window == family.as_bytes()),
+            "source Office theme font family leaked to PDF bytes: {family}"
+        );
+    }
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("Latin Extended characters for font 'Cambria'")),
+        "covered Cambria Latin Extended glyphs should render through embedded passive Type0 fonts without a degradation warning: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/OpenAction",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/Launch",
+        b"/EmbeddedFile",
+        b"/Filespec",
+        b"/RichMedia",
+        b"/XFA",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden active PDF marker {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn caller_font_asset_matches_rtf_alternate_font_name_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Mystery Sans{\*\falt Tuffy;};}}\f0 Alternate AB\par}";
     let provider = FontProvider {

@@ -282,6 +282,8 @@ fn bundled_browser_safe_sans_aliases() -> Vec<String> {
         "Arial Tur",
         "Arial Baltic",
         "Arial Narrow",
+        "Calibri",
+        "Calibri Light",
         "Helvetica Narrow",
         "Helvetica",
         "MS Sans Serif",
@@ -303,6 +305,8 @@ fn bundled_browser_safe_serif_aliases() -> Vec<String> {
         "Times New Roman Baltic",
         "Times",
         "Times-Roman",
+        "Cambria",
+        "Cambria Math",
         "MS Serif",
         "Book Antiqua",
     ]
@@ -656,10 +660,14 @@ mod tests {
         assert!(provider.has_asset_for_family("Arial"));
         assert!(provider.has_asset_for_family("Arial CE"));
         assert!(provider.has_asset_for_family("Arial Narrow"));
+        assert!(provider.has_asset_for_family("Calibri"));
+        assert!(provider.has_asset_for_family("Calibri Light"));
         assert!(provider.has_asset_for_family("Helvetica Narrow"));
         assert!(provider.has_asset_for_family("MS Sans Serif"));
         assert!(provider.has_asset_for_family("Times New Roman"));
         assert!(provider.has_asset_for_family("Times New Roman CE"));
+        assert!(provider.has_asset_for_family("Cambria"));
+        assert!(provider.has_asset_for_family("Cambria Math"));
         assert!(provider.has_asset_for_family("MS Serif"));
         assert!(provider.has_asset_for_family("Book Antiqua"));
         assert!(provider.has_asset_for_family("Courier New"));
@@ -675,7 +683,15 @@ mod tests {
             FontCoverage::Covered
         );
         assert_eq!(
+            provider.coverage_for_char("Calibri", 'A'),
+            FontCoverage::Covered
+        );
+        assert_eq!(
             provider.coverage_for_char("Times New Roman CE", '\u{0151}'),
+            FontCoverage::Covered
+        );
+        assert_eq!(
+            provider.coverage_for_char("Cambria", '\u{0151}'),
             FontCoverage::Covered
         );
         assert_eq!(
