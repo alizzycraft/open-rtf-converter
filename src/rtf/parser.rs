@@ -118,6 +118,7 @@ struct ParserState {
     field_form_default_result_value: Option<i32>,
     field_form_checkbox_result: Option<bool>,
     field_form_checkbox_default: Option<bool>,
+    field_form_checkbox_size_half_points: Option<i32>,
     field_form_default_text: String,
     field_form_dropdown_entries: Vec<String>,
     field_form_dropdown_entry_text: String,
@@ -272,6 +273,7 @@ impl Default for ParserState {
             field_form_default_result_value: None,
             field_form_checkbox_result: None,
             field_form_checkbox_default: None,
+            field_form_checkbox_size_half_points: None,
             field_form_default_text: String::new(),
             field_form_dropdown_entries: Vec::new(),
             field_form_dropdown_entry_text: String::new(),
@@ -2123,6 +2125,10 @@ impl Parser {
                     .state
                     .field_form_checkbox_default
                     .or(previous.field_form_checkbox_default);
+                previous.field_form_checkbox_size_half_points = self
+                    .state
+                    .field_form_checkbox_size_half_points
+                    .or(previous.field_form_checkbox_size_half_points);
                 merge_child_form_default_text(
                     &mut previous.field_form_default_text,
                     &self.state.field_form_default_text,
@@ -2160,6 +2166,8 @@ impl Parser {
                     .state
                     .field_form_checkbox_result
                     .or(self.state.field_form_checkbox_default);
+                let field_form_checkbox_size_half_points =
+                    self.state.field_form_checkbox_size_half_points;
                 let field_form_default_text = self.state.field_form_default_text.clone();
                 let field_form_dropdown_entries = self.state.field_form_dropdown_entries.clone();
                 let field_form_dropdown_selected_index = self
@@ -2385,6 +2393,7 @@ impl Parser {
                     } else if let Some(result) = self.passive_field_result_for_instruction(
                         &field_instruction,
                         field_form_checkbox_checked,
+                        field_form_checkbox_size_half_points,
                         &field_form_default_text,
                         &field_form_dropdown_entries,
                         field_form_dropdown_selected_index,
@@ -2542,6 +2551,7 @@ impl Parser {
                         if let Some(result) = self.passive_field_result_for_instruction(
                             &field_instruction,
                             field_form_checkbox_checked,
+                            field_form_checkbox_size_half_points,
                             &field_form_default_text,
                             &field_form_dropdown_entries,
                             field_form_dropdown_selected_index,
@@ -4526,6 +4536,13 @@ impl Parser {
                 let value = control.parameter.unwrap_or(0);
                 self.state.field_form_default_result_value = Some(value);
                 self.state.field_form_checkbox_default = Some(value != 0);
+                self.count_skipped_destination_bytes(control.name.len(), offset)?;
+            }
+            "ffsize" | "ffhps" if self.state.inside_field && self.state.inside_metadata => {
+                let value = control.parameter.unwrap_or(0);
+                if value > 0 {
+                    self.state.field_form_checkbox_size_half_points = Some(value);
+                }
                 self.count_skipped_destination_bytes(control.name.len(), offset)?;
             }
             "ffdeftext" if self.state.inside_field && self.state.inside_metadata => {
@@ -9307,6 +9324,7 @@ impl Parser {
         &mut self,
         instruction: &str,
         form_checkbox_checked: Option<bool>,
+        form_checkbox_size_half_points: Option<i32>,
         form_default_text: &str,
         form_dropdown_entries: &[String],
         form_dropdown_selected_index: Option<i32>,
@@ -9358,6 +9376,7 @@ impl Parser {
             passive_field_result(
                 instruction,
                 form_checkbox_checked,
+                form_checkbox_size_half_points,
                 form_default_text,
                 form_dropdown_entries,
                 form_dropdown_selected_index,
@@ -24876,6 +24895,7 @@ fn field_uses_numeric_formatting(instruction: &str) -> bool {
 fn passive_field_result(
     instruction: &str,
     form_checkbox_checked: Option<bool>,
+    form_checkbox_size_half_points: Option<i32>,
     form_default_text: &str,
     form_dropdown_entries: &[String],
     form_dropdown_selected_index: Option<i32>,
@@ -24901,7 +24921,7 @@ fn passive_field_result(
             }
             .to_string(),
             font_name: Some("ZapfDingbats".to_string()),
-            font_size_half_points: None,
+            font_size_half_points: form_checkbox_size_half_points,
             form_field: true,
         }),
         "FORMULA" => passive_formula_field_result(instruction),
@@ -49441,6 +49461,40 @@ After\par}"#;
             "normalized text was {text:?}; diagnostics were {:?}",
             output.diagnostics
         );
+    }
+
+    #[test]
+    fn resultless_form_checkbox_uses_bounded_passive_size_metadata() {
+        let output = parse_rtf(
+            r#"{\rtf1\fs20 Before {\field{\*\fldinst FORMCHECKBOX}{\formfield{\fftype1}{\ffres1}{\ffhps40}{\ffentrymcr launch.exe}{\datafield 414243}}} After\par}"#,
+        )
+        .unwrap();
+        let paragraph = match output.document.blocks.first().expect("paragraph") {
+            Block::Paragraph(paragraph) => paragraph,
+            block => panic!("unexpected block: {block:?}"),
+        };
+        let checkbox = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text == "\u{2611}")
+            .expect("checkbox run");
+
+        assert_eq!(checkbox.style.font_size_half_points, 40);
+        assert_ne!(
+            checkbox.style.font_size_half_points,
+            paragraph
+                .runs
+                .iter()
+                .find(|run| run.text.contains("Before"))
+                .expect("ambient run")
+                .style
+                .font_size_half_points
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "rendering passive form field FORMCHECKBOX without creating PDF form actions",
+            )
+        }));
     }
 
     #[test]

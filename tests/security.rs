@@ -17847,6 +17847,91 @@ fn unchecked_form_checkbox_renders_passive_font_glyph_without_pdf_form() {
 }
 
 #[test]
+fn sized_form_checkbox_renders_passive_glyph_size_without_metadata_or_pdf_form() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "fs20 Before {",
+        "\\",
+        "field{",
+        "\\",
+        "*",
+        "\\",
+        "fldinst FORMCHECKBOX}{",
+        "\\",
+        "formfield{",
+        "\\",
+        "fftype1}{",
+        "\\",
+        "ffres1}{",
+        "\\",
+        "ffhps40}{",
+        "\\",
+        "ffentrymcr launch.exe}{",
+        "\\",
+        "datafield 414243}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let checkbox_style = run_style_for_text(&parsed.document, "\u{2611}").expect("checkbox run");
+    let before_style = run_style_for_text(&parsed.document, "Before ").expect("ambient run");
+
+    assert!(text.contains("Before \u{2611} After"));
+    assert_eq!(checkbox_style.font_size_half_points, 40);
+    assert_eq!(before_style.font_size_half_points, 20);
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("rendering passive form field FORMCHECKBOX without creating PDF form actions")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Before "));
+    assert!(rendered_text.contains(" After"));
+    assert_passive_checkbox_vectors_without_zapf(&output.pdf, &content, "sized form checkbox");
+    for forbidden in [
+        b"FORMCHECKBOX".as_slice(),
+        b"ffhps",
+        b"launch.exe",
+        b"414243",
+        b"ffentrymcr",
+        b"datafield",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden sized checkbox content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_form_dropdown_renders_selected_entry_without_metadata_or_pdf_form() {
     let input = rtf(&[
         "{",
