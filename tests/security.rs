@@ -81036,8 +81036,8 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
     }
     assert_eq!(shapes[0].points.len(), 4);
     assert_eq!(shapes[1].points.len(), 4);
-    assert_eq!(shapes[2].points.len(), 11);
-    assert_eq!(shapes[3].points.len(), 17);
+    assert_eq!(shapes[2].points.len(), 19);
+    assert_eq!(shapes[3].points.len(), 27);
     assert_eq!(
         shapes[0].overlay_paths.len(),
         2,
@@ -81068,6 +81068,24 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
     assert_eq!(
         shapes[2].points[2].y_twips,
         (shapes[2].height_twips * 4) / 5
+    );
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| point.y_twips > (shapes[2].height_twips * 4) / 5)
+            .count()
+            >= 8,
+        "flowchart document should preserve a bounded passive wavy bottom edge"
+    );
+    assert!(
+        shapes[3]
+            .points
+            .iter()
+            .filter(|point| point.y_twips > (shapes[3].height_twips * 4) / 5)
+            .count()
+            >= 8,
+        "flowchart multidocument should preserve bounded passive wavy page edges"
     );
     assert!(
         shapes[3].points.iter().any(|point| {
