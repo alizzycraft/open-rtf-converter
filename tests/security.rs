@@ -81637,7 +81637,7 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 8);
-    let expected_point_counts = [9, 9, 24, 26, 19, 18, 26, 42];
+    let expected_point_counts = [9, 9, 24, 26, 19, 18, 38, 42];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81694,6 +81694,24 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
             "scroll curled-roll seams must stay inside passive frame: {shape:?}"
         );
     }
+    assert!(
+        shapes[6]
+            .points
+            .iter()
+            .filter(|point| point.y_twips <= shapes[6].height_twips / 4)
+            .count()
+            >= 7,
+        "wave should preserve a bounded passive upper crest"
+    );
+    assert!(
+        shapes[6]
+            .points
+            .iter()
+            .filter(|point| point.y_twips >= (shapes[6].height_twips * 3) / 4)
+            .count()
+            >= 7,
+        "wave should preserve a bounded passive lower trough"
+    );
     assert!(
         shapes[7]
             .points
