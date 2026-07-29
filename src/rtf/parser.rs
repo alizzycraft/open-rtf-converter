@@ -21312,23 +21312,28 @@ fn double_brace_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticS
 }
 
 fn left_bracket_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    let arm = width_twips / 3;
-    [
-        (width_twips, 0),
-        (0, 0),
-        (0, height_twips),
-        (width_twips, height_twips),
-        (width_twips, (height_twips * 4) / 5),
-        (arm, (height_twips * 4) / 5),
-        (arm, height_twips / 5),
-        (width_twips, height_twips / 5),
-    ]
-    .into_iter()
-    .map(|(x, y)| StaticShapePoint {
-        x_twips: x,
-        y_twips: y,
-    })
-    .collect()
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (1000, 0),
+            (0, 0),
+            (0, 1000),
+            (1000, 1000),
+            (1000, 800),
+            (650, 800),
+            (545, 790),
+            (430, 760),
+            (345, 705),
+            (333, 620),
+            (333, 380),
+            (345, 295),
+            (430, 240),
+            (545, 210),
+            (650, 200),
+            (1000, 200),
+        ],
+    )
 }
 
 fn right_bracket_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

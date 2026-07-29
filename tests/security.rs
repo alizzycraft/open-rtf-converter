@@ -80595,7 +80595,7 @@ fn office_plaque_bracket_and_brace_shapes_render_as_passive_polygons_without_pay
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 5);
-    for (shape, expected_points) in shapes.iter().zip([24, 8, 8, 46, 46]) {
+    for (shape, expected_points) in shapes.iter().zip([24, 16, 16, 46, 46]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
@@ -80634,6 +80634,32 @@ fn office_plaque_bracket_and_brace_shapes_render_as_passive_polygons_without_pay
     );
     assert_eq!(shapes[1].points[0].x_twips, shapes[1].width_twips);
     assert_eq!(shapes[2].points[0].x_twips, 0);
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= (shapes[1].width_twips * 2) / 3
+                    && point.y_twips >= shapes[1].height_twips / 5
+                    && point.y_twips <= (shapes[1].height_twips * 4) / 5
+            })
+            .count()
+            >= 8,
+        "left bracket should preserve a denser bounded passive inner shoulder"
+    );
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= shapes[2].width_twips / 3
+                    && point.y_twips >= shapes[2].height_twips / 5
+                    && point.y_twips <= (shapes[2].height_twips * 4) / 5
+            })
+            .count()
+            >= 8,
+        "right bracket should preserve a denser bounded passive inner shoulder"
+    );
     assert!(
         shapes[3]
             .points
