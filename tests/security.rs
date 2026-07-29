@@ -82483,7 +82483,7 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 9);
-    let expected_point_counts = [52, 5, 18, 4, 33, 4, 10, 7, 12];
+    let expected_point_counts = [52, 5, 30, 4, 33, 4, 10, 7, 12];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -82523,6 +82523,28 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
                 && point.y_twips <= shapes[2].height_twips
         }),
         "left-right ribbon fold lines must stay inside passive frame"
+    );
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| point.y_twips <= shapes[2].height_twips / 6)
+            .count()
+            >= 10,
+        "left-right ribbon should preserve bounded passive top ribbon curves"
+    );
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips >= (shapes[2].height_twips * 3) / 4
+                    && point.x_twips >= shapes[2].width_twips / 6
+                    && point.x_twips <= (shapes[2].width_twips * 5) / 6
+            })
+            .count()
+            >= 8,
+        "left-right ribbon should preserve bounded passive lower ribbon curves"
     );
     assert!(shapes[6].points.iter().any(|point| point.y_twips == 0));
     assert!(shapes[7].points.iter().any(|point| point.x_twips == 0));
