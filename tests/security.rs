@@ -80745,7 +80745,7 @@ fn office_heart_and_lightning_shapes_render_as_passive_polygons_without_payload_
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 2);
     assert_eq!(shapes[0].kind, StaticShapeKind::Polygon);
-    assert_eq!(shapes[0].points.len(), 40);
+    assert_eq!(shapes[0].points.len(), 48);
     assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[1].points.len(), 6);
     for shape in &shapes {
@@ -80759,6 +80759,45 @@ fn office_heart_and_lightning_shapes_render_as_passive_polygons_without_payload_
             "heart/lightning points must stay inside the passive shape frame"
         );
     }
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[0].height_twips / 10
+                    && point.x_twips >= shapes[0].width_twips / 6
+                    && point.x_twips <= shapes[0].width_twips / 3
+            })
+            .count()
+            >= 4,
+        "heart should preserve bounded passive left-lobe curve samples"
+    );
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[0].height_twips / 10
+                    && point.x_twips >= (shapes[0].width_twips * 2) / 3
+                    && point.x_twips <= (shapes[0].width_twips * 5) / 6
+            })
+            .count()
+            >= 4,
+        "heart should preserve bounded passive right-lobe curve samples"
+    );
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= (shapes[0].width_twips * 9) / 20
+                    && point.x_twips <= (shapes[0].width_twips * 11) / 20
+                    && point.y_twips <= shapes[0].height_twips / 4
+            })
+            .count()
+            >= 5,
+        "heart should preserve a bounded passive central cleft"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
