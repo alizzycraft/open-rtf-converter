@@ -81142,6 +81142,26 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
         }),
         "flowchart sort divider must stay inside passive frame"
     );
+    for shape in [&shapes[2], &shapes[3]] {
+        assert_eq!(
+            shape.overlay_paths.len(),
+            2,
+            "flowchart summing/or shapes should preserve Word-visible passive math marks"
+        );
+        assert!(
+            shape.overlay_paths.iter().all(|path| path.len() == 2),
+            "flowchart summing/or marks should be passive line segments"
+        );
+        assert!(
+            shape.overlay_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "flowchart summing/or marks must stay inside passive frame"
+        );
+    }
     for shape in [&shapes[6], &shapes[9]] {
         assert_eq!(
             shape.overlay_paths.len(),
@@ -81235,8 +81255,8 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
         "flowchart storage/io shapes should render passive fill/stroke paths"
     );
     assert!(
-        passive_overlay_strokes >= 9,
-        "flowchart sort divider and can-style storage face overlays should render as passive strokes"
+        passive_overlay_strokes >= 13,
+        "flowchart summing/or marks, sort divider, and can-style storage face overlays should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),

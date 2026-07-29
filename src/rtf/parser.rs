@@ -17586,6 +17586,10 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::FlowchartMultidocument => {
             flowchart_multidocument_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::FlowchartSummingJunction => {
+            flowchart_summing_junction_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartOr => flowchart_or_overlay_paths(width_twips, height_twips),
         ShapePolygonPreset::FlowchartSort => {
             flowchart_sort_overlay_paths(width_twips, height_twips)
         }
@@ -17972,6 +17976,41 @@ fn flowchart_collate_shape_points(width_twips: i32, height_twips: i32) -> Vec<St
         y_twips: y,
     })
     .collect()
+}
+
+fn flowchart_summing_junction_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(width_twips, height_twips, &[(146, 146), (854, 854)]),
+        scaled_shape_points(width_twips, height_twips, &[(854, 146), (146, 854)]),
+    ]
+}
+
+fn flowchart_or_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: 0,
+                y_twips: height_twips / 2,
+            },
+            StaticShapePoint {
+                x_twips: width_twips,
+                y_twips: height_twips / 2,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: width_twips / 2,
+                y_twips: 0,
+            },
+            StaticShapePoint {
+                x_twips: width_twips / 2,
+                y_twips: height_twips,
+            },
+        ],
+    ]
 }
 
 fn flowchart_sort_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
