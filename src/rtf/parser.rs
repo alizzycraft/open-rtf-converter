@@ -18730,13 +18730,19 @@ fn flowchart_offline_storage_shape_points(
     width_twips: i32,
     height_twips: i32,
 ) -> Vec<StaticShapePoint> {
-    [(0, 0), (width_twips, 0), (width_twips / 2, height_twips)]
-        .into_iter()
-        .map(|(x, y)| StaticShapePoint {
-            x_twips: x,
-            y_twips: y,
-        })
-        .collect()
+    [
+        (width_twips / 4, 0),
+        (width_twips, 0),
+        (width_twips, height_twips),
+        (width_twips / 4, height_twips),
+        (0, height_twips / 2),
+    ]
+    .into_iter()
+    .map(|(x, y)| StaticShapePoint {
+        x_twips: x,
+        y_twips: y,
+    })
+    .collect()
 }
 
 fn left_right_ribbon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

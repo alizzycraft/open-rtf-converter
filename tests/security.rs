@@ -81937,7 +81937,7 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 9);
-    let expected_point_counts = [52, 3, 18, 4, 33, 4, 10, 7, 12];
+    let expected_point_counts = [52, 5, 18, 4, 33, 4, 10, 7, 12];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81951,7 +81951,15 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
             "post-action shape points must stay inside passive frame: {shape:?}"
         );
     }
-    assert_eq!(shapes[1].points[2].y_twips, shapes[1].height_twips);
+    assert_eq!(shapes[1].points[0].x_twips, shapes[1].width_twips / 4);
+    assert_eq!(shapes[1].points[3].x_twips, shapes[1].width_twips / 4);
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .any(|point| { point.x_twips == 0 && point.y_twips == shapes[1].height_twips / 2 }),
+        "flowchart offline storage should preserve the passive left midpoint"
+    );
     assert!(shapes[6].points.iter().any(|point| point.y_twips == 0));
     assert!(shapes[7].points.iter().any(|point| point.x_twips == 0));
     assert!(
