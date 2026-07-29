@@ -81855,7 +81855,7 @@ fn office_callout_shapes_render_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 4);
-    let expected_point_counts = [7, 27, 56, 51];
+    let expected_point_counts = [7, 27, 56, 57];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81939,6 +81939,18 @@ fn office_callout_shapes_render_passively_without_payload_leakage() {
             .iter()
             .any(|point| point.y_twips == shapes[3].height_twips),
         "cloud callout pointer should still reach the bottom of the passive frame"
+    );
+    assert!(
+        shapes[3]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips >= (shapes[3].height_twips * 7) / 10
+                    && point.y_twips < (shapes[3].height_twips * 9) / 10
+            })
+            .count()
+            >= 9,
+        "cloud callout should preserve bounded passive lower lobe samples"
     );
     for forbidden in [
         "shapeType",
