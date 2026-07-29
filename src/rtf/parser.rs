@@ -17610,6 +17610,12 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::CurvedDownRibbon => {
             curved_down_ribbon_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::VerticalScroll => {
+            vertical_scroll_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::HorizontalScroll => {
+            horizontal_scroll_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::LeftRightRibbon => {
             left_right_ribbon_overlay_paths(width_twips, height_twips)
         }
@@ -18429,6 +18435,42 @@ fn curved_down_ribbon_overlay_paths(
     vec![
         scaled_shape_points(width_twips, height_twips, &[(160, 700), (500, 220)]),
         scaled_shape_points(width_twips, height_twips, &[(840, 700), (500, 220)]),
+    ]
+}
+
+fn vertical_scroll_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(280, 0), (355, 55), (390, 160), (355, 265), (280, 320)],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(720, 680), (645, 735), (610, 840), (645, 945), (720, 1000)],
+        ),
+    ]
+}
+
+fn horizontal_scroll_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(680, 280), (735, 355), (840, 390), (945, 355), (1000, 280)],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(0, 720), (55, 645), (160, 610), (265, 645), (320, 720)],
+        ),
     ]
 }
 

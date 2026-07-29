@@ -81392,6 +81392,26 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
         );
     }
     assert_eq!(shapes[4].points[1].x_twips, shapes[4].width_twips);
+    for shape in [&shapes[4], &shapes[5]] {
+        assert_eq!(
+            shape.overlay_paths.len(),
+            2,
+            "scroll shapes should preserve passive curled-roll seam strokes"
+        );
+        assert!(
+            shape.overlay_paths.iter().all(|path| path.len() >= 5),
+            "scroll curled-roll seams should be passive bounded polylines"
+        );
+        assert!(
+            shape.overlay_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "scroll curled-roll seams must stay inside passive frame: {shape:?}"
+        );
+    }
     assert!(
         shapes[7]
             .points
@@ -81453,8 +81473,8 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
         "ribbon/scroll/wave shapes should render passive fill/stroke paths"
     );
     assert!(
-        passive_overlay_strokes >= 8,
-        "ribbon fold lines should render as passive strokes"
+        passive_overlay_strokes >= 12,
+        "ribbon folds and scroll curl seams should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),
