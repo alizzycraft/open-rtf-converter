@@ -20995,40 +20995,36 @@ fn folded_corner_shape_overlay_paths(
 }
 
 fn plaque_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    let inset_x = width_twips / 6;
-    let inset_y = height_twips / 6;
-    let half_inset_x = inset_x / 2;
-    let half_inset_y = inset_y / 2;
-    [
-        (inset_x, 0),
-        (width_twips.saturating_sub(inset_x), 0),
-        (width_twips.saturating_sub(half_inset_x), half_inset_y),
-        (width_twips.saturating_sub(inset_x), inset_y),
-        (width_twips, inset_y),
-        (width_twips, height_twips.saturating_sub(inset_y)),
-        (
-            width_twips.saturating_sub(half_inset_x),
-            height_twips.saturating_sub(half_inset_y),
-        ),
-        (
-            width_twips.saturating_sub(inset_x),
-            height_twips.saturating_sub(inset_y),
-        ),
-        (width_twips.saturating_sub(inset_x), height_twips),
-        (inset_x, height_twips),
-        (half_inset_x, height_twips.saturating_sub(half_inset_y)),
-        (inset_x, height_twips.saturating_sub(inset_y)),
-        (0, height_twips.saturating_sub(inset_y)),
-        (0, inset_y),
-        (half_inset_x, half_inset_y),
-        (inset_x, inset_y),
-    ]
-    .into_iter()
-    .map(|(x, y)| StaticShapePoint {
-        x_twips: x,
-        y_twips: y,
-    })
-    .collect()
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (167, 0),
+            (833, 0),
+            (872, 9),
+            (908, 35),
+            (943, 74),
+            (977, 124),
+            (1000, 167),
+            (1000, 833),
+            (977, 876),
+            (943, 926),
+            (908, 965),
+            (872, 991),
+            (833, 1000),
+            (167, 1000),
+            (128, 991),
+            (92, 965),
+            (57, 926),
+            (23, 876),
+            (0, 833),
+            (0, 167),
+            (23, 124),
+            (57, 74),
+            (92, 35),
+            (128, 9),
+        ],
+    )
 }
 
 fn double_bracket_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

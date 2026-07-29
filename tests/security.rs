@@ -80526,7 +80526,7 @@ fn office_plaque_bracket_and_brace_shapes_render_as_passive_polygons_without_pay
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 5);
-    for (shape, expected_points) in shapes.iter().zip([16, 8, 8, 26, 26]) {
+    for (shape, expected_points) in shapes.iter().zip([24, 8, 8, 26, 26]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
@@ -80539,6 +80539,30 @@ fn office_plaque_bracket_and_brace_shapes_render_as_passive_polygons_without_pay
             "plaque/bracket/brace points must stay inside the passive shape frame"
         );
     }
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= shapes[0].width_twips - (shapes[0].width_twips / 6)
+                    && point.y_twips <= shapes[0].height_twips / 6
+            })
+            .count()
+            >= 5,
+        "plaque should preserve a bounded passive top-right scallop"
+    );
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[0].width_twips / 6
+                    && point.y_twips >= shapes[0].height_twips - (shapes[0].height_twips / 6)
+            })
+            .count()
+            >= 5,
+        "plaque should preserve a bounded passive bottom-left scallop"
+    );
     assert_eq!(shapes[1].points[0].x_twips, shapes[1].width_twips);
     assert_eq!(shapes[2].points[0].x_twips, 0);
     for forbidden in [
