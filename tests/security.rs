@@ -80526,7 +80526,7 @@ fn office_plaque_bracket_and_brace_shapes_render_as_passive_polygons_without_pay
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 5);
-    for (shape, expected_points) in shapes.iter().zip([24, 8, 8, 26, 26]) {
+    for (shape, expected_points) in shapes.iter().zip([24, 8, 8, 46, 46]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
@@ -80565,6 +80565,46 @@ fn office_plaque_bracket_and_brace_shapes_render_as_passive_polygons_without_pay
     );
     assert_eq!(shapes[1].points[0].x_twips, shapes[1].width_twips);
     assert_eq!(shapes[2].points[0].x_twips, 0);
+    assert!(
+        shapes[3]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[3].width_twips / 6
+                    && point.y_twips >= (shapes[3].height_twips * 2) / 5
+                    && point.y_twips <= (shapes[3].height_twips * 3) / 5
+            })
+            .count()
+            >= 5,
+        "left brace should preserve a bounded passive waist curve"
+    );
+    assert!(
+        shapes[4]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= shapes[4].width_twips - (shapes[4].width_twips / 6)
+                    && point.y_twips >= (shapes[4].height_twips * 2) / 5
+                    && point.y_twips <= (shapes[4].height_twips * 3) / 5
+            })
+            .count()
+            >= 5,
+        "right brace should preserve a bounded passive waist curve"
+    );
+    assert!(
+        [&shapes[3], &shapes[4]].iter().all(|shape| {
+            shape
+                .points
+                .iter()
+                .filter(|point| {
+                    point.y_twips <= shape.height_twips / 4
+                        || point.y_twips >= shape.height_twips - (shape.height_twips / 4)
+                })
+                .count()
+                >= 12
+        }),
+        "brace shoulders should preserve bounded passive curve samples"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
