@@ -81507,12 +81507,12 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     for shape in [&shapes[6], &shapes[9]] {
         assert_eq!(
             shape.overlay_paths.len(),
-            8,
-            "can-style storage shapes should preserve Word-visible top-face strokes"
+            1,
+            "can-style storage shapes should preserve the Word-visible top-face curve"
         );
         assert!(
-            shape.overlay_paths.iter().all(|path| path.len() == 2),
-            "can-style storage face overlays should be passive line segments"
+            shape.overlay_paths.iter().all(|path| path.len() >= 17),
+            "can-style storage face overlay should be a sampled passive curve"
         );
         assert!(
             shape.overlay_paths.iter().flatten().all(|point| {
@@ -81658,7 +81658,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
         "flowchart storage/io shapes should render passive fill/stroke paths"
     );
     assert!(
-        passive_overlay_strokes >= 13,
+        passive_overlay_strokes >= 5,
         "flowchart summing/or marks, sort divider, and can-style storage face overlays should render as passive strokes"
     );
     for forbidden in [

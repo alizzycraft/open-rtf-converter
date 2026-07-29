@@ -20943,31 +20943,29 @@ fn can_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint
 }
 
 fn can_shape_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
-    scaled_shape_points(
+    vec![scaled_shape_points(
         width_twips,
         height_twips,
         &[
             (0, 125),
+            (62, 109),
             (125, 94),
-            (125, 94),
+            (188, 78),
             (250, 62),
-            (250, 62),
+            (312, 47),
             (375, 31),
-            (375, 31),
+            (438, 16),
             (500, 0),
-            (500, 0),
+            (562, 16),
             (625, 31),
-            (625, 31),
+            (688, 47),
             (750, 62),
-            (750, 62),
+            (812, 78),
             (875, 94),
-            (875, 94),
+            (938, 109),
             (1000, 125),
         ],
-    )
-    .chunks(2)
-    .map(|segment| segment.to_vec())
-    .collect()
+    )]
 }
 
 fn cube_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
