@@ -80368,7 +80368,7 @@ fn office_circular_arrow_shape_renders_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shape.kind, StaticShapeKind::Polygon);
-    assert_eq!(shape.points.len(), 40);
+    assert_eq!(shape.points.len(), 68);
     assert!(
         shape.points.iter().all(|point| {
             point.x_twips >= 0
@@ -80395,7 +80395,20 @@ fn office_circular_arrow_shape_renders_passively_without_payload_leakage() {
         "circular arrow should preserve the passive inner arc"
     );
     assert!(
-        shape.overlay_paths[0].len() >= 10,
+        shape
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= (shape.width_twips * 3) / 4
+                    && point.y_twips >= shape.height_twips / 8
+                    && point.y_twips <= (shape.height_twips * 7) / 8
+            })
+            .count()
+            >= 40,
+        "circular arrow should preserve a bounded passive circular body"
+    );
+    assert!(
+        shape.overlay_paths[0].len() >= 28,
         "circular arrow inner arc should be a bounded passive polyline"
     );
     assert!(
@@ -83232,7 +83245,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     let expected = [
         (StaticShapeKind::Polygon, 6),
         (StaticShapeKind::Polygon, 34),
-        (StaticShapeKind::Polygon, 40),
+        (StaticShapeKind::Polygon, 68),
         (StaticShapeKind::Polygon, 49),
         (StaticShapeKind::Polygon, 23),
         (StaticShapeKind::Polygon, 44),
@@ -83285,6 +83298,24 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         shapes[3].overlay_paths.len(),
         2,
         "left-right circular arrow should preserve both passive inner arcs"
+    );
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= shapes[2].width_twips / 4
+                    && point.x_twips <= shapes[2].width_twips
+                    && point.y_twips >= shapes[2].height_twips / 8
+                    && point.y_twips <= (shapes[2].height_twips * 7) / 8
+            })
+            .count()
+            >= 40,
+        "left circular arrow should preserve a bounded passive circular body"
+    );
+    assert!(
+        shapes[2].overlay_paths.iter().all(|path| path.len() >= 28),
+        "left circular arrow inner arc should keep dense bounded passive samples"
     );
     for shape in [&shapes[2], &shapes[3]] {
         assert!(
