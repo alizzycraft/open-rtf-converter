@@ -80905,8 +80905,23 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
         2,
         "internal-storage flowchart should preserve Word-visible internal guide lines"
     );
+    assert_eq!(
+        shapes[3].overlay_paths.len(),
+        2,
+        "multidocument flowchart should preserve Word-visible stacked-page edges"
+    );
     assert!(shapes[0].overlay_paths.iter().all(|path| path.len() == 2));
     assert!(shapes[1].overlay_paths.iter().all(|path| path.len() == 2));
+    assert!(shapes[3].overlay_paths.iter().all(|path| path.len() == 2));
+    assert!(
+        shapes[3].overlay_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[3].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[3].height_twips
+        }),
+        "flowchart multidocument overlay edges must stay inside passive frame"
+    );
     assert_eq!(
         shapes[2].points[2].y_twips,
         (shapes[2].height_twips * 4) / 5
@@ -80946,8 +80961,8 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
         })
         .sum::<usize>();
     assert!(
-        overlay_path_count >= 4,
-        "flowchart internal guide lines should survive into passive layout"
+        overlay_path_count >= 6,
+        "flowchart internal guide lines and stacked-page edges should survive into passive layout"
     );
 
     let output = convert_rtf_to_pdf(
@@ -80984,8 +80999,8 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
         "flowchart document variants should render passive fill/stroke paths"
     );
     assert!(
-        passive_overlay_strokes >= 4,
-        "flowchart predefined/internal-storage guide lines should render as passive strokes"
+        passive_overlay_strokes >= 6,
+        "flowchart guide lines and stacked-page edges should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),

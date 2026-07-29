@@ -17548,6 +17548,9 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::FlowchartInternalStorage => {
             flowchart_internal_storage_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::FlowchartMultidocument => {
+            flowchart_multidocument_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::FoldedCorner | ShapePolygonPreset::ActionButtonDocument => {
             folded_corner_shape_overlay_paths(width_twips, height_twips)
         }
@@ -17781,6 +17784,37 @@ fn flowchart_multidocument_shape_points(
         y_twips: y,
     })
     .collect()
+}
+
+fn flowchart_multidocument_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let offset_x = width_twips / 6;
+    let offset_y = height_twips / 5;
+    let wave_top = (height_twips * 4) / 5;
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: offset_x,
+                y_twips: offset_y,
+            },
+            StaticShapePoint {
+                x_twips: offset_x,
+                y_twips: wave_top,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: offset_x,
+                y_twips: height_twips,
+            },
+            StaticShapePoint {
+                x_twips: 0,
+                y_twips: height_twips,
+            },
+        ],
+    ]
 }
 
 fn flowchart_punched_card_shape_points(
