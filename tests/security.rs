@@ -84622,7 +84622,7 @@ fn office_bent_and_uturn_arrows_render_as_passive_polygons_without_payload_leaka
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 2);
-    for (shape, expected_points) in shapes.iter().zip([11, 13]) {
+    for (shape, expected_points) in shapes.iter().zip([11, 23]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
@@ -84645,6 +84645,32 @@ fn office_bent_and_uturn_arrows_render_as_passive_polygons_without_payload_leaka
     assert!(
         shapes[1].points.iter().any(|point| point.x_twips == 0),
         "uturn arrow should preserve the left turn edge"
+    );
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[1].width_twips / 5
+                    && point.y_twips <= shapes[1].height_twips / 2
+            })
+            .count()
+            >= 6,
+        "uturn arrow should preserve a bounded passive rounded outer bend"
+    );
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= shapes[1].width_twips / 3
+                    && point.x_twips <= (shapes[1].width_twips * 4) / 5
+                    && point.y_twips >= shapes[1].height_twips / 3
+                    && point.y_twips <= (shapes[1].height_twips * 2) / 3
+            })
+            .count()
+            >= 7,
+        "uturn arrow should preserve the passive curved arrow shoulder"
     );
     for forbidden in [
         "shapeType",

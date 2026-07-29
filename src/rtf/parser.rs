@@ -21975,34 +21975,35 @@ fn bent_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSha
 }
 
 fn uturn_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    let left = width_twips / 5;
-    let right = (width_twips * 4) / 5;
-    let shaft_left = (width_twips * 2) / 5;
-    let shaft_right = (width_twips * 3) / 5;
-    let top = height_twips / 5;
-    let mid = (height_twips * 2) / 5;
-    let arrow_y = (height_twips * 3) / 5;
-    [
-        (shaft_left, height_twips),
-        (shaft_left, arrow_y),
-        (left, arrow_y),
-        (width_twips / 2, mid),
-        (right, arrow_y),
-        (shaft_right, arrow_y),
-        (shaft_right, top),
-        (left, top),
-        (left, mid),
-        (0, mid),
-        (0, 0),
-        (right, 0),
-        (right, height_twips),
-    ]
-    .into_iter()
-    .map(|(x, y)| StaticShapePoint {
-        x_twips: x,
-        y_twips: y,
-    })
-    .collect()
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (400, 1000),
+            (400, 600),
+            (200, 600),
+            (300, 520),
+            (350, 475),
+            (420, 430),
+            (500, 400),
+            (580, 430),
+            (650, 475),
+            (700, 520),
+            (800, 600),
+            (600, 600),
+            (600, 200),
+            (200, 200),
+            (146, 207),
+            (100, 225),
+            (64, 254),
+            (36, 292),
+            (16, 340),
+            (0, 400),
+            (0, 0),
+            (800, 0),
+            (800, 1000),
+        ],
+    )
 }
 
 fn mirror_shape_points_x(width_twips: i32, points: Vec<StaticShapePoint>) -> Vec<StaticShapePoint> {
