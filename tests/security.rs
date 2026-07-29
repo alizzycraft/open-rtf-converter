@@ -81607,7 +81607,7 @@ fn office_callout_shapes_render_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 4);
-    let expected_point_counts = [7, 19, 50, 51];
+    let expected_point_counts = [7, 27, 50, 51];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81628,6 +81628,30 @@ fn office_callout_shapes_render_passively_without_payload_leakage() {
             .iter()
             .any(|point| point.y_twips == shapes[1].height_twips),
         "rounded rectangular callout pointer should still reach the bottom of the passive frame"
+    );
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[1].width_twips / 8
+                    && point.y_twips <= shapes[1].height_twips / 8
+            })
+            .count()
+            >= 4,
+        "rounded rectangular callout should preserve a bounded passive top-left corner arc"
+    );
+    assert!(
+        shapes[1]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= shapes[1].width_twips - (shapes[1].width_twips / 8)
+                    && point.y_twips <= shapes[1].height_twips / 8
+            })
+            .count()
+            >= 4,
+        "rounded rectangular callout should preserve a bounded passive top-right corner arc"
     );
     assert!(
         shapes[2]
