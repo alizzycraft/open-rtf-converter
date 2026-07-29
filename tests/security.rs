@@ -81730,7 +81730,7 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 8);
-    let expected_point_counts = [9, 9, 28, 30, 19, 18, 38, 58];
+    let expected_point_counts = [9, 9, 28, 30, 27, 26, 38, 58];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81785,6 +81785,30 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
         "curved down ribbon should preserve denser bounded passive bottom arc samples"
     );
     assert_eq!(shapes[4].points[1].x_twips, shapes[4].width_twips);
+    assert!(
+        shapes[4]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= (shapes[4].width_twips * 17) / 20
+                    && point.y_twips <= shapes[4].height_twips / 3
+            })
+            .count()
+            >= 7,
+        "vertical scroll should preserve a denser bounded passive upper curl"
+    );
+    assert!(
+        shapes[5]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips >= (shapes[5].width_twips * 3) / 4
+                    && point.y_twips <= shapes[5].height_twips / 6
+            })
+            .count()
+            >= 7,
+        "horizontal scroll should preserve a denser bounded passive right curl"
+    );
     for shape in [&shapes[4], &shapes[5]] {
         assert_eq!(
             shape.overlay_paths.len(),
