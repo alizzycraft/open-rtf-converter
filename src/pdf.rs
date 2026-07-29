@@ -4896,7 +4896,7 @@ fn draw_passive_compound_polygon(
         set_stroke_color(content, stroke_color);
         set_passive_path_stroke_style(content, stroke_width, stroke_style);
         for path in overlay_paths {
-            if path.len() == 2 {
+            if path.len() >= 2 {
                 append_passive_open_path(content, path);
                 content.stroke();
             }

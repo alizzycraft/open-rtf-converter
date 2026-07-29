@@ -17629,6 +17629,12 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::LineCalloutBorderAccentBar => {
             line_callout_border_accent_bar_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::LeftCircularArrow => {
+            left_circular_arrow_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::LeftRightCircularArrow => {
+            left_right_circular_arrow_overlay_paths(width_twips, height_twips)
+        }
         _ => Vec::new(),
     }
 }
@@ -19774,6 +19780,34 @@ fn left_circular_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<
     )
 }
 
+fn left_circular_arrow_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (325, 300),
+            (400, 250),
+            (475, 220),
+            (560, 210),
+            (650, 225),
+            (730, 270),
+            (790, 345),
+            (810, 430),
+            (808, 478),
+            (800, 525),
+            (760, 610),
+            (695, 675),
+            (610, 720),
+            (520, 735),
+            (430, 720),
+            (320, 660),
+        ],
+    )]
+}
+
 fn circular_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     mirror_shape_points_x(
         width_twips,
@@ -19840,6 +19874,49 @@ fn left_right_circular_arrow_shape_points(
             (90, 330),
         ],
     )
+}
+
+fn left_right_circular_arrow_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[
+                (650, 330),
+                (770, 330),
+                (710, 240),
+                (640, 205),
+                (560, 190),
+                (475, 205),
+                (390, 240),
+                (358, 265),
+                (330, 295),
+                (290, 360),
+                (245, 440),
+                (232, 480),
+                (220, 520),
+            ],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[
+                (245, 605),
+                (290, 680),
+                (355, 740),
+                (398, 758),
+                (440, 770),
+                (530, 775),
+                (610, 750),
+                (675, 710),
+                (720, 650),
+                (590, 650),
+            ],
+        ),
+    ]
 }
 
 fn swoosh_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

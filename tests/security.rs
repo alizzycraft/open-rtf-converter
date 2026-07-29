@@ -82844,6 +82844,31 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     }
     assert_eq!(shapes[0].points[0].x_twips, 0);
     assert!(shapes[3].points.iter().any(|point| point.x_twips == 0));
+    assert_eq!(
+        shapes[2].overlay_paths.len(),
+        1,
+        "left circular arrow should preserve the passive inner arc"
+    );
+    assert_eq!(
+        shapes[3].overlay_paths.len(),
+        2,
+        "left-right circular arrow should preserve both passive inner arcs"
+    );
+    for shape in [&shapes[2], &shapes[3]] {
+        assert!(
+            shape.overlay_paths.iter().all(|path| path.len() >= 10),
+            "circular arrow inner arcs should be bounded passive polylines"
+        );
+        assert!(
+            shape.overlay_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "circular arrow inner arcs must stay inside passive frame: {shape:?}"
+        );
+    }
     assert!(
         shapes[5]
             .points
@@ -82902,7 +82927,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
-    let mut passive_line_strokes = 0usize;
+    let mut passive_strokes = 0usize;
     let mut passive_path_moves = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
@@ -82912,7 +82937,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
                 passive_shape_paints += 1;
             }
             if operation.operator == "S" {
-                passive_line_strokes += 1;
+                passive_strokes += 1;
             }
             if operation.operator == "m" {
                 passive_path_moves += 1;
@@ -82927,8 +82952,12 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         "funnel/arrow/cloud/chart shapes should render passive fill/stroke paths"
     );
     assert!(
-        passive_line_strokes >= 1,
+        passive_strokes >= 1,
         "inverse line should render as a passive stroked path"
+    );
+    assert!(
+        passive_strokes >= 4,
+        "circular arrow inner arcs and inverse line should render as passive strokes"
     );
     assert!(
         passive_path_moves >= 12,
