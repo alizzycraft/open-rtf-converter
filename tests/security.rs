@@ -80066,7 +80066,7 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 3);
-    for (shape, expected_points) in shapes.iter().zip([24, 32, 32]) {
+    for (shape, expected_points) in shapes.iter().zip([24, 48, 48]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
@@ -80105,7 +80105,7 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
         "donut should use even-odd fill so the passive PDF keeps the center open"
     );
     assert_eq!(shapes[1].point_paths.len(), 1);
-    assert_eq!(shapes[1].point_paths[0].len(), 32);
+    assert_eq!(shapes[1].point_paths[0].len(), 48);
     assert!(
         shapes[1].point_paths.iter().flatten().all(|point| {
             point.x_twips >= 0
@@ -80121,7 +80121,7 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
         "no-symbol should use even-odd fill for its passive ring"
     );
     assert_eq!(shapes[2].point_paths.len(), 1);
-    assert_eq!(shapes[2].point_paths[0].len(), 32);
+    assert_eq!(shapes[2].point_paths[0].len(), 48);
     assert_eq!(shapes[2].overlay_paths.len(), 1);
     assert_eq!(shapes[2].overlay_paths[0].len(), 4);
     assert!(

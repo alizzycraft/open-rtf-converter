@@ -22249,20 +22249,20 @@ fn regular_polygon_shape_points(
 }
 
 fn donut_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    regular_polygon_shape_points(width_twips, height_twips, 32)
+    regular_polygon_shape_points(width_twips, height_twips, 48)
 }
 
 fn donut_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
     vec![regular_polygon_inset_shape_points(
         width_twips,
         height_twips,
-        32,
+        48,
         460,
     )]
 }
 
 fn no_symbol_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
-    regular_polygon_shape_points(width_twips, height_twips, 32)
+    regular_polygon_shape_points(width_twips, height_twips, 48)
 }
 
 fn no_symbol_shape_point_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
