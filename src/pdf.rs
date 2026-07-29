@@ -892,7 +892,10 @@ fn write_passive_image_xobject(
                 (ImageFormat::JpegGrayscale, Some(tone_adjustment)) => {
                     image.decode([tone_adjustment.decode_low, tone_adjustment.decode_high]);
                 }
-                (ImageFormat::JpegCmyk, Some(tone_adjustment)) => {
+                (
+                    ImageFormat::JpegCmyk | ImageFormat::JpegCmykPassiveGrayscale,
+                    Some(tone_adjustment),
+                ) => {
                     image.decode([
                         tone_adjustment.decode_low,
                         tone_adjustment.decode_high,
