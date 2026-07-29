@@ -82926,7 +82926,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 13);
-    let expected_point_counts = [37, 6, 12, 4, 12, 16, 8, 20, 6, 6, 8, 12, 18];
+    let expected_point_counts = [37, 6, 12, 4, 12, 16, 8, 20, 6, 6, 8, 24, 36];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -82982,6 +82982,34 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert_eq!(shapes[11].point_paths[0].len(), 12);
     assert_eq!(shapes[12].point_paths.len(), 1);
     assert_eq!(shapes[12].point_paths[0].len(), 18);
+    assert!(
+        shapes[11]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[11].width_twips / 8
+                    || point.x_twips >= shapes[11].width_twips - (shapes[11].width_twips / 8)
+                    || point.y_twips <= shapes[11].height_twips / 8
+                    || point.y_twips >= shapes[11].height_twips - (shapes[11].height_twips / 8)
+            })
+            .count()
+            >= 6,
+        "gear 6 should preserve bounded passive tooth tips around the outer edge"
+    );
+    assert!(
+        shapes[12]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[12].width_twips / 8
+                    || point.x_twips >= shapes[12].width_twips - (shapes[12].width_twips / 8)
+                    || point.y_twips <= shapes[12].height_twips / 8
+                    || point.y_twips >= shapes[12].height_twips - (shapes[12].height_twips / 8)
+            })
+            .count()
+            >= 9,
+        "gear 9 should preserve bounded passive tooth tips around the outer edge"
+    );
     for shape in [&shapes[11], &shapes[12]] {
         assert!(
             shape.point_paths.iter().flatten().all(|point| {

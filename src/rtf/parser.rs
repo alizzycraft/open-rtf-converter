@@ -17487,8 +17487,8 @@ fn polygon_preset_shape_points(
         ShapePolygonPreset::CornerTabs => corner_tabs_shape_points(width_twips, height_twips),
         ShapePolygonPreset::SquareTabs => square_tabs_shape_points(width_twips, height_twips),
         ShapePolygonPreset::PlaqueTabs => plaque_tabs_shape_points(width_twips, height_twips),
-        ShapePolygonPreset::Gear6 => regular_star_shape_points(width_twips, height_twips, 6, 620),
-        ShapePolygonPreset::Gear9 => regular_star_shape_points(width_twips, height_twips, 9, 650),
+        ShapePolygonPreset::Gear6 => gear_shape_points(width_twips, height_twips, 6, 620),
+        ShapePolygonPreset::Gear9 => gear_shape_points(width_twips, height_twips, 9, 650),
         ShapePolygonPreset::Funnel => funnel_shape_points(width_twips, height_twips),
         ShapePolygonPreset::PieWedge => pie_wedge_shape_points(width_twips, height_twips),
         ShapePolygonPreset::LeftCircularArrow => {
@@ -19871,6 +19871,38 @@ fn gear_shape_point_paths(
         points.max(3) * 2,
         310,
     )]
+}
+
+fn gear_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+    teeth: usize,
+    root_radius_per_mille: i32,
+) -> Vec<StaticShapePoint> {
+    let points = teeth.max(3) * 4;
+    let center_x = f64::from(width_twips) / 2.0;
+    let center_y = f64::from(height_twips) / 2.0;
+    let radius_x = center_x;
+    let radius_y = center_y;
+    let root_radius = f64::from(root_radius_per_mille) / 1000.0;
+    let flank_radius = ((1.0 + root_radius) / 2.0).min(0.92);
+    (0..points)
+        .map(|index| {
+            let angle = -std::f64::consts::FRAC_PI_2
+                + 2.0 * std::f64::consts::PI * (index as f64) / (points as f64);
+            let radius = match index % 4 {
+                0 => 1.0,
+                1 | 3 => flank_radius,
+                _ => root_radius,
+            };
+            StaticShapePoint {
+                x_twips: ((center_x + angle.cos() * radius_x * radius).round() as i32)
+                    .clamp(0, width_twips),
+                y_twips: ((center_y + angle.sin() * radius_y * radius).round() as i32)
+                    .clamp(0, height_twips),
+            }
+        })
+        .collect()
 }
 
 fn corner_tabs_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
