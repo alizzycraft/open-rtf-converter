@@ -17494,6 +17494,9 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::MathNotEqual => {
             math_not_equal_shape_point_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::ActionButtonHelp => {
+            action_button_help_shape_point_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::CornerTabs => corner_tabs_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::SquareTabs => square_tabs_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::PlaqueTabs => plaque_tabs_shape_point_paths(width_twips, height_twips),
@@ -18453,6 +18456,17 @@ fn action_button_help_shape_points(width_twips: i32, height_twips: i32) -> Vec<S
             (390, 140),
         ],
     )
+}
+
+fn action_button_help_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(430, 790), (570, 790), (570, 920), (430, 920)],
+    )]
 }
 
 fn action_button_information_shape_points(
