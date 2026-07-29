@@ -81956,11 +81956,37 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
         "action-button information dot path must stay inside passive frame"
     );
     assert!(shapes[4].points.iter().any(|point| point.x_twips == 0));
+    assert_eq!(shapes[4].point_paths.len(), 1);
+    assert_eq!(shapes[4].point_paths[0].len(), 3);
+    assert!(
+        shapes[4]
+            .point_paths
+            .iter()
+            .flatten()
+            .all(|point| point.x_twips >= 0
+                && point.x_twips <= shapes[4].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[4].height_twips),
+        "action-button back/previous secondary arrow must stay inside passive frame"
+    );
     assert!(
         shapes[5]
             .points
             .iter()
             .any(|point| point.x_twips == shapes[5].width_twips)
+    );
+    assert_eq!(shapes[5].point_paths.len(), 1);
+    assert_eq!(shapes[5].point_paths[0].len(), 3);
+    assert!(
+        shapes[5]
+            .point_paths
+            .iter()
+            .flatten()
+            .all(|point| point.x_twips >= 0
+                && point.x_twips <= shapes[5].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[5].height_twips),
+        "action-button forward/next secondary arrow must stay inside passive frame"
     );
     assert_eq!(shapes[6].point_paths.len(), 1);
     assert_eq!(shapes[6].point_paths[0].len(), 3);
@@ -81987,6 +82013,19 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
                 && point.y_twips >= 0
                 && point.y_twips <= shapes[7].height_twips),
         "action-button end extra path must stay inside passive frame"
+    );
+    assert_eq!(shapes[8].point_paths.len(), 1);
+    assert_eq!(shapes[8].point_paths[0].len(), 3);
+    assert!(
+        shapes[8]
+            .point_paths
+            .iter()
+            .flatten()
+            .all(|point| point.x_twips >= 0
+                && point.x_twips <= shapes[8].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[8].height_twips),
+        "action-button return inner corner must stay inside passive frame"
     );
     assert_eq!(shapes[9].points[3].y_twips, shapes[9].height_twips);
     assert_eq!(shapes[9].overlay_paths.len(), 2);
@@ -82070,6 +82109,7 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_path_moves = 0usize;
     let mut passive_overlay_strokes = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
@@ -82078,6 +82118,11 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
             .operations
             .iter()
             .filter(|operation| operation.operator == "B")
+            .count();
+        passive_path_moves += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "m")
             .count();
         passive_overlay_strokes += content
             .operations
@@ -82091,6 +82136,10 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
     assert!(
         passive_shape_paints >= 12,
         "action buttons should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_path_moves >= 25,
+        "action button icon details should be included as passive subpaths"
     );
     assert!(
         passive_overlay_strokes >= 1,

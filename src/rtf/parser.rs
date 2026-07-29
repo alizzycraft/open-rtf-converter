@@ -17525,6 +17525,12 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::ActionButtonHelp => {
             action_button_help_shape_point_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::ActionButtonBackPrevious => {
+            action_button_back_previous_shape_point_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonForwardNext => {
+            action_button_forward_next_shape_point_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::CornerTabs => corner_tabs_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::SquareTabs => square_tabs_shape_point_paths(width_twips, height_twips),
         ShapePolygonPreset::PlaqueTabs => plaque_tabs_shape_point_paths(width_twips, height_twips),
@@ -17538,6 +17544,9 @@ fn polygon_preset_shape_point_paths(
         }
         ShapePolygonPreset::ActionButtonEnd => {
             action_button_end_shape_point_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::ActionButtonReturn => {
+            action_button_return_shape_point_paths(width_twips, height_twips)
         }
         ShapePolygonPreset::ActionButtonInformation => {
             action_button_information_shape_point_paths(width_twips, height_twips)
@@ -18697,11 +18706,33 @@ fn action_button_back_previous_shape_points(
     left_arrow_shape_points(width_twips, height_twips)
 }
 
+fn action_button_back_previous_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(880, 180), (420, 500), (880, 820)],
+    )]
+}
+
 fn action_button_forward_next_shape_points(
     width_twips: i32,
     height_twips: i32,
 ) -> Vec<StaticShapePoint> {
     right_arrow_shape_points(width_twips, height_twips)
+}
+
+fn action_button_forward_next_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(120, 180), (580, 500), (120, 820)],
+    )]
 }
 
 fn action_button_beginning_shape_points(
@@ -18779,6 +18810,17 @@ fn action_button_return_shape_points(width_twips: i32, height_twips: i32) -> Vec
             (650, 180),
         ],
     )
+}
+
+fn action_button_return_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[(850, 180), (850, 620), (360, 620)],
+    )]
 }
 
 fn action_button_document_shape_points(
