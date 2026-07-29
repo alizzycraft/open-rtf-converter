@@ -83354,7 +83354,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 13);
-    let expected_point_counts = [45, 6, 12, 4, 12, 16, 8, 20, 6, 6, 8, 24, 36];
+    let expected_point_counts = [45, 6, 12, 4, 12, 4, 8, 20, 6, 6, 8, 24, 36];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -83398,6 +83398,24 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         shapes[5].point_paths.len(),
         3,
         "division sign should keep separate passive dot/bar paths"
+    );
+    assert_eq!(
+        shapes[5]
+            .point_paths
+            .iter()
+            .map(Vec::len)
+            .collect::<Vec<_>>(),
+        vec![16, 4, 16],
+        "division sign should preserve rounded passive dot paths and a bounded bar"
+    );
+    assert!(
+        shapes[5].point_paths[0]
+            .iter()
+            .any(|point| point.y_twips <= shapes[5].height_twips / 8)
+            && shapes[5].point_paths[2]
+                .iter()
+                .any(|point| point.y_twips >= (shapes[5].height_twips * 7) / 8),
+        "division sign should preserve passive rounded dot extrema"
     );
     assert_eq!(
         shapes[6].point_paths.len(),
