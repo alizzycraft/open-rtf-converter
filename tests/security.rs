@@ -83369,9 +83369,9 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         "gear 9 should use even-odd fill for its passive center hole"
     );
     assert_eq!(shapes[11].point_paths.len(), 1);
-    assert_eq!(shapes[11].point_paths[0].len(), 12);
+    assert_eq!(shapes[11].point_paths[0].len(), 24);
     assert_eq!(shapes[12].point_paths.len(), 1);
-    assert_eq!(shapes[12].point_paths[0].len(), 18);
+    assert_eq!(shapes[12].point_paths[0].len(), 36);
     assert!(
         shapes[11]
             .points

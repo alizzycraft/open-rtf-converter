@@ -19988,7 +19988,7 @@ fn gear_shape_point_paths(
     vec![regular_polygon_inset_shape_points(
         width_twips,
         height_twips,
-        points.max(3) * 2,
+        points.max(3) * 4,
         310,
     )]
 }
