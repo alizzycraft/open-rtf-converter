@@ -81730,7 +81730,7 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 8);
-    let expected_point_counts = [9, 9, 24, 26, 19, 18, 38, 58];
+    let expected_point_counts = [9, 9, 28, 30, 19, 18, 38, 58];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81766,6 +81766,24 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
             "ribbon fold lines must stay inside passive frame: {shape:?}"
         );
     }
+    assert!(
+        shapes[2]
+            .points
+            .iter()
+            .filter(|point| point.y_twips <= shapes[2].height_twips / 8)
+            .count()
+            >= 9,
+        "curved up ribbon should preserve denser bounded passive top arc samples"
+    );
+    assert!(
+        shapes[3]
+            .points
+            .iter()
+            .filter(|point| point.y_twips >= (shapes[3].height_twips * 7) / 8)
+            .count()
+            >= 9,
+        "curved down ribbon should preserve denser bounded passive bottom arc samples"
+    );
     assert_eq!(shapes[4].points[1].x_twips, shapes[4].width_twips);
     for shape in [&shapes[4], &shapes[5]] {
         assert_eq!(
