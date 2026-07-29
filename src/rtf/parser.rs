@@ -4938,6 +4938,18 @@ impl Parser {
                 self.set_current_border_style(BorderStyle::Emboss);
                 self.warn_border_effect_passive_fallback("brdrsh", offset);
             }
+            "brdrart"
+                if matches!(
+                    self.state.paragraph_border_selection,
+                    BorderSelection::Page(_)
+                ) =>
+            {
+                self.set_current_border_style(BorderStyle::Single);
+                self.diagnostics.push(Diagnostic::warning(
+                    "page border art rendered as bounded passive line border fallback",
+                    Some(offset),
+                ));
+            }
             "brdrdot" => self.set_current_border_style(BorderStyle::Dotted),
             "brdrdash" | "brdrdashsm" | "brdrdashd" | "brdrdashdd" | "brdrdashdot"
             | "brdrdashdotstr" | "brdrdashdotdot" => {
@@ -51123,6 +51135,31 @@ After\par}"#;
         );
         assert!(!output.document.page.page_borders.left.visible);
         assert!(!output.document.page.page_borders.right.visible);
+    }
+
+    #[test]
+    fn normalizes_page_border_art_as_passive_line_fallback() {
+        let output = parse_rtf(r"{\rtf1\pgbrdrt\brdrart42\brdrw80 Body\par}").unwrap();
+
+        assert!(output.document.page.page_borders.top.visible);
+        assert_eq!(
+            output.document.page.page_borders.top.style,
+            BorderStyle::Single
+        );
+        assert_eq!(output.document.page.page_borders.top.width_twips, 80);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("page border art rendered as bounded passive line border fallback")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+            "page border art should be consumed as bounded passive page metadata: {:?}",
+            output.diagnostics
+        );
     }
 
     #[test]

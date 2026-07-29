@@ -73128,6 +73128,85 @@ fn page_borders_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn page_border_art_renders_passive_line_fallback_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 ",
+        "\\",
+        "pgbrdrt",
+        "\\",
+        "brdrart42",
+        "\\",
+        "brdrw80 Body",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(parsed.document.page.page_borders.top.visible);
+    assert_eq!(
+        parsed.document.page.page_borders.top.style,
+        BorderStyle::Single
+    );
+    assert_eq!(parsed.document.page.page_borders.top.width_twips, 80);
+    assert!(text.contains("Body"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("page border art rendered as bounded passive line border fallback")
+    }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "page border art should not be reported as unsupported: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in ["pgbrdrt", "brdrart", "brdrw80"] {
+        assert!(
+            !text.contains(forbidden),
+            "forbidden page border art control leaked to text: {forbidden}"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("page-border-art.rtf");
+    let output_path = dir.path().join("page-border-art.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(
+        &input_path,
+        &output_path,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    assert!(PdfDocument::load_mem(&pdf).is_ok());
+    for forbidden in [
+        b"pgbrdrt".as_slice(),
+        b"brdrart",
+        b"brdrw80",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden page border art content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_header_footer_scope_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
