@@ -83292,7 +83292,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 13);
-    let expected_point_counts = [37, 6, 12, 4, 12, 16, 8, 20, 6, 6, 8, 24, 36];
+    let expected_point_counts = [45, 6, 12, 4, 12, 16, 8, 20, 6, 6, 8, 24, 36];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -83307,6 +83307,30 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         );
     }
     assert!(shapes[0].points.iter().any(|point| point.y_twips == 0));
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[0].height_twips / 3
+                    && point.x_twips >= (shapes[0].width_twips * 4) / 5
+            })
+            .count()
+            >= 7,
+        "chord should preserve a denser bounded passive upper-right shoulder curve"
+    );
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= shapes[0].height_twips / 3
+                    && point.x_twips <= shapes[0].width_twips / 5
+            })
+            .count()
+            >= 7,
+        "chord should preserve a denser bounded passive upper-left shoulder curve"
+    );
     assert_eq!(shapes[1].points[0].x_twips, 0);
     assert_eq!(
         shapes[5].point_paths.len(),
