@@ -83625,7 +83625,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         (StaticShapeKind::Polygon, 68),
         (StaticShapeKind::Polygon, 77),
         (StaticShapeKind::Polygon, 42),
-        (StaticShapeKind::Polygon, 64),
+        (StaticShapeKind::Polygon, 70),
         (StaticShapeKind::Polygon, 4),
         (StaticShapeKind::Polygon, 4),
         (StaticShapeKind::Polygon, 4),
@@ -83776,7 +83776,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
                     && point.x_twips >= shapes[5].width_twips / 4
             })
             .count()
-            >= 12,
+            >= 15,
         "cloud should preserve bounded passive top lobes"
     );
     assert!(
@@ -83789,7 +83789,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
                     && point.y_twips <= (shapes[5].height_twips * 3) / 4
             })
             .count()
-            >= 8,
+            >= 9,
         "cloud should preserve bounded passive right lobes"
     );
     assert!(
@@ -83802,7 +83802,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
                     && point.x_twips <= (shapes[5].width_twips * 4) / 5
             })
             .count()
-            >= 10,
+            >= 11,
         "cloud should preserve bounded passive lower lobes"
     );
     for shape in [&shapes[6], &shapes[7], &shapes[8]] {
