@@ -1429,6 +1429,10 @@ struct Parser {
     document_timestamps: Vec<(DocumentTimestampKind, DocumentTimestamp)>,
     document_edit_minutes: Option<i32>,
     document_revision_number: Option<i32>,
+    document_page_count: Option<i32>,
+    document_word_count: Option<i32>,
+    document_character_count: Option<i32>,
+    document_character_count_with_spaces: Option<i32>,
     document_paragraph_count: Option<i32>,
     document_line_count: Option<i32>,
     document_byte_count: Option<i32>,
@@ -1630,6 +1634,10 @@ impl Parser {
             document_timestamps: Vec::new(),
             document_edit_minutes: None,
             document_revision_number: None,
+            document_page_count: None,
+            document_word_count: None,
+            document_character_count: None,
+            document_character_count_with_spaces: None,
             document_paragraph_count: None,
             document_line_count: None,
             document_byte_count: None,
@@ -3273,6 +3281,30 @@ impl Parser {
                     && self.state.destination == Destination::Metadata =>
             {
                 self.set_document_revision_number(control.parameter, offset)?;
+            }
+            "nofpages"
+                if self.state.inside_document_info
+                    && self.state.destination == Destination::Metadata =>
+            {
+                self.set_document_page_count(control.parameter, offset)?;
+            }
+            "nofwords"
+                if self.state.inside_document_info
+                    && self.state.destination == Destination::Metadata =>
+            {
+                self.set_document_word_count(control.parameter, offset)?;
+            }
+            "nofchars"
+                if self.state.inside_document_info
+                    && self.state.destination == Destination::Metadata =>
+            {
+                self.set_document_character_count(control.parameter, offset)?;
+            }
+            "nofcharsws"
+                if self.state.inside_document_info
+                    && self.state.destination == Destination::Metadata =>
+            {
+                self.set_document_character_count_with_spaces(control.parameter, offset)?;
             }
             "nofparas"
                 if self.state.inside_document_info
@@ -8948,6 +8980,64 @@ impl Parser {
         Ok(())
     }
 
+    fn set_document_page_count(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes("nofpages".len(), offset)?;
+        if let Some(value) =
+            self.bounded_document_metadata_count(value, "document page count", offset)?
+        {
+            self.document_page_count = Some(value);
+        }
+        Ok(())
+    }
+
+    fn set_document_word_count(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes("nofwords".len(), offset)?;
+        if let Some(value) =
+            self.bounded_document_metadata_count(value, "document word count", offset)?
+        {
+            self.document_word_count = Some(value);
+        }
+        Ok(())
+    }
+
+    fn set_document_character_count(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes("nofchars".len(), offset)?;
+        if let Some(value) =
+            self.bounded_document_metadata_count(value, "document character count", offset)?
+        {
+            self.document_character_count = Some(value);
+        }
+        Ok(())
+    }
+
+    fn set_document_character_count_with_spaces(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes("nofcharsws".len(), offset)?;
+        if let Some(value) = self.bounded_document_metadata_count(
+            value,
+            "document character count with spaces",
+            offset,
+        )? {
+            self.document_character_count_with_spaces = Some(value);
+        }
+        Ok(())
+    }
+
     fn set_document_paragraph_count(
         &mut self,
         value: Option<i32>,
@@ -9456,6 +9546,9 @@ impl Parser {
         name: &str,
         instruction: &str,
     ) -> Option<String> {
+        if let Some(text) = self.document_stat_property_field_text(name) {
+            return Some(text);
+        }
         if let Some(marker) = document_stat_property_field_marker(name) {
             return Some(marker.to_string());
         }
@@ -9534,6 +9627,20 @@ impl Parser {
             }
             "number of lines" | "lines" => Some(self.document_line_count?.to_string()),
             "number of bytes" | "bytes" => Some(self.document_byte_count?.to_string()),
+            _ => None,
+        }
+    }
+
+    fn document_stat_property_field_text(&self, name: &str) -> Option<String> {
+        match normalized_document_property_name(name).as_str() {
+            "number of pages" | "pages" => Some(self.document_page_count?.to_string()),
+            "number of words" | "words" => Some(self.document_word_count?.to_string()),
+            "number of characters" | "characters" => {
+                Some(self.document_character_count?.to_string())
+            }
+            "number of characters with spaces" | "characters with spaces" => {
+                Some(self.document_character_count_with_spaces?.to_string())
+            }
             _ => None,
         }
     }
@@ -49006,6 +49113,40 @@ After\par}"#;
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn resultless_docproperty_stat_aliases_prefer_stored_metadata_counts() {
+        let output = parse_rtf(
+            r##"{\rtf1{\info\nofpages7\nofwords1234\nofchars5678\nofcharsws6789}Stats pages {\field{\*\fldinst DOCPROPERTY "Number of Pages" \\# "000"}} words {\field{\*\fldinst DOCPROPERTY "Number of Words" \\# "#,##0"}} chars {\field{\*\fldinst INFO "Number of Characters"}} spaces {\field{\*\fldinst INFO "Number of Characters With Spaces"}}\par}"##,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Stats pages 007 words 1,234 chars 5678 spaces 6789"),
+            "stored metadata stats were not rendered passively: {text:?}"
+        );
+        for forbidden in [
+            "DOCPROPERTY",
+            "Number of Pages",
+            "Number of Words",
+            "Number of Characters",
+            "nofpages",
+            "nofwords",
+            "nofchars",
+            "nofcharsws",
+            "fldinst",
+            TOTAL_PAGES_MARKER,
+            DOCUMENT_WORDS_MARKER,
+            DOCUMENT_CHARS_MARKER,
+            DOCUMENT_CHARS_WITH_SPACES_MARKER,
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "stored stat metadata field leaked unsafe text: {forbidden}"
+            );
+        }
     }
 
     #[test]

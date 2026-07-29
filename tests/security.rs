@@ -9530,6 +9530,84 @@ fn docproperty_stat_aliases_resolve_layout_stats_without_instruction_leakage() {
 }
 
 #[test]
+fn stored_docproperty_stat_metadata_renders_passively_without_control_leakage() {
+    let input = br##"{\rtf1{\info\nofpages7\nofwords1234\nofchars5678\nofcharsws6789}Stats pages {\field{\*\fldinst DOCPROPERTY "Number of Pages" \\# "000"}} words {\field{\*\fldinst DOCPROPERTY "Number of Words" \\# "#,##0"}} chars {\field{\*\fldinst INFO "Number of Characters"}} spaces {\field{\*\fldinst INFO "Number of Characters With Spaces"}}\par}"##.to_vec();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(
+        text.contains("Stats pages 007 words 1,234 chars 5678 spaces 6789"),
+        "stored metadata stats were not rendered passively: {text:?}"
+    );
+    for forbidden in [
+        "DOCPROPERTY",
+        "INFO",
+        "Number of Pages",
+        "Number of Words",
+        "Number of Characters",
+        "nofpages",
+        "nofwords",
+        "nofchars",
+        "nofcharsws",
+        "fldinst",
+        TOTAL_PAGES_MARKER,
+        DOCUMENT_WORDS_MARKER,
+        DOCUMENT_CHARS_MARKER,
+        DOCUMENT_CHARS_WITH_SPACES_MARKER,
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "stored stat metadata leaked unsafe text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(
+        rendered_text.contains("Stats pages 007 words 1,234 chars 5678 spaces 6789"),
+        "stored metadata stats did not reach passive PDF text: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"DOCPROPERTY".as_slice(),
+        b"Number of Pages",
+        b"Number of Words",
+        b"Number of Characters",
+        b"nofpages",
+        b"nofwords",
+        b"nofchars",
+        b"nofcharsws",
+        b"fldinst",
+        b"/AcroForm",
+        b"/Widget",
+        b"/AA",
+        b"/OpenAction",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden stored stat metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn docproperty_numeric_aliases_render_metadata_without_instruction_leakage() {
     let input = br##"{\rtf1{\info{\version42}{\edmins17}\nofparas3\noflines12\nofbytes4096}Revision {\field{\*\fldinst DOCPROPERTY "Revision Number" \\* ROMAN}} edit {\field{\*\fldinst DOCPROPERTY "Total Editing Time" \\# "0000"}} paragraphs {\field{\*\fldinst DOCPROPERTY "Number of Paragraphs"}} lines {\field{\*\fldinst DOCPROPERTY "Number of Lines" \\# "000"}} bytes {\field{\*\fldinst DOCPROPERTY "Number of Bytes" \\# "#,##0"}} missing {\field{\*\fldinst DOCPROPERTY "Editing Time"}}\par}"##.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
