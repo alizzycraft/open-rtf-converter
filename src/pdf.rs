@@ -229,12 +229,16 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/Action", "/Action"),
     (b"/Annot", "/Annot"),
     (b"/Annots", "/Annots"),
+    (b"/Cert", "/Cert"),
     (b"/Collection", "/Collection"),
+    (b"/DocMDP", "/DocMDP"),
+    (b"/DSS", "/DSS"),
     (b"/EF", "/EF"),
     (b"/EmbeddedFile", "/EmbeddedFile"),
     (b"/EmbeddedFiles", "/EmbeddedFiles"),
     (b"/Encrypt", "/Encrypt"),
     (b"/FileAttachment", "/FileAttachment"),
+    (b"/FieldMDP", "/FieldMDP"),
     (b"/Filespec", "/Filespec"),
     (b"/GoTo", "/GoTo"),
     (b"/GoTo3DView", "/GoTo3DView"),
@@ -264,7 +268,9 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/SubmitForm", "/SubmitForm"),
     (b"/Trans", "/Trans"),
     (b"/URI", "/URI"),
+    (b"/UR3", "/UR3"),
     (b"/UseAttachments", "/UseAttachments"),
+    (b"/VRI", "/VRI"),
     (b"/Widget", "/Widget"),
     (b"/XRef", "/XRef"),
     (b"/XFA", "/XFA"),
@@ -6724,7 +6730,7 @@ endobj
 << /Type /EmbeddedFile /Subtype /FileAttachment >>
 endobj
 6 0 obj
-<< /AF [4 0 R] /Perms << /DocMDP 7 0 R >> /Encrypt 8 0 R /Collection << >> >>
+<< /AF [4 0 R] /Perms << /DocMDP 7 0 R /FieldMDP 18 0 R /UR3 19 0 R >> /Encrypt 8 0 R /Collection << >> >>
 endobj
 7 0 obj
 << /S /GoTo /D [2 0 R /Fit] /Next << /S /Named /N /Print >> >>
@@ -6758,6 +6764,12 @@ endobj
 endobj
 17 0 obj
 << /FT /Sig /T (signature) >>
+endobj
+18 0 obj
+<< /Type /Sig /Cert (certificate-bytes) >>
+endobj
+19 0 obj
+<< /DSS << /VRI << /ABCDEF << >> >> >> >>
 endobj
 %%EOF";
 
@@ -6807,6 +6819,10 @@ endobj
                 .iter()
                 .any(|issue| issue.token == "/Collection")
         );
+        assert!(error.issues.iter().any(|issue| issue.token == "/Cert"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/DocMDP"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/DSS"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/FieldMDP"));
         assert!(error.issues.iter().any(|issue| issue.token == "/GoTo"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Named"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Next"));
@@ -6823,12 +6839,14 @@ endobj
         assert!(error.issues.iter().any(|issue| issue.token == "/Sig"));
         assert!(error.issues.iter().any(|issue| issue.token == "/SigFlags"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Trans"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/UR3"));
         assert!(
             error
                 .issues
                 .iter()
                 .any(|issue| issue.token == "/UseAttachments")
         );
+        assert!(error.issues.iter().any(|issue| issue.token == "/VRI"));
         assert!(
             error
                 .issues
