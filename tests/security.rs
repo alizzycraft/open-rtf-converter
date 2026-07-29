@@ -9824,6 +9824,52 @@ fn metadata_field_values_reject_active_markers_before_pdf_output() {
 }
 
 #[test]
+fn metadata_field_values_reject_form_and_signature_markers_before_pdf_output() {
+    let input = br#"{\rtf1{\*\userprops{\propname Client Name}{\proptype30}{\staticval PAYLOAD /FDF /NeedAppearances /XDP /XFA}}{\*\docvar {Client Var}{PAYLOAD /SigFlags /DocMDP}}Property {\field{\*\fldinst DOCPROPERTY "Client Name"}} variable {\field{\*\fldinst DOCVARIABLE "Client Var"}}\par}"#.to_vec();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("Property [Field removed: no passive result]"));
+    assert!(rendered_text.contains("variable [Field removed: no passive result]"));
+    for forbidden in [
+        b"PAYLOAD".as_slice(),
+        b"Client Name",
+        b"Client Var",
+        b"DOCPROPERTY",
+        b"DOCVARIABLE",
+        b"staticval",
+        b"docvar",
+        b"fldinst",
+        b"/FDF",
+        b"/NeedAppearances",
+        b"/XDP",
+        b"/XFA",
+        b"/SigFlags",
+        b"/DocMDP",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "metadata field form/signature marker content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+}
+
+#[test]
 fn docvariable_fields_render_metadata_without_leaking_nested_active_content() {
     let input = br#"{\rtf1{\*\docvar {Client Name}{Contoso {\field{\*\fldinst HYPERLINK "https://example.com/docvar"}{\fldrslt Hidden link}} tail}}Client {\field{\*\fldinst DOCVARIABLE "Client Name"}} missing {\field{\*\fldinst DOCVARIABLE Missing}}\par}"#.to_vec();
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();

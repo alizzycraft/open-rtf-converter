@@ -25690,13 +25690,30 @@ fn contains_active_pdf_marker_text(text: &str) -> bool {
     [
         "/JavaScript",
         "/EmbeddedFile",
+        "/EmbeddedFiles",
+        "/Filespec",
         "/Launch",
         "/OpenAction",
         "/RichMedia",
         "/AA",
+        "/Action",
         "/AcroForm",
+        "/Annots",
         "/Widget",
         "/URI",
+        "/Sig",
+        "/SigFlags",
+        "/UseAttachments",
+        "/DocMDP",
+        "/FieldMDP",
+        "/UR3",
+        "/Cert",
+        "/DSS",
+        "/VRI",
+        "/FDF",
+        "/NeedAppearances",
+        "/XDP",
+        "/XFA",
     ]
     .iter()
     .any(|marker| text.contains(marker))
@@ -44841,6 +44858,37 @@ mod tests {
             assert!(
                 !text.contains(forbidden),
                 "unsafe SET/REF field leaked text: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn resultless_set_values_reject_form_and_signature_pdf_markers_before_refs() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\field{\*\fldinst SET Unsafe "PAYLOAD /FDF /NeedAppearances /XDP /XFA /SigFlags /DocMDP"}} ref {\field{\*\fldinst REF Unsafe}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert!(
+            text.contains("Before  ref [Field removed: no passive result]"),
+            "text was {text:?}"
+        );
+        for forbidden in [
+            "PAYLOAD",
+            "/FDF",
+            "/NeedAppearances",
+            "/XDP",
+            "/XFA",
+            "/SigFlags",
+            "/DocMDP",
+            "SET",
+            "REF Unsafe",
+            "fldinst",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "unsafe form/signature SET/REF field leaked text: {forbidden}"
             );
         }
     }
