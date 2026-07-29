@@ -80739,6 +80739,24 @@ fn office_sun_and_moon_shapes_render_as_passive_polygons_without_payload_leakage
             "sun/moon points must stay inside the passive shape frame"
         );
     }
+    assert_eq!(
+        shapes[0].overlay_paths.len(),
+        1,
+        "sun should preserve a passive inner disk boundary"
+    );
+    assert!(
+        shapes[0].overlay_paths[0].len() >= 32,
+        "sun inner disk boundary should be a bounded passive polyline"
+    );
+    assert!(
+        shapes[0].overlay_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[0].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[0].height_twips
+        }),
+        "sun inner disk boundary must stay inside the passive shape frame"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -80765,6 +80783,7 @@ fn office_sun_and_moon_shapes_render_as_passive_polygons_without_payload_leakage
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0;
+    let mut passive_overlay_strokes = 0;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -80773,6 +80792,11 @@ fn office_sun_and_moon_shapes_render_as_passive_polygons_without_payload_leakage
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_overlay_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -80780,6 +80804,10 @@ fn office_sun_and_moon_shapes_render_as_passive_polygons_without_payload_leakage
     assert!(
         passive_shape_paints >= 2,
         "sun/moon shapes should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_overlay_strokes >= 1,
+        "sun inner disk boundary should render as a passive stroke"
     );
     for forbidden in [
         b"shapeType".as_slice(),

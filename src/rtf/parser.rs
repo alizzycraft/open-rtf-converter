@@ -17580,6 +17580,7 @@ fn polygon_preset_shape_overlay_paths(
     match preset {
         ShapePolygonPreset::SmileyFace => smiley_face_overlay_paths(width_twips, height_twips),
         ShapePolygonPreset::NoSymbol => no_symbol_shape_overlay_paths(width_twips, height_twips),
+        ShapePolygonPreset::Sun => sun_shape_overlay_paths(width_twips, height_twips),
         ShapePolygonPreset::Can
         | ShapePolygonPreset::FlowchartStoredData
         | ShapePolygonPreset::FlowchartMagneticDisk => {
@@ -21692,6 +21693,14 @@ fn smiley_face_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<Sta
             ],
         ),
     ]
+}
+
+fn sun_shape_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    let mut center_ring = regular_polygon_inset_shape_points(width_twips, height_twips, 32, 500);
+    if let Some(first) = center_ring.first().copied() {
+        center_ring.push(first);
+    }
+    vec![center_ring]
 }
 
 fn regular_polygon_inset_shape_points(
