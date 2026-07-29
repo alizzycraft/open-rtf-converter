@@ -81371,6 +81371,26 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
     }
     assert_eq!(shapes[0].points[1].y_twips, 0);
     assert_eq!(shapes[1].points[5].y_twips, shapes[1].height_twips);
+    for shape in shapes.iter().take(4) {
+        assert_eq!(
+            shape.overlay_paths.len(),
+            2,
+            "ribbon shapes should preserve passive fold-line strokes"
+        );
+        assert!(
+            shape.overlay_paths.iter().all(|path| path.len() == 2),
+            "ribbon fold lines should be passive line segments"
+        );
+        assert!(
+            shape.overlay_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "ribbon fold lines must stay inside passive frame: {shape:?}"
+        );
+    }
     assert_eq!(shapes[4].points[1].x_twips, shapes[4].width_twips);
     assert!(
         shapes[7]
@@ -81410,6 +81430,7 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_overlay_strokes = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -81418,6 +81439,11 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_overlay_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -81425,6 +81451,10 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
     assert!(
         passive_shape_paints >= 8,
         "ribbon/scroll/wave shapes should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_overlay_strokes >= 8,
+        "ribbon fold lines should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),
@@ -82270,6 +82300,24 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
             .any(|point| { point.x_twips == 0 && point.y_twips == shapes[1].height_twips / 2 }),
         "flowchart offline storage should preserve the passive left midpoint"
     );
+    assert_eq!(
+        shapes[2].overlay_paths.len(),
+        2,
+        "left-right ribbon should preserve passive fold-line strokes"
+    );
+    assert!(
+        shapes[2].overlay_paths.iter().all(|path| path.len() == 2),
+        "left-right ribbon folds should be passive line segments"
+    );
+    assert!(
+        shapes[2].overlay_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[2].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[2].height_twips
+        }),
+        "left-right ribbon fold lines must stay inside passive frame"
+    );
     assert!(shapes[6].points.iter().any(|point| point.y_twips == 0));
     assert!(shapes[7].points.iter().any(|point| point.x_twips == 0));
     assert!(
@@ -82311,6 +82359,7 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_overlay_strokes = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -82319,6 +82368,11 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_overlay_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -82326,6 +82380,10 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
     assert!(
         passive_shape_paints >= 9,
         "post-action shape group should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_overlay_strokes >= 2,
+        "left-right ribbon folds should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),

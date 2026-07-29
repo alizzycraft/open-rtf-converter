@@ -17602,6 +17602,17 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::FlowchartSort => {
             flowchart_sort_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::UpRibbon => up_ribbon_overlay_paths(width_twips, height_twips),
+        ShapePolygonPreset::DownRibbon => down_ribbon_overlay_paths(width_twips, height_twips),
+        ShapePolygonPreset::CurvedUpRibbon => {
+            curved_up_ribbon_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::CurvedDownRibbon => {
+            curved_down_ribbon_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::LeftRightRibbon => {
+            left_right_ribbon_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::RightArrowCallout => {
             right_arrow_callout_overlay_paths(width_twips, height_twips)
         }
@@ -18387,6 +18398,40 @@ fn double_wave_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticSh
     )
 }
 
+fn up_ribbon_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(width_twips, height_twips, &[(140, 280), (500, 820)]),
+        scaled_shape_points(width_twips, height_twips, &[(860, 280), (500, 820)]),
+    ]
+}
+
+fn down_ribbon_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(width_twips, height_twips, &[(140, 720), (500, 180)]),
+        scaled_shape_points(width_twips, height_twips, &[(860, 720), (500, 180)]),
+    ]
+}
+
+fn curved_up_ribbon_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(width_twips, height_twips, &[(160, 300), (500, 780)]),
+        scaled_shape_points(width_twips, height_twips, &[(840, 300), (500, 780)]),
+    ]
+}
+
+fn curved_down_ribbon_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(width_twips, height_twips, &[(160, 700), (500, 220)]),
+        scaled_shape_points(width_twips, height_twips, &[(840, 700), (500, 220)]),
+    ]
+}
+
 fn rectangular_callout_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     scaled_shape_points(
         width_twips,
@@ -19059,6 +19104,16 @@ fn left_right_ribbon_shape_points(width_twips: i32, height_twips: i32) -> Vec<St
             (160, 260),
         ],
     )
+}
+
+fn left_right_ribbon_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(width_twips, height_twips, &[(160, 260), (420, 760)]),
+        scaled_shape_points(width_twips, height_twips, &[(840, 260), (580, 760)]),
+    ]
 }
 
 fn diagonal_stripe_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
