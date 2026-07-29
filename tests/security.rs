@@ -79908,11 +79908,16 @@ fn office_3d_and_folded_shapes_render_as_passive_polygons_without_payload_leakag
         "cube should preserve passive internal face strokes"
     );
     assert_eq!(
+        shapes[2].overlay_paths.len(),
+        4,
+        "bevel should preserve passive internal face strokes"
+    );
+    assert_eq!(
         shapes[3].overlay_paths.len(),
         2,
         "folded corner should preserve passive crease strokes"
     );
-    for shape in [&shapes[0], &shapes[1], &shapes[3]] {
+    for shape in [&shapes[0], &shapes[1], &shapes[2], &shapes[3]] {
         assert!(
             shape.overlay_paths.iter().all(|path| path.len() == 2),
             "3D/folded overlays should be passive line segments"
@@ -79978,7 +79983,7 @@ fn office_3d_and_folded_shapes_render_as_passive_polygons_without_payload_leakag
         "3D/folded shapes should render passive fill/stroke paths"
     );
     assert!(
-        passive_overlay_strokes >= 9,
+        passive_overlay_strokes >= 13,
         "3D/folded face details should render as passive strokes"
     );
     for forbidden in [

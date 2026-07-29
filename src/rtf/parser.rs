@@ -17548,6 +17548,7 @@ fn polygon_preset_shape_overlay_paths(
             can_shape_overlay_paths(width_twips, height_twips)
         }
         ShapePolygonPreset::Cube => cube_shape_overlay_paths(width_twips, height_twips),
+        ShapePolygonPreset::Bevel => bevel_shape_overlay_paths(width_twips, height_twips),
         ShapePolygonPreset::FlowchartPredefinedProcess => {
             flowchart_predefined_process_overlay_paths(width_twips, height_twips)
         }
@@ -20090,6 +20091,55 @@ fn bevel_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoi
         y_twips: y,
     })
     .collect()
+}
+
+fn bevel_shape_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    let inset_x = width_twips / 6;
+    let inset_y = height_twips / 6;
+    let right_x = width_twips.saturating_sub(inset_x);
+    let bottom_y = height_twips.saturating_sub(inset_y);
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: inset_x,
+                y_twips: inset_y,
+            },
+            StaticShapePoint {
+                x_twips: right_x,
+                y_twips: inset_y,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: right_x,
+                y_twips: inset_y,
+            },
+            StaticShapePoint {
+                x_twips: right_x,
+                y_twips: bottom_y,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: right_x,
+                y_twips: bottom_y,
+            },
+            StaticShapePoint {
+                x_twips: inset_x,
+                y_twips: bottom_y,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: inset_x,
+                y_twips: bottom_y,
+            },
+            StaticShapePoint {
+                x_twips: inset_x,
+                y_twips: inset_y,
+            },
+        ],
+    ]
 }
 
 fn folded_corner_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
