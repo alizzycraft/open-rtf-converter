@@ -4651,6 +4651,16 @@ fn append_passive_polygon_path(content: &mut Content, points: &[crate::layout::L
     content.close_path();
 }
 
+fn append_passive_open_path(content: &mut Content, points: &[crate::layout::LayoutPoint]) {
+    let Some(first) = points.first() else {
+        return;
+    };
+    content.move_to(first.x, first.y);
+    for point in points.iter().skip(1) {
+        content.line_to(point.x, point.y);
+    }
+}
+
 fn vector_points_bounds(points: &[crate::layout::LayoutPoint]) -> Option<VectorDrawRect> {
     let first = points.first()?;
     let mut min_x = first.x;
@@ -4879,6 +4889,16 @@ fn draw_passive_compound_polygon(
                 set_fill_color(content, fill_color);
                 append_passive_polygon_path(content, path);
                 content.fill_nonzero();
+            }
+        }
+    }
+    if has_stroke {
+        set_stroke_color(content, stroke_color);
+        set_passive_path_stroke_style(content, stroke_width, stroke_style);
+        for path in overlay_paths {
+            if path.len() == 2 {
+                append_passive_open_path(content, path);
+                content.stroke();
             }
         }
     }

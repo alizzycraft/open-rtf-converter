@@ -2588,7 +2588,7 @@ fn layout_shape(
             let overlay_paths = shape
                 .overlay_paths
                 .iter()
-                .filter(|path| path.len() >= 3)
+                .filter(|path| path.len() >= 2)
                 .map(|path| {
                     path.iter()
                         .map(|point| LayoutPoint {

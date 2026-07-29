@@ -80896,6 +80896,18 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
     assert_eq!(shapes[2].points.len(), 11);
     assert_eq!(shapes[3].points.len(), 17);
     assert_eq!(
+        shapes[0].overlay_paths.len(),
+        2,
+        "predefined-process flowchart should preserve Word-visible internal vertical lines"
+    );
+    assert_eq!(
+        shapes[1].overlay_paths.len(),
+        2,
+        "internal-storage flowchart should preserve Word-visible internal guide lines"
+    );
+    assert!(shapes[0].overlay_paths.iter().all(|path| path.len() == 2));
+    assert!(shapes[1].overlay_paths.iter().all(|path| path.len() == 2));
+    assert_eq!(
         shapes[2].points[2].y_twips,
         (shapes[2].height_twips * 4) / 5
     );
@@ -80923,6 +80935,21 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
         );
     }
 
+    let layout = LayoutEngine::layout(&parsed.document);
+    let overlay_path_count = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.items.iter())
+        .filter_map(|item| match item {
+            LayoutItem::Polygon { overlay_paths, .. } => Some(overlay_paths.len()),
+            _ => None,
+        })
+        .sum::<usize>();
+    assert!(
+        overlay_path_count >= 4,
+        "flowchart internal guide lines should survive into passive layout"
+    );
+
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
@@ -80934,6 +80961,7 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_overlay_strokes = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -80942,6 +80970,11 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_overlay_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -80949,6 +80982,10 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
     assert!(
         passive_shape_paints >= 4,
         "flowchart document variants should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_overlay_strokes >= 4,
+        "flowchart predefined/internal-storage guide lines should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),

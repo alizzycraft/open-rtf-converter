@@ -13089,7 +13089,7 @@ impl Parser {
                     width,
                     height,
                 );
-                let normalized_overlay_paths = normalize_shape_point_paths(
+                let normalized_overlay_paths = normalize_shape_overlay_paths(
                     &overlay_paths,
                     base_x,
                     base_y,
@@ -17082,9 +17082,52 @@ fn normalize_shape_point_paths(
     width_twips: i32,
     height_twips: i32,
 ) -> Vec<Vec<StaticShapePoint>> {
+    normalize_shape_point_paths_with_min_len(
+        paths,
+        base_x_twips,
+        base_y_twips,
+        left_twips,
+        top_twips,
+        width_twips,
+        height_twips,
+        3,
+    )
+}
+
+fn normalize_shape_overlay_paths(
+    paths: &[Vec<StaticShapePoint>],
+    base_x_twips: i32,
+    base_y_twips: i32,
+    left_twips: i32,
+    top_twips: i32,
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    normalize_shape_point_paths_with_min_len(
+        paths,
+        base_x_twips,
+        base_y_twips,
+        left_twips,
+        top_twips,
+        width_twips,
+        height_twips,
+        2,
+    )
+}
+
+fn normalize_shape_point_paths_with_min_len(
+    paths: &[Vec<StaticShapePoint>],
+    base_x_twips: i32,
+    base_y_twips: i32,
+    left_twips: i32,
+    top_twips: i32,
+    width_twips: i32,
+    height_twips: i32,
+    min_len: usize,
+) -> Vec<Vec<StaticShapePoint>> {
     paths
         .iter()
-        .filter(|path| path.len() >= 3)
+        .filter(|path| path.len() >= min_len)
         .map(|path| {
             path.iter()
                 .map(|point| StaticShapePoint {
@@ -17493,6 +17536,12 @@ fn polygon_preset_shape_overlay_paths(
 ) -> Vec<Vec<StaticShapePoint>> {
     match preset {
         ShapePolygonPreset::NoSymbol => no_symbol_shape_overlay_paths(width_twips, height_twips),
+        ShapePolygonPreset::FlowchartPredefinedProcess => {
+            flowchart_predefined_process_overlay_paths(width_twips, height_twips)
+        }
+        ShapePolygonPreset::FlowchartInternalStorage => {
+            flowchart_internal_storage_overlay_paths(width_twips, height_twips)
+        }
         _ => Vec::new(),
     }
 }
@@ -17604,6 +17653,66 @@ fn rectangle_polygon_shape_points(width_twips: i32, height_twips: i32) -> Vec<St
         y_twips: y,
     })
     .collect()
+}
+
+fn flowchart_predefined_process_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let left_x = width_twips / 8;
+    let right_x = width_twips - left_x;
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: left_x,
+                y_twips: 0,
+            },
+            StaticShapePoint {
+                x_twips: left_x,
+                y_twips: height_twips,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: right_x,
+                y_twips: 0,
+            },
+            StaticShapePoint {
+                x_twips: right_x,
+                y_twips: height_twips,
+            },
+        ],
+    ]
+}
+
+fn flowchart_internal_storage_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let inset_x = width_twips / 8;
+    let inset_y = height_twips / 5;
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: inset_x,
+                y_twips: 0,
+            },
+            StaticShapePoint {
+                x_twips: inset_x,
+                y_twips: height_twips,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: 0,
+                y_twips: inset_y,
+            },
+            StaticShapePoint {
+                x_twips: width_twips,
+                y_twips: inset_y,
+            },
+        ],
+    ]
 }
 
 fn flowchart_document_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
