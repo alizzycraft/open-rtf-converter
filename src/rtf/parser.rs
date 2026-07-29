@@ -17514,6 +17514,9 @@ fn polygon_preset_shape_point_paths(
         ShapePolygonPreset::ActionButtonSound => {
             action_button_sound_shape_point_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::ActionButtonMovie => {
+            action_button_movie_shape_point_paths(width_twips, height_twips)
+        }
         _ => Vec::new(),
     }
 }
@@ -18663,6 +18666,34 @@ fn action_button_movie_shape_points(width_twips: i32, height_twips: i32) -> Vec<
             (760, 200),
         ],
     )
+}
+
+fn action_button_movie_shape_point_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(140, 300), (200, 300), (200, 380), (140, 380)],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(140, 500), (200, 500), (200, 580), (140, 580)],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(800, 300), (860, 300), (860, 380), (800, 380)],
+        ),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[(800, 500), (860, 500), (860, 580), (800, 580)],
+        ),
+    ]
 }
 
 fn balloon_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {

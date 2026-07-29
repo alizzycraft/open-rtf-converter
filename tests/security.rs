@@ -81809,6 +81809,19 @@ fn office_action_button_shapes_render_passive_visuals_without_action_leakage() {
                 && point.y_twips <= shapes[10].height_twips),
         "action-button sound wave paths must stay inside passive frame"
     );
+    assert_eq!(shapes[11].point_paths.len(), 4);
+    assert!(shapes[11].point_paths.iter().all(|path| path.len() == 4));
+    assert!(
+        shapes[11]
+            .point_paths
+            .iter()
+            .flatten()
+            .all(|point| point.x_twips >= 0
+                && point.x_twips <= shapes[11].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[11].height_twips),
+        "action-button movie filmstrip detail paths must stay inside passive frame"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
