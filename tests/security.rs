@@ -81743,8 +81743,8 @@ fn office_ribbon_scroll_and_wave_shapes_render_passively_without_payload_leakage
             "scroll shapes should preserve passive curled-roll seam strokes"
         );
         assert!(
-            shape.overlay_paths.iter().all(|path| path.len() >= 5),
-            "scroll curled-roll seams should be passive bounded polylines"
+            shape.overlay_paths.iter().all(|path| path.len() >= 9),
+            "scroll curled-roll seams should be detailed passive bounded polylines"
         );
         assert!(
             shape.overlay_paths.iter().flatten().all(|point| {
