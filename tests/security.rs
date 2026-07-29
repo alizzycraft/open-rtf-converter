@@ -83839,6 +83839,24 @@ fn office_curved_and_striped_arrows_render_as_passive_polygons_without_payload_l
             .any(|point| point.y_twips == shapes[3].height_twips),
         "curved down arrow should preserve the bottom arrow tip"
     );
+    assert_eq!(
+        shapes[4].overlay_paths.len(),
+        2,
+        "striped right arrow should preserve passive stripe strokes"
+    );
+    assert!(
+        shapes[4].overlay_paths.iter().all(|path| path.len() == 2),
+        "striped right arrow stripes should be passive line segments"
+    );
+    assert!(
+        shapes[4].overlay_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[4].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[4].height_twips
+        }),
+        "striped right arrow stripe strokes must stay inside passive frame"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -83868,6 +83886,7 @@ fn office_curved_and_striped_arrows_render_as_passive_polygons_without_payload_l
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0;
+    let mut passive_overlay_strokes = 0;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -83876,6 +83895,11 @@ fn office_curved_and_striped_arrows_render_as_passive_polygons_without_payload_l
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_overlay_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -83883,6 +83907,10 @@ fn office_curved_and_striped_arrows_render_as_passive_polygons_without_payload_l
     assert!(
         passive_shape_paints >= 5,
         "curved/striped arrows should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_overlay_strokes >= 2,
+        "striped right arrow stripes should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),

@@ -17638,6 +17638,9 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::LeftRightCircularArrow => {
             left_right_circular_arrow_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::StripedRightArrow => {
+            striped_right_arrow_overlay_paths(width_twips, height_twips)
+        }
         _ => Vec::new(),
     }
 }
@@ -21443,6 +21446,29 @@ fn curved_up_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<Stat
 
 fn striped_right_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
     right_arrow_shape_points(width_twips, height_twips)
+}
+
+fn striped_right_arrow_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let shaft_top = height_twips / 4;
+    let shaft_bottom = height_twips.saturating_sub(shaft_top);
+    [width_twips / 8, width_twips / 4]
+        .into_iter()
+        .map(|x_twips| {
+            vec![
+                StaticShapePoint {
+                    x_twips,
+                    y_twips: shaft_top,
+                },
+                StaticShapePoint {
+                    x_twips,
+                    y_twips: shaft_bottom,
+                },
+            ]
+        })
+        .collect()
 }
 
 fn left_up_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
