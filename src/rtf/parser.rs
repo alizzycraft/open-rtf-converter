@@ -17548,6 +17548,9 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::FlowchartInternalStorage => {
             flowchart_internal_storage_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::FoldedCorner | ShapePolygonPreset::ActionButtonDocument => {
+            folded_corner_shape_overlay_paths(width_twips, height_twips)
+        }
         _ => Vec::new(),
     }
 }
@@ -20007,6 +20010,36 @@ fn folded_corner_shape_points(width_twips: i32, height_twips: i32) -> Vec<Static
         y_twips: y,
     })
     .collect()
+}
+
+fn folded_corner_shape_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    let fold_x = (width_twips * 3) / 4;
+    let fold_y = height_twips / 4;
+    vec![
+        vec![
+            StaticShapePoint {
+                x_twips: fold_x,
+                y_twips: 0,
+            },
+            StaticShapePoint {
+                x_twips: fold_x,
+                y_twips: fold_y,
+            },
+        ],
+        vec![
+            StaticShapePoint {
+                x_twips: fold_x,
+                y_twips: fold_y,
+            },
+            StaticShapePoint {
+                x_twips: width_twips,
+                y_twips: fold_y,
+            },
+        ],
+    ]
 }
 
 fn plaque_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
