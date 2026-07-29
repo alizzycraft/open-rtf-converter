@@ -81082,6 +81082,26 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
         );
     }
     assert_eq!(shapes[0].points[0].x_twips, shapes[0].width_twips / 5);
+    for shape in [&shapes[6], &shapes[9]] {
+        assert_eq!(
+            shape.overlay_paths.len(),
+            4,
+            "can-style storage shapes should preserve Word-visible top-face strokes"
+        );
+        assert!(
+            shape.overlay_paths.iter().all(|path| path.len() == 2),
+            "can-style storage face overlays should be passive line segments"
+        );
+        assert!(
+            shape.overlay_paths.iter().flatten().all(|point| {
+                point.x_twips >= 0
+                    && point.x_twips <= shape.width_twips
+                    && point.y_twips >= 0
+                    && point.y_twips <= shape.height_twips
+            }),
+            "can-style storage face overlays must stay inside passive frame"
+        );
+    }
     assert!(
         shapes[7]
             .points
@@ -81132,6 +81152,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_overlay_strokes = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -81140,6 +81161,11 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_overlay_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -81147,6 +81173,10 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     assert!(
         passive_shape_paints >= 12,
         "flowchart storage/io shapes should render passive fill/stroke paths"
+    );
+    assert!(
+        passive_overlay_strokes >= 8,
+        "can-style flowchart storage face overlays should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),

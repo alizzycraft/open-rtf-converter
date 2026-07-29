@@ -17542,6 +17542,11 @@ fn polygon_preset_shape_overlay_paths(
 ) -> Vec<Vec<StaticShapePoint>> {
     match preset {
         ShapePolygonPreset::NoSymbol => no_symbol_shape_overlay_paths(width_twips, height_twips),
+        ShapePolygonPreset::Can
+        | ShapePolygonPreset::FlowchartStoredData
+        | ShapePolygonPreset::FlowchartMagneticDisk => {
+            can_shape_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::FlowchartPredefinedProcess => {
             flowchart_predefined_process_overlay_paths(width_twips, height_twips)
         }
@@ -19985,6 +19990,26 @@ fn can_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint
         x_twips: x,
         y_twips: y,
     })
+    .collect()
+}
+
+fn can_shape_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    scaled_shape_points(
+        width_twips,
+        height_twips,
+        &[
+            (0, 125),
+            (250, 62),
+            (250, 62),
+            (500, 0),
+            (500, 0),
+            (750, 62),
+            (750, 62),
+            (1000, 125),
+        ],
+    )
+    .chunks(2)
+    .map(|segment| segment.to_vec())
     .collect()
 }
 
