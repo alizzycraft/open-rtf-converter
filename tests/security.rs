@@ -83000,6 +83000,25 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
             >= 8,
         "left-right ribbon should preserve bounded passive lower ribbon curves"
     );
+    assert_eq!(
+        shapes[3].overlay_paths.len(),
+        1,
+        "diagonal stripe should preserve a passive rectangular frame"
+    );
+    assert_eq!(
+        shapes[3].overlay_paths[0].len(),
+        4,
+        "diagonal stripe frame should be a bounded rectangle overlay"
+    );
+    assert!(
+        shapes[3].overlay_paths[0]
+            .iter()
+            .any(|point| point.x_twips == 0 && point.y_twips == 0)
+            && shapes[3].overlay_paths[0].iter().any(|point| {
+                point.x_twips == shapes[3].width_twips && point.y_twips == shapes[3].height_twips
+            }),
+        "diagonal stripe frame should preserve opposite passive frame corners"
+    );
     assert!(shapes[6].points.iter().any(|point| point.y_twips == 0));
     assert!(shapes[7].points.iter().any(|point| point.x_twips == 0));
     assert!(
@@ -83064,8 +83083,8 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
         "post-action shape group should render passive fill/stroke paths"
     );
     assert!(
-        passive_overlay_strokes >= 2,
-        "left-right ribbon folds should render as passive strokes"
+        passive_overlay_strokes >= 3,
+        "left-right ribbon folds and diagonal stripe frame should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),

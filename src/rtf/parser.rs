@@ -17632,6 +17632,9 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::LeftRightRibbon => {
             left_right_ribbon_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::DiagonalStripe => {
+            diagonal_stripe_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::RightArrowCallout => {
             right_arrow_callout_overlay_paths(width_twips, height_twips)
         }
@@ -19510,6 +19513,13 @@ fn diagonal_stripe_shape_points(width_twips: i32, height_twips: i32) -> Vec<Stat
         height_twips,
         &[(260, 0), (1000, 0), (740, 1000), (0, 1000)],
     )
+}
+
+fn diagonal_stripe_overlay_paths(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<Vec<StaticShapePoint>> {
+    vec![rectangle_polygon_shape_points(width_twips, height_twips)]
 }
 
 fn pie_shape_points(width_twips: i32, height_twips: i32) -> Vec<StaticShapePoint> {
