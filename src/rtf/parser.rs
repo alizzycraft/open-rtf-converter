@@ -17578,6 +17578,7 @@ fn polygon_preset_shape_overlay_paths(
     height_twips: i32,
 ) -> Vec<Vec<StaticShapePoint>> {
     match preset {
+        ShapePolygonPreset::SmileyFace => smiley_face_overlay_paths(width_twips, height_twips),
         ShapePolygonPreset::NoSymbol => no_symbol_shape_overlay_paths(width_twips, height_twips),
         ShapePolygonPreset::Can
         | ShapePolygonPreset::FlowchartStoredData
@@ -21671,6 +21672,26 @@ fn no_symbol_shape_overlay_paths(
         height_twips,
         &[(230, 120), (880, 770), (770, 880), (120, 230)],
     )]
+}
+
+fn smiley_face_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    vec![
+        scaled_shape_points(width_twips, height_twips, &[(350, 315), (350, 425)]),
+        scaled_shape_points(width_twips, height_twips, &[(650, 315), (650, 425)]),
+        scaled_shape_points(
+            width_twips,
+            height_twips,
+            &[
+                (280, 610),
+                (365, 720),
+                (450, 765),
+                (500, 775),
+                (550, 765),
+                (635, 720),
+                (720, 610),
+            ],
+        ),
+    ]
 }
 
 fn regular_polygon_inset_shape_points(

@@ -80056,6 +80056,26 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
         );
     }
     assert_eq!(
+        shapes[0].overlay_paths.len(),
+        3,
+        "smiley face should preserve passive eye and mouth strokes"
+    );
+    assert_eq!(shapes[0].overlay_paths[0].len(), 2);
+    assert_eq!(shapes[0].overlay_paths[1].len(), 2);
+    assert!(
+        shapes[0].overlay_paths[2].len() >= 5,
+        "smiley mouth should be a bounded passive polyline"
+    );
+    assert!(
+        shapes[0].overlay_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shapes[0].width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shapes[0].height_twips
+        }),
+        "smiley face detail strokes must stay inside the passive shape frame"
+    );
+    assert_eq!(
         shapes[1].fill_rule,
         StaticImageVectorFillRule::Alternate,
         "donut should use even-odd fill so the passive PDF keeps the center open"
@@ -80124,6 +80144,7 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
     let mut passive_shape_paints = 0;
     let mut passive_even_odd_shape_paints = 0;
     let mut passive_path_moves = 0;
+    let mut passive_overlay_strokes = 0;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -80142,6 +80163,11 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
             .iter()
             .filter(|operation| operation.operator == "m")
             .count();
+        passive_overlay_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -80157,6 +80183,10 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
     assert!(
         passive_path_moves >= 6,
         "compound symbols should emit separate bounded ring and slash passive paths"
+    );
+    assert!(
+        passive_overlay_strokes >= 4,
+        "smiley face details and no-symbol slash should render as passive strokes"
     );
     for forbidden in [
         b"shapeType".as_slice(),
