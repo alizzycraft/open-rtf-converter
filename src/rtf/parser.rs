@@ -19983,11 +19983,6 @@ fn math_divide_shape_point_paths(
         scaled_shape_points(
             width_twips,
             height_twips,
-            &[(120, 410), (880, 410), (880, 590), (120, 590)],
-        ),
-        scaled_shape_points(
-            width_twips,
-            height_twips,
             &[
                 (500, 740),
                 (527, 745),

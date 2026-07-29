@@ -83422,8 +83422,8 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
     assert_eq!(shapes[1].points[0].x_twips, 0);
     assert_eq!(
         shapes[5].point_paths.len(),
-        3,
-        "division sign should keep separate passive dot/bar paths"
+        2,
+        "division sign should keep rounded passive dots as separate subpaths without duplicating the bar"
     );
     assert_eq!(
         shapes[5]
@@ -83431,14 +83431,14 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
             .iter()
             .map(Vec::len)
             .collect::<Vec<_>>(),
-        vec![16, 4, 16],
-        "division sign should preserve rounded passive dot paths and a bounded bar"
+        vec![16, 16],
+        "division sign should preserve rounded passive dot paths"
     );
     assert!(
         shapes[5].point_paths[0]
             .iter()
             .any(|point| point.y_twips <= shapes[5].height_twips / 8)
-            && shapes[5].point_paths[2]
+            && shapes[5].point_paths[1]
                 .iter()
                 .any(|point| point.y_twips >= (shapes[5].height_twips * 7) / 8),
         "division sign should preserve passive rounded dot extrema"
@@ -83649,7 +83649,7 @@ fn office_chord_math_tab_and_gear_shapes_render_passively_without_payload_leakag
         "gear shapes should render as passive even-odd compound paths"
     );
     assert!(
-        passive_path_moves >= 30,
+        passive_path_moves >= 29,
         "compound math, tab, and gear shapes should emit separate passive PDF subpaths"
     );
     for forbidden in [
