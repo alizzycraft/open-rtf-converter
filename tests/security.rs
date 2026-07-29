@@ -81228,7 +81228,7 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 12);
-    let expected_point_counts = [5, 34, 24, 24, 6, 4, 10, 25, 32, 10, 6, 22];
+    let expected_point_counts = [5, 34, 24, 24, 6, 4, 10, 25, 32, 10, 6, 40];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -81350,6 +81350,28 @@ fn office_flowchart_storage_and_io_shapes_render_passively_without_payload_leaka
             .iter()
             .any(|point| point.x_twips == shapes[11].width_twips),
         "flowchart display curve should reach the right edge of the passive frame"
+    );
+    assert!(
+        shapes[11]
+            .points
+            .iter()
+            .filter(|point| point.x_twips > (shapes[11].width_twips * 9) / 10)
+            .count()
+            >= 8,
+        "flowchart display should preserve a bounded passive rounded right nose"
+    );
+    assert!(
+        shapes[11]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[11].width_twips / 8
+                    && point.y_twips > shapes[11].height_twips / 8
+                    && point.y_twips < shapes[11].height_twips
+            })
+            .count()
+            >= 8,
+        "flowchart display should preserve a bounded passive concave left edge"
     );
     for forbidden in [
         "shapeType",
