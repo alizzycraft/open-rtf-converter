@@ -17629,6 +17629,9 @@ fn polygon_preset_shape_overlay_paths(
         ShapePolygonPreset::LineCalloutBorderAccentBar => {
             line_callout_border_accent_bar_overlay_paths(width_twips, height_twips)
         }
+        ShapePolygonPreset::CircularArrow => {
+            circular_arrow_overlay_paths(width_twips, height_twips)
+        }
         ShapePolygonPreset::LeftCircularArrow => {
             left_circular_arrow_overlay_paths(width_twips, height_twips)
         }
@@ -19813,6 +19816,13 @@ fn circular_arrow_shape_points(width_twips: i32, height_twips: i32) -> Vec<Stati
         width_twips,
         left_circular_arrow_shape_points(width_twips, height_twips),
     )
+}
+
+fn circular_arrow_overlay_paths(width_twips: i32, height_twips: i32) -> Vec<Vec<StaticShapePoint>> {
+    left_circular_arrow_overlay_paths(width_twips, height_twips)
+        .into_iter()
+        .map(|path| mirror_shape_points_x(width_twips, path))
+        .collect()
 }
 
 fn left_right_circular_arrow_shape_points(

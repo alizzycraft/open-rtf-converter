@@ -80347,6 +80347,24 @@ fn office_circular_arrow_shape_renders_passively_without_payload_leakage() {
             .any(|point| point.x_twips == shape.width_twips),
         "circular arrow should include a bounded outer arc at the right edge"
     );
+    assert_eq!(
+        shape.overlay_paths.len(),
+        1,
+        "circular arrow should preserve the passive inner arc"
+    );
+    assert!(
+        shape.overlay_paths[0].len() >= 10,
+        "circular arrow inner arc should be a bounded passive polyline"
+    );
+    assert!(
+        shape.overlay_paths.iter().flatten().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shape.width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shape.height_twips
+        }),
+        "circular arrow inner arc must stay inside passive frame"
+    );
     for forbidden in [
         "shapeType",
         "fillColor",
@@ -80372,6 +80390,7 @@ fn office_circular_arrow_shape_renders_passively_without_payload_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let mut rendered_text = String::new();
     let mut passive_shape_paints = 0usize;
+    let mut passive_strokes = 0usize;
     for page_id in parsed_pdf.get_pages().values() {
         let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
         rendered_text.push_str(&decoded_pdf_text(&content));
@@ -80380,6 +80399,11 @@ fn office_circular_arrow_shape_renders_passively_without_payload_leakage() {
             .iter()
             .filter(|operation| operation.operator == "B")
             .count();
+        passive_strokes += content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "S")
+            .count();
     }
 
     assert!(rendered_text.contains("Before"));
@@ -80387,6 +80411,10 @@ fn office_circular_arrow_shape_renders_passively_without_payload_leakage() {
     assert!(
         passive_shape_paints >= 1,
         "circular arrow should render as a passive fill/stroke path"
+    );
+    assert!(
+        passive_strokes >= 1,
+        "circular arrow inner arc should render as a passive stroke"
     );
     for forbidden in [
         b"shapeType".as_slice(),
