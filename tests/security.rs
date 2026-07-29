@@ -84706,7 +84706,7 @@ fn office_curved_and_striped_arrows_render_as_passive_polygons_without_payload_l
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 5);
-    for (shape, expected_points) in shapes.iter().zip([36, 36, 36, 36, 7]) {
+    for (shape, expected_points) in shapes.iter().zip([42, 42, 42, 42, 7]) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_points);
         assert!(
@@ -84741,6 +84741,22 @@ fn office_curved_and_striped_arrows_render_as_passive_polygons_without_payload_l
             .any(|point| point.y_twips == shapes[3].height_twips),
         "curved down arrow should preserve the bottom arrow tip"
     );
+    for (index, shape) in shapes.iter().take(4).enumerate() {
+        assert!(
+            shape
+                .points
+                .iter()
+                .filter(|point| {
+                    point.x_twips >= shape.width_twips / 4
+                        && point.x_twips <= (shape.width_twips * 7) / 8
+                        && point.y_twips >= shape.height_twips / 8
+                        && point.y_twips <= (shape.height_twips * 7) / 8
+                })
+                .count()
+                >= 20,
+            "curved arrow {index} should preserve denser bounded passive bend samples"
+        );
+    }
     assert_eq!(
         shapes[4].overlay_paths.len(),
         2,
