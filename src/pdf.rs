@@ -238,6 +238,7 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/EmbeddedFiles", "/EmbeddedFiles"),
     (b"/Encrypt", "/Encrypt"),
     (b"/FileAttachment", "/FileAttachment"),
+    (b"/FDF", "/FDF"),
     (b"/FieldMDP", "/FieldMDP"),
     (b"/Filespec", "/Filespec"),
     (b"/GoTo", "/GoTo"),
@@ -253,6 +254,7 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/Movie", "/Movie"),
     (b"/Names", "/Names"),
     (b"/Named", "/Named"),
+    (b"/NeedAppearances", "/NeedAppearances"),
     (b"/Next", "/Next"),
     (b"/ObjStm", "/ObjStm"),
     (b"/OpenAction", "/OpenAction"),
@@ -272,6 +274,7 @@ const ACTIVE_PDF_NAME_TOKENS: &[(&[u8], &str)] = &[
     (b"/UseAttachments", "/UseAttachments"),
     (b"/VRI", "/VRI"),
     (b"/Widget", "/Widget"),
+    (b"/XDP", "/XDP"),
     (b"/XRef", "/XRef"),
     (b"/XFA", "/XFA"),
 ];
@@ -6781,7 +6784,7 @@ endobj
 << /S /GoTo /D [2 0 R /Fit] /Next << /S /Named /N /Print >> >>
 endobj
 8 0 obj
-<< /S /ResetForm >>
+<< /S /ResetForm /FDF << /Fields [] >> >>
 endobj
 9 0 obj
 << /S /Rendition /OP 0 >>
@@ -6805,7 +6808,7 @@ endobj
 << /Names << /EmbeddedFiles [(payload.bin) 4 0 R] >> >>
 endobj
 16 0 obj
-<< /SigFlags 3 /Fields [17 0 R] /PageMode /UseAttachments >>
+<< /SigFlags 3 /Fields [17 0 R] /NeedAppearances true /PageMode /UseAttachments >>
 endobj
 17 0 obj
 << /FT /Sig /T (signature) >>
@@ -6815,6 +6818,9 @@ endobj
 endobj
 19 0 obj
 << /DSS << /VRI << /ABCDEF << >> >> >> >>
+endobj
+20 0 obj
+<< /XFA 21 0 R /XDP <3c7864703e3c2f7864703e> >>
 endobj
 %%EOF";
 
@@ -6844,6 +6850,7 @@ endobj
                 .any(|issue| issue.token == "/AFRelationship")
         );
         assert!(error.issues.iter().any(|issue| issue.token == "/EF"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/FDF"));
         assert!(
             error
                 .issues
@@ -6870,6 +6877,12 @@ endobj
         assert!(error.issues.iter().any(|issue| issue.token == "/FieldMDP"));
         assert!(error.issues.iter().any(|issue| issue.token == "/GoTo"));
         assert!(error.issues.iter().any(|issue| issue.token == "/Named"));
+        assert!(
+            error
+                .issues
+                .iter()
+                .any(|issue| issue.token == "/NeedAppearances")
+        );
         assert!(error.issues.iter().any(|issue| issue.token == "/Next"));
         assert!(error.issues.iter().any(|issue| issue.token == "/ObjStm"));
         assert!(error.issues.iter().any(|issue| issue.token == "/XRef"));
@@ -6892,6 +6905,8 @@ endobj
                 .any(|issue| issue.token == "/UseAttachments")
         );
         assert!(error.issues.iter().any(|issue| issue.token == "/VRI"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/XDP"));
+        assert!(error.issues.iter().any(|issue| issue.token == "/XFA"));
         assert!(
             error
                 .issues
@@ -6907,10 +6922,10 @@ endobj
 << /Type /Catalog /Open#41ction << /#41 << /S /Java#53cript /J#53 (app.alert) >> /#4Eext << /S /Named >> >> >>
 endobj
 2 0 obj
-<< /Names << /Embedded#46iles [(payload.bin) 3 0 R] >> /#45F << /F 3 0 R >> >>
+<< /Names << /Embedded#46iles [(payload.bin) 3 0 R] >> /#45F << /F 3 0 R >> /#46DF << >> /Need#41ppearances true >>
 endobj
 3 0 obj
-<< /Type /Embedded#46ile /AF#52elationship /Data >>
+<< /Type /Embedded#46ile /AF#52elationship /Data /#58FA 4 0 R /#58DP <3c7864703e3c2f7864703e> >>
 endobj
 %%EOF";
 
@@ -6925,8 +6940,12 @@ endobj
             "/Next",
             "/EmbeddedFiles",
             "/EF",
+            "/FDF",
             "/EmbeddedFile",
             "/AFRelationship",
+            "/NeedAppearances",
+            "/XFA",
+            "/XDP",
         ] {
             assert!(
                 error.issues.iter().any(|issue| issue.token == expected),
