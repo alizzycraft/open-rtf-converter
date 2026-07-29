@@ -35712,9 +35712,12 @@ fn passive_jpeg_tone_adjustment(
     if !matches!(
         format,
         ImageFormat::Jpeg
+            | ImageFormat::JpegInverted
             | ImageFormat::JpegGrayscale
+            | ImageFormat::JpegGrayscaleInverted
             | ImageFormat::JpegPassiveGrayscale
             | ImageFormat::JpegCmyk
+            | ImageFormat::JpegCmykInverted
     ) {
         return None;
     }
@@ -35723,9 +35726,19 @@ fn passive_jpeg_tone_adjustment(
     {
         return None;
     }
+    let (low_sample, high_sample) = if matches!(
+        format,
+        ImageFormat::JpegInverted
+            | ImageFormat::JpegGrayscaleInverted
+            | ImageFormat::JpegCmykInverted
+    ) {
+        (255, 0)
+    } else {
+        (0, 255)
+    };
     Some(ImageToneAdjustment {
-        decode_low: f32::from(adjust_picture_sample(0, adjustments)) / 255.0,
-        decode_high: f32::from(adjust_picture_sample(255, adjustments)) / 255.0,
+        decode_low: f32::from(adjust_picture_sample(low_sample, adjustments)) / 255.0,
+        decode_high: f32::from(adjust_picture_sample(high_sample, adjustments)) / 255.0,
     })
 }
 
@@ -53151,6 +53164,46 @@ After\par}"#;
         let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
             .expect("PNG scanline");
         assert_eq!(scanlines, vec![0, 255, 128, 255]);
+    }
+
+    #[test]
+    fn passive_jpeg_tone_adjustment_composes_inverted_rgb_endpoints() {
+        assert_eq!(
+            passive_jpeg_tone_adjustment(
+                ImageFormat::JpegInverted,
+                PictureAdjustments {
+                    brightness_fixed: Some(32_768),
+                    ..PictureAdjustments::default()
+                },
+            ),
+            Some(ImageToneAdjustment {
+                decode_low: 1.0,
+                decode_high: 127.0 / 255.0,
+            })
+        );
+    }
+
+    #[test]
+    fn passive_jpeg_tone_adjustment_composes_inverted_grayscale_and_cmyk_endpoints() {
+        let adjustments = PictureAdjustments {
+            brightness_fixed: Some(32_768),
+            ..PictureAdjustments::default()
+        };
+
+        assert_eq!(
+            passive_jpeg_tone_adjustment(ImageFormat::JpegGrayscaleInverted, adjustments),
+            Some(ImageToneAdjustment {
+                decode_low: 1.0,
+                decode_high: 127.0 / 255.0,
+            })
+        );
+        assert_eq!(
+            passive_jpeg_tone_adjustment(ImageFormat::JpegCmykInverted, adjustments),
+            Some(ImageToneAdjustment {
+                decode_low: 1.0,
+                decode_high: 127.0 / 255.0,
+            })
+        );
     }
 
     #[test]

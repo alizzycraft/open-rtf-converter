@@ -889,16 +889,31 @@ fn write_passive_image_xobject(
                         tone_adjustment.decode_high,
                     ]);
                 }
-                (ImageFormat::JpegGrayscale, Some(tone_adjustment)) => {
+                (
+                    ImageFormat::JpegGrayscale | ImageFormat::JpegGrayscaleInverted,
+                    Some(tone_adjustment),
+                ) => {
                     image.decode([tone_adjustment.decode_low, tone_adjustment.decode_high]);
                 }
                 (
-                    ImageFormat::JpegCmyk | ImageFormat::JpegCmykPassiveGrayscale,
+                    ImageFormat::JpegCmyk
+                    | ImageFormat::JpegCmykInverted
+                    | ImageFormat::JpegCmykPassiveGrayscale,
                     Some(tone_adjustment),
                 ) => {
                     image.decode([
                         tone_adjustment.decode_low,
                         tone_adjustment.decode_high,
+                        tone_adjustment.decode_low,
+                        tone_adjustment.decode_high,
+                        tone_adjustment.decode_low,
+                        tone_adjustment.decode_high,
+                        tone_adjustment.decode_low,
+                        tone_adjustment.decode_high,
+                    ]);
+                }
+                (ImageFormat::JpegInverted, Some(tone_adjustment)) => {
+                    image.decode([
                         tone_adjustment.decode_low,
                         tone_adjustment.decode_high,
                         tone_adjustment.decode_low,
@@ -7965,6 +7980,43 @@ endstream
     }
 
     #[test]
+    fn writes_passive_inverted_jpeg_tone_adjustment_as_composed_decode_array() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::JpegInverted,
+            bytes: minimal_jpeg_with_dimensions(1, 1),
+            palette: Vec::new(),
+            alpha_mask: None,
+            tone_adjustment: Some(ImageToneAdjustment {
+                decode_low: 1.0,
+                decode_high: 127.0 / 255.0,
+            }),
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        assert!(
+            pdf.windows(b"/Decode [1 0.49803922 1 0.49803922 1 0.49803922]".len())
+                .any(|window| window == b"/Decode [1 0.49803922 1 0.49803922 1 0.49803922]")
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
     fn writes_passive_jpeg_tone_adjustment_as_decode_array() {
         let mut document = Document::default();
         document.blocks = vec![Block::Image(StaticImage {
@@ -8057,6 +8109,47 @@ endstream
     }
 
     #[test]
+    fn writes_passive_inverted_grayscale_jpeg_tone_adjustment_as_composed_decode_array() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::JpegGrayscaleInverted,
+            bytes: minimal_grayscale_jpeg_with_dimensions(1, 1),
+            palette: Vec::new(),
+            alpha_mask: None,
+            tone_adjustment: Some(ImageToneAdjustment {
+                decode_low: 1.0,
+                decode_high: 127.0 / 255.0,
+            }),
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        assert!(
+            pdf.windows(b"/ColorSpace /DeviceGray".len())
+                .any(|window| window == b"/ColorSpace /DeviceGray")
+        );
+        assert!(
+            pdf.windows(b"/Decode [1 0.49803922]".len())
+                .any(|window| window == b"/Decode [1 0.49803922]")
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
     fn writes_passive_cmyk_jpeg_tone_adjustment_as_decode_array() {
         let mut document = Document::default();
         document.blocks = vec![Block::Image(StaticImage {
@@ -8095,6 +8188,48 @@ endstream
                 .any(
                     |window| window == b"/Decode [0.5019608 1 0.5019608 1 0.5019608 1 0.5019608 1]"
                 )
+        );
+        audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn writes_passive_inverted_cmyk_jpeg_tone_adjustment_as_composed_decode_array() {
+        let mut document = Document::default();
+        document.blocks = vec![Block::Image(StaticImage {
+            format: ImageFormat::JpegCmykInverted,
+            bytes: minimal_cmyk_jpeg_with_dimensions(1, 1),
+            palette: Vec::new(),
+            alpha_mask: None,
+            tone_adjustment: Some(ImageToneAdjustment {
+                decode_low: 1.0,
+                decode_high: 127.0 / 255.0,
+            }),
+            vector_commands: Vec::new(),
+            width_px: 1,
+            height_px: 1,
+            natural_width_px_hint: None,
+            natural_height_px_hint: None,
+            display_width_twips: Some(720),
+            display_height_twips: Some(720),
+            scale_x_percent: None,
+            scale_y_percent: None,
+            crop: ImageCrop::default(),
+            placement: None,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        assert!(pdf.starts_with(b"%PDF-"));
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(parsed.get_pages().len(), 1);
+        assert!(
+            pdf.windows(b"/ColorSpace /DeviceCMYK".len())
+                .any(|window| window == b"/ColorSpace /DeviceCMYK")
+        );
+        assert!(
+            pdf.windows(b"/Decode [1 0.49803922 1 0.49803922 1 0.49803922 1 0.49803922]".len())
+                .any(|window| window
+                    == b"/Decode [1 0.49803922 1 0.49803922 1 0.49803922 1 0.49803922]")
         );
         audit_passive_pdf_bytes(&pdf).unwrap();
     }
