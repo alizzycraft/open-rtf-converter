@@ -78759,7 +78759,19 @@ fn rotated_office_round_rectangles_lower_to_passive_polygon_without_payload_leak
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shape.kind, StaticShapeKind::Polygon);
-    assert_eq!(shape.points.len(), 4);
+    assert!(
+        shape.points.len() >= 20,
+        "rotated rounded rectangle should preserve a sampled passive rounded outline"
+    );
+    assert!(
+        shape.points.iter().all(|point| {
+            point.x_twips >= 0
+                && point.x_twips <= shape.width_twips
+                && point.y_twips >= 0
+                && point.y_twips <= shape.height_twips
+        }),
+        "rotated rounded rectangle points must stay inside normalized passive frame: {shape:?}"
+    );
     assert_eq!(
         shape.fill_color,
         Some(open_rtf_converter::model::Color {
@@ -78794,7 +78806,7 @@ fn rotated_office_round_rectangles_lower_to_passive_polygon_without_payload_leak
         output.diagnostics.iter().any(|diagnostic| diagnostic
             .message
             .contains("stripping unsupported/active drawing properties")),
-        "rotated rounded rectangle should warn that rounded corners are approximated: {:?}",
+        "hostile rounded-rectangle payload metadata should still be stripped: {:?}",
         output.diagnostics
     );
     assert!(output.diagnostics.iter().any(|diagnostic| {
@@ -78802,7 +78814,7 @@ fn rotated_office_round_rectangles_lower_to_passive_polygon_without_payload_leak
             .message
             .contains("shape rotation rendered as bounded passive static geometry")
     }));
-    assert!(output.diagnostics.iter().any(|diagnostic| diagnostic.message.contains(
+    assert!(output.diagnostics.iter().all(|diagnostic| !diagnostic.message.contains(
         "rotated rounded rectangle rendered as bounded passive polygon with rounded corners flattened"
     )));
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();

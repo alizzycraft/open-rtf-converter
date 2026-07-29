@@ -12984,10 +12984,18 @@ impl Parser {
         let mut unsupported_or_active_property_stripped =
             shape.unsupported_or_active_property_stripped;
         let mut passive_rotation_rendered = false;
-        let mut passive_rotation_flattened = false;
         if shape.rotation_units != 0 {
             match kind {
-                StaticShapeKind::Rectangle | StaticShapeKind::RoundedRectangle => {
+                StaticShapeKind::RoundedRectangle => {
+                    kind = StaticShapeKind::Polygon;
+                    points = rotated_rounded_rectangle_shape_points(
+                        shape.width_twips,
+                        shape.height_twips,
+                        shape.rotation_units,
+                    );
+                    passive_rotation_rendered = true;
+                }
+                StaticShapeKind::Rectangle => {
                     kind = StaticShapeKind::Polygon;
                     points = rotated_shape_rectangle_points(
                         shape.width_twips,
@@ -12995,10 +13003,6 @@ impl Parser {
                         shape.rotation_units,
                     );
                     passive_rotation_rendered = true;
-                    if shape.rounded_rectangle {
-                        unsupported_or_active_property_stripped = true;
-                        passive_rotation_flattened = true;
-                    }
                 }
                 StaticShapeKind::Line => {
                     kind = StaticShapeKind::Polyline;
@@ -13241,12 +13245,6 @@ impl Parser {
         if passive_rotation_rendered {
             self.diagnostics.push(Diagnostic::warning(
                 "shape rotation rendered as bounded passive static geometry",
-                Some(offset),
-            ));
-        }
-        if passive_rotation_flattened {
-            self.diagnostics.push(Diagnostic::warning(
-                "rotated rounded rectangle rendered as bounded passive polygon with rounded corners flattened",
                 Some(offset),
             ));
         }
@@ -17815,6 +17813,85 @@ fn rectangle_polygon_shape_points(width_twips: i32, height_twips: i32) -> Vec<St
         y_twips: y,
     })
     .collect()
+}
+
+fn rounded_rectangle_polygon_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+) -> Vec<StaticShapePoint> {
+    let radius = (width_twips.min(height_twips) / 6).max(1);
+    let right = width_twips.max(1);
+    let bottom = height_twips.max(1);
+    let samples: [(i32, i32); 5] = [(0, 1000), (76, 617), (293, 293), (617, 76), (1000, 0)];
+    let mut points = Vec::with_capacity(20);
+    points.push(StaticShapePoint {
+        x_twips: radius,
+        y_twips: 0,
+    });
+    points.push(StaticShapePoint {
+        x_twips: right.saturating_sub(radius),
+        y_twips: 0,
+    });
+    for (sin, cos) in samples {
+        points.push(StaticShapePoint {
+            x_twips: right
+                .saturating_sub(radius)
+                .saturating_add((radius * sin) / 1000),
+            y_twips: radius.saturating_sub((radius * cos) / 1000),
+        });
+    }
+    points.push(StaticShapePoint {
+        x_twips: right,
+        y_twips: bottom.saturating_sub(radius),
+    });
+    for (sin, cos) in samples {
+        points.push(StaticShapePoint {
+            x_twips: right.saturating_sub((radius * cos) / 1000),
+            y_twips: bottom
+                .saturating_sub(radius)
+                .saturating_add((radius * sin) / 1000),
+        });
+    }
+    points.push(StaticShapePoint {
+        x_twips: radius,
+        y_twips: bottom,
+    });
+    for (sin, cos) in samples {
+        points.push(StaticShapePoint {
+            x_twips: radius.saturating_sub((radius * sin) / 1000),
+            y_twips: bottom.saturating_sub((radius * cos) / 1000),
+        });
+    }
+    points.push(StaticShapePoint {
+        x_twips: 0,
+        y_twips: radius,
+    });
+    for (sin, cos) in samples {
+        points.push(StaticShapePoint {
+            x_twips: (radius * cos) / 1000,
+            y_twips: radius.saturating_sub((radius * sin) / 1000),
+        });
+    }
+    points
+}
+
+fn rotated_rounded_rectangle_shape_points(
+    width_twips: i32,
+    height_twips: i32,
+    rotation_units: i32,
+) -> Vec<StaticShapePoint> {
+    rounded_rectangle_polygon_shape_points(width_twips, height_twips)
+        .into_iter()
+        .map(|point| {
+            rotated_shape_point(
+                point.x_twips,
+                point.y_twips,
+                width_twips,
+                height_twips,
+                rotation_units,
+            )
+        })
+        .collect()
 }
 
 fn flowchart_predefined_process_overlay_paths(
