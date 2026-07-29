@@ -30347,6 +30347,165 @@ fn cmyk_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leak
 }
 
 #[test]
+fn cmyk_jpeg_bilevel_metadata_renders_passive_decode_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_cmyk_jpeg_with_dimensions(1, 1));
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "jpegblip{",
+        "\\",
+        "picprop{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBiLevel}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pictureBrightness}{",
+        "\\",
+        "sv 32768}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-cmyk-bilevel-payload {",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}}}}",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        image_hex.as_str(),
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("image block");
+
+    assert_eq!(image.format, ImageFormat::JpegCmykPassiveBilevel);
+    assert_eq!(image.tone_adjustment, None);
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "JPEG picture bilevel property rendered as passive PDF decode with luminosity blend",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "JPEG picture brightness/contrast property preserved as bounded passive original image",
+        )
+    }));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("active content removed: object payload in metadata")
+    }));
+    for forbidden in [
+        "pictureBiLevel",
+        "pictureBrightness",
+        "pFragments",
+        "hidden-cmyk-bilevel-payload",
+        "objdata",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "CMYK JPEG bilevel metadata leaked to normalized text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        content
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "Do"),
+        "CMYK JPEG bilevel metadata should still render as a passive image"
+    );
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "gs"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_name().ok())
+                    .is_some_and(|name| name == b"GSImageLuminosity")
+        }),
+        "CMYK JPEG bilevel metadata should apply passive luminosity graphics state"
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/ColorSpace /DeviceCMYK".len())
+            .any(|window| window == b"/ColorSpace /DeviceCMYK")
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/BM /Luminosity".len())
+            .any(|window| window == b"/BM /Luminosity")
+    );
+    assert!(
+        output
+            .pdf
+            .windows(b"/Decode [1 0 1 0 1 0 1 0]".len())
+            .any(|window| window == b"/Decode [1 0 1 0 1 0 1 0]")
+    );
+    for forbidden in [
+        b"pictureBiLevel".as_slice(),
+        b"pictureBrightness",
+        b"pFragments",
+        b"hidden-cmyk-bilevel-payload",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "CMYK JPEG bilevel metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn rgb_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
