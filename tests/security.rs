@@ -80087,7 +80087,7 @@ fn office_symbol_shapes_render_as_passive_polygons_without_payload_leakage() {
     assert_eq!(shapes[0].overlay_paths[0].len(), 2);
     assert_eq!(shapes[0].overlay_paths[1].len(), 2);
     assert!(
-        shapes[0].overlay_paths[2].len() >= 5,
+        shapes[0].overlay_paths[2].len() >= 11,
         "smiley mouth should be a bounded passive polyline"
     );
     assert!(
