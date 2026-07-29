@@ -92114,9 +92114,9 @@ fn office_shape_oval_arrowhead_renders_passively_without_property_leakage() {
                     points,
                     fill_color: Some(_),
                     ..
-                } if points.len() >= 8
+                } if points.len() == 24
             )),
-        "oval arrowhead should render as passive filled polygonal oval geometry"
+        "oval arrowhead should render as dense passive filled polygonal oval geometry"
     );
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");

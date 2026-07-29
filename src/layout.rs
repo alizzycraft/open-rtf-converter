@@ -3200,9 +3200,11 @@ fn push_static_shape_arrowhead(
             };
             let radius_x = (arrow_length * 0.38).clamp(2.0, 10.0);
             let radius_y = half_width.clamp(2.0, 10.0);
-            let mut points = Vec::with_capacity(12);
-            for index in 0..12 {
-                let angle = std::f32::consts::PI * 2.0 * (index as f32) / 12.0;
+            const OVAL_ARROWHEAD_SEGMENTS: usize = 24;
+            let mut points = Vec::with_capacity(OVAL_ARROWHEAD_SEGMENTS);
+            for index in 0..OVAL_ARROWHEAD_SEGMENTS {
+                let angle =
+                    std::f32::consts::PI * 2.0 * (index as f32) / OVAL_ARROWHEAD_SEGMENTS as f32;
                 let along = angle.cos() * radius_x;
                 let across = angle.sin() * radius_y;
                 points.push(LayoutPoint {
