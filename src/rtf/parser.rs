@@ -19285,8 +19285,11 @@ fn round_one_rectangle_shape_points(width_twips: i32, height_twips: i32) -> Vec<
             (1000, 1000),
             (0, 1000),
             (0, 160),
+            (8, 120),
             (20, 90),
+            (42, 58),
             (70, 30),
+            (110, 10),
         ],
     )
 }

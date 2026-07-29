@@ -82544,7 +82544,7 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 10);
-    let expected_point_counts = [7, 10, 10, 11, 5, 6, 6, 4, 6, 28];
+    let expected_point_counts = [10, 10, 10, 11, 5, 6, 6, 4, 6, 28];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -82558,6 +82558,18 @@ fn office_round_snip_frame_and_tear_shapes_render_passively_without_payload_leak
             "round/snip/frame/tear points must stay inside passive frame: {shape:?}"
         );
     }
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.x_twips <= shapes[0].width_twips / 6
+                    && point.y_twips <= shapes[0].height_twips / 6
+            })
+            .count()
+            >= 5,
+        "round-one rectangle should preserve a bounded passive rounded-corner arc"
+    );
     assert_eq!(shapes[7].points[0].x_twips, 0);
     assert_eq!(
         shapes[7].fill_rule,
