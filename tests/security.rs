@@ -83247,7 +83247,7 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
         (StaticShapeKind::Polygon, 34),
         (StaticShapeKind::Polygon, 68),
         (StaticShapeKind::Polygon, 77),
-        (StaticShapeKind::Polygon, 23),
+        (StaticShapeKind::Polygon, 35),
         (StaticShapeKind::Polygon, 44),
         (StaticShapeKind::Polygon, 4),
         (StaticShapeKind::Polygon, 4),
@@ -83360,6 +83360,30 @@ fn office_funnel_arrow_cloud_chart_and_inverse_line_shapes_render_passively_with
             "circular arrow inner arcs must stay inside passive frame: {shape:?}"
         );
     }
+    assert!(
+        shapes[4]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips <= (shapes[4].height_twips * 2) / 3
+                    && point.x_twips <= shapes[4].width_twips
+            })
+            .count()
+            >= 16,
+        "swoosh arrow should preserve a bounded passive upper sweep"
+    );
+    assert!(
+        shapes[4]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips >= shapes[4].height_twips / 2
+                    && point.x_twips <= shapes[4].width_twips
+            })
+            .count()
+            >= 12,
+        "swoosh arrow should preserve a bounded passive lower return edge"
+    );
     assert!(
         shapes[5]
             .points
