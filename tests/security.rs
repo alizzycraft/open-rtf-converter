@@ -82689,7 +82689,7 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 9);
-    let expected_point_counts = [52, 5, 30, 4, 33, 4, 10, 7, 12];
+    let expected_point_counts = [57, 5, 30, 4, 33, 4, 10, 7, 12];
     for (shape, expected_point_count) in shapes.iter().zip(expected_point_counts) {
         assert_eq!(shape.kind, StaticShapeKind::Polygon);
         assert_eq!(shape.points.len(), expected_point_count);
@@ -82703,6 +82703,31 @@ fn office_post_action_shape_group_renders_passively_without_payload_leakage() {
             "post-action shape points must stay inside passive frame: {shape:?}"
         );
     }
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips >= (shapes[0].height_twips * 4) / 5
+                    && point.x_twips >= (shapes[0].width_twips * 2) / 5
+                    && point.x_twips <= (shapes[0].width_twips * 3) / 5
+            })
+            .count()
+            >= 5,
+        "balloon should preserve a bounded passive speech-tail join"
+    );
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| {
+                point.y_twips >= (shapes[0].height_twips * 3) / 4
+                    && point.y_twips < (shapes[0].height_twips * 9) / 10
+            })
+            .count()
+            >= 10,
+        "balloon should preserve bounded passive lower-oval samples"
+    );
     assert_eq!(shapes[1].points[0].x_twips, shapes[1].width_twips / 4);
     assert_eq!(shapes[1].points[3].x_twips, shapes[1].width_twips / 4);
     assert!(
