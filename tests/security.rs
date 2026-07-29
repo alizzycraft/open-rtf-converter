@@ -80256,7 +80256,7 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
     assert!(text.contains("After"));
     assert_eq!(shapes.len(), 3);
     assert_eq!(shapes[0].kind, StaticShapeKind::Polyline);
-    assert_eq!(shapes[0].points.len(), 25);
+    assert_eq!(shapes[0].points.len(), 49);
     assert_eq!(shapes[1].kind, StaticShapeKind::Polygon);
     assert_eq!(shapes[1].points.len(), 12);
     assert_eq!(shapes[2].kind, StaticShapeKind::Polygon);
@@ -80272,6 +80272,25 @@ fn office_arc_double_brace_and_double_bracket_render_passively_without_payload_l
             "arc/double-brace/double-bracket points must stay inside the passive shape frame"
         );
     }
+    assert_eq!(shapes[0].points[0].x_twips, 0);
+    assert_eq!(shapes[0].points[0].y_twips, shapes[0].height_twips);
+    assert_eq!(
+        shapes[0].points.last().unwrap().x_twips,
+        shapes[0].width_twips
+    );
+    assert_eq!(
+        shapes[0].points.last().unwrap().y_twips,
+        shapes[0].height_twips
+    );
+    assert!(
+        shapes[0]
+            .points
+            .iter()
+            .filter(|point| point.y_twips <= shapes[0].height_twips / 8)
+            .count()
+            >= 10,
+        "arc should preserve dense bounded passive samples near the top of the curve"
+    );
     assert!(
         shapes[2]
             .points
