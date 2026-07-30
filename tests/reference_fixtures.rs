@@ -32,6 +32,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/character-typography-passive.rtf",
         "fixtures/section-grid-page-number-passive.rtf",
         "fixtures/table-spacing-autofit-passive.rtf",
+        "fixtures/hyphenation-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -625,6 +626,30 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "table row autofit interpreted through bounded passive table width layout",
                 "table cell spacing rendered as bounded passive border gaps",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/hyphenation-passive.rtf",
+            expected_pages: 5,
+            must_preserve_text: &[
+                "Antidisestabli-",
+                "shmentarian-",
+                "ism",
+                "Characteristically",
+            ],
+            must_not_leak: &[
+                b"hyphauto",
+                b"hyphpar",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/AcroForm",
+            ],
+            must_contain_pdf: &[b"-"],
+            must_emit_diagnostics: &[
+                "document hyphenation rendered as bounded passive soft hyphenation",
+                "paragraph hyphenation rendered as bounded passive soft hyphenation",
             ],
         },
         ReferenceFixture {

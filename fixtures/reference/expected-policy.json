@@ -566,6 +566,43 @@
       ]
     },
     {
+      "id": "hyphenation-passive-soft-breaks",
+      "input": "fixtures/hyphenation-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 5,
+      "must_preserve_text": [
+        "Antidisestabli-",
+        "shmentarian-",
+        "ism",
+        "Characteristically"
+      ],
+      "intentional_security_differences": [
+        "Automatic hyphenation is rendered as bounded passive line-end hyphenation and does not preserve editable Word hyphenation state."
+      ],
+      "expected_diagnostics": [
+        "document hyphenation rendered as bounded passive soft hyphenation",
+        "paragraph hyphenation rendered as bounded passive soft hyphenation"
+      ],
+      "forbidden_pdf_markers": [
+        "hyphauto",
+        "hyphpar",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm"
+      ],
+      "expected_pdf_markers": [
+        "-"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact automatic hyphen break points once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
