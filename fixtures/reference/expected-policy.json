@@ -900,6 +900,62 @@
       ]
     },
     {
+      "id": "generated-counter-fields-passive-numbering",
+      "input": "fixtures/generated-counter-fields-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before generated counters.",
+        "Figure 1 and Figure 2 Table 1",
+        "Reset Figure 4 then 5 repeat 5 hidden  next 7",
+        "Auto Clause 1. Legal 2. Outline 3.",
+        "List Item 1. Sub 1. Named 1. Named next 2. Reset 7. Next 8.",
+        "Visible after generated counters."
+      ],
+      "intentional_security_differences": [
+        "Generated counter fields are resolved into bounded passive text without preserving executable field instructions.",
+        "SEQ hidden and repeat-current switches affect only passive counter state and visible text; raw switches are stripped before PDF rendering.",
+        "AUTONUM and LISTNUM counters are bounded passive approximations and do not preserve Word field state."
+      ],
+      "expected_diagnostics": [
+        "rendering passive field SEQ without executing field instruction",
+        "rendering passive field AUTONUM without executing field instruction",
+        "rendering passive field AUTONUMLGL without executing field instruction",
+        "rendering passive field AUTONUMOUT without executing field instruction",
+        "rendering passive field LISTNUM without executing field instruction"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "SEQ",
+        "AUTONUM",
+        "AUTONUMLGL",
+        "AUTONUMOUT",
+        "LISTNUM",
+        "LegalDefault",
+        "\\r",
+        "\\c",
+        "\\h",
+        "\\l",
+        "\\s",
+        "[Field removed",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact AUTONUM/AUTONUMLGL/AUTONUMOUT and LISTNUM numbering semantics once available."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
