@@ -621,6 +621,73 @@
       ]
     },
     {
+      "id": "environment-layout-clock-fields-passive-placeholders",
+      "input": "fixtures/environment-layout-clock-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before environment fields.",
+        "Size 4096",
+        "Path [Field removed: no passive result]",
+        "Template [Field removed: no passive result]",
+        "User [Field removed: no passive result]",
+        "Initials [Field removed: no passive result]",
+        "Address [Field removed: no passive result]",
+        "Advance after advance.",
+        "Date [Field removed: no passive result]",
+        "Time [Field removed: no passive result]",
+        "Visible after environment fields."
+      ],
+      "intentional_security_differences": [
+        "Host-environment fields render bounded passive placeholders instead of exposing converter file paths, user names, template paths, or address data.",
+        "FILESIZE may render from passive document metadata without preserving the field instruction or host state.",
+        "ADVANCE is stripped without applying hidden text movement.",
+        "DATE and TIME render bounded passive placeholders instead of reading the converter clock."
+      ],
+      "expected_diagnostics": [
+        "rendering passive field FILESIZE without executing field instruction",
+        "environment field FILENAME rendered as passive placeholder without exposing converter host state",
+        "environment field TEMPLATE rendered as passive placeholder without exposing converter host state",
+        "environment field USERNAME rendered as passive placeholder without exposing converter host state",
+        "environment field USERINITIALS rendered as passive placeholder without exposing converter host state",
+        "environment field USERADDRESS rendered as passive placeholder without exposing converter host state",
+        "layout field ADVANCE normalized with no visible passive cursor movement",
+        "dynamic field DATE rendered as passive placeholder without reading converter clock",
+        "dynamic field TIME rendered as passive placeholder without reading converter clock"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "FILESIZE",
+        "FILENAME",
+        "TEMPLATE",
+        "USERNAME",
+        "USERINITIALS",
+        "USERADDRESS",
+        "ADVANCE",
+        "DATE",
+        "TIME",
+        "nofbytes",
+        "host-sentinel",
+        "Users\\",
+        "open-rtf-converter",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm FILESIZE numeric formatting; current passive output preserves the metadata value without the requested thousands separator."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
