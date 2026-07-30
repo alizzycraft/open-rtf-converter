@@ -29,7 +29,7 @@ impl Default for ConvertOptions {
         Self {
             diagnostics: false,
             parse_options: RtfParseOptions::default(),
-            font_provider: FontProvider::default(),
+            font_provider: FontProvider::browser_safe_defaults(),
         }
     }
 }
