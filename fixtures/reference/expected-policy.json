@@ -751,6 +751,77 @@
       ]
     },
     {
+      "id": "document-property-fields-passive-metadata",
+      "input": "fixtures/document-property-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before document properties.",
+        "Doc Safe title",
+        "tail / Alice",
+        "Shortcuts Safe title",
+        "tail / Alice / Bob / Comment text",
+        "Extended Alice Manager / Contoso",
+        "tail / Internal Use",
+        "Numeric revision 42 edit 17 paragraphs 3 lines 12 bytes 4096",
+        "Visible after document properties."
+      ],
+      "intentional_security_differences": [
+        "Document property fields render passive metadata values without preserving executable field instructions.",
+        "Nested active content inside metadata is stripped before the safe model reaches PDF rendering.",
+        "Shortcut document property fields render passive metadata text instead of preserving Word field behavior."
+      ],
+      "expected_diagnostics": [
+        "rendering passive field DOCPROPERTY without executing field instruction",
+        "rendering passive field TITLE without executing field instruction",
+        "rendering passive field AUTHOR without executing field instruction",
+        "rendering passive field LASTSAVEDBY without executing field instruction",
+        "rendering passive field COMMENTS without executing field instruction",
+        "rendering passive field MANAGER without executing field instruction",
+        "rendering passive field COMPANY without executing field instruction",
+        "rendering passive field CATEGORY without executing field instruction"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "DOCPROPERTY",
+        "LASTSAVEDBY",
+        "COMMENTS",
+        "MANAGER",
+        "COMPANY",
+        "CATEGORY",
+        "HYPERLINK",
+        "https://example.com",
+        "Hidden link",
+        "Hidden company",
+        "Revision Number",
+        "Total Editing Time",
+        "Number of Paragraphs",
+        "Number of Lines",
+        "Number of Bytes",
+        "version",
+        "edmins",
+        "nofparas",
+        "noflines",
+        "nofbytes",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact metadata field formatting and spacing once available.",
+        "Current passive output preserves metadata values but does not apply requested uppercase, Roman numeral, zero-padding, or thousands-separator switches in this fixture."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
