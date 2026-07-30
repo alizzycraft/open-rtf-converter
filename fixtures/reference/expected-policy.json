@@ -2269,6 +2269,46 @@
       ]
     },
     {
+      "id": "symbol-font-passive-glyph-decoding",
+      "input": "fixtures/symbol-font-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before Symbol font.",
+        "Symbol glyphs",
+        "After Symbol font."
+      ],
+      "intentional_security_differences": [
+        "Legacy Symbol font bytes are normalized into bounded passive Unicode text and emitted through passive PDF Symbol encoding.",
+        "Raw font table, charset, font-name, and source hex escape metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "fcharset2",
+        "Symbol;",
+        "'b7",
+        "'a3",
+        "'b1",
+        "'d6",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact Symbol glyph mapping, font metrics, and PDF text extraction behavior once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
