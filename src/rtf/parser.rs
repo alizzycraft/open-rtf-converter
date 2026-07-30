@@ -5198,6 +5198,7 @@ impl Parser {
                 self.state.character.character_scaling_percent =
                     self.clamp_character_scaling(control.parameter.unwrap_or(100), offset);
             }
+            "fittext" => self.set_character_fit_text(control.parameter, offset),
             "plain" => self.state.character = self.default_character_style(),
             "fs" | "afs" => {
                 self.state.character.font_size_half_points =
@@ -6896,6 +6897,27 @@ impl Parser {
             ));
         }
         clamped
+    }
+
+    fn set_character_fit_text(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0).max(0);
+        self.state.character.fit_text_width_twips = if value == 0 {
+            None
+        } else {
+            Some(self.clamp_page_value(
+                value,
+                1,
+                self.limits().max_page_dimension_twips.max(1),
+                "character fit-text width",
+                offset,
+            ))
+        };
+        if self.state.character.fit_text_width_twips.is_some() {
+            self.diagnostics.push(Diagnostic::warning(
+                "character fit-text rendered as bounded passive horizontal scaling",
+                Some(offset),
+            ));
+        }
     }
 
     fn clamp_character_shading(&mut self, value: i32, offset: usize) -> i32 {
@@ -23649,6 +23671,9 @@ fn inherit_character_style(base: &CharacterStyle, derived: &CharacterStyle) -> C
     if output.character_scaling_percent == default.character_scaling_percent {
         output.character_scaling_percent = base.character_scaling_percent;
     }
+    if output.fit_text_width_twips == default.fit_text_width_twips {
+        output.fit_text_width_twips = base.fit_text_width_twips;
+    }
     if output.font_index == default.font_index {
         output.font_index = base.font_index;
     }
@@ -23794,6 +23819,7 @@ fn is_visible_non_destination_control(name: &str) -> bool {
             | "aexpnd"
             | "kerning"
             | "charscalex"
+            | "fittext"
             | "chcbpat"
             | "chshdng"
             | "plain"
@@ -51043,6 +51069,54 @@ After\par}"#;
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("character scaling clamped"))
+        );
+    }
+
+    #[test]
+    fn normalizes_character_fit_text_as_safe_layout_metadata() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_page_dimension_twips: 720,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\fittext360 fitted \fittext0 plain \fittext9999 clamped\par}",
+            &options,
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let style_for = |text: &str| {
+            paragraph
+                .runs
+                .iter()
+                .find(|run| run.text.trim() == text)
+                .map(|run| &run.style)
+                .unwrap_or_else(|| panic!("missing run {text}"))
+        };
+
+        assert_eq!(style_for("fitted").fit_text_width_twips, Some(360));
+        assert_eq!(style_for("plain").fit_text_width_twips, None);
+        assert_eq!(style_for("clamped").fit_text_width_twips, Some(720));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("character fit-text rendered as bounded passive horizontal scaling")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("character fit-text width clamped")
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
     }
 

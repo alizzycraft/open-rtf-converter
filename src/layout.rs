@@ -8508,6 +8508,14 @@ fn push_segment(
         segment.tab_leader = next_tab_leader(line.width, paragraph_style);
         segment.tab_alignment = next_tab_alignment(line.width, paragraph_style);
         segment.tab_stop_position = Some(next_tab_position(line.width, paragraph_style, document));
+    } else {
+        apply_fit_text_scaling_to_segment(
+            &mut segment,
+            line.width,
+            paragraph_style,
+            document,
+            font_provider,
+        );
     }
     segment.width = measure_flow_run(
         &segment,
@@ -8524,6 +8532,45 @@ fn push_segment(
         .height
         .max(flow_run_line_height(&segment, document, font_provider));
     line.runs.push(segment);
+}
+
+fn apply_fit_text_scaling_to_segment(
+    segment: &mut FlowRun,
+    current_line_width: f32,
+    paragraph_style: &ParagraphStyle,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) {
+    let Some(target_twips) = segment.style.fit_text_width_twips else {
+        return;
+    };
+    if target_twips <= 0
+        || segment.text.is_empty()
+        || is_passive_advance_marker(&segment.text)
+        || parse_bookmark_page_marker_id(&segment.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
+        || parse_bookmark_page_marker_id(&segment.text, BOOKMARK_PAGE_REF_MARKER).is_some()
+    {
+        return;
+    }
+
+    let mut measured_segment = segment.clone();
+    measured_segment.style.fit_text_width_twips = None;
+    let measured_width = measure_flow_run(
+        &measured_segment,
+        current_line_width,
+        paragraph_style,
+        document,
+        font_provider,
+    );
+    if measured_width <= 0.0 {
+        return;
+    }
+
+    let target_width = twips_to_points(target_twips).max(0.1);
+    let scaled = (segment.style.character_scaling_percent as f32 * target_width / measured_width)
+        .round()
+        .clamp(1.0, 600.0);
+    segment.style.character_scaling_percent = scaled as i32;
 }
 
 fn adjust_pending_aligned_tab(
@@ -16782,6 +16829,38 @@ mod tests {
             .expect("scaled text");
 
         assert_eq!(fragment.style.character_scaling_percent, 150);
+    }
+
+    #[test]
+    fn fit_text_width_scales_run_to_bounded_passive_target() {
+        let target_twips = 360;
+        let target_width = twips_to_points(target_twips);
+        let mut fit_style = CharacterStyle::default();
+        fit_style.fit_text_width_twips = Some(target_twips);
+        let raw_width = measure_text("FittedText", &CharacterStyle::default());
+
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "FittedText".to_string(),
+                style: fit_style,
+            }],
+        })];
+        let layout = LayoutEngine::layout(&document);
+        let fragment = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "FittedText" => Some(fragment),
+                _ => None,
+            })
+            .expect("fit-text fragment");
+        let rendered_width = measure_text("FittedText", &fragment.style);
+
+        assert!(fragment.style.character_scaling_percent < 100);
+        assert!((rendered_width - target_width).abs() < 0.75);
+        assert!(rendered_width < raw_width);
     }
 
     #[test]

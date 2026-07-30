@@ -19735,7 +19735,7 @@ fn ignorable_marker_before_associated_character_control_preserves_visible_text_w
 
 #[test]
 fn ignorable_marker_before_passive_character_controls_preserves_visible_text_without_leakage() {
-    let input = br"{\rtf1{\colortbl;\red0\green0\blue0;\red255\green0\blue0;}{\*\uldb\ulc2\outl\shad\accdot\expndtw40\kerning2\charscalex125 Visible styled text{\object\objdata 414243}}\par After\par}".to_vec();
+    let input = br"{\rtf1{\colortbl;\red0\green0\blue0;\red255\green0\blue0;}{\*\uldb\ulc2\outl\shad\accdot\expndtw40\kerning2\charscalex125\fittext720 Visible styled text{\object\objdata 414243}}\par After\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("Visible styled text"));
@@ -19749,6 +19749,7 @@ fn ignorable_marker_before_passive_character_controls_preserves_visible_text_wit
         "expndtw40",
         "kerning2",
         "charscalex125",
+        "fittext720",
         "objdata",
         "414243",
     ] {
@@ -19783,6 +19784,20 @@ fn ignorable_marker_before_passive_character_controls_preserves_visible_text_wit
     assert_eq!(visible.style.character_spacing_twips, 40);
     assert_eq!(visible.style.character_kerning_half_points, 2);
     assert_eq!(visible.style.character_scaling_percent, 125);
+    assert_eq!(visible.style.fit_text_width_twips, Some(720));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("character fit-text rendered as bounded passive horizontal scaling")
+    }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "passive character controls should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -19812,6 +19827,7 @@ fn ignorable_marker_before_passive_character_controls_preserves_visible_text_wit
         b"expndtw40",
         b"kerning2",
         b"charscalex125",
+        b"fittext720",
         b"objdata",
         b"414243",
         b"/JavaScript",
