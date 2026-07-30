@@ -1350,6 +1350,47 @@
       ]
     },
     {
+      "id": "shape-line-dashing-passive-stroke",
+      "input": "fixtures/shape-line-dashing-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before dashed line.",
+        "After dashed line."
+      ],
+      "intentional_security_differences": [
+        "Office drawing dash metadata is normalized into bounded passive PDF stroke geometry and never preserved as editable shape metadata.",
+        "Unsupported or active drawing payload properties adjacent to line dashing are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "dpline",
+        "dpx360",
+        "dpy480",
+        "dpxsize1440",
+        "dpysize720",
+        "lineDashing",
+        "dashDot",
+        "pFragments",
+        "hostile-line-dashing-reference-payload",
+        "[Shape skipped",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact dash-dot pattern length, phase, and stroke endpoint behavior once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
