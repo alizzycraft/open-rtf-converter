@@ -2651,6 +2651,59 @@
       ]
     },
     {
+      "id": "active-control-fields-passive-placeholders",
+      "input": "fixtures/active-control-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before active controls.",
+        "Button [Field removed: no passive result]",
+        "Checkbox [Field removed: no passive result]",
+        "Input [Field removed: no passive result]",
+        "Select [Field removed: no passive result]",
+        "Visible after active controls."
+      ],
+      "intentional_security_differences": [
+        "Active CONTROL and HTML form fields are replaced with bounded passive placeholders instead of creating controls, forms, links, or actions.",
+        "Raw control instructions, captions, names, form values, and active PDF form/action features are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "active control field CONTROL rendered as passive placeholder without creating active form or control content",
+        "active control field HTMLCHECKBOX rendered as passive placeholder without creating active form or control content",
+        "active control field HTMLINPUT rendered as passive placeholder without creating active form or control content",
+        "active control field HTMLSELECT rendered as passive placeholder without creating active form or control content"
+      ],
+      "forbidden_pdf_markers": [
+        "CONTROL",
+        "HTMLCHECKBOX",
+        "HTMLINPUT",
+        "HTMLSELECT",
+        "Forms.CommandButton",
+        "Hidden caption",
+        "secret-name",
+        "password",
+        "value=",
+        "Secret option",
+        "fldinst",
+        "/AcroForm",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm surrounding text flow and placeholder positioning for active control fields once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
