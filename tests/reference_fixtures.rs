@@ -27,6 +27,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/floating-table-positioning.rtf",
         "fixtures/office-math-passive.rtf",
         "fixtures/field-hyperlink-passive.rtf",
+        "fixtures/line-numbering-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -493,6 +494,26 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "rendering stored result for field HYPERLINK without executing field instruction",
                 "external field INCLUDEPICTURE rendered as passive placeholder without fetching external resource",
             ],
+        },
+        ReferenceFixture {
+            input: "fixtures/line-numbering-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "1Numbered first line.",
+                "2Numbered second line.",
+                "3Numbered third line.",
+            ],
+            must_not_leak: &[
+                b"linemod",
+                b"linex",
+                b"lineppage",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &["line numbering rendered as bounded passive margin text"],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",

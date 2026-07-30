@@ -374,6 +374,39 @@
       ]
     },
     {
+      "id": "line-numbering-passive-margin-text",
+      "input": "fixtures/line-numbering-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "1Numbered first line.",
+        "2Numbered second line.",
+        "3Numbered third line."
+      ],
+      "intentional_security_differences": [
+        "Line numbers are rendered as bounded passive margin text, not as editable Word layout state."
+      ],
+      "expected_diagnostics": [
+        "line numbering rendered as bounded passive margin text"
+      ],
+      "forbidden_pdf_markers": [
+        "linemod",
+        "linex",
+        "lineppage",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact line-number margin offset and restart behavior once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
