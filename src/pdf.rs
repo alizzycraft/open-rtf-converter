@@ -9147,6 +9147,7 @@ endstream
                 alignment: crate::model::TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,

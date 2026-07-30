@@ -4394,6 +4394,51 @@ fn layout_table(
         let top_margin = row_wrap_margins.top.max(0.0);
         let bottom_margin = row_wrap_margins.bottom.max(0.0);
 
+        if row.keep_with_next
+            && !pages.last().is_none_or(|page| page.items.is_empty())
+            && let Some(next_row) = next_row
+        {
+            let next_prepared = prepare_table_row(
+                next_row,
+                &column_widths,
+                content_width / column_count as f32,
+                &current_marker_context(pages, document_stats),
+                document,
+                font_provider,
+            );
+            let next_margins = table_row_wrap_margin_points(next_row);
+            let kept_height = top_offset
+                + top_margin
+                + prepared.row_height
+                + bottom_margin
+                + next_margins.top.max(0.0)
+                + next_prepared.row_height
+                + next_margins.bottom.max(0.0);
+            let usable_height = (geometry.height - geometry.margin_top - margin_bottom).max(0.0);
+            if kept_height <= usable_height && *cursor_y - kept_height < margin_bottom {
+                advance_column_or_page(pages, cursor_y, geometry, current_column);
+                margin_left = geometry.body_left(*current_column);
+
+                if !row.repeat_header {
+                    push_repeating_table_headers(
+                        pages,
+                        cursor_y,
+                        &header_rows,
+                        &column_widths,
+                        content_width,
+                        column_count,
+                        margin_bottom,
+                        margin_left,
+                        table_width,
+                        document,
+                        document_stats,
+                        font_provider,
+                        table.borders_visible,
+                    );
+                }
+            }
+        }
+
         if should_split_tall_table_row(row, &prepared, *geometry, margin_bottom) {
             if *cursor_y - 14.0 < margin_bottom {
                 advance_column_or_page(pages, cursor_y, geometry, current_column);
@@ -13125,6 +13170,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -13224,6 +13270,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13275,6 +13322,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13334,6 +13382,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13400,6 +13449,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13485,6 +13535,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13626,6 +13677,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -13721,6 +13773,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -13781,6 +13834,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -13834,6 +13888,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -13917,6 +13972,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -13965,6 +14021,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14022,6 +14079,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -14098,6 +14156,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -14157,6 +14216,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14210,6 +14270,7 @@ mod tests {
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14287,6 +14348,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14382,6 +14444,7 @@ mod tests {
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14490,6 +14553,7 @@ mod tests {
                     alignment: TableRowAlignment::Center,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14520,6 +14584,7 @@ mod tests {
                     alignment: TableRowAlignment::Right,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14572,6 +14637,7 @@ mod tests {
                 alignment,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14653,6 +14719,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14713,6 +14780,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -14840,6 +14908,7 @@ mod tests {
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14870,6 +14939,7 @@ mod tests {
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14939,6 +15009,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14990,6 +15061,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15045,6 +15117,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15115,6 +15188,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -15182,6 +15256,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -15284,6 +15359,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -15383,6 +15459,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -15493,6 +15570,7 @@ mod tests {
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![
                         TableCell {
                             shading_color_index: Some(1),
@@ -15545,6 +15623,7 @@ mod tests {
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![
                         TableCell {
                             shading_color_index: None,
@@ -15640,6 +15719,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15692,6 +15772,67 @@ mod tests {
     }
 
     #[test]
+    fn table_row_keep_with_next_starts_pair_on_next_page_when_pair_would_split() {
+        fn row(text: &str, keep_with_next: bool) -> TableRow {
+            TableRow {
+                height_twips: Some(720),
+                left_offset_twips: 0,
+                vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
+                cell_gap_twips: 60,
+                alignment: TableRowAlignment::Left,
+                repeat_header: false,
+                keep_together: false,
+                keep_with_next,
+                cells: vec![TableCell {
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: crate::model::ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    spacing: Default::default(),
+                    borders: TableCellBorders::default(),
+                    fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                    paragraphs: vec![Paragraph {
+                        style: Default::default(),
+                        runs: vec![Run {
+                            text: text.to_string(),
+                            style: Default::default(),
+                        }],
+                    }],
+                }],
+            }
+        }
+
+        let mut document = small_test_page_document();
+        document.blocks = vec![Block::Table(Table {
+            rows: vec![
+                row("Filler 1", false),
+                row("Filler 2", false),
+                row("Filler 3", false),
+                row("Keep follow", true),
+                row("Follower", false),
+            ],
+            column_widths_twips: vec![2_880],
+            borders_visible: true,
+            preserve_authored_widths: false,
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let first_page_text = layout_text(&layout.pages[0]);
+        let second_page_text = layout_text(&layout.pages[1]);
+
+        assert!(layout.pages.len() >= 2);
+        assert!(first_page_text.contains("Filler 3"));
+        assert!(!first_page_text.contains("Keep follow"));
+        assert!(second_page_text.contains("Keep follow"));
+        assert!(second_page_text.contains("Follower"));
+    }
+
+    #[test]
     fn splits_tall_auto_height_table_rows_across_pages() {
         fn row(text: String, repeat_header: bool) -> TableRow {
             TableRow {
@@ -15703,6 +15844,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15765,6 +15907,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15822,6 +15965,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -17256,6 +17400,7 @@ mod tests {
                 alignment: Default::default(),
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 5_000,
@@ -17541,6 +17686,7 @@ mod tests {
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![TableCell {
                         shading_color_index: Some(1),
                         shading_basis_points: 5_000,
@@ -17633,6 +17779,7 @@ mod tests {
                     alignment: TableRowAlignment::Left,
                     repeat_header: false,
                     keep_together: false,
+                    keep_with_next: false,
                     cells: vec![TableCell {
                         shading_color_index: Some(1),
                         shading_basis_points: 10_000,
@@ -17877,6 +18024,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -18284,6 +18432,7 @@ mod tests {
                 alignment: TableRowAlignment::Left,
                 repeat_header: false,
                 keep_together: false,
+                keep_with_next: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,

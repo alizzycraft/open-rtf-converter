@@ -665,6 +665,7 @@ struct TableRowBuilder {
     alignment: TableRowAlignment,
     repeat_header: bool,
     keep_together: bool,
+    keep_with_next: bool,
     right_to_left: bool,
     current_cell_paragraphs: Vec<Paragraph>,
     current_cell_paragraph: Paragraph,
@@ -4820,11 +4821,7 @@ impl Parser {
                 self.set_current_table_row_keep_together(control.parameter.unwrap_or(1) != 0)
             }
             "trkeepfollow" => {
-                self.set_current_table_row_keep_together(control.parameter.unwrap_or(1) != 0);
-                self.diagnostics.push(Diagnostic::warning(
-                    "table row keep-with-following approximated as bounded passive keep-together pagination",
-                    Some(offset),
-                ));
+                self.set_current_table_row_keep_with_next(control.parameter.unwrap_or(1) != 0);
             }
             "trftsWidth" => self.set_current_table_row_preferred_width_unit(control.parameter),
             "trwWidth" => self.set_current_table_row_preferred_width(control.parameter),
@@ -10835,6 +10832,7 @@ impl Parser {
             alignment: TableRowAlignment::Left,
             repeat_header: false,
             keep_together: false,
+            keep_with_next: false,
             right_to_left: false,
             current_cell_paragraphs: Vec::new(),
             current_cell_paragraph: Paragraph {
@@ -12034,6 +12032,12 @@ impl Parser {
         }
     }
 
+    fn set_current_table_row_keep_with_next(&mut self, keep_with_next: bool) {
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.keep_with_next = keep_with_next;
+        }
+    }
+
     fn finish_table_cell(&mut self, offset: usize) -> Result<(), ParseError> {
         let max_table_cells = self.limits().max_table_cells;
         let page_content_width_twips = self.current_page_content_width_twips();
@@ -12228,6 +12232,7 @@ impl Parser {
             alignment: row.alignment,
             repeat_header: row.repeat_header,
             keep_together: row.keep_together,
+            keep_with_next: row.keep_with_next,
         });
         Ok(())
     }
@@ -43906,7 +43911,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_table_row_keep_following_as_passive_keep_together_approximation() {
+    fn normalizes_table_row_keep_following_as_passive_keep_next_metadata() {
         let output = parse_rtf(
             r"{\rtf1\trowd\trkeepfollow\cellx2000 Kept\cell\row\trowd\trkeepfollow0\cellx2000 Normal\cell\row}",
         )
@@ -43916,16 +43921,18 @@ mod tests {
             _ => panic!("expected table block"),
         };
 
-        assert!(table.rows[0].keep_together);
+        assert!(!table.rows[0].keep_together);
+        assert!(table.rows[0].keep_with_next);
         assert!(!table.rows[1].keep_together);
+        assert!(!table.rows[1].keep_with_next);
         assert!(
             output
                 .diagnostics
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
-        assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic
+        assert!(output.diagnostics.iter().all(|diagnostic| {
+            !diagnostic
                 .message
                 .contains("table row keep-with-following approximated")
         }));

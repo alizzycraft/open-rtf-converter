@@ -2156,7 +2156,7 @@ fn table_row_keep_together_renders_passively_without_control_leakage() {
 }
 
 #[test]
-fn table_row_keep_following_is_bounded_passive_approximation_without_control_leakage() {
+fn table_row_keep_following_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
         "\\",
@@ -2197,11 +2197,13 @@ fn table_row_keep_following_is_bounded_passive_approximation_without_control_lea
     assert!(text.contains("Kept follow"));
     assert!(text.contains("Normal follow"));
     assert!(text.contains("explicit-payload"));
-    assert!(table.rows[0].keep_together);
+    assert!(!table.rows[0].keep_together);
+    assert!(table.rows[0].keep_with_next);
     assert!(!table.rows[1].keep_together);
+    assert!(!table.rows[1].keep_with_next);
     assert!(!text.contains("trkeepfollow"));
-    assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
+    assert!(parsed.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
             .message
             .contains("table row keep-with-following approximated")
     }));
