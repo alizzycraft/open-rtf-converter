@@ -23160,6 +23160,9 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
         "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
             Some("section text grid interpreted through bounded passive paragraph layout")
         }
+        "dxfrtext" | "dfrmtxtx" | "dfrmtxty" => {
+            Some("paragraph wrap distance interpreted through bounded passive flow layout")
+        }
         "lytexcttp" | "lytprtmet" | "noextrasprl" | "notcvasp" | "notvatxbx" | "expshrtn"
         | "useltbaln" | "htmautsp" | "wraptrsp" | "sprsspbf" | "sprsbsp" | "nooverflow"
         | "wpjst" | "wpbrdr" | "otblrul" => {
