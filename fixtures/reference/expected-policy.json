@@ -1023,6 +1023,66 @@
       ]
     },
     {
+      "id": "literal-control-drawing-fields-passive-resolution",
+      "input": "fixtures/literal-control-drawing-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before literal and drawing fields.",
+        "Quote Visible quoted text unicode",
+        "formatted MIXED CASE",
+        "If safe Greater false Different formatted Checked Status",
+        "Compare safe 1 false 0 roman I",
+        "Macro Visible button text unsafe literal [Field removed: no passive result] unsafe macro [Field removed: no passive result]",
+        "Stored shape Visible drawing fallback resultless shape [Field removed: no passive result]",
+        "Visible after literal and drawing fields."
+      ],
+      "intentional_security_differences": [
+        "QUOTE, IF, COMPARE, and MACROBUTTON render only bounded passive literal text derived from safe field instructions.",
+        "Literal field results containing active PDF markers render bounded placeholders instead of preserving hidden payload text.",
+        "MACROBUTTON display text is rendered without executing macros or creating PDF actions.",
+        "SHAPE fields use safe stored results or bounded placeholders and never synthesize or preserve active drawing canvas behavior."
+      ],
+      "expected_diagnostics": [
+        "rendering passive field QUOTE without executing field instruction",
+        "rendering passive field IF without executing field instruction",
+        "rendering passive field COMPARE without executing field instruction",
+        "rendering passive field MACROBUTTON without executing field instruction",
+        "rendering stored result for field SHAPE without executing field instruction",
+        "drawing field SHAPE rendered as passive placeholder without synthesizing drawing canvas output"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "fldrslt",
+        "QUOTE",
+        "COMPARE",
+        "MACROBUTTON",
+        "SHAPE",
+        "MERGEFORMAT",
+        "LaunchPayload",
+        "mixed Case",
+        "Upper",
+        "Caps",
+        "ROMAN",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact QUOTE/IF/COMPARE/MACROBUTTON spacing, case switch behavior, and SHAPE stored-result placement once available."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
