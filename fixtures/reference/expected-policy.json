@@ -1083,6 +1083,73 @@
       ]
     },
     {
+      "id": "timestamp-stat-fields-passive-metadata",
+      "input": "fixtures/timestamp-stat-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before timestamp stats.",
+        "Created Friday, July 5, 2024 at 2:30 P saved Thu 2025-01-02 9:04 a printed 12/31/26 bad saved [Field removed: no passive result]",
+        "Edit XLII edit raw 0042 missing edit 42",
+        "Revision XII revision raw 0012 missing revision 12",
+        "Dynamic date [Field removed: no passive result] time [Field removed: no passive result]",
+        "Visible after timestamp stats."
+      ],
+      "intentional_security_differences": [
+        "CREATEDATE, SAVEDATE, PRINTDATE, EDITTIME, and REVNUM render only from bounded passive document metadata.",
+        "Unsupported timestamp picture tokens render bounded placeholders instead of preserving raw field instructions.",
+        "Dynamic DATE and TIME fields render bounded placeholders instead of reading the converter host clock.",
+        "Nested active content inside metadata is stripped before the safe model reaches PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "active content removed: field instruction in metadata before safe model normalization",
+        "rendering passive field CREATEDATE without executing field instruction",
+        "rendering passive field SAVEDATE without executing field instruction",
+        "rendering passive field PRINTDATE without executing field instruction",
+        "field SAVEDATE has no stored result and was not evaluated dynamically",
+        "rendering passive field EDITTIME without executing field instruction",
+        "rendering passive field REVNUM without executing field instruction",
+        "dynamic field DATE rendered as passive placeholder without reading converter clock",
+        "dynamic field TIME rendered as passive placeholder without reading converter clock"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "CREATEDATE",
+        "SAVEDATE",
+        "PRINTDATE",
+        "EDITTIME",
+        "REVNUM",
+        "DATE",
+        "TIME",
+        "creatim",
+        "revtim",
+        "printim",
+        "edmins",
+        "version",
+        "unknown-token",
+        "host-sentinel",
+        "HYPERLINK",
+        "https://example.com",
+        "Hidden title",
+        "Hidden link",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact date/time picture formatting, missing timestamp fallback behavior, and metadata-derived edit/revision formatting once available."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
