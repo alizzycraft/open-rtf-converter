@@ -1111,6 +1111,48 @@
       ]
     },
     {
+      "id": "font-family-hints-passive-substitution",
+      "input": "fixtures/font-family-hints-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Roman family text.",
+        "Modern family text.",
+        "Theme heading text.",
+        "Theme body text."
+      ],
+      "intentional_security_differences": [
+        "Font family and theme hints are mapped to bounded passive base-font substitution without depending on system fonts or copying font metadata into the PDF.",
+        "No embedded font file or platform font discovery is required, preserving WASM-compatible core behavior."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "fonttbl",
+        "froman",
+        "fmodern",
+        "flomajor",
+        "fhiminor",
+        "Mystery Serif",
+        "Mystery Mono",
+        "Mystery Heading",
+        "Mystery Body",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact family/theme font substitution metrics once bundled or caller-provided fonts are available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",

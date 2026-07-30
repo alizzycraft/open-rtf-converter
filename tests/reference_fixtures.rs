@@ -45,6 +45,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/section-number-passive.rtf",
         "fixtures/picture-scaling-passive.rtf",
         "fixtures/associated-character-passive.rtf",
+        "fixtures/font-family-hints-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1006,6 +1007,36 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "active content removed: OLE object before safe model normalization",
             ],
+        },
+        ReferenceFixture {
+            input: "fixtures/font-family-hints-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Roman family text.",
+                "Modern family text.",
+                "Theme heading text.",
+                "Theme body text.",
+            ],
+            must_not_leak: &[
+                b"fonttbl",
+                b"froman",
+                b"fmodern",
+                b"flomajor",
+                b"fhiminor",
+                b"Mystery Serif",
+                b"Mystery Mono",
+                b"Mystery Heading",
+                b"Mystery Body",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",
