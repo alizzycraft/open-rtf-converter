@@ -3379,6 +3379,73 @@
       ]
     },
     {
+      "id": "form-text-dropdown-passive-values",
+      "input": "fixtures/form-text-dropdown-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before form text and dropdown fields.",
+        "Stored text Visible stored value",
+        "Default text Default",
+        "value empty text [Field removed: no passive result]",
+        "Dropdown Second",
+        "choice",
+        "Visible after form text and dropdown fields."
+      ],
+      "intentional_security_differences": [
+        "FORMTEXT fields render stored results or bounded passive defaults without creating PDF form widgets.",
+        "FORMDROPDOWN fields render the selected bounded passive list entry without creating interactive PDF controls.",
+        "Raw form field metadata, macro hooks, datafield payloads, and active PDF form/action features are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "rendering stored result for passive form field FORMTEXT without creating PDF form actions",
+        "rendering passive form field FORMTEXT without creating PDF form actions",
+        "field FORMTEXT has no stored result and was not evaluated dynamically",
+        "rendering passive form field FORMDROPDOWN without creating PDF form actions"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "fldrslt",
+        "FORMTEXT",
+        "FORMDROPDOWN",
+        "formfield",
+        "fftype",
+        "ffname",
+        "ffdeftext",
+        "ffdefres",
+        "ffres",
+        "ffl",
+        "HiddenStored",
+        "HiddenDefault",
+        "HiddenText",
+        "EmptyText",
+        "HiddenDrop",
+        "First choice",
+        "launch.exe",
+        "https://example.com",
+        "datafield",
+        "414243",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Widget",
+        "/AA"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact FORMTEXT default spacing, Unicode form value glyph rendering, and FORMDROPDOWN selected-entry spacing once available."
+      ]
+    },
+    {
       "id": "active-control-fields-passive-placeholders",
       "input": "fixtures/active-control-fields-passive.rtf",
       "category": "intentional_security_difference",
