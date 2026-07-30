@@ -2011,6 +2011,42 @@
       ]
     },
     {
+      "id": "font-charset-greek-passive-decoding",
+      "input": "fixtures/font-charset-greek-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before Greek charset.",
+        "Greek",
+        "After Greek charset."
+      ],
+      "intentional_security_differences": [
+        "Greek font charset metadata guides bounded passive hex-escape decoding and Symbol-compatible PDF text encoding.",
+        "Raw font table, code-page, charset, and font-name metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "fcharset161",
+        "Times New Roman Greek",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact Greek charset glyph mapping, font fallback metrics, and Symbol-compatible text encoding once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
