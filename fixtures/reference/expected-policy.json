@@ -290,6 +290,48 @@
       ]
     },
     {
+      "id": "office-math-passive-text",
+      "input": "fixtures/office-math-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before math.",
+        "E=mc2",
+        "x+1",
+        "y",
+        "after math."
+      ],
+      "intentional_security_differences": [
+        "Office math is rendered as bounded passive text and passive layout marks, not as an active equation object.",
+        "Object payloads adjacent to math content are stripped and never copied into the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "Office math rendered as bounded passive math text",
+        "active content removed: OLE object before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "mmath",
+        "moMath",
+        "mtext",
+        "msup",
+        "mnum",
+        "mden",
+        "xmlopen",
+        "hidden-office-math-reference-payload",
+        "objdata",
+        "414243",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact superscript baseline and fraction visual layout once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",

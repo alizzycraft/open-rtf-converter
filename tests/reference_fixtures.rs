@@ -25,6 +25,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/windows-bitmap.rtf",
         "fixtures/static-shape-wrap.rtf",
         "fixtures/floating-table-positioning.rtf",
+        "fixtures/office-math-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -436,6 +437,30 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "floating table horizontal position interpreted as bounded passive row offset",
                 "floating table vertical position interpreted as bounded passive row offset",
                 "floating table wrap distance interpreted as bounded passive row margin",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/office-math-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before math.", "E=mc2", "x+1", "y", "after math."],
+            must_not_leak: &[
+                b"mmath",
+                b"moMath",
+                b"mtext",
+                b"msup",
+                b"mnum",
+                b"mden",
+                b"xmlopen",
+                b"hidden-office-math-reference-payload",
+                b"objdata",
+                b"414243",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "Office math rendered as bounded passive math text",
+                "active content removed: OLE object before safe model normalization",
             ],
         },
         ReferenceFixture {
