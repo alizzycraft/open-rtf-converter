@@ -852,6 +852,54 @@
       ]
     },
     {
+      "id": "shading-patterns-passive-fill",
+      "input": "fixtures/shading-patterns-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Patterned paragraph.",
+        "Row shade",
+        "Cell shade",
+        "After shading."
+      ],
+      "intentional_security_differences": [
+        "Paragraph, row, and cell shading controls are normalized into bounded passive fill and pattern drawing commands."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "colortbl",
+        "red255",
+        "green0",
+        "blue255",
+        "cbpat",
+        "cfpat",
+        "shading2500",
+        "bghoriz",
+        "trcbpat",
+        "trcfpat",
+        "trshdng",
+        "trbgvert",
+        "clcbpat",
+        "clcfpat",
+        "clshdng",
+        "clbgdkdcross",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact paragraph/table shading color, density, and pattern line placement once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
