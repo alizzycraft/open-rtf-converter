@@ -1434,6 +1434,50 @@
       ]
     },
     {
+      "id": "shape-line-join-passive-stroke",
+      "input": "fixtures/shape-line-join-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before joined line.",
+        "After joined line."
+      ],
+      "intentional_security_differences": [
+        "Office drawing line join metadata is normalized into bounded passive PDF stroke geometry and never preserved as editable shape metadata.",
+        "Unsupported or active drawing payload properties adjacent to line joins are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
+      ],
+      "forbidden_pdf_markers": [
+        "dppolyline",
+        "dpptx360",
+        "dppty480",
+        "dpptx1440",
+        "dppty1200",
+        "lineWidth",
+        "lineJoinStyle",
+        "round",
+        "pFragments",
+        "hostile-line-join-reference-payload",
+        "[Shape skipped",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact round join radius, miter fallback behavior, and polyline stroke geometry once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
