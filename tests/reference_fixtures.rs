@@ -23,6 +23,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/png-alpha.rtf",
         "fixtures/png-trns.rtf",
         "fixtures/windows-bitmap.rtf",
+        "fixtures/static-shape-wrap.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -374,6 +375,33 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_contain_pdf: &[b"/Subtype /Image"],
             must_emit_diagnostics: &[
                 "Windows bitmap picture rendered as bounded passive RGB image",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/static-shape-wrap.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before wrapped static shape.",
+                "Wrapped static shape text should flow beside the passive frame",
+                "After wrapped static shape.",
+            ],
+            must_not_leak: &[
+                b"shpinst",
+                b"shpleft",
+                b"shptop",
+                b"shpright",
+                b"shpbottom",
+                b"shpwr",
+                b"shpwrk",
+                b"shapeType",
+                b"pFragments",
+                b"hidden-static-wrap-reference-payload",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
             ],
         },
         ReferenceFixture {
