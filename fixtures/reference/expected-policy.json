@@ -1204,6 +1204,41 @@
       ]
     },
     {
+      "id": "drop-cap-passive-layout",
+      "input": "fixtures/drop-cap-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Dropped paragraph continues",
+        "enlarged first letter.",
+        "Plain paragraph follows normal baseline flow."
+      ],
+      "intentional_security_differences": [
+        "Drop-cap controls are normalized into bounded passive paragraph layout metadata and rendered as static text geometry.",
+        "Raw drop-cap and paragraph reset controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "pard",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact drop-cap character scale, baseline, and adjacent text wrapping once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
