@@ -70661,6 +70661,14 @@ fn no_wrap_controls_render_passively_without_control_leakage() {
         "\\",
         "rtf1",
         "\\",
+        "nowrap Alias Alpha Beta",
+        "\\",
+        "par",
+        "\\",
+        "nowrap0 Alias wrapped",
+        "\\",
+        "par",
+        "\\",
         "nowwrap Alpha Beta",
         "\\",
         "par",
@@ -70687,13 +70695,36 @@ fn no_wrap_controls_render_passively_without_control_leakage() {
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("Alpha Beta"));
+    assert!(text.contains("Alias Alpha Beta"));
+    assert!(text.contains("Alias wrapped"));
     assert!(text.contains("Cell Alpha Beta"));
-    for forbidden in ["nowwrap", "clNoWrap"] {
+    for forbidden in ["nowrap", "nowwrap", "clNoWrap"] {
         assert!(
             !text.contains(forbidden),
             "forbidden no-wrap control leaked to text: {forbidden}"
         );
     }
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            open_rtf_converter::model::Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(paragraphs[0].style.no_wrap);
+    assert!(!paragraphs[1].style.no_wrap);
+    assert!(paragraphs[2].style.no_wrap);
+    assert!(!paragraphs[3].style.no_wrap);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "no-wrap controls should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("no-wrap.rtf");
@@ -70711,7 +70742,8 @@ fn no_wrap_controls_render_passively_without_control_leakage() {
     let pdf = fs::read(&output_path).unwrap();
     assert!(PdfDocument::load_mem(&pdf).is_ok());
     for forbidden in [
-        b"nowwrap".as_slice(),
+        b"nowrap".as_slice(),
+        b"nowwrap",
         b"clNoWrap",
         b"/JavaScript",
         b"/EmbeddedFile",

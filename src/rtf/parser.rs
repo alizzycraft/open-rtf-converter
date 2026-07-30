@@ -5301,7 +5301,9 @@ impl Parser {
             }
             "widctlpar" => self.state.paragraph.widow_control = control.parameter.unwrap_or(1) != 0,
             "nowidctlpar" | "nowidowctrl" => self.state.paragraph.widow_control = false,
-            "nowwrap" => self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0,
+            "nowwrap" | "nowrap" => {
+                self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0
+            }
             "noline" => {
                 self.state.paragraph.suppress_line_numbers = control.parameter.unwrap_or(1) != 0
             }
@@ -52046,7 +52048,7 @@ After\par}"#;
     #[test]
     fn normalizes_no_wrap_controls_for_paragraphs_and_table_cells() {
         let output = parse_rtf(
-            r"{\rtf1\nowwrap No wrap paragraph\par\nowwrap0 Wrapped paragraph\par\trowd\clNoWrap\cellx1440 Cell no wrap\cell\cellx2880 Cell wrapped\cell\row}",
+            r"{\rtf1\nowrap Alias no wrap paragraph\par\nowrap0 Alias wrapped paragraph\par\nowwrap No wrap paragraph\par\nowwrap0 Wrapped paragraph\par\trowd\clNoWrap\cellx1440 Cell no wrap\cell\cellx2880 Cell wrapped\cell\row}",
         )
         .unwrap();
 
@@ -52058,15 +52060,31 @@ After\par}"#;
             Block::Paragraph(paragraph) => paragraph,
             other => panic!("expected second paragraph, got {other:?}"),
         };
-        let table = match &output.document.blocks[2] {
+        let third = match &output.document.blocks[2] {
+            Block::Paragraph(paragraph) => paragraph,
+            other => panic!("expected third paragraph, got {other:?}"),
+        };
+        let fourth = match &output.document.blocks[3] {
+            Block::Paragraph(paragraph) => paragraph,
+            other => panic!("expected fourth paragraph, got {other:?}"),
+        };
+        let table = match &output.document.blocks[4] {
             Block::Table(table) => table,
             other => panic!("expected table, got {other:?}"),
         };
 
         assert!(first.style.no_wrap);
         assert!(!second.style.no_wrap);
+        assert!(third.style.no_wrap);
+        assert!(!fourth.style.no_wrap);
         assert!(table.rows[0].cells[0].paragraphs[0].style.no_wrap);
         assert!(!table.rows[0].cells[1].paragraphs[0].style.no_wrap);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
