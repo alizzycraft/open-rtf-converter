@@ -1916,6 +1916,48 @@
       ]
     },
     {
+      "id": "shape-hidden-passive-nonvisual-state",
+      "input": "fixtures/shape-hidden-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before hidden shape.",
+        "After hidden shape."
+      ],
+      "intentional_security_differences": [
+        "Office drawing hidden-state metadata suppresses the shape and any shape-contained text before PDF rendering.",
+        "Hidden drawing payload properties are stripped at normalization and never copied into PDF content."
+      ],
+      "expected_diagnostics": [
+        "hidden shape stripped before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "shpinst",
+        "shapeType",
+        "fHidden",
+        "fillColor",
+        "lineWidth",
+        "pFragments",
+        "hostile-hidden-shape-reference-payload",
+        "Hidden shape text must not render.",
+        "[Shape skipped",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm hidden Office drawing output and shape text suppression once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",

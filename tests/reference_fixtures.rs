@@ -65,6 +65,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/shape-line-flag-passive.rtf",
         "fixtures/shape-disabled-fill-passive.rtf",
         "fixtures/shape-disabled-line-passive.rtf",
+        "fixtures/shape-hidden-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1546,6 +1547,31 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
             ],
+        },
+        ReferenceFixture {
+            input: "fixtures/shape-hidden-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before hidden shape.", "After hidden shape."],
+            must_not_leak: &[
+                b"shpinst",
+                b"shapeType",
+                b"fHidden",
+                b"fillColor",
+                b"lineWidth",
+                b"pFragments",
+                b"hostile-hidden-shape-reference-payload",
+                b"Hidden shape text must not render.",
+                b"[Shape skipped",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &["hidden shape stripped before safe model normalization"],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",
