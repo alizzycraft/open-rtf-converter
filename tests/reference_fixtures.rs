@@ -881,12 +881,12 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_preserve_text: &[
                 "Visible before document properties.",
                 "Doc Safe title",
-                "tail / Alice",
+                "tail / ALICE",
                 "Shortcuts Safe title",
-                "tail / Alice / Bob / Comment text",
-                "Extended Alice Manager / Contoso",
-                "tail / Internal Use",
-                "Numeric revision 42 edit 17 paragraphs 3 lines 12 bytes 4096",
+                "tail / ALICE / Bob / Comment text",
+                "Extended Alice Manager / CONTOSO",
+                "TAIL / Internal Use",
+                "Numeric revision XLII edit 0017 paragraphs 3 lines 012 bytes 4,096",
                 "Visible after document properties.",
             ],
             must_not_leak: &[
