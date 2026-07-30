@@ -519,6 +519,53 @@
       ]
     },
     {
+      "id": "table-spacing-autofit-passive-layout",
+      "input": "fixtures/table-spacing-autofit-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before table spacing.",
+        "Unit left",
+        "Unit right",
+        "After table spacing."
+      ],
+      "intentional_security_differences": [
+        "Table autofit and cell spacing controls are normalized into bounded passive table width and border-gap layout metadata."
+      ],
+      "expected_diagnostics": [
+        "table row autofit interpreted through bounded passive table width layout",
+        "table cell spacing rendered as bounded passive border gaps"
+      ],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "trautofit",
+        "trspdl",
+        "trspdfl",
+        "trspdr",
+        "trspdfr",
+        "trspdt",
+        "trspdft",
+        "trspdb",
+        "trspdfb",
+        "clspdl",
+        "clspdfl",
+        "clspdr",
+        "clspdfr",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact table autofit width preservation and cell gap geometry once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
