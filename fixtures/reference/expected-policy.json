@@ -763,6 +763,52 @@
       ]
     },
     {
+      "id": "table-cell-vertical-align-passive-positioning",
+      "input": "fixtures/table-cell-vertical-align-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before vertical align table.",
+        "Top aligned",
+        "Center aligned",
+        "Bottom aligned",
+        "After vertical align table."
+      ],
+      "intentional_security_differences": [
+        "Table cell vertical alignment controls are normalized into bounded passive text positioning within fixed row geometry.",
+        "Raw table vertical-alignment, row, border, and cell metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "trgaph",
+        "trrh",
+        "clvertalt",
+        "clvertalc",
+        "clvertalb",
+        "clbrdrt",
+        "clbrdrl",
+        "clbrdrb",
+        "clbrdrr",
+        "brdrw",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact top/center/bottom baselines and interaction with row height once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
