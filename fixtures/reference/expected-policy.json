@@ -1285,6 +1285,53 @@
       ]
     },
     {
+      "id": "text-decoration-passive-strokes",
+      "input": "fixtures/text-decoration-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Two words",
+        "plain",
+        "colored",
+        "auto",
+        "plain tail",
+        "topmark",
+        "clear",
+        "second",
+        "done"
+      ],
+      "intentional_security_differences": [
+        "Word-only underline, underline color, and overline controls are normalized into bounded passive text stroke geometry.",
+        "Raw text decoration controls and color-table control words are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ulw",
+        "ulc2",
+        "ulc0",
+        "ulnone",
+        "ol0",
+        "olnone",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " RG",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact underline word gaps, underline color fallback, and overline offset once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
