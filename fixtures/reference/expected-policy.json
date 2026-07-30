@@ -2309,6 +2309,43 @@
       ]
     },
     {
+      "id": "symbol-field-passive-resultless-rendering",
+      "input": "fixtures/symbol-field-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before Symbol field.",
+        "Field value A rendered passively.",
+        "After Symbol field."
+      ],
+      "intentional_security_differences": [
+        "Resultless SYMBOL fields are interpreted only as bounded passive visible text and do not execute field instructions.",
+        "Raw field instructions, field metadata, font metadata, and active link/action targets are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "fldinst",
+        "SYMBOL",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact resultless SYMBOL field glyph mapping and field fallback behavior once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
