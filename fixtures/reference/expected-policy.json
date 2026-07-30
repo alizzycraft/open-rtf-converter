@@ -802,6 +802,56 @@
       ]
     },
     {
+      "id": "legacy-textbox-passive-shape",
+      "input": "fixtures/legacy-textbox-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before legacy box.",
+        "Legacy box text",
+        "After legacy box."
+      ],
+      "intentional_security_differences": [
+        "Legacy drawing text boxes are normalized into bounded passive static shape/text content.",
+        "Active objects nested inside the text box are stripped before normalized model and PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "active content removed: OLE object before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "dobx",
+        "dobxcolumn",
+        "doby",
+        "dobypara",
+        "dodhgt",
+        "dpxsize",
+        "dpysize",
+        "dptxbx",
+        "dptxbxtext",
+        "objemb",
+        "objclass",
+        "objdata",
+        "Word.Picture.8",
+        "414243",
+        "dpptx",
+        "hidden-legacy-textbox-coordinate-payload",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact legacy drawing text-box frame position, z-order, and text inset once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
