@@ -1,0 +1,17 @@
+{\rtf1\ansi\deff0{\fonttbl{\f0 Arial;}}\paperw6120\paperh7920\margl720\margr720\margt720\margb720
+\f0\fs24 Visible before mail merge and prompts.\par
+Ask {\field{\*\fldinst ASK Client "Hidden prompt" \d "Hidden default"}}\par
+Ask ref {\field{\*\fldinst REF Client}}\par
+Fill {\field{\*\fldinst FILLIN "Secret prompt" \d "Secret default"}}\par
+Unsafe fill {\field{\*\fldinst FILLIN "Unsafe prompt" \d "/JavaScript"}}\par
+Next {\field{\*\fldinst NEXT}}\par
+Next if {\field{\*\fldinst NEXTIF "City" = "Paris"}}\par
+Skip if {\field{\*\fldinst SKIPIF "Status" = "Hidden"}}\par
+Record {\field{\*\fldinst MERGEREC}}\par
+Sequence {\field{\*\fldinst MERGESEQ}}\par
+Merge name {\field{\*\fldinst MERGEFIELD Client}}\par
+Address {\field{\*\fldinst ADDRESSBLOCK \f "<<_COMPANY_>>\r<<_ADDRESS1_>>" \l 1033}}\par
+Greeting {\field{\*\fldinst GREETINGLINE \f "<<_TITLE0_>> <<_LAST0_>>" \e "Dear Sir or Madam,"}}\par
+Unsafe greeting {\field{\*\fldinst GREETINGLINE \e "/JavaScript"}}\par
+Visible after mail merge and prompts.\par
+}
