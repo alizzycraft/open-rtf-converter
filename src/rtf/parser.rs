@@ -23146,11 +23146,21 @@ fn word_layout_compatibility_control_message(name: &str) -> Option<&'static str>
         "asianbrkrule" => {
             Some("Asian line-breaking rule interpreted through bounded passive Unicode line layout")
         }
+        "faauto" => {
+            Some("East Asian font alignment interpreted through bounded passive font metrics")
+        }
+        "twoinone" | "horzvert" => {
+            Some("East Asian inline layout rendered through bounded passive horizontal fallback")
+        }
+        "aspalpha" | "aspnum" => {
+            Some("Word auto-spacing compatibility interpreted through bounded passive text layout")
+        }
         "sectexpand" | "sectspecifycl" | "sectspecifyl" => {
             Some("section text grid interpreted through bounded passive paragraph layout")
         }
         "lytexcttp" | "lytprtmet" | "noextrasprl" | "notcvasp" | "notvatxbx" | "expshrtn"
-        | "useltbaln" | "htmautsp" | "wraptrsp" | "sprsspbf" | "sprsbsp" => {
+        | "useltbaln" | "htmautsp" | "wraptrsp" | "sprsspbf" | "sprsbsp" | "nooverflow"
+        | "wpjst" | "wpbrdr" | "otblrul" => {
             Some("Word typography compatibility option interpreted through bounded passive layout")
         }
         "vertdoc" => {
@@ -23820,6 +23830,11 @@ fn is_visible_non_destination_control(name: &str) -> bool {
             | "kerning"
             | "charscalex"
             | "fittext"
+            | "faauto"
+            | "twoinone"
+            | "horzvert"
+            | "aspalpha"
+            | "aspnum"
             | "chcbpat"
             | "chshdng"
             | "plain"
