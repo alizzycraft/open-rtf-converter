@@ -478,6 +478,47 @@
       ]
     },
     {
+      "id": "section-grid-page-number-passive-layout",
+      "input": "fixtures/section-grid-page-number-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Page 1",
+        "Visible section grid body.",
+        "Second grid line."
+      ],
+      "intentional_security_differences": [
+        "Page number positioning and section text-grid controls are normalized into bounded passive header/footer and paragraph layout metadata."
+      ],
+      "expected_diagnostics": [
+        "page number position rendered as bounded passive header/footer coordinates",
+        "section line grid applied as bounded passive paragraph line pitch",
+        "section default text grid cleared bounded passive paragraph line pitch",
+        "section text grid interpreted through bounded passive paragraph layout"
+      ],
+      "forbidden_pdf_markers": [
+        "pgnx",
+        "pgny",
+        "sectlinegrid",
+        "sectdefaultcl",
+        "sectexpand",
+        "sectspecifycl",
+        "sectspecifyl",
+        "chpgn",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact page-number baseline and section grid line pitch once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",

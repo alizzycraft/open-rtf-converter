@@ -30,6 +30,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/line-numbering-passive.rtf",
         "fixtures/page-border-art-passive.rtf",
         "fixtures/character-typography-passive.rtf",
+        "fixtures/section-grid-page-number-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -561,6 +562,32 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "character kerning rendered as bounded passive pair spacing",
                 "character fit-text rendered as bounded passive horizontal scaling",
                 "active content removed: OLE object before safe model normalization",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/section-grid-page-number-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Page 1", "Visible section grid body.", "Second grid line."],
+            must_not_leak: &[
+                b"pgnx",
+                b"pgny",
+                b"sectlinegrid",
+                b"sectdefaultcl",
+                b"sectexpand",
+                b"sectspecifycl",
+                b"sectspecifyl",
+                b"chpgn",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "page number position rendered as bounded passive header/footer coordinates",
+                "section line grid applied as bounded passive paragraph line pitch",
+                "section default text grid cleared bounded passive paragraph line pitch",
+                "section text grid interpreted through bounded passive paragraph layout",
             ],
         },
         ReferenceFixture {
