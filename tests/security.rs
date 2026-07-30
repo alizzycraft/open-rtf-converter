@@ -70504,6 +70504,14 @@ fn widow_control_renders_passively_without_control_leakage() {
         "\\",
         "nowidctlpar Plain",
         "\\",
+        "par",
+        "\\",
+        "widctlpar Restored",
+        "\\",
+        "par",
+        "\\",
+        "nowidowctrl Alias plain",
+        "\\",
         "par}",
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -70512,17 +70520,36 @@ fn widow_control_renders_passively_without_control_leakage() {
     assert!(text.contains("Document default\nCarries widow control"));
     assert!(text.contains("Alpha\nBeta\nGamma"));
     assert!(text.contains("Plain"));
+    assert!(text.contains("Restored"));
+    assert!(text.contains("Alias plain"));
     assert!(!text.contains("widowctrl"));
     assert!(!text.contains("widctlpar"));
     assert!(!text.contains("nowidctlpar"));
+    assert!(!text.contains("nowidowctrl"));
     let open_rtf_converter::model::Block::Paragraph(first) = &parsed.document.blocks[0] else {
         panic!("expected first paragraph");
     };
     let open_rtf_converter::model::Block::Paragraph(third) = &parsed.document.blocks[2] else {
         panic!("expected third paragraph");
     };
+    let open_rtf_converter::model::Block::Paragraph(fourth) = &parsed.document.blocks[3] else {
+        panic!("expected fourth paragraph");
+    };
+    let open_rtf_converter::model::Block::Paragraph(fifth) = &parsed.document.blocks[4] else {
+        panic!("expected fifth paragraph");
+    };
     assert!(first.style.widow_control);
     assert!(!third.style.widow_control);
+    assert!(fourth.style.widow_control);
+    assert!(!fifth.style.widow_control);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "widow-control aliases should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("widow-control.rtf");
@@ -70543,6 +70570,7 @@ fn widow_control_renders_passively_without_control_leakage() {
         b"widowctrl".as_slice(),
         b"widctlpar",
         b"nowidctlpar",
+        b"nowidowctrl",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

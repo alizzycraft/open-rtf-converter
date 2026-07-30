@@ -5299,7 +5299,7 @@ impl Parser {
                 self.state.paragraph.widow_control = self.default_paragraph_style.widow_control;
             }
             "widctlpar" => self.state.paragraph.widow_control = control.parameter.unwrap_or(1) != 0,
-            "nowidctlpar" => self.state.paragraph.widow_control = false,
+            "nowidctlpar" | "nowidowctrl" => self.state.paragraph.widow_control = false,
             "nowwrap" => self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0,
             "noline" => {
                 self.state.paragraph.suppress_line_numbers = control.parameter.unwrap_or(1) != 0
@@ -51725,9 +51725,10 @@ After\par}"#;
 
     #[test]
     fn normalizes_keep_paragraph_pagination_controls() {
-        let output =
-            parse_rtf(r"{\rtf1\keep Keep together\par\keep0 Plain\par\keepn Keep next\par\widctlpar Widow\par\nowidctlpar No widow\par}")
-                .unwrap();
+        let output = parse_rtf(
+            r"{\rtf1\keep Keep together\par\keep0 Plain\par\keepn Keep next\par\widctlpar Widow\par\nowidctlpar No widow\par\widctlpar Widow alias\par\nowidowctrl No widow alias\par}",
+        )
+        .unwrap();
 
         let first = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
@@ -51749,12 +51750,28 @@ After\par}"#;
             Block::Paragraph(paragraph) => paragraph,
             other => panic!("expected fifth paragraph, got {other:?}"),
         };
+        let sixth = match &output.document.blocks[5] {
+            Block::Paragraph(paragraph) => paragraph,
+            other => panic!("expected sixth paragraph, got {other:?}"),
+        };
+        let seventh = match &output.document.blocks[6] {
+            Block::Paragraph(paragraph) => paragraph,
+            other => panic!("expected seventh paragraph, got {other:?}"),
+        };
 
         assert!(first.style.keep_together);
         assert!(!second.style.keep_together);
         assert!(third.style.keep_with_next);
         assert!(fourth.style.widow_control);
         assert!(!fifth.style.widow_control);
+        assert!(sixth.style.widow_control);
+        assert!(!seventh.style.widow_control);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
