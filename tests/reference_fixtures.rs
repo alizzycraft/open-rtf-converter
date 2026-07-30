@@ -35,6 +35,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/hyphenation-passive.rtf",
         "fixtures/form-field-shading-passive.rtf",
         "fixtures/note-placement-passive.rtf",
+        "fixtures/shape-rotation-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -711,6 +712,32 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "footnotes placed at passive page bottom without active note behavior",
                 "endnotes placed at passive section boundary without active note behavior",
                 "active content removed: OLE object before safe model normalization",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/shape-rotation-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before tilted shape.", "After tilted shape."],
+            must_not_leak: &[
+                b"shpinst",
+                b"shpleft",
+                b"shptop",
+                b"shpright",
+                b"shpbottom",
+                b"shapeType",
+                b"rotation",
+                b"pFragments",
+                b"hidden-rotated-shape-reference-payload",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
+                "shape rotation rendered as bounded passive static geometry",
             ],
         },
         ReferenceFixture {

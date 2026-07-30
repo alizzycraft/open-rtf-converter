@@ -690,6 +690,47 @@
       ]
     },
     {
+      "id": "shape-rotation-passive-static-geometry",
+      "input": "fixtures/shape-rotation-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before tilted shape.",
+        "After tilted shape."
+      ],
+      "intentional_security_differences": [
+        "Rotated Office drawing shape metadata is normalized into bounded passive static PDF path geometry.",
+        "Unsupported or active shape property payloads are stripped before the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
+        "shape rotation rendered as bounded passive static geometry"
+      ],
+      "forbidden_pdf_markers": [
+        "shpinst",
+        "shpleft",
+        "shptop",
+        "shpright",
+        "shpbottom",
+        "shapeType",
+        "rotation",
+        "pFragments",
+        "hidden-rotated-shape-reference-payload",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact rotated rectangle path geometry and fill/stroke placement once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
