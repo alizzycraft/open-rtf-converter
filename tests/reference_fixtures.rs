@@ -33,6 +33,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/section-grid-page-number-passive.rtf",
         "fixtures/table-spacing-autofit-passive.rtf",
         "fixtures/hyphenation-passive.rtf",
+        "fixtures/form-field-shading-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -650,6 +651,33 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "document hyphenation rendered as bounded passive soft hyphenation",
                 "paragraph hyphenation rendered as bounded passive soft hyphenation",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/form-field-shading-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before form field.", "Visible value", "After form field."],
+            must_not_leak: &[
+                b"formshade",
+                b"FORMTEXT",
+                b"formfield",
+                b"HiddenName",
+                b"HiddenDefault",
+                b"launch.exe",
+                b"datafield",
+                b"414243",
+                b"/AcroForm",
+                b"/Widget",
+                b"/AA",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "form-field shading rendered as bounded passive fill",
+                "rendering stored result for passive form field FORMTEXT without creating PDF form actions",
             ],
         },
         ReferenceFixture {

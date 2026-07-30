@@ -603,6 +603,49 @@
       ]
     },
     {
+      "id": "form-field-shading-passive-fill",
+      "input": "fixtures/form-field-shading-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before form field.",
+        "Visible value",
+        "After form field."
+      ],
+      "intentional_security_differences": [
+        "Stored form field results are rendered with bounded passive fill shading instead of creating PDF form fields, widgets, actions, or executable macros.",
+        "Form metadata, macro hooks, and datafield payloads are stripped before the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "form-field shading rendered as bounded passive fill",
+        "rendering stored result for passive form field FORMTEXT without creating PDF form actions"
+      ],
+      "forbidden_pdf_markers": [
+        "formshade",
+        "FORMTEXT",
+        "formfield",
+        "HiddenName",
+        "HiddenDefault",
+        "launch.exe",
+        "datafield",
+        "414243",
+        "/AcroForm",
+        "/Widget",
+        "/AA",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact passive form shading bounds and color once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
