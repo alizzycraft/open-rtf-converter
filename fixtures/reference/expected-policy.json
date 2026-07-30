@@ -1186,6 +1186,50 @@
       ]
     },
     {
+      "id": "header-footer-variants-passive-layout",
+      "input": "fixtures/header-footer-variants-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "First header",
+        "Even header",
+        "Odd header",
+        "First footer",
+        "Even footer",
+        "Odd footer",
+        "Page one body.",
+        "Page two body.",
+        "Page three body."
+      ],
+      "intentional_security_differences": [
+        "First, even, and odd page header/footer destinations are normalized into bounded passive page text, not preserved as editable Word section state."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "headerf",
+        "headerl",
+        "headerr",
+        "footerf",
+        "footerl",
+        "footerr",
+        "titlepg",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact first/even/odd header/footer selection and vertical placement once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
