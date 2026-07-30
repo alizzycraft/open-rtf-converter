@@ -24,6 +24,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/png-trns.rtf",
         "fixtures/windows-bitmap.rtf",
         "fixtures/static-shape-wrap.rtf",
+        "fixtures/floating-table-positioning.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -402,6 +403,39 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_contain_pdf: &[],
             must_emit_diagnostics: &[
                 "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/floating-table-positioning.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before floating table.",
+                "Floating left",
+                "Floating right",
+                "Follow left",
+                "Follow right",
+                "After floating table.",
+            ],
+            must_not_leak: &[
+                b"tabsnoovrlp",
+                b"trgaph",
+                b"trleft",
+                b"tphmrg",
+                b"posx",
+                b"pvmrg",
+                b"posy",
+                b"tdfrmtxt",
+                b"cellx",
+                b"trowd",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "floating table no-overlap \\tabsnoovrlp captured as bounded passive row exclusion",
+                "floating table horizontal position interpreted as bounded passive row offset",
+                "floating table vertical position interpreted as bounded passive row offset",
+                "floating table wrap distance interpreted as bounded passive row margin",
             ],
         },
         ReferenceFixture {

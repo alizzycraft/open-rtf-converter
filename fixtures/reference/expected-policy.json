@@ -248,6 +248,48 @@
       ]
     },
     {
+      "id": "floating-table-passive-positioning",
+      "input": "fixtures/floating-table-positioning.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before floating table.",
+        "Floating left",
+        "Floating right",
+        "Follow left",
+        "Follow right",
+        "After floating table."
+      ],
+      "intentional_security_differences": [],
+      "expected_diagnostics": [
+        "floating table no-overlap \\tabsnoovrlp captured as bounded passive row exclusion",
+        "floating table horizontal position interpreted as bounded passive row offset",
+        "floating table vertical position interpreted as bounded passive row offset",
+        "floating table wrap distance interpreted as bounded passive row margin"
+      ],
+      "forbidden_pdf_markers": [
+        "tabsnoovrlp",
+        "trgaph",
+        "trleft",
+        "tphmrg",
+        "posx",
+        "pvmrg",
+        "posy",
+        "tdfrmtxt",
+        "cellx",
+        "trowd",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact floating table anchor offsets, wrap distance, and no-overlap placement once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
