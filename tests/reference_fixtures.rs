@@ -46,6 +46,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/picture-scaling-passive.rtf",
         "fixtures/associated-character-passive.rtf",
         "fixtures/font-family-hints-passive.rtf",
+        "fixtures/section-pages-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1027,6 +1028,28 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"Mystery Mono",
                 b"Mystery Heading",
                 b"Mystery Body",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
+            input: "fixtures/section-pages-passive.rtf",
+            expected_pages: 3,
+            must_preserve_text: &[
+                "First section pages 2",
+                "First section continues.",
+                "Second section pages 1",
+            ],
+            must_not_leak: &[
+                b"fldinst",
+                b"SECTIONPAGES",
                 b"/JavaScript",
                 b"/EmbeddedFile",
                 b"/Launch",

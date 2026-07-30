@@ -1153,6 +1153,39 @@
       ]
     },
     {
+      "id": "section-pages-passive-field",
+      "input": "fixtures/section-pages-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "First section pages 2",
+        "First section continues.",
+        "Second section pages 1"
+      ],
+      "intentional_security_differences": [
+        "SECTIONPAGES fields are resolved into bounded passive generated text after pagination without preserving executable field instructions."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "SECTIONPAGES",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact late SECTIONPAGES replacement, wrapping, and per-section page-count behavior once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
