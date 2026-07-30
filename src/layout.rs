@@ -4394,6 +4394,19 @@ fn layout_table(
         let top_margin = row_wrap_margins.top.max(0.0);
         let bottom_margin = row_wrap_margins.bottom.max(0.0);
 
+        if row.no_overlap {
+            let adjusted_top = non_overlapping_table_row_top(
+                pages,
+                row,
+                &prepared,
+                *cursor_y - top_offset - top_margin,
+                content_width,
+                margin_left,
+                table_width,
+            );
+            *cursor_y = adjusted_top + top_offset + top_margin;
+        }
+
         if row.keep_with_next
             && !pages.last().is_none_or(|page| page.items.is_empty())
             && let Some(next_row) = next_row
@@ -4861,6 +4874,64 @@ fn table_row_has_wrap_margins(row: &TableRow) -> bool {
         bottom_twips,
     } = row.wrap_margins;
     left_twips > 0 || right_twips > 0 || top_twips > 0 || bottom_twips > 0
+}
+
+fn non_overlapping_table_row_top(
+    pages: &[LayoutPage],
+    row: &TableRow,
+    prepared: &PreparedTableRow,
+    mut row_top: f32,
+    content_width: f32,
+    margin_left: f32,
+    table_width: f32,
+) -> f32 {
+    if !table_row_has_wrap_margins(row) {
+        return row_top;
+    }
+    let Some(page) = pages.last() else {
+        return row_top;
+    };
+    let wrap_margins = table_row_wrap_margin_points(row);
+    let effective_margin_left = margin_left + wrap_margins.left;
+    let effective_content_width = (content_width - wrap_margins.left - wrap_margins.right)
+        .max(table_width)
+        .max(1.0);
+    let row_left = table_row_left(
+        effective_margin_left,
+        effective_content_width,
+        table_width,
+        row.alignment,
+        page.geometry,
+    ) + twips_to_points(row.left_offset_twips);
+    let row_excluded_left = (row_left - wrap_margins.left).max(margin_left);
+    let row_excluded_right = (row_left + table_width + wrap_margins.right)
+        .min(margin_left + content_width)
+        .max(row_excluded_left);
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let row_excluded_top = row_top + wrap_margins.top;
+        let row_excluded_bottom = row_top - prepared.row_height - wrap_margins.bottom;
+        for exclusion in &page.flow_exclusions {
+            let exclusion_left = exclusion.x;
+            let exclusion_right = exclusion.x + exclusion.width;
+            let exclusion_bottom = exclusion.y;
+            let exclusion_top = exclusion.y + exclusion.height;
+            let horizontally_overlaps =
+                row_excluded_left < exclusion_right && row_excluded_right > exclusion_left;
+            let vertically_overlaps =
+                row_excluded_bottom < exclusion_top && row_excluded_top > exclusion_bottom;
+            if horizontally_overlaps && vertically_overlaps {
+                let next_top = exclusion_bottom - wrap_margins.top;
+                if next_top < row_top {
+                    row_top = next_top;
+                    changed = true;
+                }
+            }
+        }
+    }
+    row_top
 }
 
 fn push_table_row_flow_exclusion(
@@ -13171,6 +13242,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -13271,6 +13343,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13323,6 +13396,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13383,6 +13457,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13450,6 +13525,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13536,6 +13612,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -13678,6 +13755,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -13774,6 +13852,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -13835,6 +13914,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -13889,6 +13969,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -13973,6 +14054,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -14022,6 +14104,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14080,6 +14163,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -14157,6 +14241,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -14217,6 +14302,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14271,6 +14357,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14349,6 +14436,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14445,6 +14533,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14537,6 +14626,46 @@ mod tests {
     }
 
     #[test]
+    fn no_overlap_floating_table_starts_below_previous_passive_exclusion() {
+        let parsed = parse_rtf(
+            r"{\rtf1\trowd\tposx0\trrh720\cellx1440 First floating\cell\row\pard\par\trowd\tabsnoovrlp\tposx0\trrh720\cellx1440 Second floating\cell\row}",
+        )
+        .unwrap();
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        let page = &layout.pages[0];
+        assert!(
+            layout_text(page).contains("floating"),
+            "layout text: {:?}",
+            layout_text(page)
+        );
+        let first = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.trim() == "First" => Some(fragment),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("first floating text in {:?}", layout_text(page)));
+        let second = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.trim() == "Second" => Some(fragment),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("second floating text in {:?}", layout_text(page)));
+
+        assert_eq!(page.flow_exclusions.len(), 2);
+        assert!(
+            second.baseline_y < first.baseline_y - 24.0,
+            "no-overlap row should move below the earlier passive exclusion: first={}, second={}",
+            first.baseline_y,
+            second.baseline_y
+        );
+    }
+
+    #[test]
     fn lays_out_table_row_horizontal_alignment() {
         let mut document = Document::default();
         document.blocks = vec![Block::Table(Table {
@@ -14554,6 +14683,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14585,6 +14715,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14638,6 +14769,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14720,6 +14852,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -14781,6 +14914,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -14909,6 +15043,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -14940,6 +15075,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![TableCell {
                         shading_color_index: None,
                         shading_basis_points: 10_000,
@@ -15010,6 +15146,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15062,6 +15199,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15118,6 +15256,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15189,6 +15328,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
@@ -15257,6 +15397,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -15360,6 +15501,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -15460,6 +15602,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![
                     TableCell {
                         shading_color_index: None,
@@ -15571,6 +15714,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![
                         TableCell {
                             shading_color_index: Some(1),
@@ -15624,6 +15768,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![
                         TableCell {
                             shading_color_index: None,
@@ -15720,6 +15865,7 @@ mod tests {
                 repeat_header,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15784,6 +15930,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15845,6 +15992,7 @@ mod tests {
                 repeat_header,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15908,6 +16056,7 @@ mod tests {
                 repeat_header,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -15966,6 +16115,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -17401,6 +17551,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: Some(1),
                     shading_basis_points: 5_000,
@@ -17687,6 +17838,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![TableCell {
                         shading_color_index: Some(1),
                         shading_basis_points: 5_000,
@@ -17780,6 +17932,7 @@ mod tests {
                     repeat_header: false,
                     keep_together: false,
                     keep_with_next: false,
+                    no_overlap: false,
                     cells: vec![TableCell {
                         shading_color_index: Some(1),
                         shading_basis_points: 10_000,
@@ -18025,6 +18178,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -18433,6 +18587,7 @@ mod tests {
                 repeat_header: false,
                 keep_together: false,
                 keep_with_next: false,
+                no_overlap: false,
                 cells: vec![TableCell {
                     shading_color_index: None,
                     shading_basis_points: 10_000,

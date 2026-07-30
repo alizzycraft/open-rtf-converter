@@ -1370,6 +1370,7 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
     assert_eq!(table.rows[0].wrap_margins.top_twips, 120);
     assert_eq!(table.rows[0].wrap_margins.bottom_twips, 120);
     assert_eq!(table.rows[0].alignment, TableRowAlignment::Outside);
+    assert!(table.rows[0].no_overlap);
     assert_eq!(table.rows[1].left_offset_twips, 720);
     assert_eq!(table.rows[1].vertical_offset_twips, 120);
     assert!(!table.rows[0].cells[0].fit_text);
@@ -1417,7 +1418,7 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("floating table no-overlap \\tabsnoovrlp")
+            .contains("floating table no-overlap \\tabsnoovrlp captured")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains(

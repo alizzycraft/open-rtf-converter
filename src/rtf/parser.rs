@@ -666,6 +666,7 @@ struct TableRowBuilder {
     repeat_header: bool,
     keep_together: bool,
     keep_with_next: bool,
+    no_overlap: bool,
     right_to_left: bool,
     current_cell_paragraphs: Vec<Paragraph>,
     current_cell_paragraph: Paragraph,
@@ -10833,6 +10834,7 @@ impl Parser {
             repeat_header: false,
             keep_together: false,
             keep_with_next: false,
+            no_overlap: false,
             right_to_left: false,
             current_cell_paragraphs: Vec::new(),
             current_cell_paragraph: Paragraph {
@@ -11965,10 +11967,11 @@ impl Parser {
     }
 
     fn handle_current_table_row_no_overlap(&mut self, control_name: &str, offset: usize) {
-        if self.current_table_row.is_some() {
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.no_overlap = true;
             self.diagnostics.push(Diagnostic::warning(
                 format!(
-                    "floating table no-overlap \\{control_name} interpreted through passive table flow"
+                    "floating table no-overlap \\{control_name} captured as bounded passive row exclusion"
                 ),
                 Some(offset),
             ));
@@ -12233,6 +12236,7 @@ impl Parser {
             repeat_header: row.repeat_header,
             keep_together: row.keep_together,
             keep_with_next: row.keep_with_next,
+            no_overlap: row.no_overlap,
         });
         Ok(())
     }
@@ -43738,11 +43742,12 @@ mod tests {
         let text = table.rows[0].cells[0].paragraphs[0].runs[0].text.clone();
 
         assert!(text.contains("Non overlapping"));
+        assert!(table.rows[0].no_overlap);
         assert!(!text.contains("tabsnoovrlp"));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("floating table no-overlap \\tabsnoovrlp")
+                .contains("floating table no-overlap \\tabsnoovrlp captured")
         }));
         assert!(!output.diagnostics.iter().any(|diagnostic| {
             diagnostic

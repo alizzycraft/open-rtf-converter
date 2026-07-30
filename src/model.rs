@@ -756,6 +756,7 @@ pub struct TableRow {
     pub repeat_header: bool,
     pub keep_together: bool,
     pub keep_with_next: bool,
+    pub no_overlap: bool,
 }
 
 pub const TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE: i32 = -1_000_000_000;
