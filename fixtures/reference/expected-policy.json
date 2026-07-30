@@ -1836,6 +1836,46 @@
       ]
     },
     {
+      "id": "shape-disabled-fill-passive-hidden-state",
+      "input": "fixtures/shape-disabled-fill-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before disabled fill.",
+        "After disabled fill."
+      ],
+      "intentional_security_differences": [
+        "Office drawing disabled-fill state suppresses passive fill geometry even when fill color metadata is present.",
+        "Raw fill-state metadata and unsupported or active drawing payload properties are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
+      ],
+      "forbidden_pdf_markers": [
+        "shpinst",
+        "shapeType",
+        "fFilled",
+        "fillColor",
+        "pFragments",
+        "hostile-disabled-fill-reference-payload",
+        "[Shape skipped",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm disabled-fill precedence and no-fill paint output once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
