@@ -997,6 +997,60 @@
       ]
     },
     {
+      "id": "table-merged-cells-passive-geometry",
+      "input": "fixtures/table-merged-cells-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before merged table.",
+        "Horizontal merged",
+        "Right top",
+        "Vertical merged",
+        "Middle",
+        "Right middle",
+        "Bottom middle",
+        "Right bottom",
+        "After merged table."
+      ],
+      "intentional_security_differences": [
+        "Horizontal and vertical table merge controls are normalized into bounded passive cell geometry.",
+        "Raw table row, merge, border, and shading controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "colortbl",
+        "red220",
+        "trowd",
+        "trgaph",
+        "trrh",
+        "clmgf",
+        "clmrg",
+        "clvmgf",
+        "clvmrg",
+        "clcbpat",
+        "clbrdrt",
+        "clbrdrl",
+        "clbrdrb",
+        "clbrdrr",
+        "brdrw",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact merged-cell border suppression, shading extents, and cell text placement once available."
+      ]
+    },
+    {
       "id": "old-style-list-passive-markers",
       "input": "fixtures/old-style-list-passive.rtf",
       "category": "acceptable_approximation",
