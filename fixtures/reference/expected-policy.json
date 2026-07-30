@@ -1640,6 +1640,45 @@
       ]
     },
     {
+      "id": "shape-line-fore-color-passive-stroke",
+      "input": "fixtures/shape-line-fore-color-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before stroke color.",
+        "After stroke color."
+      ],
+      "intentional_security_differences": [
+        "Office drawing foreground stroke color metadata is normalized into bounded passive PDF stroke geometry rather than editable Office drawing state.",
+        "Unsupported or active drawing payload properties adjacent to stroke metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
+      ],
+      "forbidden_pdf_markers": [
+        "shpinst",
+        "shapeType",
+        "lineForeColor",
+        "pFragments",
+        "hostile-line-fore-color-reference-payload",
+        "[Shape skipped",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact Office stroke color interpretation, outline width, and paint order once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",

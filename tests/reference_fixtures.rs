@@ -58,6 +58,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/shape-gradient-fill-passive.rtf",
         "fixtures/shape-shadow-opacity-passive.rtf",
         "fixtures/shape-fill-fore-color-passive.rtf",
+        "fixtures/shape-line-fore-color-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1355,6 +1356,30 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"fillForeColor",
                 b"pFragments",
                 b"hostile-fill-fore-color-reference-payload",
+                b"[Shape skipped",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/shape-line-fore-color-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before stroke color.", "After stroke color."],
+            must_not_leak: &[
+                b"shpinst",
+                b"shapeType",
+                b"lineForeColor",
+                b"pFragments",
+                b"hostile-line-fore-color-reference-payload",
                 b"[Shape skipped",
                 b"/JavaScript",
                 b"/EmbeddedFile",
