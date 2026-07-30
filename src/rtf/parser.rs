@@ -4869,7 +4869,7 @@ impl Parser {
             "cltxlrtb" => {
                 self.set_current_cell_text_direction(TableCellTextDirection::LeftToRightTopToBottom)
             }
-            "cltxtbrlv" | "cltxlrtbv" => {
+            "cltxtbrl" | "cltxtbrlv" | "cltxlrtbv" => {
                 self.set_current_cell_text_direction(TableCellTextDirection::TopToBottomRightToLeft)
             }
             "cltxbtlr" => {
@@ -23403,6 +23403,7 @@ fn is_nested_table_structural_control(name: &str) -> bool {
                 | "clNoWrap"
                 | "clnowrap"
                 | "cltxlrtb"
+                | "cltxtbrl"
                 | "cltxtbrlv"
                 | "cltxlrtbv"
                 | "cltxbtlr"
@@ -44327,7 +44328,7 @@ mod tests {
     #[test]
     fn normalizes_table_cell_text_direction_controls_as_safe_layout_metadata() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\cltxtbrlv\cellx2000 ABC\cell\cltxbtlr\cellx4000 XY\cell\cltxlrtb\cellx6000 Flat\cell\row}",
+            r"{\rtf1\trowd\cltxtbrl\cellx2000 Alias\cell\cltxtbrlv\cellx4000 ABC\cell\cltxbtlr\cellx6000 XY\cell\cltxlrtb\cellx8000 Flat\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -44335,21 +44336,27 @@ mod tests {
             _ => panic!("expected table block"),
         };
 
-        assert_eq!(table.rows[0].cells[0].paragraphs[0].runs[0].text, "ABC");
+        assert_eq!(table.rows[0].cells[0].paragraphs[0].runs[0].text, "Alias");
         assert_eq!(
             table.rows[0].cells[0].text_direction,
             TableCellTextDirection::TopToBottomRightToLeft
         );
-        assert_eq!(table.rows[0].cells[1].paragraphs[0].runs[0].text, "XY");
+        assert_eq!(table.rows[0].cells[1].paragraphs[0].runs[0].text, "ABC");
         assert_eq!(
             table.rows[0].cells[1].text_direction,
-            TableCellTextDirection::BottomToTopLeftToRight
+            TableCellTextDirection::TopToBottomRightToLeft
         );
-        assert_eq!(table.rows[0].cells[2].paragraphs[0].runs[0].text, "Flat");
+        assert_eq!(table.rows[0].cells[2].paragraphs[0].runs[0].text, "XY");
         assert_eq!(
             table.rows[0].cells[2].text_direction,
+            TableCellTextDirection::BottomToTopLeftToRight
+        );
+        assert_eq!(table.rows[0].cells[3].paragraphs[0].runs[0].text, "Flat");
+        assert_eq!(
+            table.rows[0].cells[3].text_direction,
             TableCellTextDirection::LeftToRightTopToBottom
         );
+        assert!(!document_text(&output.document).contains("cltxtbrl"));
         assert!(!document_text(&output.document).contains("cltxtbrlv"));
         assert!(!document_text(&output.document).contains("cltxbtlr"));
     }

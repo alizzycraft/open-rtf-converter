@@ -2696,21 +2696,27 @@ fn table_cell_text_direction_renders_passively_without_control_leakage() {
         "\\",
         "trowd",
         "\\",
+        "cltxtbrl",
+        "\\",
+        "cellx2000 Alias",
+        "\\",
+        "cell",
+        "\\",
         "cltxtbrlv",
         "\\",
-        "cellx2000 ABC",
+        "cellx4000 ABC",
         "\\",
         "cell",
         "\\",
         "cltxbtlr",
         "\\",
-        "cellx4000 XY",
+        "cellx6000 XY",
         "\\",
         "cell",
         "\\",
         "cltxlrtb",
         "\\",
-        "cellx6000 Flat",
+        "cellx8000 Flat",
         "\\",
         "cell",
         "\\",
@@ -2728,18 +2734,23 @@ fn table_cell_text_direction_renders_passively_without_control_leakage() {
         })
         .expect("table");
 
-    assert!(text.contains("ABC"));
+    assert!(text.contains("Alias"));
     assert_eq!(
         table.rows[0].cells[0].text_direction,
         TableCellTextDirection::TopToBottomRightToLeft
     );
-    assert!(text.contains("XY"));
+    assert!(text.contains("ABC"));
     assert_eq!(
         table.rows[0].cells[1].text_direction,
+        TableCellTextDirection::TopToBottomRightToLeft
+    );
+    assert!(text.contains("XY"));
+    assert_eq!(
+        table.rows[0].cells[2].text_direction,
         TableCellTextDirection::BottomToTopLeftToRight
     );
     assert!(text.contains("Flat"));
-    for forbidden in ["cltxtbrlv", "cltxbtlr", "cltxlrtb"] {
+    for forbidden in ["cltxtbrl", "cltxtbrlv", "cltxbtlr", "cltxlrtb"] {
         assert!(
             !text.contains(forbidden),
             "forbidden table cell text-direction control leaked to text: {forbidden}"
@@ -2765,7 +2776,7 @@ fn table_cell_text_direction_renders_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    for expected in ["A", "B", "C", "Y", "X"] {
+    for expected in ["A", "l", "i", "a", "s", "B", "C", "Y", "X"] {
         assert!(
             rendered_text.contains(expected),
             "decoded PDF text did not contain stacked cell text {expected:?}; got {rendered_text:?}"
@@ -2774,6 +2785,7 @@ fn table_cell_text_direction_renders_passively_without_control_leakage() {
     assert!(rendered_text.contains("Flat"));
     for forbidden in [
         b"cltxtbrlv".as_slice(),
+        b"cltxtbrl",
         b"cltxbtlr",
         b"cltxlrtb",
         b"/JavaScript",
