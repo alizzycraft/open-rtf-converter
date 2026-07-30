@@ -2846,6 +2846,19 @@ fn layout_shape(
         font_provider,
     );
     if let Some(page) = pages.last_mut() {
+        if shape.text_wrap {
+            let left_gap = twips_to_points(shape.wrap_margin_left_twips.max(0));
+            let right_gap = twips_to_points(shape.wrap_margin_right_twips.max(0));
+            let top_gap = twips_to_points(shape.wrap_margin_top_twips.max(0));
+            let bottom_gap = twips_to_points(shape.wrap_margin_bottom_twips.max(0));
+            page.flow_exclusions.push(FlowExclusion {
+                x: (x - left_gap).max(0.0),
+                y: bottom_y - bottom_gap,
+                width: (width + left_gap + right_gap).max(1.0),
+                height: (height + top_gap + bottom_gap).max(1.0),
+                wrap_side: shape.wrap_side,
+            });
+        }
         wrap_static_shape_items(
             page,
             shape_item_start,
@@ -2855,7 +2868,9 @@ fn layout_shape(
             shape.stroke_opacity_percent,
         );
     }
-    *cursor_y -= block_height + 6.0;
+    if !shape.text_wrap {
+        *cursor_y -= block_height + 6.0;
+    }
 }
 
 fn wrap_static_shape_items(
@@ -11637,6 +11652,98 @@ mod tests {
     }
 
     #[test]
+    fn wrapped_paragraph_flows_beside_prior_passive_static_shape_frame() {
+        let mut document = Document::default();
+        document.blocks = vec![
+            Block::Shape(StaticShape {
+                kind: StaticShapeKind::Rectangle,
+                left_twips: 0,
+                top_twips: 0,
+                width_twips: 2160,
+                height_twips: 720,
+                z_order: 0,
+                below_text: false,
+                text_wrap: true,
+                wrap_side: StaticImageWrapSide::Both,
+                wrap_margin_left_twips: 120,
+                wrap_margin_right_twips: 240,
+                wrap_margin_top_twips: 0,
+                wrap_margin_bottom_twips: 0,
+                horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+                vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
+                flip_horizontal: false,
+                flip_vertical: false,
+                start_arrowhead: StaticShapeArrowhead::None,
+                end_arrowhead: StaticShapeArrowhead::None,
+                start_arrowhead_width_percent: 100,
+                start_arrowhead_length_percent: 100,
+                end_arrowhead_width_percent: 100,
+                end_arrowhead_length_percent: 100,
+                stroke_width_twips: 15,
+                stroke_color: Default::default(),
+                stroke_style: BorderStyle::Single,
+                stroke_cap: StaticShapeLineCap::Flat,
+                stroke_join: StaticShapeLineJoin::Miter,
+                fill_opacity_percent: 100,
+                stroke_opacity_percent: 100,
+                fill_color: None,
+                fill_gradient_color: None,
+                fill_pattern: ShadingPattern::None,
+                shadow_enabled: false,
+                shadow_color: Default::default(),
+                shadow_opacity_percent: 100,
+                shadow_offset_x_twips: 0,
+                shadow_offset_y_twips: 0,
+                text_margin_left_twips: 0,
+                text_margin_right_twips: 0,
+                text_margin_top_twips: 0,
+                text_margin_bottom_twips: 0,
+                text_vertical_anchor: StaticShapeTextVerticalAnchor::Top,
+                text_horizontal_anchor_centered: false,
+                text: Vec::new(),
+                points: Vec::new(),
+                point_paths: Vec::new(),
+                overlay_paths: Vec::new(),
+                fill_rule: StaticImageVectorFillRule::Winding,
+            }),
+            Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "wrapped words should start beside the passive static shape frame"
+                        .to_string(),
+                    style: Default::default(),
+                }],
+            }),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let shape_right = page
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Line { x1, x2, .. } => Some(x1.max(*x2)),
+                _ => None,
+            })
+            .fold(0.0_f32, f32::max);
+        let text = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.contains("wrapped") => Some(text),
+                _ => None,
+            })
+            .expect("paragraph text beside wrapped static shape");
+
+        assert!(
+            text.x > shape_right,
+            "text should be shifted beside wrapped static shape: text {}, shape right {}",
+            text.x,
+            shape_right
+        );
+    }
+
+    #[test]
     fn passive_drawing_slots_are_sorted_by_normalized_z_order() {
         let mut document = Document::default();
         document.blocks = vec![
@@ -11681,6 +11788,12 @@ mod tests {
                 height_twips: 720,
                 z_order: 10,
                 below_text: false,
+                text_wrap: false,
+                wrap_side: StaticImageWrapSide::Both,
+                wrap_margin_left_twips: 0,
+                wrap_margin_right_twips: 0,
+                wrap_margin_top_twips: 0,
+                wrap_margin_bottom_twips: 0,
                 horizontal_anchor: StaticShapeHorizontalAnchor::Column,
                 vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
                 flip_horizontal: false,
@@ -11753,6 +11866,12 @@ mod tests {
             height_twips: 720,
             z_order: 12,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -11897,6 +12016,12 @@ mod tests {
                 height_twips: 720,
                 z_order: 0,
                 below_text: true,
+                text_wrap: false,
+                wrap_side: StaticImageWrapSide::Both,
+                wrap_margin_left_twips: 0,
+                wrap_margin_right_twips: 0,
+                wrap_margin_top_twips: 0,
+                wrap_margin_bottom_twips: 0,
                 horizontal_anchor: StaticShapeHorizontalAnchor::Column,
                 vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
                 flip_horizontal: false,
@@ -11975,6 +12100,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Page,
             vertical_anchor: StaticShapeVerticalAnchor::Page,
             flip_horizontal: false,
@@ -12063,6 +12194,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12150,6 +12287,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12250,6 +12393,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12359,6 +12508,12 @@ mod tests {
             height_twips: 1440,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12439,6 +12594,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12529,6 +12690,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12596,6 +12763,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: true,
@@ -12665,6 +12838,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12748,6 +12927,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12846,6 +13031,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -12944,6 +13135,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -13025,6 +13222,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -13129,6 +13332,12 @@ mod tests {
             height_twips: 720,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,
@@ -20409,6 +20618,12 @@ mod tests {
             height_twips: 360,
             z_order: 0,
             below_text: false,
+            text_wrap: false,
+            wrap_side: StaticImageWrapSide::Both,
+            wrap_margin_left_twips: 0,
+            wrap_margin_right_twips: 0,
+            wrap_margin_top_twips: 0,
+            wrap_margin_bottom_twips: 0,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
             vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             flip_horizontal: false,

@@ -90697,6 +90697,128 @@ fn unsupported_shape_wrap_modes_warn_as_bounded_passive_layout_without_payload_l
 }
 
 #[test]
+fn square_wrapped_static_shape_excludes_following_text_without_payload_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before",
+        "\\",
+        "par{",
+        "\\",
+        "shp{",
+        "\\",
+        "*",
+        "\\",
+        "shpinst",
+        "\\",
+        "shpleft0",
+        "\\",
+        "shptop0",
+        "\\",
+        "shpright2160",
+        "\\",
+        "shpbottom720",
+        "\\",
+        "shpbxcolumn",
+        "\\",
+        "shpbypara",
+        "\\",
+        "shpwr2",
+        "\\",
+        "shpwrk0",
+        "\\",
+        "shpfblwtxt0{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn shapeType}{",
+        "\\",
+        "sv 1}}{",
+        "\\",
+        "sp{",
+        "\\",
+        "sn pFragments}{",
+        "\\",
+        "sv hidden-static-wrap-payload}}}} Wrapped static shape text",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("static wrapped shape");
+    assert!(shape.text_wrap);
+    assert_eq!(shape.wrap_side, StaticImageWrapSide::Both);
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    let page = &layout.pages[0];
+    let shape_right = page
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            LayoutItem::Line { x1, x2, .. } => Some(x1.max(*x2)),
+            _ => None,
+        })
+        .fold(0.0_f32, f32::max);
+    let wrapped_text = page
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Text(text) if text.text.contains("Wrapped") => Some(text),
+            _ => None,
+        })
+        .expect("wrapped text");
+    assert!(
+        wrapped_text.x > shape_right,
+        "following text should be shifted beside the passive static shape: text {}, shape right {}",
+        wrapped_text.x,
+        shape_right
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic
+            .message
+            .contains("shape text wrapping approximated")
+    }));
+    for forbidden in [
+        b"shpwr".as_slice(),
+        b"shpwrk",
+        b"shapeType",
+        b"pFragments",
+        b"hidden-static-wrap-payload",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "static shape wrap metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn column_paragraph_shape_anchoring_is_consumed_as_passive_layout_metadata() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
