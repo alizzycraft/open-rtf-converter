@@ -1757,6 +1757,46 @@
       ]
     },
     {
+      "id": "shape-fill-flag-passive-last-state",
+      "input": "fixtures/shape-fill-flag-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before fill flag.",
+        "After fill flag."
+      ],
+      "intentional_security_differences": [
+        "Office drawing fill enablement flags are normalized into bounded passive fill state rather than editable Office drawing metadata.",
+        "Repeated fill flags use the final safe state for visible rendering while unsupported or active drawing payload properties are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
+      ],
+      "forbidden_pdf_markers": [
+        "shpinst",
+        "shapeType",
+        "fillColor",
+        "fFilled",
+        "pFragments",
+        "hostile-fill-flag-reference-payload",
+        "[Shape skipped",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm final-state fill flag precedence and passive fill color rendering once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
