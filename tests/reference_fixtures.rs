@@ -28,6 +28,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/office-math-passive.rtf",
         "fixtures/field-hyperlink-passive.rtf",
         "fixtures/line-numbering-passive.rtf",
+        "fixtures/page-border-art-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -514,6 +515,26 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[],
             must_emit_diagnostics: &["line numbering rendered as bounded passive margin text"],
+        },
+        ReferenceFixture {
+            input: "fixtures/page-border-art-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Body inside passive page border fallback."],
+            must_not_leak: &[
+                b"pgbrdrt",
+                b"brdrart",
+                b"brdrw80",
+                b"brsp240",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/AcroForm",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "page border art rendered as bounded passive line border fallback",
+            ],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",

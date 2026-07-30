@@ -407,6 +407,39 @@
       ]
     },
     {
+      "id": "page-border-art-passive-fallback",
+      "input": "fixtures/page-border-art-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Body inside passive page border fallback."
+      ],
+      "intentional_security_differences": [
+        "Word page border art is rendered as a bounded passive line border fallback instead of preserving art payload semantics."
+      ],
+      "expected_diagnostics": [
+        "page border art rendered as bounded passive line border fallback"
+      ],
+      "forbidden_pdf_markers": [
+        "pgbrdrt",
+        "brdrart",
+        "brdrw80",
+        "brsp240",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact page-border inset and visual fallback thickness once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
