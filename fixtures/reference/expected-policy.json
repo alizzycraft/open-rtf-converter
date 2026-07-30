@@ -2598,6 +2598,59 @@
       ]
     },
     {
+      "id": "form-checkbox-passive-vectors",
+      "input": "fixtures/form-checkbox-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before form checkboxes.",
+        "Checked",
+        "item.",
+        "Unchecked",
+        "After form checkboxes."
+      ],
+      "intentional_security_differences": [
+        "FORMCHECKBOX fields are normalized into bounded passive checked/unchecked checkbox text and vector output without creating PDF form widgets.",
+        "Raw form field metadata, macro hooks, datafield payloads, ZapfDingbats dependencies, and active PDF form/action features are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "rendering passive form field FORMCHECKBOX without creating PDF form actions"
+      ],
+      "forbidden_pdf_markers": [
+        "FORMCHECKBOX",
+        "formfield",
+        "fftype1",
+        "ffname",
+        "HiddenChecked",
+        "HiddenUnchecked",
+        "ffdefres",
+        "ffres",
+        "ffentrymcr",
+        "launch.exe",
+        "datafield",
+        "414243",
+        "444546",
+        "ZapfDingbats",
+        "/AcroForm",
+        "/Widget",
+        "/AA",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact checked and unchecked form checkbox vector geometry and label spacing once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
