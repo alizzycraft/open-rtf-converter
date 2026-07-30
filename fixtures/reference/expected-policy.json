@@ -488,6 +488,44 @@
       ]
     },
     {
+      "id": "page-border-scope-passive-layout",
+      "input": "fixtures/page-border-scope-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Body inside scoped passive page border."
+      ],
+      "intentional_security_differences": [
+        "Page border header/footer scope and page-edge reference controls are normalized into bounded passive page border geometry.",
+        "Raw page border scope and reference controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "pgbrdrhead",
+        "pgbrdrfoot",
+        "pgbrdropt",
+        "pgbrdrt",
+        "pgbrdrb",
+        "pgbrdrl",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact page border scope relative to header/footer and page edge once available."
+      ]
+    },
+    {
       "id": "character-typography-passive-controls",
       "input": "fixtures/character-typography-passive.rtf",
       "category": "acceptable_approximation",
