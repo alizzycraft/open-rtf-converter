@@ -70987,6 +70987,8 @@ fn mirrored_page_gutter_renders_passively_without_control_leakage() {
         "\\",
         "gutter720",
         "\\",
+        "margmirsxn",
+        "\\",
         "facingp Odd text",
         "\\",
         "page Even text",
@@ -71000,6 +71002,7 @@ fn mirrored_page_gutter_renders_passively_without_control_leakage() {
     assert!(text.contains("Odd text"));
     assert!(text.contains("Even text"));
     assert!(!text.contains("facingp"));
+    assert!(!text.contains("margmirsxn"));
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("mirrored-page-gutter.rtf");
@@ -71020,6 +71023,7 @@ fn mirrored_page_gutter_renders_passively_without_control_leakage() {
 
     for forbidden in [
         b"facingp".as_slice(),
+        b"margmirsxn",
         b"gutter",
         b"/JavaScript",
         b"/EmbeddedFile",
@@ -71047,6 +71051,8 @@ fn right_to_left_gutter_renders_passively_without_control_leakage() {
         "\\",
         "gutter720",
         "\\",
+        "gutterprl",
+        "\\",
         "rtlgutter Bound text",
         "\\",
         "par}",
@@ -71058,6 +71064,7 @@ fn right_to_left_gutter_renders_passively_without_control_leakage() {
     assert_eq!(parsed.document.page.gutter_twips, 720);
     assert!(text.contains("Bound text"));
     assert!(!text.contains("rtlgutter"));
+    assert!(!text.contains("gutterprl"));
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("rtl-gutter.rtf");
@@ -71078,6 +71085,7 @@ fn right_to_left_gutter_renders_passively_without_control_leakage() {
 
     for forbidden in [
         b"rtlgutter".as_slice(),
+        b"gutterprl",
         b"gutter",
         b"/JavaScript",
         b"/EmbeddedFile",

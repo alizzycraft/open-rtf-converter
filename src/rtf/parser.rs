@@ -5511,11 +5511,11 @@ impl Parser {
                     self.clamp_page_gutter(control.parameter, offset);
                 self.upsert_current_section_settings();
             }
-            "facingp" | "margmirror" => {
+            "facingp" | "margmirror" | "margmirsxn" => {
                 self.current_section_page.mirror_margins = control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
-            "rtlgutter" | "rtlguttersxn" => {
+            "rtlgutter" | "rtlguttersxn" | "gutterprl" => {
                 self.current_section_page.gutter_on_right = control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
@@ -51202,6 +51202,13 @@ After\par}"#;
 
         let output = parse_rtf(r"{\rtf1\margmirror0 Body\par}").unwrap();
         assert!(!output.document.page.mirror_margins);
+
+        let output = parse_rtf(r"{\rtf1\margmirsxn\gutter360 Body\par}").unwrap();
+        assert!(output.document.page.mirror_margins);
+        assert_eq!(output.document.page.gutter_twips, 360);
+
+        let output = parse_rtf(r"{\rtf1\margmirsxn0 Body\par}").unwrap();
+        assert!(!output.document.page.mirror_margins);
     }
 
     #[test]
@@ -51212,6 +51219,13 @@ After\par}"#;
         assert_eq!(output.document.page.gutter_twips, 360);
 
         let output = parse_rtf(r"{\rtf1\rtlgutter0 Body\par}").unwrap();
+        assert!(!output.document.page.gutter_on_right);
+
+        let output = parse_rtf(r"{\rtf1\gutterprl\gutter360 Body\par}").unwrap();
+        assert!(output.document.page.gutter_on_right);
+        assert_eq!(output.document.page.gutter_twips, 360);
+
+        let output = parse_rtf(r"{\rtf1\gutterprl0 Body\par}").unwrap();
         assert!(!output.document.page.gutter_on_right);
     }
 
@@ -51308,6 +51322,16 @@ After\par}"#;
     fn normalizes_later_section_rtl_gutter_as_safe_metadata() {
         let output =
             parse_rtf(r"{\rtf1 First\par\sect\sectd\rtlguttersxn\gutter360 Second\par}").unwrap();
+        let settings = match &output.document.blocks[2] {
+            Block::SectionSettings(settings) => settings,
+            _ => panic!("expected section page settings block"),
+        };
+
+        assert!(settings.gutter_on_right);
+        assert_eq!(settings.gutter_twips, 360);
+
+        let output =
+            parse_rtf(r"{\rtf1 First\par\sect\sectd\gutterprl\gutter360 Second\par}").unwrap();
         let settings = match &output.document.blocks[2] {
             Block::SectionSettings(settings) => settings,
             _ => panic!("expected section page settings block"),
