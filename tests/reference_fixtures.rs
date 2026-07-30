@@ -26,6 +26,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/static-shape-wrap.rtf",
         "fixtures/floating-table-positioning.rtf",
         "fixtures/office-math-passive.rtf",
+        "fixtures/field-hyperlink-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -461,6 +462,36 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "Office math rendered as bounded passive math text",
                 "active content removed: OLE object before safe model normalization",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/field-hyperlink-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before field.",
+                "Visible safe link text",
+                "after link.",
+                "[Field removed: no passive result]",
+                "after external field.",
+            ],
+            must_not_leak: &[
+                b"fldinst",
+                b"fldrslt",
+                b"HYPERLINK",
+                b"INCLUDEPICTURE",
+                b"example.com",
+                b"active?token=414243",
+                b"pixel.png",
+                b"/URI",
+                b"/Annots",
+                b"/Action",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "rendering stored result for field HYPERLINK without executing field instruction",
+                "external field INCLUDEPICTURE rendered as passive placeholder without fetching external resource",
             ],
         },
         ReferenceFixture {

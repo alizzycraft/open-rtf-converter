@@ -332,6 +332,48 @@
       ]
     },
     {
+      "id": "field-hyperlink-passive-result",
+      "input": "fixtures/field-hyperlink-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before field.",
+        "Visible safe link text",
+        "after link.",
+        "[Field removed: no passive result]",
+        "after external field."
+      ],
+      "intentional_security_differences": [
+        "Stored hyperlink field results are rendered as plain passive text without preserving clickable PDF actions.",
+        "Resultless external fields are rendered as passive placeholders and are never fetched or embedded."
+      ],
+      "expected_diagnostics": [
+        "rendering stored result for field HYPERLINK without executing field instruction",
+        "external field INCLUDEPICTURE rendered as passive placeholder without fetching external resource"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "fldrslt",
+        "HYPERLINK",
+        "INCLUDEPICTURE",
+        "example.com",
+        "active?token=414243",
+        "pixel.png",
+        "/URI",
+        "/Annots",
+        "/Action",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact stored field-result spacing once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
