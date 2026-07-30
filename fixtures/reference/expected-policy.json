@@ -2389,6 +2389,51 @@
       ]
     },
     {
+      "id": "wingdings-checkbox-passive-vectors",
+      "input": "fixtures/wingdings-checkbox-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before Wingdings checkboxes.",
+        "Box states:",
+        "Field states:",
+        "After Wingdings checkboxes."
+      ],
+      "intentional_security_differences": [
+        "Wingdings checkbox glyphs and SYMBOL field fallbacks are normalized into bounded passive checkbox text and vector output.",
+        "Raw Wingdings font metadata, source hex escapes, field instructions, ZapfDingbats dependencies, and active link/action targets are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "Wingdings",
+        "fldinst",
+        "SYMBOL",
+        "ZapfDingbats",
+        "'a3",
+        "'fe",
+        "'fc",
+        "'fb",
+        "'fd",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact Wingdings checkbox glyph mapping, checkbox vector geometry, and field fallback spacing once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
