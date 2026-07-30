@@ -36,6 +36,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/form-field-shading-passive.rtf",
         "fixtures/note-placement-passive.rtf",
         "fixtures/shape-rotation-passive.rtf",
+        "fixtures/section-columns-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -739,6 +740,27 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
                 "shape rotation rendered as bounded passive static geometry",
             ],
+        },
+        ReferenceFixture {
+            input: "fixtures/section-columns-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Left rail text.", "Right rail text."],
+            must_not_leak: &[
+                b"colsx",
+                b"linebetcol",
+                b"colno",
+                b"colw",
+                b"colsr",
+                b"column",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",

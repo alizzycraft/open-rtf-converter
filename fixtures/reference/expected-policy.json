@@ -731,6 +731,41 @@
       ]
     },
     {
+      "id": "section-columns-passive-layout",
+      "input": "fixtures/section-columns-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Left rail text.",
+        "Right rail text."
+      ],
+      "intentional_security_differences": [
+        "Section column metadata is normalized into bounded passive text flow and separator rules, not preserved as editable Word section state."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "colsx",
+        "linebetcol",
+        "colno",
+        "colw",
+        "colsr",
+        "column",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact column widths, gap, separator rule position, and column-break flow once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
