@@ -56,6 +56,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/shape-line-join-passive.rtf",
         "fixtures/shape-pattern-fill-passive.rtf",
         "fixtures/shape-gradient-fill-passive.rtf",
+        "fixtures/shape-shadow-opacity-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1314,6 +1315,34 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[],
             must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
+            input: "fixtures/shape-shadow-opacity-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before shadow shape.", "After shadow shape."],
+            must_not_leak: &[
+                b"shpinst",
+                b"shapeType",
+                b"fillColor",
+                b"fShadow",
+                b"shadowColor",
+                b"shadowOpacity",
+                b"32768",
+                b"pFragments",
+                b"hostile-shadow-opacity-reference-payload",
+                b"[Shape skipped",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
+            ],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",
