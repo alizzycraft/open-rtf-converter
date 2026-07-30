@@ -850,6 +850,47 @@
       ]
     },
     {
+      "id": "table-row-keep-together-passive-pagination",
+      "input": "fixtures/table-row-keep-together-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "Before keep-together table.",
+        "Filler row 1",
+        "Filler row 3",
+        "Kept tall row first line",
+        "Kept tall row second line",
+        "Normal row",
+        "After keep-together table."
+      ],
+      "intentional_security_differences": [
+        "Table row keep-together controls are normalized into bounded passive pagination hints.",
+        "Raw keep-together, row-height, and cell metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "trrh",
+        "trkeep",
+        "trkeep0",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact kept-row page break behavior once available."
+      ]
+    },
+    {
       "id": "table-row-keep-follow-passive-pagination",
       "input": "fixtures/table-row-keep-follow-passive.rtf",
       "category": "acceptable_approximation",
