@@ -44,6 +44,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/old-style-list-passive.rtf",
         "fixtures/section-number-passive.rtf",
         "fixtures/picture-scaling-passive.rtf",
+        "fixtures/associated-character-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -973,6 +974,38 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[b"/Subtype /Image"],
             must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
+            input: "fixtures/associated-character-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before associated text.",
+                "Associated styled text",
+                "Plain after associated text.",
+            ],
+            must_not_leak: &[
+                b"fonttbl",
+                b"colortbl",
+                b"loch",
+                b"acf1",
+                b"aul",
+                b"aexpnd4",
+                b"aup6",
+                b"objdata",
+                b"414243",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+                b"/URI",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "active content removed: OLE object before safe model normalization",
+            ],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",

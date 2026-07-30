@@ -1067,6 +1067,50 @@
       ]
     },
     {
+      "id": "associated-character-passive-controls",
+      "input": "fixtures/associated-character-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before associated text.",
+        "Associated styled text",
+        "Plain after associated text."
+      ],
+      "intentional_security_differences": [
+        "Associated character controls are normalized into bounded passive character styling.",
+        "Adjacent embedded object payloads are stripped before normalized model and PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "active content removed: OLE object before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "fonttbl",
+        "colortbl",
+        "loch",
+        "acf1",
+        "aul",
+        "aexpnd4",
+        "aup6",
+        "objdata",
+        "414243",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact associated-control bold/italic/color/underline/spacing/baseline rendering once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
