@@ -49,6 +49,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/section-pages-passive.rtf",
         "fixtures/header-footer-variants-passive.rtf",
         "fixtures/background-shape-passive.rtf",
+        "fixtures/shape-z-order-text-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1119,6 +1120,34 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[],
             must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
+            input: "fixtures/shape-z-order-text-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before z-order shape.",
+                "Layered Box",
+                "After z-order shape.",
+            ],
+            must_not_leak: &[
+                b"shpinst",
+                b"shpz",
+                b"shapeType",
+                b"pFragments",
+                b"hidden-z-order-reference-payload",
+                b"shptxt",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "shape z-order rendered through bounded passive drawing order",
+            ],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",

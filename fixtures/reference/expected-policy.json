@@ -1268,6 +1268,46 @@
       ]
     },
     {
+      "id": "shape-z-order-text-passive-drawing-order",
+      "input": "fixtures/shape-z-order-text-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before z-order shape.",
+        "Layered Box",
+        "After z-order shape."
+      ],
+      "intentional_security_differences": [
+        "Shape z-order controls are normalized into bounded passive drawing order rather than preserving editable Office drawing metadata.",
+        "Unsupported or active shape property payloads are stripped before the PDF layer while safe shape text remains visible."
+      ],
+      "expected_diagnostics": [
+        "shape z-order rendered through bounded passive drawing order"
+      ],
+      "forbidden_pdf_markers": [
+        "shpinst",
+        "shpz",
+        "shapeType",
+        "pFragments",
+        "hidden-z-order-reference-payload",
+        "shptxt",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact z-order paint order and shape-text frame positioning once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
