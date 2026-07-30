@@ -1021,6 +1021,52 @@
       ]
     },
     {
+      "id": "picture-scaling-passive-image-geometry",
+      "input": "fixtures/picture-scaling-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before scaled image.",
+        "After scaled image."
+      ],
+      "intentional_security_differences": [
+        "Picture sizing, scaling, and crop controls are normalized into bounded passive image geometry; raw image payload and RTF picture controls are not copied through as document text or active PDF data."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "pngblip",
+        "picw2",
+        "pich1",
+        "picwgoal",
+        "pichgoal",
+        "picscalex",
+        "picscaley",
+        "piccropl",
+        "piccropt",
+        "piccropr",
+        "piccropb",
+        "IHDR",
+        "IDAT",
+        "IEND",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact scaled/cropped image transform and clipping geometry once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
