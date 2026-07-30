@@ -614,6 +614,60 @@
       ]
     },
     {
+      "id": "table-padding-passive-insets",
+      "input": "fixtures/table-padding-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before table padding.",
+        "Row padded",
+        "Cell padded",
+        "After table padding."
+      ],
+      "intentional_security_differences": [
+        "Row default and cell-specific table padding controls are normalized into bounded passive cell text insets.",
+        "Raw table padding controls and unit metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "table padding and spacing units interpreted through bounded twip layout"
+      ],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "trgaph",
+        "trpaddfl",
+        "trpaddfr",
+        "trpaddft",
+        "trpaddfb",
+        "trpaddl",
+        "trpaddr",
+        "trpaddt",
+        "trpaddb",
+        "clpadfl",
+        "clpadfr",
+        "clpadft",
+        "clpadfb",
+        "clpadl",
+        "clpadr",
+        "clpadt",
+        "clpadb",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact row-default versus cell-specific padding precedence and text inset placement once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
