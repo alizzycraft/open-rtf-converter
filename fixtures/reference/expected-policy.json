@@ -931,6 +931,46 @@
       ]
     },
     {
+      "id": "paragraph-keep-pagination-passive-flow",
+      "input": "fixtures/paragraph-keep-pagination-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "Filler one",
+        "Filler three",
+        "Kept line one",
+        "Kept line two",
+        "Kept line three",
+        "Keep next heading",
+        "Follower paragraph",
+        "Plain tail"
+      ],
+      "intentional_security_differences": [
+        "Paragraph keep-together and keep-with-next controls are normalized into bounded passive pagination hints.",
+        "Raw paragraph pagination controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "keep",
+        "keepn",
+        "keep0",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact paragraph keep-together and keep-with-next page break behavior once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
