@@ -17230,6 +17230,87 @@ fn resultless_index_entry_fields_are_stripped_without_pdf_leakage() {
 }
 
 #[test]
+fn index_entry_and_subdocument_metadata_are_stripped_without_pdf_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 visible before {",
+        "\\",
+        "txe hidden index entry {",
+        "\\",
+        "object",
+        "\\",
+        "objdata 414243}} ",
+        "\\",
+        "subdocument12 visible after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("visible before"));
+    assert!(text.contains("visible after"));
+    for forbidden in [
+        "txe",
+        "hidden index entry",
+        "subdocument",
+        "objdata",
+        "414243",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "index/subdocument metadata leaked to normalized text: {forbidden}"
+        );
+    }
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unsupported RTF control")
+            && !diagnostic.message.contains("unknown RTF destination")),
+        "index/subdocument metadata should be known and stripped: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+
+    assert!(rendered_text.contains("visible before"));
+    assert!(rendered_text.contains("visible after"));
+    for forbidden in [
+        b"txe".as_slice(),
+        b"hidden index entry",
+        b"subdocument",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/RichMedia",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "index/subdocument metadata leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn form_field_metadata_does_not_create_pdf_forms_or_leak_payloads() {
     let input = rtf(&[
         "{",

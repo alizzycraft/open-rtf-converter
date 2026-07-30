@@ -3223,6 +3223,13 @@ impl Parser {
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
             }
+            "txe"
+                if control_starts_group
+                    && destination_allows_safe_structural_content(&self.state) =>
+            {
+                self.state.destination = Destination::Metadata;
+                self.state.inside_metadata = true;
+            }
             name if is_object_metadata_destination(name)
                 && self.state.destination == Destination::ObjectData => {}
             name if is_object_metadata_destination(name)
@@ -23100,6 +23107,7 @@ fn is_known_ignored_control(name: &str) -> bool {
                 | "softcol"
                 | "softline"
                 | "softpage"
+                | "subdocument"
                 | "saveinvalidxml"
                 | "showxmlerrors"
                 | "sprstsp"
