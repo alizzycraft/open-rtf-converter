@@ -1014,6 +1014,48 @@
       ]
     },
     {
+      "id": "no-wrap-passive-line-breaking",
+      "input": "fixtures/no-wrap-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Alias Alpha Beta",
+        "Alias wrapped paragraph",
+        "Direct Alpha Beta",
+        "Direct wrapped paragraph",
+        "Cell Alpha Beta",
+        "Cell wrapped content",
+        "After passive no wrap."
+      ],
+      "intentional_security_differences": [
+        "Paragraph and table-cell no-wrap controls are normalized into bounded passive line-breaking metadata.",
+        "Raw no-wrap control words and table cell metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "nowrap",
+        "nowwrap",
+        "clNoWrap",
+        "trowd",
+        "trrh",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact no-wrap overflow and table-cell wrapping behavior once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
