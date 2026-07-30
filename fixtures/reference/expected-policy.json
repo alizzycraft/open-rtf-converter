@@ -809,6 +809,47 @@
       ]
     },
     {
+      "id": "table-header-repeat-passive-pagination",
+      "input": "fixtures/table-header-repeat-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 5,
+      "must_preserve_text": [
+        "Before repeating table header.",
+        "Header row",
+        "Body row 01",
+        "Body row 18",
+        "Body row 36",
+        "After repeating table header."
+      ],
+      "intentional_security_differences": [
+        "Table header-repeat controls are normalized into bounded passive repeated header rows during pagination.",
+        "Raw table header, row-height, shading, and cell metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "trhdr",
+        "trhdr0",
+        "trrh",
+        "clcbpat",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact repeated-header placement and page-break row distribution once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
