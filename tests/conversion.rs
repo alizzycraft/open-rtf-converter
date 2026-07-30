@@ -1106,6 +1106,68 @@ fn default_conversion_embeds_bundled_metric_fonts_for_common_word_families() {
 }
 
 #[test]
+fn default_conversion_embeds_bundled_fallback_for_unknown_word_font_names() {
+    let input = br"{\rtf1\ansi{\fonttbl{\f7\fnil Unknown Word Font;}}\f7 Unknown fallback AB\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(output.pages, 1);
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for expected in [
+        b"/Subtype /Type0".as_slice(),
+        b"/CIDFontType2".as_slice(),
+        b"/Encoding /Identity-H".as_slice(),
+        b"/FontFile2".as_slice(),
+    ] {
+        assert!(
+            output
+                .pdf
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "expected bundled fallback passive font marker {:?}",
+            String::from_utf8_lossy(expected)
+        );
+    }
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("Unknown Word Font")
+            || !diagnostic.message.contains("substituted")),
+        "bundled wildcard fallback should suppress base-font substitution diagnostics: {:?}",
+        output.diagnostics
+    );
+    for forbidden in [
+        b"fonttbl".as_slice(),
+        b"Unknown Word Font",
+        b"/JavaScript",
+        b"/OpenAction",
+        b"/AA",
+        b"/AcroForm",
+        b"/Widget",
+        b"/Launch",
+        b"/EmbeddedFile",
+        b"/Filespec",
+        b"/RichMedia",
+        b"/XFA",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "source unknown-font metadata or active PDF marker leaked: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn browser_safe_defaults_embed_bundled_metric_fonts_for_office_theme_families() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Calibri;}{\f1 Cambria;}{\f2 Calibri Light;}{\f3 Cambria Math;}}\f0 Sans AB\par\f1 Serif \u337?D\par\f2 Light EF\par\f3 Math GH\par}";
     let output = convert_rtf_to_pdf(

@@ -274,6 +274,7 @@ fn push_bundled_browser_safe_style_set(
 
 fn bundled_browser_safe_sans_aliases() -> Vec<String> {
     [
+        "*",
         "Liberation Sans",
         "Arial",
         "Arial CE",
@@ -657,6 +658,7 @@ mod tests {
         provider.validate().unwrap();
 
         assert_eq!(provider.assets.len(), 13);
+        assert!(provider.has_asset_for_family("Unknown Word Font"));
         assert!(provider.has_asset_for_family("Arial"));
         assert!(provider.has_asset_for_family("Arial CE"));
         assert!(provider.has_asset_for_family("Arial Narrow"));
@@ -718,10 +720,9 @@ mod tests {
                 )
                 .is_some()
         );
-        assert!(!provider.has_asset_for_family("Unknown Word Font"));
         assert_eq!(
             provider.coverage_for_char("Unknown Word Font", 'A'),
-            FontCoverage::NoAsset
+            FontCoverage::Covered
         );
     }
 
