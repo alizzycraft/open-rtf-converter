@@ -70174,13 +70174,18 @@ fn distributed_alignment_controls_render_as_passive_justified_text() {
         "\\",
         "qk thai distributed one two three four five six seven eight",
         "\\",
+        "par",
+        "\\",
+        "qt thai justified one two three four five six seven eight",
+        "\\",
         "par}",
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("distributed one"));
     assert!(text.contains("thai distributed"));
-    for forbidden in ["qd", "qk"] {
+    assert!(text.contains("thai justified"));
+    for forbidden in ["qd", "qk", "qt"] {
         assert!(
             !text.contains(forbidden),
             "forbidden distributed-alignment control leaked to text: {forbidden}"
@@ -70197,6 +70202,15 @@ fn distributed_alignment_controls_render_as_passive_justified_text() {
         .collect::<Vec<_>>();
     assert_eq!(paragraphs[0].style.alignment, Alignment::Justified);
     assert_eq!(paragraphs[1].style.alignment, Alignment::Justified);
+    assert_eq!(paragraphs[2].style.alignment, Alignment::Justified);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "distributed alignment controls should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("distributed-alignment.rtf");
@@ -70216,6 +70230,7 @@ fn distributed_alignment_controls_render_as_passive_justified_text() {
     for forbidden in [
         b"\\qd".as_slice(),
         b"\\qk",
+        b"\\qt",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

@@ -5286,7 +5286,7 @@ impl Parser {
             "ql" => self.state.paragraph.alignment = Alignment::Left,
             "qc" => self.state.paragraph.alignment = Alignment::Center,
             "qr" => self.state.paragraph.alignment = Alignment::Right,
-            "qj" | "qd" | "qk" => self.state.paragraph.alignment = Alignment::Justified,
+            "qj" | "qd" | "qk" | "qt" => self.state.paragraph.alignment = Alignment::Justified,
             "rtlpar" => self.state.paragraph.alignment = Alignment::Right,
             "ltrpar" => self.state.paragraph.alignment = Alignment::Left,
             "pagebb" => {
@@ -23802,6 +23802,9 @@ fn is_visible_non_destination_control(name: &str) -> bool {
             | "qr"
             | "qc"
             | "qj"
+            | "qd"
+            | "qk"
+            | "qt"
             | "li"
             | "ri"
             | "fi"
@@ -51710,8 +51713,10 @@ After\par}"#;
 
     #[test]
     fn normalizes_distributed_alignment_controls_as_justified_metadata() {
-        let output =
-            parse_rtf(r"{\rtf1\qd Distributed\par\qk Thai distributed\par\ql Left\par}").unwrap();
+        let output = parse_rtf(
+            r"{\rtf1\qd Distributed\par\qk Thai distributed\par\qt Thai justified\par\ql Left\par}",
+        )
+        .unwrap();
 
         let paragraph = |index: usize| match &output.document.blocks[index] {
             Block::Paragraph(paragraph) => paragraph,
@@ -51720,7 +51725,14 @@ After\par}"#;
 
         assert_eq!(paragraph(0).style.alignment, Alignment::Justified);
         assert_eq!(paragraph(1).style.alignment, Alignment::Justified);
-        assert_eq!(paragraph(2).style.alignment, Alignment::Left);
+        assert_eq!(paragraph(2).style.alignment, Alignment::Justified);
+        assert_eq!(paragraph(3).style.alignment, Alignment::Left);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
