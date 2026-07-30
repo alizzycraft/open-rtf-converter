@@ -80,8 +80,8 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
 
 #[test]
 fn reference_policy_fixtures_match_current_passive_converter_output() {
-    for fixture in reference_fixtures() {
-        let input = std::fs::read(fixture.input).unwrap_or_else(|error| {
+    for fixture in manifest_reference_fixtures() {
+        let input = std::fs::read(&fixture.input).unwrap_or_else(|error| {
             panic!(
                 "failed to read reference fixture {}: {error}",
                 fixture.input
@@ -114,7 +114,7 @@ fn reference_policy_fixtures_match_current_passive_converter_output() {
             fixture.input
         );
         let rendered_text = decoded_pdf_text(&pdf);
-        for expected in fixture.must_preserve_text {
+        for expected in &fixture.must_preserve_text {
             assert!(
                 rendered_text.contains(expected),
                 "{} rendered PDF text did not contain {:?}; text was {:?}",
@@ -123,29 +123,31 @@ fn reference_policy_fixtures_match_current_passive_converter_output() {
                 rendered_text
             );
         }
-        for forbidden in fixture.must_not_leak {
+        for forbidden in &fixture.must_not_leak {
+            let forbidden = forbidden.as_bytes();
             assert!(
                 !output
                     .pdf
                     .windows(forbidden.len())
-                    .any(|window| window == *forbidden),
+                    .any(|window| window == forbidden),
                 "{} leaked forbidden source/control bytes {:?}",
                 fixture.input,
                 String::from_utf8_lossy(forbidden)
             );
         }
-        for expected in fixture.must_contain_pdf {
+        for expected in &fixture.must_contain_pdf {
+            let expected = expected.as_bytes();
             assert!(
                 output
                     .pdf
                     .windows(expected.len())
-                    .any(|window| window == *expected),
+                    .any(|window| window == expected),
                 "{} rendered PDF did not contain expected passive marker {:?}",
                 fixture.input,
                 String::from_utf8_lossy(expected)
             );
         }
-        for expected in fixture.must_emit_diagnostics {
+        for expected in &fixture.must_emit_diagnostics {
             assert!(
                 output
                     .diagnostics
@@ -160,6 +162,78 @@ fn reference_policy_fixtures_match_current_passive_converter_output() {
     }
 }
 
+#[test]
+fn executable_reference_fixtures_follow_manifest_policy_entries() {
+    let manifest_fixtures = manifest_reference_fixtures();
+    assert_eq!(
+        manifest_fixtures.len(),
+        reference_fixtures().len(),
+        "executable fixture count should stay in lockstep with manifest policy entries"
+    );
+
+    for fixture in reference_fixtures() {
+        let manifest = manifest_fixtures
+            .iter()
+            .find(|manifest| manifest.input == fixture.input)
+            .unwrap_or_else(|| panic!("manifest missing executable fixture {}", fixture.input));
+        assert_eq!(
+            manifest.expected_pages, fixture.expected_pages,
+            "{} expected_pages drifted between manifest and executable gate",
+            fixture.input
+        );
+        assert_eq!(
+            manifest.must_preserve_text,
+            fixture
+                .must_preserve_text
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>(),
+            "{} must_preserve_text drifted between manifest and executable gate",
+            fixture.input
+        );
+        assert_eq!(
+            manifest.must_not_leak,
+            fixture
+                .must_not_leak
+                .iter()
+                .map(|marker| String::from_utf8_lossy(marker).into_owned())
+                .collect::<Vec<_>>(),
+            "{} forbidden_pdf_markers drifted between manifest and executable gate",
+            fixture.input
+        );
+        assert_eq!(
+            manifest.must_contain_pdf,
+            fixture
+                .must_contain_pdf
+                .iter()
+                .map(|marker| String::from_utf8_lossy(marker).into_owned())
+                .collect::<Vec<_>>(),
+            "{} expected_pdf_markers drifted between manifest and executable gate",
+            fixture.input
+        );
+        assert_eq!(
+            manifest.must_emit_diagnostics,
+            fixture
+                .must_emit_diagnostics
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>(),
+            "{} expected_diagnostics drifted between manifest and executable gate",
+            fixture.input
+        );
+    }
+}
+
+#[derive(Debug)]
+struct ManifestReferenceFixture {
+    input: String,
+    expected_pages: usize,
+    must_preserve_text: Vec<String>,
+    must_not_leak: Vec<String>,
+    must_contain_pdf: Vec<String>,
+    must_emit_diagnostics: Vec<String>,
+}
+
 struct ReferenceFixture {
     input: &'static str,
     expected_pages: usize,
@@ -167,6 +241,21 @@ struct ReferenceFixture {
     must_not_leak: &'static [&'static [u8]],
     must_contain_pdf: &'static [&'static [u8]],
     must_emit_diagnostics: &'static [&'static str],
+}
+
+fn manifest_reference_fixtures() -> Vec<ManifestReferenceFixture> {
+    let fixtures = json_array_for_key(MANIFEST, "fixtures");
+    split_json_objects(fixtures)
+        .into_iter()
+        .map(|object| ManifestReferenceFixture {
+            input: json_string_for_key(object, "input"),
+            expected_pages: json_usize_for_key(object, "expected_pages"),
+            must_preserve_text: json_string_array_for_key(object, "must_preserve_text"),
+            must_not_leak: json_string_array_for_key(object, "forbidden_pdf_markers"),
+            must_contain_pdf: json_string_array_for_key(object, "expected_pdf_markers"),
+            must_emit_diagnostics: json_string_array_for_key(object, "expected_diagnostics"),
+        })
+        .collect()
 }
 
 fn reference_fixtures() -> &'static [ReferenceFixture] {
@@ -357,4 +446,158 @@ fn bytes_look_like_utf16be_cids(bytes: &[u8]) -> bool {
     let chunks = bytes.len() / 2;
     let zero_high_bytes = bytes.chunks_exact(2).filter(|chunk| chunk[0] == 0).count();
     zero_high_bytes * 2 >= chunks
+}
+
+fn json_usize_for_key(object: &str, key: &str) -> usize {
+    let marker = format!("\"{key}\":");
+    let start = object
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing numeric key {key}"))
+        + marker.len();
+    let value = object[start..]
+        .trim_start()
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    value
+        .parse()
+        .unwrap_or_else(|error| panic!("invalid numeric key {key}: {error}"))
+}
+
+fn json_string_for_key(object: &str, key: &str) -> String {
+    let marker = format!("\"{key}\":");
+    let start = object
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing string key {key}"))
+        + marker.len();
+    let value = object[start..].trim_start();
+    let (decoded, _) = parse_json_string(value)
+        .unwrap_or_else(|| panic!("invalid JSON string for key {key}: {value:?}"));
+    decoded
+}
+
+fn json_string_array_for_key(object: &str, key: &str) -> Vec<String> {
+    let array = json_array_for_key(object, key);
+    let mut values = Vec::new();
+    let mut rest = array.trim();
+    while !rest.is_empty() {
+        rest = rest.trim_start();
+        if let Some(after_comma) = rest.strip_prefix(',') {
+            rest = after_comma;
+            continue;
+        }
+        let Some((value, consumed)) = parse_json_string(rest) else {
+            panic!("invalid JSON string array item for key {key}: {rest:?}");
+        };
+        values.push(value);
+        rest = &rest[consumed..];
+    }
+    values
+}
+
+fn json_array_for_key<'a>(object: &'a str, key: &str) -> &'a str {
+    let marker = format!("\"{key}\":");
+    let start = object
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing array key {key}"))
+        + marker.len();
+    let after_marker = object[start..].trim_start();
+    let open = after_marker
+        .find('[')
+        .unwrap_or_else(|| panic!("missing array open for key {key}"));
+    let array_start = open + 1;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, ch) in after_marker[array_start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '[' => depth += 1,
+            ']' if depth == 0 => return &after_marker[array_start..array_start + idx],
+            ']' => depth -= 1,
+            _ => {}
+        }
+    }
+    panic!("unterminated array for key {key}")
+}
+
+fn split_json_objects(array: &str) -> Vec<&str> {
+    let mut objects = Vec::new();
+    let mut object_start = None;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, ch) in array.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => {
+                if depth == 0 {
+                    object_start = Some(idx);
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth = depth.checked_sub(1).expect("unexpected JSON object close");
+                if depth == 0 {
+                    let start = object_start.take().expect("missing JSON object start");
+                    objects.push(&array[start..=idx]);
+                }
+            }
+            _ => {}
+        }
+    }
+    objects
+}
+
+fn parse_json_string(value: &str) -> Option<(String, usize)> {
+    let mut chars = value.char_indices();
+    if chars.next()?.1 != '"' {
+        return None;
+    }
+    let mut output = String::new();
+    let mut escaped = false;
+    for (idx, ch) in chars {
+        if escaped {
+            let decoded = match ch {
+                '"' => '"',
+                '\\' => '\\',
+                '/' => '/',
+                'b' => '\u{0008}',
+                'f' => '\u{000c}',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                _ => return None,
+            };
+            output.push(decoded);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            return Some((output, idx + ch.len_utf8()));
+        } else {
+            output.push(ch);
+        }
+    }
+    None
 }
