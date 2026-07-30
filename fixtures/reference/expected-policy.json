@@ -900,6 +900,55 @@
       ]
     },
     {
+      "id": "table-borders-passive-lines",
+      "input": "fixtures/table-borders-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before table borders.",
+        "Top left",
+        "Diagonal cell",
+        "Right cell",
+        "After table borders."
+      ],
+      "intentional_security_differences": [
+        "Table row, inner, cell, and diagonal border controls are normalized into bounded passive line drawing commands."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "colortbl",
+        "red255",
+        "blue255",
+        "trowd",
+        "trbrdrt",
+        "trbrdrh",
+        "trbrdrv",
+        "clbrdrl",
+        "clbrdrt",
+        "cldglu",
+        "cldgll",
+        "brdrdb",
+        "brdrdash",
+        "brdrw",
+        "brdrcf",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact row, inner, cell, and diagonal border stroke placement, styles, widths, and colors once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
