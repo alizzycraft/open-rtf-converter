@@ -248,6 +248,54 @@
       ]
     },
     {
+      "id": "shape-wrap-distance-passive-flow",
+      "input": "fixtures/shape-wrap-distance-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before shape wrap distance.",
+        "Wrapped paragraph should honor the passive shape wrap distances",
+        "After shape wrap distance."
+      ],
+      "intentional_security_differences": [
+        "Office drawing wrap-distance properties are normalized into bounded passive flow exclusions.",
+        "Raw shape placement, wrap-distance metadata, and unsupported or active drawing payload properties are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
+      ],
+      "forbidden_pdf_markers": [
+        "shpinst",
+        "shpleft",
+        "shptop",
+        "shpright",
+        "shpbottom",
+        "shpwr",
+        "shpwrk",
+        "shapeType",
+        "dxWrapDistLeft",
+        "dxWrapDistRight",
+        "dyWrapDistTop",
+        "dyWrapDistBottom",
+        "pFragments",
+        "hostile-wrap-distance-reference-payload",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact wrap-distance conversion and line reflow around the passive shape once available."
+      ]
+    },
+    {
       "id": "floating-table-passive-positioning",
       "input": "fixtures/floating-table-positioning.rtf",
       "category": "acceptable_approximation",
