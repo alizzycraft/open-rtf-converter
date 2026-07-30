@@ -766,6 +766,42 @@
       ]
     },
     {
+      "id": "tab-alignment-passive-layout",
+      "input": "fixtures/tab-alignment-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Left label",
+        "9",
+        "Decimal value",
+        "12.3"
+      ],
+      "intentional_security_differences": [
+        "Word tab stop controls are normalized into bounded passive PDF text placement and leader glyphs, not preserved as editable paragraph tab metadata."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "tqr",
+        "tqdec",
+        "tldot",
+        "tx1440",
+        "tx2160",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact right-tab, decimal-tab, and dot-leader positioning once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
