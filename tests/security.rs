@@ -70999,6 +70999,135 @@ fn page_break_before_renders_passively_without_control_leakage() {
 }
 
 #[test]
+fn paragraph_keep_controls_paginate_passively_without_control_leakage() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "paperw6120",
+        "\\",
+        "paperh3600",
+        "\\",
+        "margt360",
+        "\\",
+        "margb360",
+        "\\",
+        "fs48 Filler one",
+        "\\",
+        "par Filler two",
+        "\\",
+        "par Filler three",
+        "\\",
+        "par ",
+        "\\",
+        "keep Kept line one",
+        "\\",
+        "line Kept line two",
+        "\\",
+        "line Kept line three",
+        "\\",
+        "par ",
+        "\\",
+        "keepn Keep next heading",
+        "\\",
+        "par Follower paragraph",
+        "\\",
+        "par ",
+        "\\",
+        "keep0 Plain tail",
+        "\\",
+        "par} ",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("Filler one"));
+    assert!(text.contains("Kept line one\nKept line two\nKept line three"));
+    assert!(text.contains("Keep next heading"));
+    assert!(text.contains("Follower paragraph"));
+    assert!(!text.contains("keep"));
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(paragraphs[3].style.keep_together);
+    assert!(paragraphs[4].style.keep_with_next);
+    assert!(!paragraphs[6].style.keep_together);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
+        "paragraph keep controls should not be unsupported: {:?}",
+        parsed.diagnostics
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let pages = parsed_pdf.get_pages();
+    assert!(
+        pages.len() >= 2,
+        "kept paragraph should force passive pagination"
+    );
+    let page_texts = pages
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !page_texts[0].contains("Kept line one"),
+        "keep-together paragraph should move as a unit: {page_texts:?}"
+    );
+    assert!(
+        page_texts
+            .iter()
+            .skip(1)
+            .any(|page| page.contains("Kept line one") && page.contains("Kept line three")),
+        "kept lines should remain together on a later page: {page_texts:?}"
+    );
+    let keep_next_page = page_texts
+        .iter()
+        .position(|page| page.contains("Keep next heading"))
+        .expect("keep-next heading should render");
+    assert!(
+        page_texts[keep_next_page].contains("Follower paragraph")
+            || page_texts
+                .iter()
+                .skip(keep_next_page + 1)
+                .any(|page| page.contains("Follower paragraph")),
+        "keep-next follower should not be lost: {page_texts:?}"
+    );
+    for forbidden in [
+        b"keep".as_slice(),
+        b"keepn",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden paragraph keep content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_gutter_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
