@@ -2191,6 +2191,45 @@
       ]
     },
     {
+      "id": "font-code-page-passive-decoding",
+      "input": "fixtures/font-code-page-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before font code pages.",
+        "IBM cafe",
+        "Mac quote",
+        "After font code pages."
+      ],
+      "intentional_security_differences": [
+        "Font-specific code-page metadata guides bounded passive hex-escape decoding for visible text only.",
+        "Raw font table, global code-page, font-specific code-page, and font-name metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "cpg437",
+        "cpg10000",
+        "Terminal",
+        "Mac Face",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact IBM437 and MacRoman glyph mapping, font fallback metrics, and PDF text extraction behavior once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
