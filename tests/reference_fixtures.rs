@@ -42,6 +42,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/shading-patterns-passive.rtf",
         "fixtures/table-borders-passive.rtf",
         "fixtures/old-style-list-passive.rtf",
+        "fixtures/section-number-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -912,6 +913,25 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"pnstart",
                 b"pndec",
                 b"pnucrm",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
+            input: "fixtures/section-number-passive.rtf",
+            expected_pages: 2,
+            must_preserve_text: &["Part 1", "Part 2", "Part 3"],
+            must_not_leak: &[
+                b"sectnum",
+                b"fldinst",
+                b"SECTION",
                 b"/JavaScript",
                 b"/EmbeddedFile",
                 b"/Launch",

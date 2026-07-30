@@ -987,6 +987,40 @@
       ]
     },
     {
+      "id": "section-number-passive-fields",
+      "input": "fixtures/section-number-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "Part 1",
+        "Part 2",
+        "Part 3"
+      ],
+      "intentional_security_differences": [
+        "Section-number controls and SECTION fields are resolved into bounded passive generated text without preserving executable field instructions."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "sectnum",
+        "fldinst",
+        "SECTION",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact section-number pagination and restart/continue behavior once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
