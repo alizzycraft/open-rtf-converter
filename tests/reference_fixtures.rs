@@ -22,6 +22,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/object-result.rtf",
         "fixtures/png-alpha.rtf",
         "fixtures/png-trns.rtf",
+        "fixtures/windows-bitmap.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -353,6 +354,27 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[b"/SMask"],
             must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
+            input: "fixtures/windows-bitmap.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before Windows bitmap image.",
+                "After Windows bitmap image.",
+            ],
+            must_not_leak: &[
+                b"wbitmap",
+                b"wbmplanes",
+                b"wbmbitspixel",
+                b"wbmwidthbytes",
+                b"ff0000ffffff0000ff00ff00",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+            ],
+            must_contain_pdf: &[b"/Subtype /Image"],
+            must_emit_diagnostics: &[
+                "Windows bitmap picture rendered as bounded passive RGB image",
+            ],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",

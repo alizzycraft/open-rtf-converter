@@ -180,6 +180,38 @@
       ]
     },
     {
+      "id": "windows-bitmap-passive-rgb",
+      "input": "fixtures/windows-bitmap.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before Windows bitmap image.",
+        "After Windows bitmap image."
+      ],
+      "intentional_security_differences": [],
+      "expected_diagnostics": [
+        "Windows bitmap picture rendered as bounded passive RGB image"
+      ],
+      "forbidden_pdf_markers": [
+        "wbitmap",
+        "wbmplanes",
+        "wbmbitspixel",
+        "wbmwidthbytes",
+        "ff0000ffffff0000ff00ff00",
+        "/JavaScript",
+        "/EmbeddedFile"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact bitmap placement and color orientation once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
