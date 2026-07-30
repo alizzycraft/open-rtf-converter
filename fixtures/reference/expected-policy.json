@@ -2346,6 +2346,49 @@
       ]
     },
     {
+      "id": "pntext-symbol-list-passive-markers",
+      "input": "fixtures/pntext-symbol-list-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before pntext list.",
+        "Bullet item",
+        "I.Roman item",
+        "After pntext list."
+      ],
+      "intentional_security_differences": [
+        "Explicit pntext list markers are normalized into bounded passive paragraph text while stale pn metadata is ignored.",
+        "Raw list marker controls, font table metadata, Symbol font metadata, and active link/action targets are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "fcharset2",
+        "Symbol;",
+        "pntext",
+        "pntxtb",
+        "pntxta",
+        "pnlvlblt",
+        "pnucrm",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact explicit pntext bullet and Roman marker spacing once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
