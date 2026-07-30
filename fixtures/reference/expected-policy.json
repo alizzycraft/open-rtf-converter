@@ -422,6 +422,59 @@
       ]
     },
     {
+      "id": "generated-reference-fields-passive-placeholders",
+      "input": "fixtures/generated-reference-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before generated references.",
+        "TOC [Field removed: no passive result]",
+        "Index [Field removed: no passive result]",
+        "Citation [Field removed: no passive result]",
+        "Bibliography [Field removed: no passive result]",
+        "Authorities [Field removed: no passive result]",
+        "Visible after generated references."
+      ],
+      "intentional_security_differences": [
+        "Generated reference fields are rendered as bounded passive placeholders instead of synthesizing TOC, index, citation, bibliography, or table-of-authorities output.",
+        "Generated field instructions, switches, hidden sources, and separators are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "generated field TOC rendered as passive placeholder without synthesizing generated field output",
+        "generated field INDEX rendered as passive placeholder without synthesizing generated field output",
+        "generated field CITATION rendered as passive placeholder without synthesizing generated field output",
+        "generated field BIBLIOGRAPHY rendered as passive placeholder without synthesizing generated field output",
+        "generated field TOA rendered as passive placeholder without synthesizing generated field output"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "TOC",
+        "INDEX",
+        "CITATION",
+        "BIBLIOGRAPHY",
+        "TOA",
+        "HiddenSource",
+        "Hidden separator",
+        "\\o",
+        "\\h",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm placeholder placement and line flow around generated reference fields once available."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
