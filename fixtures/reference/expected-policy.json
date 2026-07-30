@@ -688,6 +688,69 @@
       ]
     },
     {
+      "id": "nonvisible-storage-fields-passive-stripping",
+      "input": "fixtures/nonvisible-storage-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before non-visible storage fields.",
+        "Addin  after addin.",
+        "Private  after private.",
+        "Print  after print.",
+        "RD  after rd.",
+        "Index  after index.",
+        "TOC entry  after toc.",
+        "Authority entry  after authority.",
+        "Visible after non-visible storage fields."
+      ],
+      "intentional_security_differences": [
+        "Active non-visible storage fields are stripped completely without rendering placeholders or preserving payloads.",
+        "External RD fields are stripped without reading subdocuments or exposing source paths.",
+        "Index, table-of-contents, and table-of-authorities entry fields are stripped because their resultless field content is non-visible metadata."
+      ],
+      "expected_diagnostics": [
+        "active non-visible field ADDIN stripped",
+        "active non-visible field PRIVATE stripped",
+        "active non-visible field PRINT stripped",
+        "external non-visible field RD stripped",
+        "non-visible field XE stripped",
+        "non-visible field TC stripped",
+        "non-visible field TA stripped"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "ADDIN",
+        "PRIVATE",
+        "PRINT",
+        "RD",
+        "Hidden addin payload",
+        "414243",
+        "hidden private",
+        "hidden printer command",
+        "secret",
+        "source.rtf",
+        "https://example.com",
+        "Hidden TOC",
+        "Hidden authority",
+        "[Field removed",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact whitespace after stripped non-visible fields once available."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
