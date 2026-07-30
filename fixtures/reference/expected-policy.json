@@ -1056,6 +1056,40 @@
       ]
     },
     {
+      "id": "page-break-before-passive-pagination",
+      "input": "fixtures/page-break-before-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "First page text",
+        "Second page text",
+        "Still second page"
+      ],
+      "intentional_security_differences": [
+        "Page-break-before controls are normalized into bounded passive page break metadata.",
+        "Raw paragraph page-break controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "pagebb",
+        "pagebb0",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact page-break-before placement once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
