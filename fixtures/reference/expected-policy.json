@@ -2556,6 +2556,48 @@
       ]
     },
     {
+      "id": "segoe-ui-symbol-checkbox-passive-vectors",
+      "input": "fixtures/segoe-ui-symbol-checkbox-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before Segoe UI Symbol checkboxes.",
+        "Label",
+        "After Segoe UI Symbol checkboxes."
+      ],
+      "intentional_security_differences": [
+        "Segoe UI Symbol Unicode checkbox glyphs are normalized into bounded passive checkbox text and vector output while Latin label text remains readable.",
+        "Raw Segoe UI Symbol font metadata, Unicode source controls, ZapfDingbats dependencies, and active link/action targets are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "Segoe UI Symbol",
+        "u9744",
+        "u9745",
+        "u9746",
+        "u10003",
+        "u10007",
+        "ZapfDingbats",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact Segoe UI Symbol checkbox glyph mapping, checkbox vector geometry, and label spacing once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
