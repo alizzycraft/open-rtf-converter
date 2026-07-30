@@ -220,7 +220,7 @@
       "known_gaps": [
         "Word-exported PDF and page PNG references still need to be captured for visual diffing.",
         "Exact Word visual parity for the embedded object/shape result area remains a comparison target.",
-        "JPEG pictureBiLevel exact thresholding remains a fidelity gap for JPEG streams; current behavior is a WASM-safe passive approximation."
+        "JPEG pictureBiLevel exact thresholding is implemented for bounded decodable RGB/grayscale streams; CMYK, oversized, or undecodable JPEG streams still use a WASM-safe passive approximation."
       ]
     }
   ]
