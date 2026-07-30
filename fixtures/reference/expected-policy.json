@@ -956,6 +956,73 @@
       ]
     },
     {
+      "id": "cross-reference-fields-passive-resolution",
+      "input": "fixtures/cross-reference-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before cross references.",
+        "Before  copy CONTOSO VALUE missing [Field removed: no passive result]",
+        "Bookmark Marked text visible Marked text unsafe [Field removed: no passive result]",
+        "Target Target text page 1 missing page ?",
+        "Note 1 note I missing note",
+        "1. Footnote text",
+        "Visible heading",
+        "Style ref VISIBLE HEADING again Visible heading missing [Field removed: no passive result]",
+        "Visible after cross references."
+      ],
+      "intentional_security_differences": [
+        "SET fields may seed bounded passive REF output without preserving executable field instructions.",
+        "Unsafe SET values and unsafe or missing bookmark targets render bounded placeholders before PDF generation.",
+        "PAGEREF, NOTEREF, and STYLEREF are resolved only from safe in-document passive state; missing targets are not dynamically evaluated.",
+        "Bookmark and style metadata used for passive references is stripped before the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "rendering passive field SET without executing field instruction",
+        "rendering passive field REF without executing field instruction",
+        "field REF has no stored result and was not evaluated dynamically",
+        "rendering passive field PAGEREF without executing field instruction",
+        "rendering passive field NOTEREF without executing field instruction",
+        "field NOTEREF has no stored result and was not evaluated dynamically",
+        "rendering passive field STYLEREF without executing field instruction",
+        "field STYLEREF has no stored result and was not evaluated dynamically"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "SET Client",
+        "SET Unsafe",
+        "REF Client",
+        "REF Unsafe",
+        "PAGEREF",
+        "NOTEREF",
+        "STYLEREF",
+        "Heading One",
+        "VisibleMark",
+        "TargetBookmark",
+        "NoteRef",
+        "MissingTarget",
+        "MissingNote",
+        "PAYLOAD",
+        "bkmkstart",
+        "bkmkend",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact REF, PAGEREF, NOTEREF, and STYLEREF spacing, footnote marker formatting, and page-reference behavior once available."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
