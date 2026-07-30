@@ -646,6 +646,50 @@
       ]
     },
     {
+      "id": "note-placement-passive-layout",
+      "input": "fixtures/note-placement-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "Body with footnote",
+        "Footnote text",
+        "and endnote",
+        "Endnote text",
+        "Next section body."
+      ],
+      "intentional_security_differences": [
+        "Footnotes and endnotes are rendered as passive note text at bounded page or section placement points, without active Word note behavior.",
+        "Object payloads inside note bodies are stripped before the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "footnotes placed at passive page bottom without active note behavior",
+        "endnotes placed at passive section boundary without active note behavior",
+        "active content removed: OLE object before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "ftnbj",
+        "endnhere",
+        "chftn",
+        "footnote",
+        "endnote",
+        "objdata",
+        "414243",
+        "444546",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact footnote/endnote separator positions and section-boundary pagination once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",

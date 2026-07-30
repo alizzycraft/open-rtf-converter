@@ -34,6 +34,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/table-spacing-autofit-passive.rtf",
         "fixtures/hyphenation-passive.rtf",
         "fixtures/form-field-shading-passive.rtf",
+        "fixtures/note-placement-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -678,6 +679,38 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "form-field shading rendered as bounded passive fill",
                 "rendering stored result for passive form field FORMTEXT without creating PDF form actions",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/note-placement-passive.rtf",
+            expected_pages: 3,
+            must_preserve_text: &[
+                "Body with footnote",
+                "Footnote text",
+                "and endnote",
+                "Endnote text",
+                "Next section body.",
+            ],
+            must_not_leak: &[
+                b"ftnbj",
+                b"endnhere",
+                b"chftn",
+                b"footnote",
+                b"endnote",
+                b"objdata",
+                b"414243",
+                b"444546",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/AcroForm",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "footnotes placed at passive page bottom without active note behavior",
+                "endnotes placed at passive section boundary without active note behavior",
+                "active content removed: OLE object before safe model normalization",
             ],
         },
         ReferenceFixture {
