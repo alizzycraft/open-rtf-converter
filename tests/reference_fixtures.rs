@@ -55,6 +55,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/shape-line-cap-passive.rtf",
         "fixtures/shape-line-join-passive.rtf",
         "fixtures/shape-pattern-fill-passive.rtf",
+        "fixtures/shape-gradient-fill-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1289,6 +1290,30 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
             ],
+        },
+        ReferenceFixture {
+            input: "fixtures/shape-gradient-fill-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before gradient fill.", "After gradient fill."],
+            must_not_leak: &[
+                b"shpinst",
+                b"shapeType",
+                b"fillType",
+                b"msofillShade",
+                b"fillColor",
+                b"fillBackColor",
+                b"16711680",
+                b"[Shape skipped",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",

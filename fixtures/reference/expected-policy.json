@@ -1519,6 +1519,45 @@
       ]
     },
     {
+      "id": "shape-gradient-fill-passive-shading",
+      "input": "fixtures/shape-gradient-fill-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before gradient fill.",
+        "After gradient fill."
+      ],
+      "intentional_security_differences": [
+        "Office drawing gradient fill metadata is normalized into bounded passive PDF shading geometry rather than editable Office drawing state.",
+        "Raw shape and fill metadata is stripped before PDF rendering; no active drawing payloads or object data are preserved."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "shpinst",
+        "shapeType",
+        "fillType",
+        "msofillShade",
+        "fillColor",
+        "fillBackColor",
+        "16711680",
+        "[Shape skipped",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact gradient direction, color interpolation, and clipping once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
