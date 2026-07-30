@@ -786,6 +786,9 @@ struct PictureBuilder {
     pending_hex: Option<u8>,
     blip_uid_hex_nibbles_remaining: usize,
     blip_units_per_inch: Option<u32>,
+    windows_bitmap_planes: Option<u16>,
+    windows_bitmap_bits_per_pixel: Option<u16>,
+    windows_bitmap_width_bytes: Option<usize>,
     width_px_hint: Option<u32>,
     height_px_hint: Option<u32>,
     display_width_twips: Option<i32>,
@@ -808,6 +811,9 @@ impl Default for PictureBuilder {
             pending_hex: None,
             blip_uid_hex_nibbles_remaining: 0,
             blip_units_per_inch: None,
+            windows_bitmap_planes: None,
+            windows_bitmap_bits_per_pixel: None,
+            windows_bitmap_width_bytes: None,
             width_px_hint: None,
             height_px_hint: None,
             display_width_twips: None,
@@ -1172,6 +1178,7 @@ enum PictureKind {
     Wmf,
     Emf,
     Dib,
+    WindowsBitmap,
     Unsupported,
 }
 
@@ -4085,9 +4092,19 @@ impl Parser {
             "dibitmap" if self.state.destination == Destination::Picture => {
                 self.set_picture_kind(PictureKind::Dib)
             }
-            "macpict" | "pmmetafile" | "wbitmap"
-                if self.state.destination == Destination::Picture =>
-            {
+            "wbitmap" if self.state.destination == Destination::Picture => {
+                self.set_picture_kind(PictureKind::WindowsBitmap)
+            }
+            "wbmplanes" if self.state.destination == Destination::Picture => {
+                self.set_picture_windows_bitmap_planes(control.parameter, offset)
+            }
+            "wbmbitspixel" if self.state.destination == Destination::Picture => {
+                self.set_picture_windows_bitmap_bits_per_pixel(control.parameter, offset)
+            }
+            "wbmwidthbytes" if self.state.destination == Destination::Picture => {
+                self.set_picture_windows_bitmap_width_bytes(control.parameter, offset)
+            }
+            "macpict" | "pmmetafile" if self.state.destination == Destination::Picture => {
                 self.set_picture_kind(PictureKind::Unsupported)
             }
             "bliptag" if self.state.destination == Destination::Picture => {}
@@ -12644,6 +12661,62 @@ impl Parser {
                     }
                 }
             }
+            PictureKind::WindowsBitmap => {
+                if let Some(bitmap) =
+                    parse_windows_bitmap_image_data(&picture, self.limits().max_image_pixels)
+                {
+                    self.ensure_image_pixels(bitmap.width_px, bitmap.height_px, offset)?;
+                    let natural_width_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, true, offset);
+                    let natural_height_px_hint =
+                        self.normalized_picture_natural_size_hint(&picture, false, offset);
+                    let mut image = StaticImage {
+                        format: ImageFormat::Rgb8,
+                        bytes: bitmap.rgb,
+                        palette: Vec::new(),
+                        alpha_mask: None,
+                        tone_adjustment: None,
+                        vector_commands: Vec::new(),
+                        width_px: bitmap.width_px,
+                        height_px: bitmap.height_px,
+                        natural_width_px_hint,
+                        natural_height_px_hint,
+                        display_width_twips: picture.display_width_twips,
+                        display_height_twips: picture.display_height_twips,
+                        scale_x_percent: picture.scale_x_percent,
+                        scale_y_percent: picture.scale_y_percent,
+                        crop: picture.crop,
+                        placement: None,
+                    };
+                    self.apply_picture_color_mode(
+                        &mut image,
+                        PictureAdjustments {
+                            grayscale: picture.grayscale,
+                            bilevel: picture.bilevel,
+                            brightness_fixed: picture.brightness_fixed,
+                            contrast_fixed: picture.contrast_fixed,
+                        },
+                        offset,
+                    );
+                    self.diagnostics.push(Diagnostic::warning(
+                        "Windows bitmap picture rendered as bounded passive RGB image",
+                        Some(offset),
+                    ));
+                    self.push_static_image(picture.owner_destination, image, offset)?;
+                    self.mark_shape_visual_result_rendered();
+                } else {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "unsupported picture format replaced with a passive geometry placeholder",
+                        Some(offset),
+                    ));
+                    self.push_static_image(
+                        picture.owner_destination,
+                        passive_picture_placeholder_image(&picture),
+                        offset,
+                    )?;
+                    self.mark_shape_visual_result_rendered();
+                }
+            }
             PictureKind::Wmf => {
                 if let Some(wmf) = parse_wmf_vector_image_data(&picture.bytes) {
                     self.ensure_image_pixels(wmf.width_px, wmf.height_px, offset)?;
@@ -15539,6 +15612,74 @@ impl Parser {
         }
         if let Some(picture) = self.current_picture.as_mut() {
             picture.blip_units_per_inch = Some(normalized as u32);
+        }
+    }
+
+    fn set_picture_windows_bitmap_planes(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0);
+        if value <= 0 {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("Windows bitmap planes metadata ignored because value {value} is invalid"),
+                Some(offset),
+            ));
+            return;
+        }
+        let clamped = value.min(4);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("Windows bitmap planes metadata clamped from {value} to {clamped}"),
+                Some(offset),
+            ));
+        }
+        if let Some(picture) = self.current_picture.as_mut() {
+            picture.windows_bitmap_planes = Some(clamped as u16);
+        }
+    }
+
+    fn set_picture_windows_bitmap_bits_per_pixel(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0);
+        if value <= 0 {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "Windows bitmap bits-per-pixel metadata ignored because value {value} is invalid"
+                ),
+                Some(offset),
+            ));
+            return;
+        }
+        let clamped = value.min(32);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("Windows bitmap bits-per-pixel metadata clamped from {value} to {clamped}"),
+                Some(offset),
+            ));
+        }
+        if let Some(picture) = self.current_picture.as_mut() {
+            picture.windows_bitmap_bits_per_pixel = Some(clamped as u16);
+        }
+    }
+
+    fn set_picture_windows_bitmap_width_bytes(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0);
+        if value <= 0 {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "Windows bitmap row stride metadata ignored because value {value} is invalid"
+                ),
+                Some(offset),
+            ));
+            return;
+        }
+        let max = self.limits().max_image_bytes.min(i32::MAX as usize).max(1) as i32;
+        let clamped = value.min(max);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("Windows bitmap row stride metadata clamped from {value} to {clamped}"),
+                Some(offset),
+            ));
+        }
+        if let Some(picture) = self.current_picture.as_mut() {
+            picture.windows_bitmap_width_bytes = Some(clamped as usize);
         }
     }
 
@@ -36280,6 +36421,13 @@ struct ParsedDib {
 }
 
 #[derive(Debug)]
+struct ParsedWindowsBitmap {
+    width_px: u32,
+    height_px: u32,
+    rgb: Vec<u8>,
+}
+
+#[derive(Debug)]
 struct ParsedCompressedDibImage {
     width_px: u32,
     height_px: u32,
@@ -36844,6 +36992,89 @@ fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
         raw_height < 0,
         color_masks,
     )
+}
+
+fn parse_windows_bitmap_image_data(
+    picture: &PictureBuilder,
+    max_pixels: usize,
+) -> Option<ParsedWindowsBitmap> {
+    let width_px = picture.width_px_hint?;
+    let height_px = picture.height_px_hint?;
+    let planes = picture.windows_bitmap_planes.unwrap_or(1);
+    let bits_per_pixel = picture.windows_bitmap_bits_per_pixel?;
+    if planes != 1 || !matches!(bits_per_pixel, 1 | 24 | 32) {
+        return None;
+    }
+
+    let width = usize::try_from(width_px).ok()?;
+    let height = usize::try_from(height_px).ok()?;
+    let pixels = width.checked_mul(height)?;
+    if pixels == 0 || pixels > max_pixels {
+        return None;
+    }
+    let minimum_row_bytes = match bits_per_pixel {
+        1 => width.checked_add(7)?.checked_div(8)?,
+        24 => width.checked_mul(3)?,
+        32 => width.checked_mul(4)?,
+        _ => return None,
+    };
+    let row_stride = picture
+        .windows_bitmap_width_bytes
+        .unwrap_or_else(|| word_aligned_bitmap_row_stride(width, bits_per_pixel).unwrap_or(0));
+    if row_stride < minimum_row_bytes {
+        return None;
+    }
+    let required_bytes = row_stride.checked_mul(height)?;
+    if picture.bytes.len() < required_bytes {
+        return None;
+    }
+
+    let mut rgb = vec![0; pixels.checked_mul(3)?];
+    for output_y in 0..height {
+        let source_y = height - 1 - output_y;
+        let source_row = source_y.checked_mul(row_stride)?;
+        let output_row = output_y.checked_mul(width)?.checked_mul(3)?;
+        for x in 0..width {
+            let output = output_row.checked_add(x.checked_mul(3)?)?;
+            match bits_per_pixel {
+                1 => {
+                    let byte = *picture.bytes.get(source_row.checked_add(x / 8)?)?;
+                    let bit = (byte >> (7 - (x % 8))) & 0x01;
+                    let sample = if bit == 0 { 0 } else { 255 };
+                    rgb[output] = sample;
+                    rgb[output + 1] = sample;
+                    rgb[output + 2] = sample;
+                }
+                24 => {
+                    let source = source_row.checked_add(x.checked_mul(3)?)?;
+                    rgb[output] = *picture.bytes.get(source + 2)?;
+                    rgb[output + 1] = *picture.bytes.get(source + 1)?;
+                    rgb[output + 2] = *picture.bytes.get(source)?;
+                }
+                32 => {
+                    let source = source_row.checked_add(x.checked_mul(4)?)?;
+                    rgb[output] = *picture.bytes.get(source + 2)?;
+                    rgb[output + 1] = *picture.bytes.get(source + 1)?;
+                    rgb[output + 2] = *picture.bytes.get(source)?;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    Some(ParsedWindowsBitmap {
+        width_px,
+        height_px,
+        rgb,
+    })
+}
+
+fn word_aligned_bitmap_row_stride(width: usize, bits_per_pixel: u16) -> Option<usize> {
+    width
+        .checked_mul(usize::from(bits_per_pixel))?
+        .checked_add(15)?
+        .checked_div(16)?
+        .checked_mul(2)
 }
 
 fn parse_compressed_dib_image_data(

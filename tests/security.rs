@@ -33090,6 +33090,127 @@ fn unsupported_picture_formats_are_placeholdered_without_payload_leakage() {
 }
 
 #[test]
+fn windows_bitmap_picture_renders_as_bounded_passive_rgb_without_payload_leakage() {
+    let bitmap_hex = "ff0000ffffff0000ff00ff00";
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 before {",
+        "\\",
+        "pict",
+        "\\",
+        "wbitmap0",
+        "\\",
+        "wbmplanes1",
+        "\\",
+        "wbmbitspixel24",
+        "\\",
+        "wbmwidthbytes6",
+        "\\",
+        "picw2",
+        "\\",
+        "pich2",
+        "\\",
+        "picwgoal720",
+        "\\",
+        "pichgoal720 ",
+        bitmap_hex,
+        "} after",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("Windows bitmap image");
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert_eq!(image.format, ImageFormat::Rgb8);
+    assert_eq!(image.width_px, 2);
+    assert_eq!(image.height_px, 2);
+    assert_eq!(
+        image.bytes,
+        vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255],
+        "Windows bitmap BGR rows should normalize to top-down passive RGB"
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("Windows bitmap picture rendered as bounded passive RGB image")
+    }));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unsupported picture format")),
+        "parseable Windows bitmap should not fall back to placeholder: {:?}",
+        parsed.diagnostics
+    );
+    for forbidden in [
+        "wbitmap",
+        "wbmplanes",
+        "wbmbitspixel",
+        "wbmwidthbytes",
+        bitmap_hex,
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "Windows bitmap metadata leaked to text: {forbidden}"
+        );
+    }
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(rendered_text.contains("before"));
+    assert!(rendered_text.contains("after"));
+    assert!(
+        output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image"),
+        "Windows bitmap should render as a passive PDF image XObject"
+    );
+    for forbidden in [
+        b"wbitmap".as_slice(),
+        b"wbmplanes",
+        b"wbmbitspixel",
+        b"wbmwidthbytes",
+        bitmap_hex.as_bytes(),
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Windows bitmap metadata or active marker leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn malformed_picture_hex_data_becomes_geometry_placeholder_without_payload_leakage() {
     let input = rtf(&[
         "{",
