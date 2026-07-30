@@ -50,6 +50,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/header-footer-variants-passive.rtf",
         "fixtures/background-shape-passive.rtf",
         "fixtures/shape-z-order-text-passive.rtf",
+        "fixtures/shape-arrowheads-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1148,6 +1149,33 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "shape z-order rendered through bounded passive drawing order",
             ],
+        },
+        ReferenceFixture {
+            input: "fixtures/shape-arrowheads-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before arrow line.", "After arrow line."],
+            must_not_leak: &[
+                b"dpline",
+                b"dpx360",
+                b"dpy480",
+                b"dpxsize1440",
+                b"dpysize720",
+                b"lineStartArrowhead",
+                b"lineEndArrowhead",
+                b"triangle",
+                b"pFragments",
+                b"hostile-arrowhead-reference-payload",
+                b"[Shape skipped",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",

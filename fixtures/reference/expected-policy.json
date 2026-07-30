@@ -1308,6 +1308,48 @@
       ]
     },
     {
+      "id": "shape-arrowheads-passive-line-decoration",
+      "input": "fixtures/shape-arrowheads-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before arrow line.",
+        "After arrow line."
+      ],
+      "intentional_security_differences": [
+        "Office drawing arrowhead properties are normalized into bounded passive line geometry and never preserved as editable shape metadata.",
+        "Unsupported or active drawing payload properties adjacent to the arrowhead metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "dpline",
+        "dpx360",
+        "dpy480",
+        "dpxsize1440",
+        "dpysize720",
+        "lineStartArrowhead",
+        "lineEndArrowhead",
+        "triangle",
+        "pFragments",
+        "hostile-arrowhead-reference-payload",
+        "[Shape skipped",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact start/end arrowhead shape, stroke joins, and endpoint alignment once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
