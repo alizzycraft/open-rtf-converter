@@ -552,6 +552,75 @@
       ]
     },
     {
+      "id": "template-barcode-embed-fields-passive-placeholders",
+      "input": "fixtures/template-barcode-embed-fields-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before template and embedded fields.",
+        "Auto text [Field removed: no passive result]",
+        "Auto text list [Field removed: no passive result]",
+        "Barcode [Field removed: no passive result]",
+        "Display barcode [Field removed: no passive result]",
+        "Merge barcode [Field removed: no passive result]",
+        "Math 1",
+        "2",
+        "Embed [Field removed: no passive result]",
+        "Go button Visible jump",
+        "Visible after template and embedded fields."
+      ],
+      "intentional_security_differences": [
+        "Building-block fields are rendered as bounded passive placeholders without reading external or template storage.",
+        "Barcode fields are rendered as bounded passive placeholders instead of generating barcode graphics from hidden payloads.",
+        "Embedded object fields are never activated or embedded; resultless EMBED fields render bounded placeholders.",
+        "GOTOBUTTON renders passive display text without creating navigation actions.",
+        "EQ renders a bounded passive approximation for visible equation content without preserving executable field instructions."
+      ],
+      "expected_diagnostics": [
+        "building-block field AUTOTEXT rendered as passive placeholder without reading template storage",
+        "building-block field AUTOTEXTLIST rendered as passive placeholder without reading template storage",
+        "generated field BARCODE rendered as passive placeholder without synthesizing generated field output",
+        "generated field DISPLAYBARCODE rendered as passive placeholder without synthesizing generated field output",
+        "generated field MERGEBARCODE rendered as passive placeholder without synthesizing generated field output",
+        "rendering passive field EQ without executing field instruction",
+        "embedded object field EMBED rendered as passive placeholder without activating embedded object",
+        "rendering passive field GOTOBUTTON without executing field instruction"
+      ],
+      "forbidden_pdf_markers": [
+        "fldinst",
+        "AUTOTEXT",
+        "AUTOTEXTLIST",
+        "BARCODE",
+        "DISPLAYBARCODE",
+        "MERGEBARCODE",
+        "EMBED",
+        "GOTOBUTTON",
+        "HiddenBlock",
+        "Hidden menu",
+        "HiddenStyle",
+        "Hidden address",
+        "Hidden code",
+        "Hidden merge value",
+        "HiddenBookmark",
+        "Word.Document.8",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EQ fraction layout, placeholder line flow, and GOTOBUTTON display text spacing once available."
+      ]
+    },
+    {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
