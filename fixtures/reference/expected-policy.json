@@ -2474,6 +2474,45 @@
       ]
     },
     {
+      "id": "wingdings3-arrows-passive-symbol-encoding",
+      "input": "fixtures/wingdings3-arrows-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before Wingdings 3 arrows.",
+        "Arrow states:",
+        "Field arrow:",
+        "After Wingdings 3 arrows."
+      ],
+      "intentional_security_differences": [
+        "Wingdings 3 arrow glyphs and SYMBOL field fallbacks are normalized into bounded passive arrow text and PDF Symbol encoding.",
+        "Raw Wingdings 3 font metadata, field instructions, and active link/action targets are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "Wingdings 3",
+        "fldinst",
+        "SYMBOL",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact Wingdings 3 arrow glyph mapping, Symbol-encoded PDF output, and field fallback spacing once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
