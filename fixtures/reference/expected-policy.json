@@ -1164,6 +1164,46 @@
       ]
     },
     {
+      "id": "paragraph-spacing-passive-flow",
+      "input": "fixtures/paragraph-spacing-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Auto spaced paragraph",
+        "Manual spaced paragraph",
+        "Context first paragraph",
+        "Context second paragraph",
+        "Normal tail paragraph"
+      ],
+      "intentional_security_differences": [
+        "Paragraph auto-spacing and contextual-spacing controls are normalized into bounded passive paragraph flow metadata.",
+        "Raw paragraph spacing control words are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "sbauto",
+        "saauto",
+        "contextualspace",
+        "sb240",
+        "sa360",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact auto-spacing and contextual spacing offsets once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
