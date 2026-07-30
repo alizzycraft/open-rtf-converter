@@ -2047,6 +2047,42 @@
       ]
     },
     {
+      "id": "font-charset-cyrillic-passive-decoding",
+      "input": "fixtures/font-charset-cyrillic-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before Cyrillic charset.",
+        "Cyrillic",
+        "After Cyrillic charset."
+      ],
+      "intentional_security_differences": [
+        "Cyrillic font charset metadata guides bounded passive hex-escape decoding and bundled-font PDF text output.",
+        "Raw font table, code-page, charset, and font-name metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ansicpg1252",
+        "fonttbl",
+        "fcharset204",
+        "Times New Roman Cyr",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact Cyrillic charset glyph mapping, bundled-font metrics, and PDF text extraction behavior once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
