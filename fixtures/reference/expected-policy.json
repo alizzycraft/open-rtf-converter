@@ -949,6 +949,44 @@
       ]
     },
     {
+      "id": "old-style-list-passive-markers",
+      "input": "fixtures/old-style-list-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before old list.",
+        "3.Indented decimal item",
+        "IV.Upper roman item",
+        "After old list."
+      ],
+      "intentional_security_differences": [
+        "Old-style list controls are normalized into bounded passive marker text and paragraph indentation, not preserved as editable Word list state."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "pnindent",
+        "pnhang",
+        "pnsp",
+        "pnstart",
+        "pndec",
+        "pnucrm",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact old-style list marker indentation, hanging offset, tab spacing, and numbering continuation once available."
+      ]
+    },
+    {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
       "category": "acceptable_approximation",
