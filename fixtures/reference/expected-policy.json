@@ -1090,6 +1090,40 @@
       ]
     },
     {
+      "id": "page-vertical-alignment-passive-layout",
+      "input": "fixtures/page-vertical-alignment-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Center page body",
+        "Top reset body"
+      ],
+      "intentional_security_differences": [
+        "Page vertical alignment controls are normalized into bounded passive page layout metadata.",
+        "Raw page vertical alignment controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "vertalc",
+        "vertalt",
+        "vertalb",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact page vertical alignment offsets once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
