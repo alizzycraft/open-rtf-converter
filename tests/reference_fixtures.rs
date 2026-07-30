@@ -29,6 +29,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/field-hyperlink-passive.rtf",
         "fixtures/line-numbering-passive.rtf",
         "fixtures/page-border-art-passive.rtf",
+        "fixtures/character-typography-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -534,6 +535,32 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_contain_pdf: &[],
             must_emit_diagnostics: &[
                 "page border art rendered as bounded passive line border fallback",
+            ],
+        },
+        ReferenceFixture {
+            input: "fixtures/character-typography-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Before typography.",
+                "Visible styled typography",
+                "After typography.",
+            ],
+            must_not_leak: &[
+                b"kerning2",
+                b"charscalex125",
+                b"fittext720",
+                b"objdata",
+                b"414243",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "character kerning rendered as bounded passive pair spacing",
+                "character fit-text rendered as bounded passive horizontal scaling",
+                "active content removed: OLE object before safe model normalization",
             ],
         },
         ReferenceFixture {
