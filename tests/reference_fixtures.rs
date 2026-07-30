@@ -52,6 +52,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/shape-z-order-text-passive.rtf",
         "fixtures/shape-arrowheads-passive.rtf",
         "fixtures/shape-line-dashing-passive.rtf",
+        "fixtures/shape-line-cap-passive.rtf",
         "docs/sample.rtf",
     ] {
         assert!(
@@ -1203,6 +1204,34 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[],
             must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
+            input: "fixtures/shape-line-cap-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Before capped line.", "After capped line."],
+            must_not_leak: &[
+                b"dpline",
+                b"dpx360",
+                b"dpy480",
+                b"dpxsize1440",
+                b"dpysize720",
+                b"lineEndCap",
+                b"round",
+                b"pFragments",
+                b"hostile-line-cap-reference-payload",
+                b"[Shape skipped",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties",
+            ],
         },
         ReferenceFixture {
             input: "docs/sample.rtf",
