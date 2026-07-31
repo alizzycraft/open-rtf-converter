@@ -745,6 +745,50 @@
       ]
     },
     {
+      "id": "emf-roundrect-passive-curves",
+      "input": "fixtures/emf-roundrect-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF roundrect.",
+        "After EMF roundrect."
+      ],
+      "intentional_security_differences": [
+        "Supported EMF RoundRect records are converted into bounded passive PDF cubic curves and strokes.",
+        "Raw EMF bytes, rounded-rectangle record data, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "2c000000",
+        "5a00000050000000",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " c",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF rounded-corner radius clamping and stroke geometry once available.",
+        "The converter intentionally supports only a hardened passive EMF shape subset; unsupported rounded-rectangle behavior remains placeholder or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
