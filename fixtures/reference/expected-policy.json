@@ -2872,6 +2872,57 @@
       ]
     },
     {
+      "id": "picture-adjustments-passive-image-pixels",
+      "input": "fixtures/picture-adjustments-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before adjusted images.",
+        "Grayscale image:",
+        "Bilevel image:",
+        "Tone image:",
+        "After adjusted images."
+      ],
+      "intentional_security_differences": [
+        "Word picture adjustment metadata is resolved into bounded passive image pixels, not preserved as raw RTF property payload.",
+        "Original PNG chunks and picture property controls are stripped before the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "PNG picture grayscale property rendered as bounded passive image pixels",
+        "PNG picture bilevel property rendered as bounded passive image pixels",
+        "PNG picture brightness/contrast property rendered as bounded passive image pixels"
+      ],
+      "forbidden_pdf_markers": [
+        "pngblip",
+        "picprop",
+        "pictureGray",
+        "pictureBiLevel",
+        "pictureBrightness",
+        "pictureContrast",
+        "picwgoal",
+        "pichgoal",
+        "IHDR",
+        "IDAT",
+        "IEND",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact grayscale, bilevel, brightness, and contrast pixel transforms once available."
+      ]
+    },
+    {
       "id": "associated-character-passive-controls",
       "input": "fixtures/associated-character-passive.rtf",
       "category": "acceptable_approximation",
