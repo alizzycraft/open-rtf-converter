@@ -789,6 +789,51 @@
       ]
     },
     {
+      "id": "emf-setpixelv-passive-rectangles",
+      "input": "fixtures/emf-setpixelv-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF setpixelv.",
+        "After EMF setpixelv."
+      ],
+      "intentional_security_differences": [
+        "Supported EMF SETPIXELV records are converted into bounded passive one-pixel PDF rectangle fills.",
+        "Raw EMF bytes, SETPIXELV record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "0f00000014000000",
+        "14283c00",
+        "dcb47800",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " re",
+        " f"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF one-pixel rectangle scaling once available.",
+        "The converter intentionally supports only bounded passive pixel fills; malformed or unsupported pixel records remain placeholdered or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
