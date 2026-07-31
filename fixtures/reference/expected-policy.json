@@ -4078,6 +4078,67 @@
       ]
     },
     {
+      "id": "structural-metadata-passive-stripping",
+      "input": "fixtures/structural-metadata-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible body.",
+        "Body Marked text visible Marked text hidden [Field removed: no passive result] style [Field removed: no passive result]"
+      ],
+      "intentional_security_differences": [
+        "Fields, bookmarks, shapes, and picture fallbacks nested inside structural metadata are stripped before PDF rendering.",
+        "Visible body bookmarks may feed passive REF fields, but bookmarks hidden inside metadata cannot create anchors or field results.",
+        "Metadata shapes and metadata picture fallbacks do not create body shapes, image placeholders, active PDF content, or raw embedded image/object bytes."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "Hidden font payload",
+        "Hidden style payload",
+        "HiddenFontMark",
+        "HiddenStyleMark",
+        "Hidden title",
+        "[Shape skipped",
+        "Image skipped",
+        "unsupported picture",
+        "HYPERLINK",
+        "INCLUDEPICTURE",
+        "hidden.example",
+        "payload.png",
+        "fldinst",
+        "fonttbl",
+        "stylesheet",
+        "colortbl",
+        "bkmkstart",
+        "bkmkend",
+        "shapeType",
+        "pFragments",
+        "hidden-metadata-shape-payload",
+        "shppict",
+        "nonshppict",
+        "pict",
+        "pngblip",
+        "wmetafile",
+        "2f4a617661536372697074",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact text spacing around stripped structural metadata and hidden metadata REF placeholders once available."
+      ]
+    },
+    {
       "id": "word-layout-compatibility-passive-classification",
       "input": "fixtures/word-layout-compatibility-passive.rtf",
       "category": "acceptable_approximation",
