@@ -3664,6 +3664,41 @@
       ]
     },
     {
+      "id": "jpeg-trailing-payload-passive-image",
+      "input": "fixtures/jpeg-trailing-payload-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before JPEG payload.",
+        "After JPEG payload."
+      ],
+      "intentional_security_differences": [
+        "JPEG image bytes are trimmed at the end-of-image marker before PDF embedding, so trailing active-looking payload bytes cannot cross into the PDF layer.",
+        "The RTF jpegblip control is resolved into a bounded passive image and stripped from output bytes."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "jpegblip",
+        "TRAILING-JPEG-AFTER-EOI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact JPEG placement and raster appearance once available."
+      ]
+    },
+    {
       "id": "associated-character-passive-controls",
       "input": "fixtures/associated-character-passive.rtf",
       "category": "acceptable_approximation",
