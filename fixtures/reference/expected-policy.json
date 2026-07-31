@@ -881,6 +881,54 @@
       ]
     },
     {
+      "id": "emf-polypolygon-passive-compound-path",
+      "input": "fixtures/emf-polypolygon-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF polypolygon.",
+        "After EMF polypolygon."
+      ],
+      "intentional_security_differences": [
+        "Supported EMF POLYPOLYGON records are converted into a bounded passive compound PDF path with fill/stroke painting.",
+        "Raw EMF bytes, polyfill/brush/polypolygon record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "130000000c000000",
+        "2700000018000000",
+        "0800000068000000",
+        "8c00000046000000",
+        "6400000037000000",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " m",
+        " l",
+        " B"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF POLYPOLYGON fill/stroke placement and winding behavior once available.",
+        "The converter intentionally supports only bounded passive compound path geometry; malformed or excessive compound poly records remain placeholdered or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
