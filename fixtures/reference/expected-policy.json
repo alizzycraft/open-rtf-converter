@@ -1983,6 +1983,39 @@
       ]
     },
     {
+      "id": "even-section-break-passive-pagination",
+      "input": "fixtures/even-section-break-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "First parity section.",
+        "Even-start section."
+      ],
+      "intentional_security_differences": [
+        "Even-page section breaks are normalized into bounded passive pagination and only insert blank parity pages when required by the physical page number.",
+        "Raw section-break controls are stripped before PDF rendering and cannot carry active section metadata into the PDF layer."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "sbkeven",
+        "\\sect",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact even-page section-start placement and blank-page insertion behavior for documents where parity requires one."
+      ]
+    },
+    {
       "id": "page-vertical-alignment-passive-layout",
       "input": "fixtures/page-vertical-alignment-passive.rtf",
       "category": "acceptable_approximation",
