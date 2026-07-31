@@ -1023,6 +1023,58 @@
       ]
     },
     {
+      "id": "styleref-resultless-passive-fields",
+      "input": "fixtures/styleref-resultless-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible title",
+        "Numbered title",
+        "Ref text VISIBLE TITLE",
+        "Ref number 1.",
+        "Ref contexts full 1. relative 1 malformed [Field removed: no passive result]"
+      ],
+      "intentional_security_differences": [
+        "Resultless STYLEREF fields resolve only from safe prior styled text and list-number state; field instructions are not executed.",
+        "Unsupported or malformed STYLEREF switches produce a passive placeholder instead of dynamic Word field evaluation.",
+        "Style names are normalized for lookup without leaking hidden hyperlink payloads or list/style metadata into PDF bytes."
+      ],
+      "expected_diagnostics": [
+        "rendering passive field STYLEREF without executing field instruction",
+        "field STYLEREF has no stored result and was not evaluated dynamically"
+      ],
+      "forbidden_pdf_markers": [
+        "STYLEREF",
+        "TitleStyle",
+        "nfoo",
+        "HYPERLINK",
+        "https://example.com",
+        "Hidden link",
+        "fldinst",
+        "fldrslt",
+        "stylesheet",
+        "listtable",
+        "listoverridetable",
+        "leveltext",
+        "levelnumbers",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact STYLEREF result selection when multiple style matches precede the field and when list-number switches are combined with styled paragraphs."
+      ]
+    },
+    {
       "id": "literal-control-drawing-fields-passive-resolution",
       "input": "fixtures/literal-control-drawing-fields-passive.rtf",
       "category": "intentional_security_difference",
