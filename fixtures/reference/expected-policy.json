@@ -564,6 +564,53 @@
       ]
     },
     {
+      "id": "wmf-polybezierto-passive-current-point",
+      "input": "fixtures/wmf-polybezierto-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF polybezierto.",
+        "After WMF polybezierto."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF POLYBEZIERTO records are converted into bounded passive PDF cubic curve strokes and update the passive current point for following line records.",
+        "Raw WMF bytes, POLYBEZIERTO record payloads, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "3c2814",
+        "041003001e000500",
+        "4600320050001400",
+        "13023c005a00",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " c",
+        " l",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF PolyBezierTo current-position and following LineTo placement once available.",
+        "The converter intentionally supports only complete bounded passive BezierTo runs; malformed or partial WMF BezierTo records remain no-ops, placeholders, or stripped."
+      ]
+    },
+    {
       "id": "wmf-polypolygon-passive-compound-path",
       "input": "fixtures/wmf-polypolygon-passive.rtf",
       "category": "acceptable_approximation",
