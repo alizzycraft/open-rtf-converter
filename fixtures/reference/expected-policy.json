@@ -4024,6 +4024,60 @@
       ]
     },
     {
+      "id": "stylesheet-metadata-passive-classification",
+      "input": "fixtures/stylesheet-metadata-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Heading",
+        "linked text",
+        "Visible after stylesheet metadata."
+      ],
+      "intentional_security_differences": [
+        "Word stylesheet metadata controls are classified without leaking raw style table control names into PDF bytes.",
+        "Paragraph and linked character styles still affect passive visible output while internal style names and latent-style metadata are stripped.",
+        "Nested object payloads inside latent stylesheet metadata are removed before safe model normalization."
+      ],
+      "expected_diagnostics": [
+        "active content removed: object payload in metadata before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "stylesheet",
+        "ssemihidden",
+        "sqformat",
+        "spriority",
+        "slink",
+        "slocked",
+        "sautoupd",
+        "styrsid",
+        "latentstyles",
+        "lsdstimax",
+        "lsdlockeddef",
+        "lsdsemihiddendef",
+        "lsdlockedexcept",
+        "Heading 1",
+        "Linked Char",
+        "object",
+        "objdata",
+        "414243",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact visual impact of paragraph and linked character style metadata once available."
+      ]
+    },
+    {
       "id": "word-layout-compatibility-passive-classification",
       "input": "fixtures/word-layout-compatibility-passive.rtf",
       "category": "acceptable_approximation",
