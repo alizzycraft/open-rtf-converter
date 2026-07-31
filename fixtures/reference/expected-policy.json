@@ -659,6 +659,51 @@
       ]
     },
     {
+      "id": "wmf-setpixel-passive-rectangle",
+      "input": "fixtures/wmf-setpixel-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF setpixel.",
+        "After WMF setpixel."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF SETPIXEL records are converted into bounded passive one-pixel PDF rectangle fills.",
+        "Raw WMF bytes, SETPIXEL record payloads, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "041f",
+        "ff0000",
+        "20004000",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " re",
+        " f"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF SETPIXEL scaling and color placement once available.",
+        "The converter intentionally supports only bounded passive pixel fills; malformed SETPIXEL records remain placeholdered or stripped."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
