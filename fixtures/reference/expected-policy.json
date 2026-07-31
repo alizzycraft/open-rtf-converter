@@ -472,6 +472,53 @@
       ]
     },
     {
+      "id": "wmf-arc-family-passive-paths",
+      "input": "fixtures/wmf-arc-family-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF arcs.",
+        "After WMF arcs."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF arc, chord, and pie records are converted into bounded passive PDF paths and fills.",
+        "Raw WMF bytes, arc-family record identifiers, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "1708",
+        "3008",
+        "1a08",
+        "dcdcdc",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " m",
+        " l",
+        " f"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF arc flattening tolerance, chord/pie closure, and fill behavior once available.",
+        "The converter intentionally supports only a hardened passive WMF arc subset; unsupported arc behavior remains placeholder or stripped."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
