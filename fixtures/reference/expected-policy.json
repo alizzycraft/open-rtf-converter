@@ -2145,6 +2145,49 @@
       ]
     },
     {
+      "id": "line-spacing-passive-flow",
+      "input": "fixtures/line-spacing-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "Before line spacing.",
+        "Double spaced line one",
+        "Double spaced line two",
+        "Exact spaced line one",
+        "Exact spaced line two",
+        "Clamped spacing line.",
+        "After line spacing."
+      ],
+      "intentional_security_differences": [
+        "Line-spacing controls are normalized into bounded passive paragraph line pitch metadata.",
+        "Extreme line-spacing values are clamped before layout and raw line-spacing controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "line spacing clamped"
+      ],
+      "forbidden_pdf_markers": [
+        "sl480",
+        "slmult1",
+        "sl-360",
+        "slmult0",
+        "sl99999",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact multiple, exact, and clamped line pitch baselines once available."
+      ]
+    },
+    {
       "id": "drop-cap-passive-layout",
       "input": "fixtures/drop-cap-passive.rtf",
       "category": "acceptable_approximation",
