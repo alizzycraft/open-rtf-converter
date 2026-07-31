@@ -1385,6 +1385,48 @@
       ]
     },
     {
+      "id": "page-number-format-restart-passive-layout",
+      "input": "fixtures/page-number-format-restart-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 4,
+      "must_preserve_text": [
+        "Page IV",
+        "Page V",
+        "Page 1",
+        "Page 2",
+        "First roman page.",
+        "Second roman page.",
+        "Restarted decimal section.",
+        "Continued decimal page."
+      ],
+      "intentional_security_differences": [
+        "Page-number start, format, restart, and display controls are resolved into bounded passive header text.",
+        "Raw page-number controls and section metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "pgnucrm",
+        "pgndec",
+        "pgnstarts",
+        "pgnrestart",
+        "chpgn",
+        "sectd",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact page-number format transition, restart behavior, and header placement once available."
+      ]
+    },
+    {
       "id": "table-spacing-autofit-passive-layout",
       "input": "fixtures/table-spacing-autofit-passive.rtf",
       "category": "acceptable_approximation",
