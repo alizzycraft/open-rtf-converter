@@ -4601,6 +4601,42 @@
       ]
     },
     {
+      "id": "header-footer-distance-passive-layout",
+      "input": "fixtures/header-footer-distance-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Header",
+        "Footer",
+        "Body"
+      ],
+      "intentional_security_differences": [
+        "Header and footer distance controls are normalized into bounded passive page geometry.",
+        "Raw header/footer distance controls are stripped before PDF rendering and cannot create active PDF features."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "headery",
+        "footery",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact header and footer vertical offsets once available."
+      ]
+    },
+    {
       "id": "background-shape-passive-page-layer",
       "input": "fixtures/background-shape-passive.rtf",
       "category": "intentional_security_difference",
