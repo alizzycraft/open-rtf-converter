@@ -3715,6 +3715,60 @@
       ]
     },
     {
+      "id": "font-template-metadata-passive-stripping",
+      "input": "fixtures/font-template-metadata-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible Arial text.",
+        "Visible Courier text.",
+        "Visible after font and template metadata."
+      ],
+      "intentional_security_differences": [
+        "Embedded font payload destinations are stripped while safe font names remain available for passive rendering.",
+        "External template destinations are stripped without fetching or preserving template URLs.",
+        "Active metadata nested inside document info is removed before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "active content removed: embedded font payload before safe model normalization",
+        "active content removed: embedded font payload in metadata before safe model normalization",
+        "active content removed: external template in metadata before safe model normalization",
+        "active content removed: field instruction in metadata before safe model normalization",
+        "active content removed: external template before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "fontemb",
+        "fontfile",
+        "HOSTILE-FONT-PAYLOAD",
+        "HIDDEN-METADATA-FONT",
+        "Hidden title",
+        "Hidden link",
+        "HYPERLINK",
+        "https://example.com",
+        "template.dotm",
+        "t.dotm",
+        "objdata",
+        "414243",
+        "fldinst",
+        "fldrslt",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact font fallback/substitution and body spacing around stripped font/template metadata once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
