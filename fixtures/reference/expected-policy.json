@@ -380,6 +380,52 @@
       ]
     },
     {
+      "id": "wmf-hatch-brush-passive-lines",
+      "input": "fixtures/wmf-hatch-brush-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF hatch.",
+        "After WMF hatch."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF hatch brush fills are converted into bounded passive line drawing clipped to the filled shape.",
+        "Raw WMF bytes, brush object records, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "02fc",
+        "0200ff0000000000",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " n",
+        " m",
+        " l",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF hatch density, phase, clipping, and color once available.",
+        "The converter intentionally supports only a hardened passive WMF brush subset; unsupported brush records remain inert, placeholder, or stripped."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
