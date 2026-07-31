@@ -3608,6 +3608,65 @@
       ]
     },
     {
+      "id": "review-bookmark-metadata-passive-stripping",
+      "input": "fixtures/review-bookmark-metadata-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before review metadata.",
+        "Comment  after comment.",
+        "Bookmark visible after bookmark.",
+        "Revision  visible after Inserted text.",
+        "Visible after review metadata."
+      ],
+      "intentional_security_differences": [
+        "Annotation/comment payloads are stripped as metadata while surrounding visible body text remains passive.",
+        "Bookmark names and deleted revision text are stripped, while inserted/revised visible text remains rendered.",
+        "Nested object payloads and hyperlink instructions inside review metadata are removed before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "active content removed: annotation metadata before safe model normalization",
+        "active content removed: object payload in metadata before safe model normalization",
+        "active content removed: field instruction in metadata before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "annotation",
+        "Hidden comment",
+        "Hidden result",
+        "Hidden link",
+        "HYPERLINK",
+        "https://example.com/comment",
+        "SecretBookmark",
+        "bkmkstart",
+        "bkmkend",
+        "Deleted text",
+        "deleted",
+        "revised",
+        "revauth",
+        "revdttm",
+        "insrsid",
+        "objdata",
+        "414243",
+        "fldinst",
+        "fldrslt",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact body spacing around stripped review, bookmark, and deleted-text metadata once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
