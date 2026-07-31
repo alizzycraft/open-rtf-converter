@@ -750,6 +750,55 @@
       ]
     },
     {
+      "id": "wmf-line-poly-paths-passive",
+      "input": "fixtures/wmf-line-poly-paths-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF poly paths.",
+        "After WMF poly paths."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF line, polyline, and polygon records are converted into bounded passive PDF path move, line, and stroke operations.",
+        "Raw WMF bytes, line/polyline/polygon record payloads, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "0324",
+        "0325",
+        "dcdcdc",
+        "2403030014002800",
+        "2503040014004600",
+        "8c004600b4005a00",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " m",
+        " l",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF line, polyline, and polygon placement and closure behavior once available.",
+        "The converter intentionally supports only bounded passive path geometry; malformed or excessive WMF point-list records remain placeholdered or stripped."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
