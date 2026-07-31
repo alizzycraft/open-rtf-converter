@@ -3166,6 +3166,44 @@
       ]
     },
     {
+      "id": "intbl-zero-body-flow-passive-layout",
+      "input": "fixtures/intbl-zero-body-flow-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before table-state reset.",
+        "Table cell",
+        "Outside table body.",
+        "After table-state reset."
+      ],
+      "intentional_security_differences": [
+        "The intbl0 table-state-off control is consumed as bounded parser state so following text remains normal body flow.",
+        "Raw table state controls and cell boundary metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "cellx",
+        "pard",
+        "intbl0",
+        "intbl",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact paragraph spacing and body-flow placement after intbl0 table-state reset once available."
+      ]
+    },
+    {
       "id": "table-merged-cells-passive-geometry",
       "input": "fixtures/table-merged-cells-passive.rtf",
       "category": "must_match_closely",
