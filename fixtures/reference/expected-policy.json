@@ -3545,6 +3545,69 @@
       ]
     },
     {
+      "id": "mailmerge-object-metadata-passive-stripping",
+      "input": "fixtures/mailmerge-object-metadata-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before metadata.",
+        "Mail merge  after merge.",
+        "Object meta  middle  after object meta.",
+        "Visible after metadata."
+      ],
+      "intentional_security_differences": [
+        "Mail-merge data-source destinations are stripped as active metadata without connecting to external data sources.",
+        "Object classification/name/alias/topic metadata is stripped before safe model normalization and cannot create PDF actions or embedded files.",
+        "Nested object payloads inside metadata destinations are removed without rendering placeholders or leaking raw object bytes."
+      ],
+      "expected_diagnostics": [
+        "active content removed: mail merge data source before safe model normalization",
+        "active content removed: mail merge data source in metadata before safe model normalization",
+        "active content removed: object payload in metadata before safe model normalization",
+        "active content removed: object metadata before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "mailmerge",
+        "mmconnectstr",
+        "mmdatasource",
+        "mmquery",
+        "mmodsoudl",
+        "Provider=SQLOLEDB",
+        "Password=secret",
+        "Data Source",
+        "contacts.mdb",
+        "SELECT *",
+        "example.com",
+        "source.udl",
+        "objclass",
+        "objname",
+        "objalias",
+        "objtopic",
+        "HiddenClass",
+        "HiddenName",
+        "HiddenAlias",
+        "HiddenTopic",
+        "objdata",
+        "414243",
+        "444546",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact body spacing around stripped mail-merge and object metadata once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
