@@ -212,6 +212,45 @@
       ]
     },
     {
+      "id": "dib-grayscale-passive-image-pixels",
+      "input": "fixtures/dib-grayscale-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before DIB grayscale.",
+        "After DIB grayscale."
+      ],
+      "intentional_security_differences": [
+        "DIB grayscale picture metadata is applied to bounded passive image pixels before PDF rendering.",
+        "Raw DIB bytes, picture property controls, and hidden fragment metadata are stripped before the PDF layer."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "dibitmap",
+        "picprop",
+        "pictureGray",
+        "pFragments",
+        "hidden-fragment",
+        "280000000200000001000000010018000000000008000000000000000000000000000000000000000000ff00ff000000",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact DIB grayscale conversion and placement once available."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
