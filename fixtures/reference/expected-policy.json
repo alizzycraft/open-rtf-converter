@@ -493,6 +493,73 @@
       ]
     },
     {
+      "id": "office-math-limits-arrays-passive-layout",
+      "input": "fixtures/office-math-limits-arrays-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before math arrays.",
+        "X=1",
+        "Y=2",
+        "limx=0maxn",
+        "i",
+        "VisiblePhantom",
+        "after math arrays."
+      ],
+      "intentional_security_differences": [
+        "Office math equation arrays, limits, n-ary operators, and phantoms are normalized into bounded passive text and script placement.",
+        "Hidden n-ary limits, hidden phantom content, executable-looking text, URLs, and object data are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "Office math rendered as bounded passive math text"
+      ],
+      "forbidden_pdf_markers": [
+        "mmath",
+        "moMath",
+        "meqArr",
+        "meqArrPr",
+        "mlimLow",
+        "mlimLowPr",
+        "mlimUpp",
+        "mlimUppPr",
+        "mlim",
+        "mnary",
+        "mnaryPr",
+        "mchr",
+        "msubHide",
+        "msupHide",
+        "msub",
+        "msup",
+        "HIDDEN-SUB-LIMIT",
+        "HIDDEN-SUP-LIMIT",
+        "mphant",
+        "mphantPr",
+        "mshow",
+        "HIDDEN-PHANTOM-PAYLOAD",
+        "mtext",
+        "calc.exe",
+        "launch.exe",
+        "example.com/payload",
+        "objdata",
+        "414243",
+        "444546",
+        "454647",
+        "464748",
+        "474849",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact equation-array row placement, lower/upper limit baselines, n-ary glyph placement, and visible/hidden phantom spacing once available."
+      ]
+    },
+    {
       "id": "field-hyperlink-passive-result",
       "input": "fixtures/field-hyperlink-passive.rtf",
       "category": "intentional_security_difference",
