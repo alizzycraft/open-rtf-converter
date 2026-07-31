@@ -4139,6 +4139,43 @@
       ]
     },
     {
+      "id": "word-grid-outline-metadata-passive-classification",
+      "input": "fixtures/word-grid-outline-metadata-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible metadata.",
+        "Styled visible metadata."
+      ],
+      "intentional_security_differences": [
+        "Word outline-level and character grid controls are classified as passive metadata and never leak raw control names into PDF bytes.",
+        "Style-table outline/grid metadata may influence internal style classification, but only visible body text reaches the PDF layer.",
+        "Grid and outline metadata cannot create active PDF features or preserve raw stylesheet payloads."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "outlinelevel",
+        "cgrid",
+        "stylesheet",
+        "Heading",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm whether outline/grid metadata has any visible pagination or spacing impact for this fixture."
+      ]
+    },
+    {
       "id": "word-layout-compatibility-passive-classification",
       "input": "fixtures/word-layout-compatibility-passive.rtf",
       "category": "acceptable_approximation",
