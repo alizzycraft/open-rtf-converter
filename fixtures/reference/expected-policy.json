@@ -4228,6 +4228,53 @@
       ]
     },
     {
+      "id": "stylesheet-semantics-passive-rendering",
+      "input": "fixtures/stylesheet-semantics-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Inherited styled text",
+        "Heading text",
+        "Body text",
+        "Right Bold only",
+        "Direct Direct and styled"
+      ],
+      "intentional_security_differences": [
+        "Stylesheet inheritance, next-style selection, and character styles are applied only as passive formatting in the normalized model.",
+        "Character styles do not leak paragraph-only metadata into the paragraph layout, and direct formatting remains preserved when character styles are applied.",
+        "Raw stylesheet, font table, style names, and style-control metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "stylesheet",
+        "sbasedon",
+        "snext",
+        "Child",
+        "Heading;",
+        "Body;",
+        "cs5",
+        "li1440",
+        "Emphasis",
+        "fonttbl",
+        "Courier New",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact style inheritance, next-style, and character-style visual formatting once available."
+      ]
+    },
+    {
       "id": "word-layout-compatibility-passive-classification",
       "input": "fixtures/word-layout-compatibility-passive.rtf",
       "category": "acceptable_approximation",
