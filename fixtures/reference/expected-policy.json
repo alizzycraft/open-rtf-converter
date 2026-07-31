@@ -3769,6 +3769,58 @@
       ]
     },
     {
+      "id": "macro-script-metadata-passive-stripping",
+      "input": "fixtures/macro-script-metadata-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before macro script metadata.",
+        "Macro  after macro.",
+        "Script  after script.",
+        "VBA  after vba.",
+        "Metadata  after metadata.",
+        "Visible after macro script metadata."
+      ],
+      "intentional_security_differences": [
+        "Macro, script, VBA, and ActiveX destinations are stripped as active payloads while surrounding visible text remains passive.",
+        "Nested macro/script payloads inside metadata are removed before PDF rendering.",
+        "Active scripting/control payloads never become PDF JavaScript, form widgets, links, launches, rich media, or embedded files."
+      ],
+      "expected_diagnostics": [
+        "active content removed: macro/script payload before safe model normalization",
+        "active content removed: macro/script payload in metadata before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "macros",
+        "vbaproject",
+        "activex",
+        "launch.exe",
+        "<script>",
+        "414243",
+        "Hidden VBA payload",
+        "Hidden title",
+        "Forms.CommandButton",
+        "https://example.com",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Widget"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact body spacing around stripped macro/script metadata once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
