@@ -3608,6 +3608,64 @@
       ]
     },
     {
+      "id": "private-metadata-passive-stripping",
+      "input": "fixtures/private-metadata-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before private metadata.",
+        "Storage  after storage.",
+        "Metadata  after metadata.",
+        "Unknown  after unknown.",
+        "Visible after private metadata."
+      ],
+      "intentional_security_differences": [
+        "Private metadata destinations are stripped while surrounding visible body text remains passive.",
+        "Nested object payloads and hyperlink field instructions inside private metadata are removed before PDF rendering.",
+        "Private metadata hidden directly, inside document info, or inside skipped destinations never becomes PDF JavaScript, links, attachments, rich media, or launch actions."
+      ],
+      "expected_diagnostics": [
+        "active content removed: private metadata before safe model normalization",
+        "active content removed: private metadata in metadata before safe model normalization",
+        "active content removed: private metadata in skipped destination before safe model normalization",
+        "active content removed: object payload in metadata before safe model normalization",
+        "active content removed: object payload in skipped destination before safe model normalization",
+        "active content removed: field instruction in metadata before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "Hidden private payload",
+        "Hidden info payload",
+        "Hidden skipped payload",
+        "object",
+        "objdata",
+        "414243",
+        "504b0304",
+        "4d5a9000",
+        "HYPERLINK",
+        "https://example.com/private",
+        "https://example.com/info",
+        "Hidden link",
+        "Hidden info link",
+        "fldinst",
+        "fldrslt",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact body spacing around stripped private metadata once available."
+      ]
+    },
+    {
       "id": "review-bookmark-metadata-passive-stripping",
       "input": "fixtures/review-bookmark-metadata-passive.rtf",
       "category": "intentional_security_difference",
