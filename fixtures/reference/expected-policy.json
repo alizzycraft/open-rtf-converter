@@ -2029,6 +2029,41 @@
       ]
     },
     {
+      "id": "paragraph-indent-aliases-passive-layout",
+      "input": "fixtures/paragraph-indent-aliases-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Alias indented paragraph",
+        "Normal following paragraph"
+      ],
+      "intentional_security_differences": [
+        "Word paragraph indent aliases are normalized into bounded passive paragraph geometry.",
+        "Raw indent alias controls are stripped before PDF rendering and cannot create active PDF features."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "lin720",
+        "rin360",
+        "fin-240",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact first-line, left, and right indent offsets once available."
+      ]
+    },
+    {
       "id": "paragraph-spacing-passive-flow",
       "input": "fixtures/paragraph-spacing-passive.rtf",
       "category": "acceptable_approximation",
