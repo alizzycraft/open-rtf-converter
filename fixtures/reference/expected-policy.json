@@ -799,6 +799,53 @@
       ]
     },
     {
+      "id": "wmf-patblt-passive-rectangle",
+      "input": "fixtures/wmf-patblt-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF patblt.",
+        "After WMF patblt."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF PATBLT PATCOPY records are converted into bounded passive PDF rectangle fills using the selected passive brush.",
+        "Raw WMF bytes, raster-operation records, brush records, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "061d",
+        "00f00021",
+        "ff0000",
+        "1d062100f0001400",
+        "28001e003200",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " re",
+        " f"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF PATBLT rectangle placement and brush color once available.",
+        "The converter intentionally supports only safe source-independent raster operations; unsupported raster operations remain placeholdered or stripped."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
