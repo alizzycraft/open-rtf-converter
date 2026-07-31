@@ -468,6 +468,50 @@
       ]
     },
     {
+      "id": "emf-cliprect-passive-paths",
+      "input": "fixtures/emf-cliprect-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF clip.",
+        "After EMF clip."
+      ],
+      "intentional_security_differences": [
+        "Supported EMF IntersectClipRect state is converted into bounded passive PDF clipping paths before drawing.",
+        "Raw EMF bytes, clip/drawing record identifiers, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "1e000000",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " n",
+        " re",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF clipping geometry and clipped paint extents once available.",
+        "The converter intentionally supports only a hardened passive EMF clipping subset; unsupported clip operations remain placeholder or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
