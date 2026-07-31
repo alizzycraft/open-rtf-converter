@@ -339,6 +339,49 @@
       ]
     },
     {
+      "id": "emf-text-passive-output",
+      "input": "fixtures/emf-text-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF text.",
+        "Hi",
+        "After EMF text."
+      ],
+      "intentional_security_differences": [
+        "Supported EMF EXTTEXTOUTW text is converted into bounded passive PDF text using safe font and color resources.",
+        "Raw EMF bytes, encoded source text bytes, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "48006900",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " rg"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF text baseline, alignment, color, and font metrics once available.",
+        "The converter intentionally supports only a hardened passive EMF text subset; unsupported EMF text options remain placeholder or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
