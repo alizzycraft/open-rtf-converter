@@ -2273,6 +2273,53 @@
       ]
     },
     {
+      "id": "character-highlight-border-passive-drawing",
+      "input": "fixtures/character-highlight-border-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before character drawing.",
+        "Marked text",
+        "plain text",
+        "Tinted text",
+        "Bordered text",
+        "After character drawing."
+      ],
+      "intentional_security_differences": [
+        "Character highlight, shading, and border controls are normalized into bounded passive PDF fills and strokes.",
+        "Raw character drawing controls and excessive border width metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "border width clamped"
+      ],
+      "forbidden_pdf_markers": [
+        "highlight",
+        "chshdng",
+        "chcbpat",
+        "chbrdr",
+        "brdrs",
+        "brdrw9999",
+        "brdrcf",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " rg",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact highlight bounds, character shading tint, border spacing, and clamped border width once available."
+      ]
+    },
+    {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
