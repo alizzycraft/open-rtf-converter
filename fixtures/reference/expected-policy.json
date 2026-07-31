@@ -846,6 +846,52 @@
       ]
     },
     {
+      "id": "wmf-stretchblt-patcopy-passive-rectangle",
+      "input": "fixtures/wmf-stretchblt-patcopy-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF stretchblt patcopy.",
+        "After WMF stretchblt patcopy."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF STRETCHBLT PATCOPY records are reduced to bounded passive PDF rectangle fills using the selected passive brush.",
+        "Raw WMF bytes, raster-operation records, source payload bytes, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "0b23",
+        "00f00021",
+        "285078",
+        "RAW-SRCCOPY-PAYLOAD",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " re",
+        " f"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF STRETCHBLT PATCOPY rectangle placement and brush color once available.",
+        "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
