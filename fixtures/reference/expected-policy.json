@@ -2188,6 +2188,40 @@
       ]
     },
     {
+      "id": "soft-breaks-passive-flow",
+      "input": "fixtures/soft-breaks-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before soft line soft column soft page",
+        "After soft breaks."
+      ],
+      "intentional_security_differences": [
+        "Word soft line, column, and page break controls are treated as passive soft hints and stripped without forcing PDF line, column, or page breaks.",
+        "Raw soft-break controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "softline",
+        "softcol",
+        "softpage",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm whether soft break hints have any visible wrapping impact in edge cases once available."
+      ]
+    },
+    {
       "id": "drop-cap-passive-layout",
       "input": "fixtures/drop-cap-passive.rtf",
       "category": "acceptable_approximation",
