@@ -519,6 +519,51 @@
       ]
     },
     {
+      "id": "wmf-polybezier-passive-curves",
+      "input": "fixtures/wmf-polybezier-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF polybezier.",
+        "After WMF polybezier."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF POLYBEZIER records are converted into bounded passive PDF cubic curve strokes.",
+        "Raw WMF bytes, POLYBEZIER record payloads, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "3c2814",
+        "051004000a000a00",
+        "4600320050001400",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " c",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF PolyBezier curve placement and pen styling once available.",
+        "The converter intentionally supports only complete bounded passive Bezier runs; malformed or partial WMF Bezier records remain no-ops, placeholders, or stripped."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
