@@ -3170,6 +3170,63 @@
       ]
     },
     {
+      "id": "nested-table-flatten-passive-layout",
+      "input": "fixtures/nested-table-flatten-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before nested table.",
+        "Outer before",
+        "Inner A",
+        "Inner B",
+        "Outer after",
+        "After nested table."
+      ],
+      "intentional_security_differences": [
+        "Nested table content is flattened into bounded passive text inside the outer cell instead of preserving editable nested table structure.",
+        "Nested table properties, floating-table positioning hints, row direction, padding, spacing, and raw cell boundary controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "itap",
+        "nesttableprops",
+        "nestcell",
+        "nestrow",
+        "rtlrow",
+        "ltrrow",
+        "trpaddfl",
+        "trpaddl",
+        "trspdfl",
+        "trspdl",
+        "clpadfl",
+        "clpadl",
+        "clspdfl",
+        "clspdl",
+        "tphmrg",
+        "tposx",
+        "tpvpg",
+        "tposyin",
+        "tdfrmtxtLeft",
+        "tabsnoovrlp",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact nested-table flattening order, spacing, and approximation versus true nested table geometry once available."
+      ]
+    },
+    {
       "id": "old-style-list-passive-markers",
       "input": "fixtures/old-style-list-passive.rtf",
       "category": "acceptable_approximation",
