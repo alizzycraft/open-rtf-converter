@@ -1950,6 +1950,41 @@
       ]
     },
     {
+      "id": "section-break-kinds-passive-pagination",
+      "input": "fixtures/section-break-kinds-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "Alpha flow.",
+        "Beta flow.",
+        "Gamma flow."
+      ],
+      "intentional_security_differences": [
+        "Continuous section breaks are normalized into bounded passive section state without forcing a page break.",
+        "Page section breaks are normalized into bounded passive pagination, and raw section controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "sbknone",
+        "sbkpage",
+        "\\sect",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact continuous-section same-page flow and page-section break placement once available."
+      ]
+    },
+    {
       "id": "odd-section-break-passive-pagination",
       "input": "fixtures/odd-section-break-passive.rtf",
       "category": "must_match_closely",
