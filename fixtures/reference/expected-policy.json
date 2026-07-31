@@ -251,6 +251,49 @@
       ]
     },
     {
+      "id": "wmf-vector-passive-paths",
+      "input": "fixtures/wmf-vector-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF vector.",
+        "After WMF vector."
+      ],
+      "intentional_security_differences": [
+        "Only the supported safe WMF drawing subset is converted into bounded passive PDF vector paths.",
+        "Raw WMF bytes, WMF picture controls, unsupported metafile behavior, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "dcdcdc",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " re",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF rectangle and ellipse geometry once available.",
+        "The converter intentionally supports only a hardened passive WMF subset; unsupported WMF/EMF behavior remains placeholder or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
