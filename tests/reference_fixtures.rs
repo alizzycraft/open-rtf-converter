@@ -2261,6 +2261,24 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[],
         },
         ReferenceFixture {
+            input: "fixtures/column-section-break-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &["Left segment.", "Right segment."],
+            must_not_leak: &[
+                b"cols2",
+                b"sbkcol",
+                b"\\sect",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
+        },
+        ReferenceFixture {
             input: "fixtures/tab-alignment-passive.rtf",
             expected_pages: 1,
             must_preserve_text: &[
