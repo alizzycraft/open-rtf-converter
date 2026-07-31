@@ -1982,6 +1982,47 @@
       ]
     },
     {
+      "id": "landscape-zero-geometry-passive-page",
+      "input": "fixtures/landscape-zero-geometry-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "Portrait body",
+        "portrait page two",
+        "Later section"
+      ],
+      "intentional_security_differences": [
+        "Explicit landscape-zero controls are normalized as portrait page geometry rather than preserving raw orientation controls.",
+        "Section page size controls are bounded passive geometry hints and cannot create active PDF features.",
+        "Raw page geometry and orientation controls are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "landscape",
+        "lndscpsxn",
+        "paperw",
+        "paperh",
+        "pgwsxn",
+        "pghsxn",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact portrait page media box and section page-size behavior once available."
+      ]
+    },
+    {
       "id": "alignment-direction-passive-layout",
       "input": "fixtures/alignment-direction-passive.rtf",
       "category": "acceptable_approximation",
