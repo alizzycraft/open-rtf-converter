@@ -1950,6 +1950,39 @@
       ]
     },
     {
+      "id": "odd-section-break-passive-pagination",
+      "input": "fixtures/odd-section-break-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "First parity section.",
+        "Odd-start section."
+      ],
+      "intentional_security_differences": [
+        "Odd-page section breaks are normalized into bounded passive pagination, including the Word-visible blank parity page when needed.",
+        "Raw section-break controls are stripped before PDF rendering and cannot carry active section metadata into the PDF layer."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "sbkodd",
+        "\\sect",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact blank parity page behavior and following-section text placement once available."
+      ]
+    },
+    {
       "id": "page-vertical-alignment-passive-layout",
       "input": "fixtures/page-vertical-alignment-passive.rtf",
       "category": "acceptable_approximation",
