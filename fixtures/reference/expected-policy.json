@@ -1982,6 +1982,53 @@
       ]
     },
     {
+      "id": "alignment-direction-passive-layout",
+      "input": "fixtures/alignment-direction-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "distributed one",
+        "thai distributed",
+        "thai justified",
+        "Right placed",
+        "Left placed",
+        "Normal",
+        "LTR text"
+      ],
+      "intentional_security_differences": [
+        "Distributed and Thai alignment controls are normalized into bounded passive justified paragraph layout.",
+        "Paragraph direction controls are rendered as passive paragraph alignment metadata without preserving raw controls.",
+        "Character direction controls are bounded to passive visual text order and do not create active PDF features."
+      ],
+      "expected_diagnostics": [
+        "right-to-left character direction rendered by bounded passive visual text order"
+      ],
+      "forbidden_pdf_markers": [
+        "\\qd",
+        "\\qk",
+        "\\qt",
+        "rtlpar",
+        "ltrpar",
+        "rtlch",
+        "ltrch",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact distributed alignment spacing and bidirectional visual ordering once available."
+      ]
+    },
+    {
       "id": "paragraph-spacing-passive-flow",
       "input": "fixtures/paragraph-spacing-passive.rtf",
       "category": "acceptable_approximation",
