@@ -3116,6 +3116,56 @@
       ]
     },
     {
+      "id": "carried-table-row-definitions-passive-layout",
+      "input": "fixtures/carried-table-row-definitions-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before carried table.",
+        "Alpha",
+        "Beta",
+        "Gamma",
+        "Delta",
+        "After carried table."
+      ],
+      "intentional_security_differences": [
+        "Carried table row definitions are normalized into bounded passive row geometry for following intbl rows.",
+        "Raw row definitions, table state controls, cell boundaries, and border metadata are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "trowd",
+        "trgaph",
+        "trbrdrb",
+        "clbrdrl",
+        "clbrdrt",
+        "clbrdrb",
+        "clbrdrr",
+        "brdrs",
+        "brdrw",
+        "cellx",
+        "pard",
+        "intbl",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots",
+        "/URI"
+      ],
+      "expected_pdf_markers": [
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact carried-row border reuse, cell widths, and row spacing once available."
+      ]
+    },
+    {
       "id": "table-merged-cells-passive-geometry",
       "input": "fixtures/table-merged-cells-passive.rtf",
       "category": "must_match_closely",
