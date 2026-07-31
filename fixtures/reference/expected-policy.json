@@ -294,6 +294,47 @@
       ]
     },
     {
+      "id": "wmf-text-passive-output",
+      "input": "fixtures/wmf-text-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF text.",
+        "Hi",
+        "After WMF text."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF EXTTEXTOUT text is converted into bounded passive PDF text using safe font resources.",
+        "Raw WMF bytes, encoded source text bytes, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "0a32",
+        "4869",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF text baseline, alignment, and font metrics once available.",
+        "The converter intentionally supports only a hardened passive WMF text subset; unsupported WMF text options remain placeholder or stripped."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
