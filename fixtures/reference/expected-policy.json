@@ -3499,6 +3499,52 @@
       ]
     },
     {
+      "id": "document-protection-passive-stripping",
+      "input": "fixtures/document-protection-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible protected body.",
+        "Inline body.",
+        "Visible after protection metadata."
+      ],
+      "intentional_security_differences": [
+        "Document protection flags and password hashes are stripped as metadata while visible body text remains passive.",
+        "RTF protection metadata never becomes PDF encryption, PDF permissions, form widgets, actions, or active content."
+      ],
+      "expected_diagnostics": [
+        "document protection password hash stripped"
+      ],
+      "forbidden_pdf_markers": [
+        "passwordhash",
+        "DEADBEEF",
+        "AABBCC",
+        "formprot",
+        "revprot",
+        "annotprot",
+        "/Encrypt",
+        "/Perms",
+        "/AcroForm",
+        "/Widget",
+        "/AA",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact body spacing around stripped document-protection metadata once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
