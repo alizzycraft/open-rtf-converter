@@ -435,6 +435,64 @@
       ]
     },
     {
+      "id": "office-math-flow-passive-layout",
+      "input": "fixtures/office-math-flow-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before math flow.",
+        "FirstSecond",
+        "x+1",
+        "sin x",
+        "after math flow."
+      ],
+      "intentional_security_differences": [
+        "Office math manual breaks, group characters, functions, and phantoms are normalized into bounded passive text, spacing, line breaks, and strokes.",
+        "Office math property payloads, phantom text, executable-looking text, URLs, and object data are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "Office math rendered as bounded passive math text"
+      ],
+      "forbidden_pdf_markers": [
+        "mmath",
+        "moMath",
+        "mbox",
+        "mboxPr",
+        "mbrk",
+        "mgroupChr",
+        "mgroupChrPr",
+        "mchr",
+        "mfunc",
+        "mfuncPr",
+        "mfName",
+        "mctrlPr",
+        "mphant",
+        "mphantPr",
+        "mtext",
+        "calc.exe",
+        "example.invalid",
+        "objdata",
+        "414243",
+        "444546",
+        "454647",
+        "464748",
+        "HIDDEN-PHANTOM-PAYLOAD",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact manual-break baseline, group-character stroke placement, function spacing, and phantom spacing once available."
+      ]
+    },
+    {
       "id": "field-hyperlink-passive-result",
       "input": "fixtures/field-hyperlink-passive.rtf",
       "category": "intentional_security_difference",
