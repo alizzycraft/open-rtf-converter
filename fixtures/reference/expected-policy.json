@@ -834,6 +834,53 @@
       ]
     },
     {
+      "id": "emf-polyline-polygon-passive-paths",
+      "input": "fixtures/emf-polyline-polygon-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF poly paths.",
+        "After EMF poly paths."
+      ],
+      "intentional_security_differences": [
+        "Supported EMF POLYLINE and POLYGON records are converted into bounded passive PDF path move, line, and stroke operations.",
+        "Raw EMF bytes, polyline/polygon record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "0400000034000000",
+        "0300000034000000",
+        "c800000064000000",
+        "3c00000046000000",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " m",
+        " l",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF polyline and polygon edge placement once available.",
+        "The converter intentionally supports only bounded passive path geometry; malformed or excessive poly records remain placeholdered or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
