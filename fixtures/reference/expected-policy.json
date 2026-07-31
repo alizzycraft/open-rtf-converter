@@ -335,6 +335,51 @@
       ]
     },
     {
+      "id": "wmf-cliprect-passive-paths",
+      "input": "fixtures/wmf-cliprect-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF clip.",
+        "After WMF clip."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF IntersectClipRect state is converted into bounded passive PDF clipping paths before drawing.",
+        "Raw WMF bytes, clip/drawing record identifiers, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "1604",
+        "dcdcdc",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " n",
+        " re",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF clipping geometry and clipped paint extents once available.",
+        "The converter intentionally supports only a hardened passive WMF clipping subset; unsupported clip operations remain placeholder or stripped."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
