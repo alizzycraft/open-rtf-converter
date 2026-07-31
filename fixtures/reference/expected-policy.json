@@ -1117,6 +1117,54 @@
       ]
     },
     {
+      "id": "emf-anglearc-passive-polyline",
+      "input": "fixtures/emf-anglearc-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF anglearc.",
+        "After EMF anglearc."
+      ],
+      "intentional_security_differences": [
+        "Supported EMF ANGLEARC records are converted into bounded passive sampled PDF line strokes.",
+        "Raw EMF bytes, ANGLEARC record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "1b00000010000000",
+        "290000001c000000",
+        "3c0000002800000028000000",
+        "0000b442",
+        "3600000010000000",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " m",
+        " l",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF ANGLEARC sampling tolerance and current-position behavior once available.",
+        "The converter intentionally samples ANGLEARC into bounded passive line segments; malformed records remain no-ops, placeholders, or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
