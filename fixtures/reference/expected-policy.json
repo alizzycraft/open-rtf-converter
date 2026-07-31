@@ -929,6 +929,53 @@
       ]
     },
     {
+      "id": "emf-bezier-passive-curves",
+      "input": "fixtures/emf-bezier-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF bezier.",
+        "After EMF bezier."
+      ],
+      "intentional_security_differences": [
+        "Supported EMF POLYBEZIER and POLYBEZIERTO records, including 16-bit variants, are converted into bounded passive PDF cubic curve strokes.",
+        "Raw EMF bytes, Bezier record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "020000003c000000",
+        "0500000034000000",
+        "550000002c000000",
+        "5800000028000000",
+        "6400280078004600c8006400",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " c",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF Bezier curve placement and current-position behavior once available.",
+        "The converter intentionally supports only complete bounded passive Bezier runs; malformed or partial Bezier records remain no-ops, placeholders, or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
