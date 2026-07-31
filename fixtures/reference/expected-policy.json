@@ -1722,6 +1722,53 @@
       ]
     },
     {
+      "id": "tall-table-row-split-passive-pagination",
+      "input": "fixtures/tall-table-row-split-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 4,
+      "must_preserve_text": [
+        "Before split table.",
+        "Safe fallback",
+        "Split header",
+        "Split row line 000",
+        "Split row line 069",
+        "After split table."
+      ],
+      "intentional_security_differences": [
+        "Tall auto-height table rows are split into bounded passive row fragments across pages with repeated passive table headers.",
+        "Embedded object payload data before the table is stripped while the safe static result text is rendered passively."
+      ],
+      "expected_diagnostics": [
+        "active content removed: OLE object before safe model normalization",
+        "rendering safe embedded object result and stripping active object data"
+      ],
+      "forbidden_pdf_markers": [
+        "objemb",
+        "objdata",
+        "414243",
+        "JavaScript",
+        "EmbeddedFile",
+        "trowd",
+        "trhdr",
+        "trrh",
+        "cellx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact split-row fragment heights, repeated-header placement, and object-result spacing once available."
+      ]
+    },
+    {
       "id": "table-row-keep-together-passive-pagination",
       "input": "fixtures/table-row-keep-together-passive.rtf",
       "category": "acceptable_approximation",
