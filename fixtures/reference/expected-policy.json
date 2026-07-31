@@ -3821,6 +3821,63 @@
       ]
     },
     {
+      "id": "html-xml-metadata-passive-stripping",
+      "input": "fixtures/html-xml-metadata-passive.rtf",
+      "category": "intentional_security_difference",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible HTML body after html.",
+        "Before XML tagged",
+        "After XML.",
+        "Visible after HTML XML metadata."
+      ],
+      "intentional_security_differences": [
+        "Encapsulated HTML metadata is stripped while visible RTF body text remains passive.",
+        "Custom XML markup may preserve visible body text, but XML tags, attributes, data stores, theme data, color mapping, and nested object payloads are stripped.",
+        "HTML/XML metadata never becomes PDF JavaScript, links, attachments, rich media, or launch actions."
+      ],
+      "expected_diagnostics": [
+        "active content removed: object payload in skipped destination before safe model normalization"
+      ],
+      "forbidden_pdf_markers": [
+        "fromhtml",
+        "htmlrtf",
+        "htmltag",
+        "htmlbase",
+        "Hidden HTML",
+        "onclick",
+        "launch.exe",
+        "<script>",
+        "https://example.com/base",
+        "datastore",
+        "themedata",
+        "colorschememapping",
+        "xmlopen",
+        "xmlclose",
+        "xmlattrname",
+        "xmlattrvalue",
+        "secret",
+        "objdata",
+        "414243",
+        "504b0304",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact visible text spacing around stripped encapsulated HTML and custom XML markup once available."
+      ]
+    },
+    {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
