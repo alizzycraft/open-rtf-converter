@@ -2397,6 +2397,50 @@
       ]
     },
     {
+      "id": "note-restart-numbering-passive-layout",
+      "input": "fixtures/note-restart-numbering-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "BodyIV MiddleV Endb",
+        "IV. First note text",
+        "V. Second note text",
+        "b. Final note text"
+      ],
+      "intentional_security_differences": [
+        "Word note restart and numbering controls are resolved into passive visible labels, without preserving active note behavior.",
+        "Raw note control words and restart metadata are stripped before the PDF layer."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "ftnrestart",
+        "ftnrstpg",
+        "ftnrstcont",
+        "aftnrestart",
+        "aftnrstpg",
+        "aftnrstcont",
+        "ftnstart",
+        "ftnnruc",
+        "aftnstart",
+        "aftnnalc",
+        "chftn",
+        "footnote",
+        "endnote",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact restart behavior across automatic page and section boundaries once available."
+      ]
+    },
+    {
       "id": "shape-rotation-passive-static-geometry",
       "input": "fixtures/shape-rotation-passive.rtf",
       "category": "must_match_closely",
