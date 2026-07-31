@@ -3049,6 +3049,52 @@
       ]
     },
     {
+      "id": "zero-width-formatting-passive-controls",
+      "input": "fixtures/zero-width-formatting-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Visible before zero width.",
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "L",
+        "R",
+        "Visible after zero width."
+      ],
+      "intentional_security_differences": [
+        "Zero-width and directional formatting controls are normalized into passive text formatting without exposing raw RTF control words.",
+        "Formatting controls do not create active PDF features, annotations, links, or embedded payloads.",
+        "Visible surrounding text remains available to the PDF layer while invisible formatting controls remain bounded."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "zwbo",
+        "zwnbo",
+        "zwnj",
+        "zwj",
+        "ltrmark",
+        "rtlmark",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word-exported reference should confirm exact copy/paste text extraction behavior for zero-width formatting marks once available."
+      ]
+    },
+    {
       "id": "symbol-font-passive-glyph-decoding",
       "input": "fixtures/symbol-font-passive.rtf",
       "category": "acceptable_approximation",
