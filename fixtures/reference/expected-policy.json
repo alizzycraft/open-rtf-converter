@@ -294,6 +294,51 @@
       ]
     },
     {
+      "id": "emf-vector-passive-paths",
+      "input": "fixtures/emf-vector-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before EMF vector.",
+        "After EMF vector."
+      ],
+      "intentional_security_differences": [
+        "Only the supported safe EMF drawing subset is converted into bounded passive PDF vector paths.",
+        "Unsupported EMF records are skipped with diagnostics, and raw EMF bytes, EMF picture controls, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [
+        "EMF picture rendered as bounded passive vector preview with 1 unsupported record(s) skipped"
+      ],
+      "forbidden_pdf_markers": [
+        "emfblip",
+        "picw160",
+        "pich80",
+        "picwgoal",
+        "pichgoal",
+        "20454d46",
+        "e7030000",
+        "/Subtype /Image",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " re",
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact EMF rectangle and ellipse geometry once available.",
+        "The converter intentionally supports only a hardened passive EMF subset; unsupported EMF behavior remains placeholder or stripped."
+      ]
+    },
+    {
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
