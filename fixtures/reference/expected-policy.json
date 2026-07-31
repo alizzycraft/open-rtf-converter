@@ -380,6 +380,61 @@
       ]
     },
     {
+      "id": "office-math-structures-passive-layout",
+      "input": "fixtures/office-math-structures-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before math structures.",
+        "root-x",
+        "over-z",
+        "p+q",
+        "after math structures."
+      ],
+      "intentional_security_differences": [
+        "Office math radicals, bars, and delimiters are rendered as bounded passive text and passive strokes rather than active equation objects.",
+        "Office math property payloads, hidden degree content, executable-looking text, and object data are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [
+        "Office math rendered as bounded passive math text"
+      ],
+      "forbidden_pdf_markers": [
+        "mmath",
+        "moMath",
+        "mrad",
+        "mradPr",
+        "mdeg",
+        "mdegHide",
+        "HIDDEN-DEGREE",
+        "mbar",
+        "mbarPr",
+        "mpos",
+        "mdPr",
+        "mbegChr",
+        "mendChr",
+        "mr",
+        "mtext",
+        "calc.exe",
+        "launch.exe",
+        "objdata",
+        "414243",
+        "444546",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact radical bar, overbar, delimiter spacing, and stroke placement once available."
+      ]
+    },
+    {
       "id": "field-hyperlink-passive-result",
       "input": "fixtures/field-hyperlink-passive.rtf",
       "category": "intentional_security_difference",
