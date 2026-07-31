@@ -2698,6 +2698,52 @@
       ]
     },
     {
+      "id": "paragraph-borders-passive-lines",
+      "input": "fixtures/paragraph-borders-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before paragraph borders.",
+        "Boxed paragraph.",
+        "Bar paragraph.",
+        "Between first.",
+        "Between second.",
+        "After paragraph borders."
+      ],
+      "intentional_security_differences": [
+        "Paragraph box, bar, and between-border controls are normalized into bounded passive PDF line drawing commands.",
+        "Raw paragraph border controls and color-table control words are stripped before PDF rendering."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "brdrbar",
+        "brdrbtw",
+        "brdrdash",
+        "brdrs",
+        "brdrw",
+        "brdrcf",
+        "colortbl",
+        "red255",
+        "blue255",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        " S"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact paragraph border offsets, between-border placement, side selection, and dash metrics once available."
+      ]
+    },
+    {
       "id": "table-borders-passive-lines",
       "input": "fixtures/table-borders-passive.rtf",
       "category": "must_match_closely",
