@@ -6,6 +6,7 @@ use pdf_writer::types::{
     TextRenderingMode, UnicodeCmap,
 };
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
+use miniz_oxide::deflate::compress_to_vec_zlib;
 use ttf_parser::{Face, name_id};
 
 use crate::fonts::{FontAsset, FontProvider};
@@ -4179,7 +4180,9 @@ fn write_supplied_pdf_fonts(
             .font_file2(supplied.font_file_ref);
 
         {
-            let mut font_file = pdf.stream(supplied.font_file_ref, &asset.bytes);
+            let compressed_font = compress_to_vec_zlib(&asset.bytes, 6);
+            let mut font_file = pdf.stream(supplied.font_file_ref, &compressed_font);
+            font_file.filter(Filter::FlateDecode);
             font_file.pair(Name(b"Length1"), asset.bytes.len() as i32);
         }
 
