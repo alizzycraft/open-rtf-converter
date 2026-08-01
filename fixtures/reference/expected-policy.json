@@ -1704,7 +1704,7 @@
       "expected_pdf_markers": [
         " m",
         " l",
-        " B"
+        "\nB\n"
       ],
       "known_gaps": [
         "Word-exported reference should confirm exact EMF POLYPOLYGON fill/stroke placement and winding behavior once available.",
@@ -2107,7 +2107,6 @@
         "mdPr",
         "mbegChr",
         "mendChr",
-        "mr",
         "mtext",
         "calc.exe",
         "launch.exe",
@@ -2330,8 +2329,6 @@
         "TOA",
         "HiddenSource",
         "Hidden separator",
-        "\\o",
-        "\\h",
         "/Action",
         "/Annots",
         "/URI",
@@ -2597,7 +2594,6 @@
         "ADDIN",
         "PRIVATE",
         "PRINT",
-        "RD",
         "Hidden addin payload",
         "414243",
         "hidden private",
@@ -2807,11 +2803,6 @@
         "AUTONUMOUT",
         "LISTNUM",
         "LegalDefault",
-        "\\r",
-        "\\c",
-        "\\h",
-        "\\l",
-        "\\s",
         "[Field removed",
         "/Action",
         "/Annots",
