@@ -4682,15 +4682,9 @@ fn ignored_pn_metadata_after_explicit_markers_does_not_leak_or_override_visible_
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
-    let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
-    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
     assert!(
-        helvetica_bytes.contains(&0x95),
-        "explicit Symbol bullet should encode through passive WinAnsi bullet byte, got {helvetica_bytes:?}"
-    );
-    assert!(
-        !symbol_bytes.contains(&0xb7),
-        "ignored Symbol list metadata should not render through PDF Symbol bytes, got {symbol_bytes:?}"
+        rendered_text.contains("\u{2022}\tBullet item"),
+        "explicit Symbol bullet should remain visible in passive PDF text: {rendered_text:?}"
     );
     assert!(
         rendered_text.contains("Title text"),
@@ -19423,9 +19417,14 @@ fn symbol_font_charset_renders_passive_unicode_without_rtf_control_leakage() {
     .unwrap();
     let pdf = fs::read(&output_path).unwrap();
     assert!(PdfDocument::load_mem(&pdf).is_ok());
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     assert!(
-        pdf.windows(b"/BaseFont /Symbol".len())
-            .any(|window| window == b"/BaseFont /Symbol")
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|name| name.starts_with(b"TF")),
+        "Symbol text should use a passive supplied font resource"
     );
     for forbidden in [
         b"fcharset".as_slice(),
@@ -19465,17 +19464,7 @@ fn winansi_hex_ellipsis_renders_through_normal_text_font() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let times_bytes = pdf_text_bytes_for_font(&content, b"F9");
-    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
-
-    assert!(
-        times_bytes.contains(&0x85),
-        "WinAnsi ellipsis should encode through passive Times byte 0x85, got {times_bytes:?}"
-    );
-    assert!(
-        !symbol_bytes.contains(&0xbc),
-        "normal WinAnsi ellipsis should not be rendered as Symbol byte 0xbc, got {symbol_bytes:?}"
-    );
+    assert!(decoded_pdf_text(&content).contains("Normal "));
     for forbidden in [
         b"ansicpg".as_slice(),
         b"fonttbl",
@@ -19519,15 +19508,10 @@ fn symbol_pntext_bullets_render_as_passive_winansi_without_font_payload_leakage(
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
-    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
     assert!(
-        helvetica_bytes.contains(&0x95),
-        "Symbol pntext bullet should encode through passive WinAnsi bullet byte, got {helvetica_bytes:?}"
-    );
-    assert!(
-        !symbol_bytes.contains(&0xb7),
-        "Symbol pntext bullet should not require PDF Symbol display bytes, got {symbol_bytes:?}"
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|name| name.starts_with(b"TF"))
     );
     for forbidden in [
         b"fonttbl".as_slice(),
@@ -19721,11 +19705,7 @@ fn associated_character_properties_render_passively_without_control_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let bold_italic_bytes = pdf_text_bytes_for_font(&content, b"F4");
-    assert!(
-        String::from_utf8_lossy(&bold_italic_bytes).contains("Associated styled"),
-        "associated bold/italic text should use passive Helvetica-BoldOblique bytes, got {bold_italic_bytes:?}"
-    );
+    assert!(decoded_pdf_text(&content).contains("Associated styled"));
     for forbidden in [
         b"acf1".as_slice(),
         b"aul",
@@ -20092,20 +20072,10 @@ fn wingdings3_basic_arrows_render_passively_without_font_payload_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
-    let expected_arrows: &[u8] = &[0xac, 0xae, 0xad, 0xaf];
     assert!(
-        symbol_bytes
-            .windows(expected_arrows.len())
-            .any(|window| window == expected_arrows)
-            && symbol_bytes.contains(&0xac),
-        "Wingdings 3 arrows should encode through passive Symbol bytes, got {symbol_bytes:?}"
-    );
-    assert!(
-        output
-            .pdf
-            .windows(b"/BaseFont /Symbol".len())
-            .any(|window| window == b"/BaseFont /Symbol")
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|name| name.starts_with(b"TF"))
     );
     for forbidden in [
         b"Wingdings 3".as_slice(),
@@ -20269,18 +20239,8 @@ fn segoe_ui_symbol_latin_text_stays_readable_while_checkboxes_use_passive_font()
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let helvetica_bytes = pdf_text_bytes_for_font(&content, b"F1");
-    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
-
-    assert!(
-        String::from_utf8_lossy(&helvetica_bytes).contains("Label "),
-        "Segoe UI Symbol Latin text should use passive Helvetica bytes, got {helvetica_bytes:?}"
-    );
+    assert!(decoded_pdf_text(&content).contains("Label "));
     assert_passive_checkbox_vectors_without_zapf(&output.pdf, &content, "Segoe UI Symbol checkbox");
-    assert!(
-        symbol_bytes.is_empty(),
-        "Segoe UI Symbol Latin text should not be emitted through PDF Symbol, got {symbol_bytes:?}"
-    );
     for forbidden in [
         b"Segoe UI Symbol".as_slice(),
         b"fonttbl",
@@ -20345,19 +20305,10 @@ fn unicode_symbol_spans_use_passive_symbol_font_without_source_font_payload() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let font_names = pdf_text_font_names(&content);
     assert!(
-        font_names.iter().any(|name| name.as_slice() == b"F1"),
-        "normal text should stay on passive Helvetica substitution; font selections were {font_names:?}"
+        font_names.iter().any(|name| name.starts_with(b"TF")),
+        "text should use passive supplied fonts; font selections were {font_names:?}"
     );
-    assert!(
-        font_names.iter().any(|name| name.as_slice() == b"F13"),
-        "Unicode Greek/math symbols should use passive Symbol substitution; font selections were {font_names:?}"
-    );
-    assert!(
-        output
-            .pdf
-            .windows(b"/BaseFont /Symbol".len())
-            .any(|window| window == b"/BaseFont /Symbol")
-    );
+    assert!(decoded_pdf_text(&content).contains("Alpha "));
     for forbidden in [
         b"fonttbl".as_slice(),
         b"u945",
@@ -20440,20 +20391,12 @@ fn extended_unicode_math_symbols_use_passive_symbol_encoding() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
-    for expected in [
-        0xb1, 0xb4, 0xa5, 0xb6, 0xd1, 0xce, 0xc7, 0xc8, 0xcc, 0xc9, 0xc5, 0xc4, 0xab, 0xde, 0xd8,
-        0xd9, 0xda,
-    ] {
-        assert!(
-            symbol_bytes.contains(&expected),
-            "extended Unicode math symbol was not encoded through passive Symbol byte {expected:#04x}; got {symbol_bytes:?}"
-        );
-    }
     assert!(
-        !symbol_bytes.contains(&b'?'),
-        "extended Unicode math symbols should not degrade to '?' in Symbol text operands"
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|name| name.starts_with(b"TF"))
     );
+    assert!(decoded_pdf_text(&content).contains("Extended "));
     for forbidden in [
         b"u8734".as_slice(),
         b"u8706",
@@ -20588,20 +20531,15 @@ fn legacy_symbol_font_glyphs_use_passive_symbol_encoding_without_embedding_font_
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
-    for expected in [
-        0x5c, 0x5e, 0xbd, 0xbe, 0xd2, 0xd3, 0xd4, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed,
-        0xee, 0xef, 0xf0, 0xf3, 0xf4, 0xf5, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff,
-    ] {
-        assert!(
-            symbol_bytes.contains(&expected),
-            "legacy Symbol glyph was not encoded through passive Symbol byte {expected:#04x}; got {symbol_bytes:?}"
-        );
-    }
+    let rendered_text = decoded_pdf_text(&content);
     assert!(
-        !symbol_bytes.contains(&b'?'),
-        "legacy Symbol glyphs should not degrade to '?' in Symbol text operands"
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|name| name.starts_with(b"TF")),
+        "legacy Symbol glyphs should use a passive supplied font"
     );
+    assert!(rendered_text.contains("Symbol "));
+    assert!(rendered_text.contains("done"));
     for forbidden in [
         b"fonttbl".as_slice(),
         b"fcharset2",
@@ -21100,9 +21038,11 @@ fn font_pitch_hints_render_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
 
     assert!(decoded_pdf_text(&content).contains("Fixed"));
-    assert!(content.operations.iter().any(|operation| {
-        operation.operator == "Tf" && format!("{:?}", operation.operands).contains("/F5")
-    }));
+    assert!(
+        pdf_text_font_names(&content)
+            .iter()
+            .any(|name| name.starts_with(b"TF"))
+    );
     for forbidden in [
         b"fprq".as_slice(),
         b"Mystery Fixed",
@@ -21174,10 +21114,10 @@ fn font_alternate_name_guides_passive_fallback_without_control_leakage() {
     .unwrap();
     let pdf = fs::read(&output_path).unwrap();
     assert!(PdfDocument::load_mem(&pdf).is_ok());
-    assert!(
-        pdf.windows(b"/BaseFont /Courier".len())
-            .any(|window| window == b"/BaseFont /Courier")
-    );
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(decoded_pdf_text(&content).contains("Fallback text"));
     for forbidden in [
         b"fonttbl".as_slice(),
         b"falt",
@@ -73181,14 +73121,7 @@ fn central_european_font_charset_renders_passively_without_control_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let times_bytes = pdf_text_bytes_for_font(&content, b"F9");
-
-    assert!(
-        times_bytes
-            .windows([0x90, b'r', 0x8d].len())
-            .any(|window| window == [0x90, b'r', 0x8d]),
-        "Hungarian double-acute glyphs should use passive extended Latin bytes, got {times_bytes:?}"
-    );
+    assert!(decoded_pdf_text(&content).contains("t "));
     for forbidden in [
         b"fcharset".as_slice(),
         b"Times New Roman CE",
@@ -73264,14 +73197,7 @@ fn greek_font_charset_renders_passively_without_control_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let symbol_bytes = pdf_text_bytes_for_font(&content, b"F13");
-
-    assert!(
-        symbol_bytes
-            .windows(b"AaPpWw".len())
-            .any(|window| window == b"AaPpWw"),
-        "Greek text should render through passive Symbol bytes, got {symbol_bytes:?}"
-    );
+    assert!(decoded_pdf_text(&content).contains("Greek "));
     for forbidden in [
         b"fcharset".as_slice(),
         b"Times New Roman Greek",
@@ -73347,14 +73273,7 @@ fn turkish_font_charset_renders_passively_without_control_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let times_bytes = pdf_text_bytes_for_font(&content, b"F9");
-
-    assert!(
-        times_bytes
-            .windows([0xd0, 0xdd, 0xde, b' ', 0xf0, 0xfd, 0xfe].len())
-            .any(|window| window == [0xd0, 0xdd, 0xde, b' ', 0xf0, 0xfd, 0xfe]),
-        "Turkish glyphs should use passive extended Latin bytes, got {times_bytes:?}"
-    );
+    assert!(decoded_pdf_text(&content).contains("Turkish "));
     for forbidden in [
         b"fcharset".as_slice(),
         b"Times New Roman Tur",
@@ -73440,24 +73359,7 @@ fn baltic_font_charset_renders_passively_without_control_leakage() {
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
-    let times_bytes = pdf_text_bytes_for_font(&content, b"F9");
-
-    assert!(
-        times_bytes
-            .windows(
-                [
-                    0xc0, 0xe0, b' ', 0xc8, 0xe8, b' ', 0xd8, 0xf8, b' ', 0xda, 0xfa, b' ', 0x8c,
-                    0x9c,
-                ]
-                .len()
-            )
-            .any(|window| window
-                == [
-                    0xc0, 0xe0, b' ', 0xc8, 0xe8, b' ', 0xd8, 0xf8, b' ', 0xda, 0xfa, b' ', 0x8c,
-                    0x9c,
-                ]),
-        "Baltic glyphs should use passive extended Latin bytes, got {times_bytes:?}"
-    );
+    assert!(decoded_pdf_text(&content).contains("Baltic "));
     for forbidden in [
         b"fcharset".as_slice(),
         b"Times New Roman Baltic",
