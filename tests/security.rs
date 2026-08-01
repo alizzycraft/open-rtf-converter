@@ -416,7 +416,7 @@ fn central_european_charset_text_uses_bundled_serif_asset() {
 }
 
 #[test]
-fn unsupported_latin_extended_text_still_reports_browser_safe_font_gap() {
+fn bundled_fonts_cover_latin_extended_text_without_control_leakage() {
     let input = r"{\rtf1\ansi{\fonttbl{\f0\froman Unknown Word Serif;}}\f0 Unsupported \u384?\par}"
         .as_bytes()
         .to_vec();
@@ -425,18 +425,10 @@ fn unsupported_latin_extended_text_still_reports_browser_safe_font_gap() {
     let output = convert_rtf_to_pdf(&input, &options).unwrap();
 
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("Latin Extended characters")
-            && diagnostic.message.contains("passive font asset support")
-            && diagnostic.message.contains("Unknown Word Serif")
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic.message.contains("Latin Extended characters")
+            || !diagnostic.message.contains("passive font asset support")
     }));
-    assert!(
-        output.diagnostics.iter().all(|diagnostic| !diagnostic
-            .message
-            .contains("bounded passive PDF base-font encoding")),
-        "unsupported Latin Extended glyph should not be reported as base-font covered: {:?}",
-        output.diagnostics
-    );
     for forbidden in [
         b"fonttbl".as_slice(),
         b"Unknown Word Serif",
@@ -456,7 +448,7 @@ fn unsupported_latin_extended_text_still_reports_browser_safe_font_gap() {
 }
 
 #[test]
-fn unsupported_greek_text_still_reports_browser_safe_font_gap() {
+fn bundled_fonts_cover_greek_text_without_control_leakage() {
     let input =
         r"{\rtf1\ansi{\fonttbl{\f0\fswiss Unknown Word Sans;}}\f0 Unsupported \u945?\u7936?\par}"
             .as_bytes()
@@ -466,10 +458,9 @@ fn unsupported_greek_text_still_reports_browser_safe_font_gap() {
     let output = convert_rtf_to_pdf(&input, &options).unwrap();
 
     assert!(PdfDocument::load_mem(&output.pdf).is_ok());
-    assert!(output.diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("Greek characters")
-            && diagnostic.message.contains("passive font asset support")
-            && diagnostic.message.contains("Unknown Word Sans")
+    assert!(output.diagnostics.iter().all(|diagnostic| {
+        !diagnostic.message.contains("Greek characters")
+            || !diagnostic.message.contains("passive font asset support")
     }));
     for forbidden in [
         b"fonttbl".as_slice(),
@@ -20697,7 +20688,7 @@ fn font_family_hints_render_passively_without_control_leakage() {
 }
 
 #[test]
-fn narrow_font_aliases_render_as_passive_scaled_base14_without_font_payload_leakage() {
+fn narrow_font_aliases_render_as_passive_scaled_bundled_font_without_source_payload_leakage() {
     let input =
         br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Arial Narrow;}}\f1 Narrow visible text\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -20734,8 +20725,8 @@ fn narrow_font_aliases_render_as_passive_scaled_base14_without_font_payload_leak
     let font_names = pdf_text_font_names(&content);
 
     assert!(
-        font_names.iter().any(|name| name.as_slice() == b"F1"),
-        "narrow sans text should use passive Helvetica resource; got {font_names:?}"
+        font_names.iter().any(|name| name.starts_with(b"TF")),
+        "narrow sans text should use a passive supplied font resource; got {font_names:?}"
     );
     assert!(content.operations.iter().any(|operation| {
         operation.operator == "Tz"
@@ -20750,9 +20741,6 @@ fn narrow_font_aliases_render_as_passive_scaled_base14_without_font_payload_leak
         b"Arial Narrow",
         b"ArialNarrow",
         b"HelveticaNarrow",
-        b"/FontFile",
-        b"/FontFile2",
-        b"/FontFile3",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -20830,12 +20818,12 @@ fn theme_font_hints_render_passively_without_control_leakage() {
     let font_names = pdf_text_font_names(&content);
 
     assert!(
-        font_names.iter().any(|name| name.as_slice() == b"F9"),
-        "major theme font should use passive Times substitution; font selections were {font_names:?}"
+        font_names.iter().any(|name| name.starts_with(b"TF")),
+        "major theme font should use a passive supplied font resource; font selections were {font_names:?}"
     );
     assert!(
-        font_names.iter().any(|name| name.as_slice() == b"F1"),
-        "minor theme font should use passive Helvetica substitution; font selections were {font_names:?}"
+        font_names.iter().any(|name| name.starts_with(b"TF")),
+        "minor theme font should use a passive supplied font resource; font selections were {font_names:?}"
     );
     for forbidden in [
         b"fonttbl".as_slice(),
@@ -21513,7 +21501,7 @@ fn default_font_control_renders_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
 
     assert!(content.operations.iter().any(|operation| {
-        operation.operator == "Tf" && format!("{:?}", operation.operands).contains("/F9")
+        operation.operator == "Tf" && format!("{:?}", operation.operands).contains("/TF")
     }));
     for forbidden in [
         b"deff".as_slice(),
