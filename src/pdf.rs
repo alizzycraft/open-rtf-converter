@@ -1,12 +1,12 @@
 use std::error::Error;
 use std::fmt;
 
+use miniz_oxide::deflate::compress_to_vec_zlib;
 use pdf_writer::types::{
     BlendMode, CidFontType, FontFlags, LineCapStyle, LineJoinStyle, Predictor, SystemInfo,
     TextRenderingMode, UnicodeCmap,
 };
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
-use miniz_oxide::deflate::compress_to_vec_zlib;
 use ttf_parser::{Face, name_id};
 
 use crate::fonts::{FontAsset, FontProvider};
