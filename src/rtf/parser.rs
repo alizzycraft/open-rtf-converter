@@ -3271,6 +3271,9 @@ impl Parser {
                 && document_property_control(name).is_some()
                 && self.state.destination == Destination::Metadata =>
             {
+                if let Some(feature) = opaque_metadata_payload_feature(name) {
+                    self.reject_active_content_only(feature, offset)?;
+                }
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
                 self.state.metadata_property = document_property_control(name);

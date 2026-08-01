@@ -27137,7 +27137,7 @@ fn nonbreaking_hyphen_renders_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(rendered_text.contains("Before A-B after"));
+    assert!(rendered_text.contains("Before A\u{2011}B after"));
     for forbidden in [
         b"\\_".as_slice(),
         b"/JavaScript",
