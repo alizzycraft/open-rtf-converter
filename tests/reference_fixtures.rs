@@ -249,6 +249,53 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
 }
 
 #[test]
+fn available_word_reference_pdfs_match_manifest_contract() {
+    for fixture in manifest_reference_fixtures() {
+        match fixture.word_reference_status.as_str() {
+            "pending_word_export" => assert!(
+                fixture.word_reference_pdf.is_none(),
+                "{} cannot mark a Word reference pending while naming a PDF",
+                fixture.input
+            ),
+            "available" => {
+                let path = fixture
+                    .word_reference_pdf
+                    .as_deref()
+                    .unwrap_or_else(|| panic!("{} marks a missing Word reference", fixture.input));
+                assert!(
+                    Path::new(path).is_file(),
+                    "{} names missing Word reference PDF {}",
+                    fixture.input,
+                    path
+                );
+                let pdf = PdfDocument::load(path).unwrap_or_else(|error| {
+                    panic!("{} Word reference PDF is invalid: {error}", fixture.input)
+                });
+                assert_eq!(
+                    pdf.get_pages().len(),
+                    fixture.expected_pages,
+                    "{} Word reference page count drifted",
+                    fixture.input
+                );
+                let rendered_text = decoded_pdf_text(&pdf);
+                for expected in &fixture.must_preserve_text {
+                    assert!(
+                        rendered_text.contains(expected),
+                        "{} Word reference PDF did not contain {:?}",
+                        fixture.input,
+                        expected
+                    );
+                }
+            }
+            status => panic!(
+                "{} has unsupported word_reference_status {:?}",
+                fixture.input, status
+            ),
+        }
+    }
+}
+
+#[test]
 fn reference_policy_fixtures_match_current_passive_converter_output() {
     for fixture in manifest_reference_fixtures() {
         let input = std::fs::read(&fixture.input).unwrap_or_else(|error| {
@@ -397,6 +444,8 @@ fn executable_reference_fixtures_follow_manifest_policy_entries() {
 #[derive(Debug)]
 struct ManifestReferenceFixture {
     input: String,
+    word_reference_status: String,
+    word_reference_pdf: Option<String>,
     expected_pages: usize,
     must_preserve_text: Vec<String>,
     must_not_leak: Vec<String>,
@@ -419,6 +468,8 @@ fn manifest_reference_fixtures() -> Vec<ManifestReferenceFixture> {
         .into_iter()
         .map(|object| ManifestReferenceFixture {
             input: json_string_for_key(object, "input"),
+            word_reference_status: json_string_for_key(object, "word_reference_status"),
+            word_reference_pdf: json_nullable_string_for_key(object, "word_reference_pdf"),
             expected_pages: json_usize_for_key(object, "expected_pages"),
             must_preserve_text: json_string_array_for_key(object, "must_preserve_text"),
             must_not_leak: json_string_array_for_key(object, "forbidden_pdf_markers"),
@@ -5942,6 +5993,21 @@ fn json_string_for_key(object: &str, key: &str) -> String {
     let (decoded, _) = parse_json_string(value)
         .unwrap_or_else(|| panic!("invalid JSON string for key {key}: {value:?}"));
     decoded
+}
+
+fn json_nullable_string_for_key(object: &str, key: &str) -> Option<String> {
+    let marker = format!("\"{key}\":");
+    let start = object
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing nullable string key {key}"))
+        + marker.len();
+    let value = object[start..].trim_start();
+    if value.starts_with("null") {
+        return None;
+    }
+    let (decoded, _) = parse_json_string(value)
+        .unwrap_or_else(|| panic!("invalid JSON nullable string for key {key}: {value:?}"));
+    Some(decoded)
 }
 
 fn json_string_array_for_key(object: &str, key: &str) -> Vec<String> {
