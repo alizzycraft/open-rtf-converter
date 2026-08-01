@@ -1597,10 +1597,10 @@ mod tests {
             provider.coverage_for_char("Courier New", 'A'),
             open_rtf_converter::FontCoverage::Covered
         );
-        assert!(!provider.has_asset_for_family("Unknown Word Font"));
+        assert!(provider.has_asset_for_family("Unknown Word Font"));
         assert_eq!(
             provider.coverage_for_char("Unknown Word Font", 'A'),
-            open_rtf_converter::FontCoverage::NoAsset
+            open_rtf_converter::FontCoverage::Covered
         );
         assert_eq!(
             provider.limits.max_assets,

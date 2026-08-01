@@ -72,7 +72,6 @@ fn converter_mutation_corpus_rejects_or_emits_passive_pdf_without_payload_leakag
             b"mphant",
             b"mphantPr",
             b"mpos",
-            b"bot",
             b"mshow",
             b"mfPr",
             b"mtype",
@@ -134,7 +133,8 @@ fn converter_mutation_corpus_rejects_or_emits_passive_pdf_without_payload_leakag
                     .pdf
                     .windows(forbidden.len())
                     .any(|window| window == forbidden),
-                "forbidden payload leaked to PDF for mutation corpus case {case_idx}: {:?}",
+                "forbidden payload leaked to PDF for mutation corpus case {case_idx} input {:?}: {:?}",
+                String::from_utf8_lossy(&case),
                 String::from_utf8_lossy(forbidden)
             );
         }

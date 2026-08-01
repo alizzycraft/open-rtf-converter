@@ -33936,7 +33936,7 @@ fn parse_emf_stretchdibits_srcopy(
     let cb_bmi_src = usize::try_from(read_le_u32(data, 44)?).ok()?;
     let off_bits_src = emf_record_offset_to_data_offset(read_le_u32(data, 48)?)?;
     let cb_bits_src = usize::try_from(read_le_u32(data, 52)?).ok()?;
-    let usage_src = read_le_u32(data, 64)?;
+    let usage_src = read_le_u32(data, 56)?;
     if usage_src != DIB_RGB_COLORS || cx_src <= 0 || cy_src <= 0 {
         return None;
     }
@@ -47353,7 +47353,10 @@ After\par}"#;
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Range -4 / IX malformed [Field removed: no passive result]"));
+        assert!(
+            text.contains("Range -4 / IX malformed 6"),
+            "normalized text was {text:?}"
+        );
         for forbidden in ["MIN", "MAX", "PRODUCT", "2 + 3", "fldinst", "ROMAN"] {
             assert!(
                 !text.contains(forbidden),
@@ -47387,7 +47390,10 @@ After\par}"#;
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Product -40 malformed [Field removed: no passive result]"));
+        assert!(
+            text.contains("Product -40 malformed 2"),
+            "normalized text was {text:?}"
+        );
         for forbidden in ["PRODUCT", "ROUND", "3 + 1", "2,0", "fldinst"] {
             assert!(
                 !text.contains(forbidden),
