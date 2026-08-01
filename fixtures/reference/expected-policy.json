@@ -1080,6 +1080,228 @@
       ]
     },
     {
+      "id": "wmf-srccopy-stretchdib-passive-image",
+      "input": "fixtures/wmf-srccopy-stretchdib-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF srccopy stretchdib.",
+        "After WMF srccopy stretchdib."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF STRETCHDIB SRCCOPY records are normalized into bounded passive image pixels before PDF rendering.",
+        "Raw WMF bytes, raster-operation records, DIB headers/source bytes, WMF picture controls, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "0f43",
+        "00cc0020",
+        "280000000200000001000000010018",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF STRETCHDIB SRCCOPY image placement and pixel orientation once available.",
+        "The converter preserves only normalized passive pixels; source DIB headers and raw metafile transfer records remain outside the PDF layer."
+      ]
+    },
+    {
+      "id": "wmf-setdib-to-dev-passive-image",
+      "input": "fixtures/wmf-setdib-to-dev-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF setdib to dev.",
+        "After WMF setdib to dev."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF SETDIBTODEV records are normalized into bounded passive image pixels before PDF rendering.",
+        "Raw WMF bytes, SETDIBTODEV records, DIB headers/source bytes, trailing payload bytes, WMF picture controls, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "0d33",
+        "280000000200000001000000010018",
+        "TRAILING-WMF-SETDIBTODEV",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF SETDIBTODEV image placement, scan handling, and pixel orientation once available.",
+        "The converter preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
+      ]
+    },
+    {
+      "id": "wmf-srccopy-dib-blits-passive-image",
+      "input": "fixtures/wmf-srccopy-dib-blits-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF srccopy dib blits.",
+        "After WMF srccopy dib blits."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF DIBBITBLT and DIBSTRETCHBLT SRCCOPY records are normalized into bounded passive image pixels before PDF rendering.",
+        "Raw WMF bytes, raster-operation records, DIB headers/source bytes, trailing payload bytes, WMF picture controls, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "0940",
+        "0b41",
+        "00cc0020",
+        "280000000200000001000000010018",
+        "TRAILING-WMF-SRCCOPY-DIB",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF DIBBITBLT and DIBSTRETCHBLT SRCCOPY image placement and scaling once available.",
+        "The converter preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
+      ]
+    },
+    {
+      "id": "wmf-srccopy-cropped-dib-passive-image",
+      "input": "fixtures/wmf-srccopy-cropped-dib-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF srccopy cropped dib.",
+        "After WMF srccopy cropped dib."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF SRCCOPY DIB records with source-window cropping are normalized into bounded passive image pixels before PDF rendering.",
+        "Raw WMF bytes, raster-operation records, DIB headers/source bytes, trailing payload bytes, WMF picture controls, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "0f43",
+        "0940",
+        "0b41",
+        "00cc0020",
+        "280000000300000002000000010018",
+        "TRAILING-WMF-CROPPED-DIB",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF cropped SRCCOPY source-window placement, scaling, and pixel orientation once available.",
+        "The converter preserves only cropped normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
+      ]
+    },
+    {
+      "id": "wmf-srccopy-cropped-jpeg-dib-passive-image",
+      "input": "fixtures/wmf-srccopy-cropped-jpeg-dib-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "pending_word_export",
+      "word_reference_pdf": null,
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before WMF srccopy cropped jpeg dib.",
+        "After WMF srccopy cropped jpeg dib."
+      ],
+      "intentional_security_differences": [
+        "Supported WMF SRCCOPY JPEG-in-DIB records with source-window cropping are rendered as clipped bounded passive image draws.",
+        "Raw WMF bytes, raster-operation records, DIB headers/source bytes, trailing payload bytes, WMF picture controls, and active PDF features are stripped before PDF output."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "wmetafile8",
+        "picw200",
+        "pich100",
+        "picwgoal",
+        "pichgoal",
+        "010009",
+        "0f43",
+        "0b41",
+        "00cc0020",
+        "TRAILING-WMF-STRETCHDIB-JPEG-CROP",
+        "TRAILING-WMF-STRETCHDIB-JPEG-CROP-DIB",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [
+        "/Subtype /Image"
+      ],
+      "known_gaps": [
+        "Word-exported reference should confirm exact WMF cropped JPEG-in-DIB placement, scaling, clipping, and pixel orientation once available.",
+        "The converter preserves only bounded passive JPEG image draws; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
+      ]
+    },
+    {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
