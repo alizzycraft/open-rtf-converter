@@ -681,15 +681,50 @@ struct NestedTableCapture {
     cell_properties: Vec<Vec<NestedCellProperties>>,
     column_widths_twips: Vec<i32>,
     row_heights_twips: Vec<Option<i32>>,
+    row_alignments: Vec<TableRowAlignment>,
+    row_left_offsets_twips: Vec<i32>,
+    row_keep_togethers: Vec<bool>,
+    row_keep_with_nexts: Vec<bool>,
+    row_right_to_lefts: Vec<bool>,
+    row_outer_left_borders: Vec<Option<TableCellBorder>>,
+    row_outer_right_borders: Vec<Option<TableCellBorder>>,
+    row_outer_top_borders: Vec<Option<TableCellBorder>>,
+    row_outer_bottom_borders: Vec<Option<TableCellBorder>>,
+    row_inner_horizontal_borders: Vec<Option<TableCellBorder>>,
+    row_inner_vertical_borders: Vec<Option<TableCellBorder>>,
+    cell_preferred_widths_twips: Vec<Vec<Option<i32>>>,
+    row_preferred_widths_twips: Vec<Option<i32>>,
+    row_repeat_headers: Vec<bool>,
     current_row: Vec<Vec<Paragraph>>,
     current_row_borders: Vec<TableCellBorders>,
     current_row_properties: Vec<NestedCellProperties>,
+    current_row_cell_preferred_widths_twips: Vec<Option<i32>>,
     current_row_height_twips: Option<i32>,
+    current_row_alignment: TableRowAlignment,
+    current_row_left_offset_twips: i32,
+    current_row_keep_together: bool,
+    current_row_keep_with_next: bool,
+    current_row_right_to_left: bool,
+    current_row_border_side: Option<TableCellBorderSide>,
+    current_row_outer_left_border: Option<TableCellBorder>,
+    current_row_outer_right_border: Option<TableCellBorder>,
+    current_row_outer_top_border: Option<TableCellBorder>,
+    current_row_outer_bottom_border: Option<TableCellBorder>,
+    current_row_inner_horizontal_border: Option<TableCellBorder>,
+    current_row_inner_vertical_border: Option<TableCellBorder>,
     current_row_right_edge_twips: i32,
+    current_row_preferred_width: PreferredTableWidth,
+    current_row_repeat_header: bool,
     current_cell_paragraphs: Vec<Paragraph>,
     current_cell_paragraph: Paragraph,
     current_cell_borders: TableCellBorders,
     current_cell_border_side: Option<TableCellBorderSide>,
+    current_cell_preferred_width: PreferredTableWidth,
+    current_row_padding: TableCellPadding,
+    current_row_spacing: TableCellSpacing,
+    current_row_shading_color_index: Option<usize>,
+    current_row_shading_basis_points: i32,
+    current_row_shading_pattern: ShadingPattern,
     current_cell_properties: NestedCellProperties,
 }
 
@@ -700,6 +735,7 @@ struct NestedCellProperties {
     shading_pattern: ShadingPattern,
     padding: TableCellPadding,
     spacing: TableCellSpacing,
+    no_wrap: bool,
     fit_text: bool,
     text_direction: TableCellTextDirection,
     vertical_align: TableCellVerticalAlign,
@@ -715,6 +751,7 @@ impl Default for NestedCellProperties {
             shading_pattern: ShadingPattern::None,
             padding: TableCellPadding::default(),
             spacing: TableCellSpacing::default(),
+            no_wrap: false,
             fit_text: false,
             text_direction: TableCellTextDirection::default(),
             vertical_align: TableCellVerticalAlign::default(),
@@ -735,41 +772,107 @@ fn nested_table_from_capture(
     if column_count == 0 {
         return None;
     }
-    let column_widths_twips = if capture.column_widths_twips.len() >= column_count {
+    let all_rows_right_to_left = capture.row_right_to_lefts.len() == capture.rows.len()
+        && capture
+            .row_right_to_lefts
+            .iter()
+            .all(|right_to_left| *right_to_left);
+    let mut column_widths_twips = if capture.column_widths_twips.len() >= column_count {
         capture
             .column_widths_twips
             .into_iter()
             .take(column_count)
             .collect()
     } else {
-        vec![1440; column_count]
+        let mut widths = vec![0; column_count];
+        for row in &capture.cell_preferred_widths_twips {
+            for (index, width) in row.iter().enumerate().take(column_count) {
+                if let Some(width) = width {
+                    widths[index] = widths[index].max(*width);
+                }
+            }
+        }
+        if widths.iter().all(|width| *width == 0) {
+            if let Some(total_width) = capture
+                .row_preferred_widths_twips
+                .iter()
+                .flatten()
+                .copied()
+                .max()
+            {
+                let base = total_width / column_count as i32;
+                let remainder = total_width % column_count as i32;
+                for (index, width) in widths.iter_mut().enumerate() {
+                    *width = base
+                        .max(1)
+                        .saturating_add(((index as i32) < remainder) as i32);
+                }
+            }
+        }
+        for width in &mut widths {
+            if *width == 0 {
+                *width = 1440;
+            }
+        }
+        widths
     };
+    if all_rows_right_to_left {
+        column_widths_twips.reverse();
+    }
     let cell_borders = capture.cell_borders;
     let cell_properties = capture.cell_properties;
     let row_heights_twips = capture.row_heights_twips;
+    let row_alignments = capture.row_alignments;
+    let row_left_offsets_twips = capture.row_left_offsets_twips;
+    let row_keep_togethers = capture.row_keep_togethers;
+    let row_keep_with_nexts = capture.row_keep_with_nexts;
+    let row_right_to_lefts = capture.row_right_to_lefts;
+    let row_outer_left_borders = capture.row_outer_left_borders;
+    let row_outer_right_borders = capture.row_outer_right_borders;
+    let row_outer_top_borders = capture.row_outer_top_borders;
+    let row_outer_bottom_borders = capture.row_outer_bottom_borders;
+    let row_inner_horizontal_borders = capture.row_inner_horizontal_borders;
+    let row_inner_vertical_borders = capture.row_inner_vertical_borders;
+    let row_repeat_headers = capture.row_repeat_headers;
     let rows = capture
         .rows
         .into_iter()
         .enumerate()
-        .map(|(row_index, cells)| TableRow {
-            cells: (0..column_count)
+        .map(|(row_index, mut cells)| {
+            let right_to_left = row_right_to_lefts.get(row_index).copied().unwrap_or(false);
+            let source_cell_count = cells.len();
+            if right_to_left {
+                cells.reverse();
+            }
+            let mut cells: Vec<TableCell> = (0..column_count)
                 .map(|index| {
+                    let source_index = if right_to_left && index < source_cell_count {
+                        source_cell_count.saturating_sub(1).saturating_sub(index)
+                    } else {
+                        index
+                    };
                     let properties = cell_properties
                         .get(row_index)
-                        .and_then(|row| row.get(index))
+                        .and_then(|row| row.get(source_index))
                         .copied()
                         .unwrap_or_default();
+                    let mut paragraphs = cells
+                        .get(index)
+                        .cloned()
+                        .filter(|paragraphs| !paragraphs.is_empty())
+                        .unwrap_or_else(|| {
+                            vec![Paragraph {
+                                style: paragraph_style.clone(),
+                                runs: Vec::new(),
+                            }]
+                        });
+                    if properties.no_wrap {
+                        for paragraph in &mut paragraphs {
+                            paragraph.style.no_wrap = true;
+                        }
+                    }
                     TableCell {
-                        paragraphs: cells
-                            .get(index)
-                            .cloned()
-                            .filter(|paragraphs| !paragraphs.is_empty())
-                            .unwrap_or_else(|| {
-                                vec![Paragraph {
-                                    style: paragraph_style.clone(),
-                                    runs: Vec::new(),
-                                }]
-                            }),
+                        paragraphs,
                         nested_table: None,
                         shading_color_index: properties.shading_color_index,
                         shading_basis_points: properties.shading_basis_points,
@@ -778,7 +881,7 @@ fn nested_table_from_capture(
                         spacing: properties.spacing,
                         borders: cell_borders
                             .get(row_index)
-                            .and_then(|row| row.get(index))
+                            .and_then(|row| row.get(source_index))
                             .copied()
                             .unwrap_or_default(),
                         fit_text: properties.fit_text,
@@ -788,17 +891,71 @@ fn nested_table_from_capture(
                         vertical_merge: properties.vertical_merge,
                     }
                 })
-                .collect(),
-            height_twips: row_heights_twips.get(row_index).copied().flatten(),
-            left_offset_twips: 0,
-            vertical_offset_twips: 0,
-            wrap_margins: TableRowWrapMargins::default(),
-            cell_gap_twips: 0,
-            alignment: TableRowAlignment::Left,
-            repeat_header: false,
-            keep_together: false,
-            keep_with_next: false,
-            no_overlap: false,
+                .collect();
+            TableRow {
+                cells: {
+                    let horizontal_border = row_inner_horizontal_borders
+                        .get(row_index)
+                        .copied()
+                        .flatten();
+                    let vertical_border =
+                        row_inner_vertical_borders.get(row_index).copied().flatten();
+                    let left_border = row_outer_left_borders.get(row_index).copied().flatten();
+                    let right_border = row_outer_right_borders.get(row_index).copied().flatten();
+                    let top_border = row_outer_top_borders.get(row_index).copied().flatten();
+                    let bottom_border = row_outer_bottom_borders.get(row_index).copied().flatten();
+                    let cell_count = cells.len();
+                    for (cell_index, cell) in cells.iter_mut().enumerate() {
+                        if cell_index == 0
+                            && let Some(border) = left_border
+                            && cell.borders.left == TableCellBorder::default()
+                        {
+                            cell.borders.left = border;
+                        }
+                        if cell_index + 1 == cell_count
+                            && let Some(border) = right_border
+                            && cell.borders.right == TableCellBorder::default()
+                        {
+                            cell.borders.right = border;
+                        }
+                        if let Some(border) = top_border
+                            && cell.borders.top == TableCellBorder::default()
+                        {
+                            cell.borders.top = border;
+                        }
+                        if let Some(border) = bottom_border
+                            && cell.borders.bottom == TableCellBorder::default()
+                        {
+                            cell.borders.bottom = border;
+                        }
+                        if let Some(border) = horizontal_border
+                            && cell.borders.bottom == TableCellBorder::default()
+                        {
+                            cell.borders.bottom = border;
+                        }
+                        if cell_index + 1 < cell_count
+                            && let Some(border) = vertical_border
+                            && cell.borders.right == TableCellBorder::default()
+                        {
+                            cell.borders.right = border;
+                        }
+                    }
+                    cells
+                },
+                height_twips: row_heights_twips.get(row_index).copied().flatten(),
+                left_offset_twips: row_left_offsets_twips.get(row_index).copied().unwrap_or(0),
+                vertical_offset_twips: 0,
+                wrap_margins: TableRowWrapMargins::default(),
+                cell_gap_twips: 0,
+                alignment: row_alignments
+                    .get(row_index)
+                    .copied()
+                    .unwrap_or(TableRowAlignment::Left),
+                repeat_header: row_repeat_headers.get(row_index).copied().unwrap_or(false),
+                keep_together: row_keep_togethers.get(row_index).copied().unwrap_or(false),
+                keep_with_next: row_keep_with_nexts.get(row_index).copied().unwrap_or(false),
+                no_overlap: false,
+            }
         })
         .collect::<Vec<_>>();
     Some(Table {
@@ -4977,6 +5134,9 @@ impl Parser {
                 self.set_current_table_row_repeat_header(control.parameter.unwrap_or(1) != 0)
             }
             "trkeep" => {
+                self.set_current_table_row_keep_together(control.parameter.unwrap_or(1) != 0)
+            }
+            "trcantSplit" => {
                 self.set_current_table_row_keep_together(control.parameter.unwrap_or(1) != 0)
             }
             "trkeepfollow" => {
@@ -11062,6 +11222,31 @@ impl Parser {
             return Ok(false);
         }
 
+        // The bounded capture model represents one nested table level.  Do not
+        // reinterpret deeper table structure as additional sibling rows/cells;
+        // retain its visible text in the containing cell and consume only the
+        // deeper structural controls.  This keeps malformed or unusually deep
+        // Word nesting passive and prevents inner geometry from corrupting the
+        // normalized level-2 grid.
+        if self.state.table_nesting_level > 2 {
+            match control.name.as_str() {
+                "itap" => {
+                    self.set_table_nesting_level(
+                        control.parameter.unwrap_or(2).max(2).min(2),
+                        offset,
+                    )?;
+                    return Ok(true);
+                }
+                "nestrow" | "row" => {
+                    self.set_table_nesting_level(2, offset)?;
+                    return Ok(true);
+                }
+                "nestcell" | "cell" | "trowd" => return Ok(true),
+                name if is_nested_table_structural_control(name) => return Ok(true),
+                _ => {}
+            }
+        }
+
         match control.name.as_str() {
             "itap" if control.parameter.unwrap_or(1) > 1 => {
                 self.warn_nested_table_approximation(offset);
@@ -11076,6 +11261,30 @@ impl Parser {
             "trowd" => {
                 self.warn_nested_table_approximation(offset);
                 self.begin_nested_table_capture();
+                if let Some(row) = self.current_table_row.as_mut()
+                    && let Some(capture) = row.nested_table_capture.as_mut()
+                {
+                    capture.current_row_alignment = TableRowAlignment::Left;
+                    capture.current_row_left_offset_twips = 0;
+                    capture.current_row_padding = TableCellPadding::default();
+                    capture.current_row_spacing = TableCellSpacing::default();
+                    capture.current_row_shading_color_index = None;
+                    capture.current_row_shading_basis_points = 10_000;
+                    capture.current_row_shading_pattern = ShadingPattern::None;
+                    capture.current_row_keep_together = false;
+                    capture.current_row_keep_with_next = false;
+                    capture.current_row_right_to_left = false;
+                    capture.current_row_border_side = None;
+                    capture.current_row_outer_left_border = None;
+                    capture.current_row_outer_right_border = None;
+                    capture.current_row_outer_top_border = None;
+                    capture.current_row_outer_bottom_border = None;
+                    capture.current_row_inner_horizontal_border = None;
+                    capture.current_row_inner_vertical_border = None;
+                    capture.current_row_preferred_width = PreferredTableWidth::default();
+                    capture.current_row_repeat_header = false;
+                    capture.current_cell_properties = NestedCellProperties::default();
+                }
                 self.set_table_nesting_level(self.state.table_nesting_level.max(2), offset)?;
                 return Ok(true);
             }
@@ -11095,8 +11304,136 @@ impl Parser {
                 self.capture_nested_table_cell_boundary(control.parameter, offset)?;
                 Ok(true)
             }
+            "clftsWidth" => {
+                self.set_nested_cell_preferred_width_unit(control.parameter);
+                Ok(true)
+            }
+            "clwWidth" => {
+                self.set_nested_cell_preferred_width(control.parameter);
+                Ok(true)
+            }
             "trrh" => {
                 self.capture_nested_table_row_height(control.parameter, offset)?;
+                Ok(true)
+            }
+            "trftsWidth" => {
+                self.set_nested_table_row_preferred_width_unit(control.parameter);
+                Ok(true)
+            }
+            "trwWidth" => {
+                self.set_nested_table_row_preferred_width(control.parameter);
+                Ok(true)
+            }
+            "trhdr" => {
+                self.set_nested_table_row_repeat_header(control.parameter.unwrap_or(1) != 0);
+                Ok(true)
+            }
+            "trleft" => {
+                self.capture_nested_table_row_left_offset(control.parameter, offset);
+                Ok(true)
+            }
+            "trql" => {
+                self.set_nested_table_row_alignment(TableRowAlignment::Left);
+                Ok(true)
+            }
+            "trqc" => {
+                self.set_nested_table_row_alignment(TableRowAlignment::Center);
+                Ok(true)
+            }
+            "trqr" => {
+                self.set_nested_table_row_alignment(TableRowAlignment::Right);
+                Ok(true)
+            }
+            "taprtl" | "rtlrow" => {
+                self.set_nested_table_row_right_to_left(control.parameter.unwrap_or(1) != 0);
+                Ok(true)
+            }
+            "ltrrow" => {
+                self.set_nested_table_row_right_to_left(false);
+                Ok(true)
+            }
+            "trgaph" => {
+                self.set_nested_table_cell_gap(control.parameter, offset);
+                Ok(true)
+            }
+            "trpaddl" => {
+                self.set_nested_table_row_padding("left", control.parameter, offset);
+                Ok(true)
+            }
+            "trpaddr" => {
+                self.set_nested_table_row_padding("right", control.parameter, offset);
+                Ok(true)
+            }
+            "trpaddt" => {
+                self.set_nested_table_row_padding("top", control.parameter, offset);
+                Ok(true)
+            }
+            "trpaddb" => {
+                self.set_nested_table_row_padding("bottom", control.parameter, offset);
+                Ok(true)
+            }
+            "trspdl" => {
+                self.set_nested_table_row_spacing("left", control.parameter, offset);
+                Ok(true)
+            }
+            "trspdr" => {
+                self.set_nested_table_row_spacing("right", control.parameter, offset);
+                Ok(true)
+            }
+            "trspdt" => {
+                self.set_nested_table_row_spacing("top", control.parameter, offset);
+                Ok(true)
+            }
+            "trspdb" => {
+                self.set_nested_table_row_spacing("bottom", control.parameter, offset);
+                Ok(true)
+            }
+            "trcbpat" | "trcfpat" => {
+                self.set_nested_table_row_shading(control.parameter.unwrap_or(0).max(0) as usize);
+                Ok(true)
+            }
+            "trshdng" => {
+                self.set_nested_table_row_shading_basis(control.parameter, offset);
+                Ok(true)
+            }
+            "trkeep" => {
+                self.set_nested_table_row_keep_together(control.parameter.unwrap_or(1) != 0);
+                Ok(true)
+            }
+            "trcantSplit" => {
+                self.set_nested_table_row_keep_together(control.parameter.unwrap_or(1) != 0);
+                Ok(true)
+            }
+            "trkeepfollow" => {
+                self.set_nested_table_row_keep_with_next(control.parameter.unwrap_or(1) != 0);
+                Ok(true)
+            }
+            name if let Some(pattern) = table_row_shading_pattern_control(name) => {
+                self.set_nested_table_row_shading_pattern(pattern);
+                Ok(true)
+            }
+            "trbrdrh" => {
+                self.select_nested_table_row_inner_border(TableCellBorderSide::RowHorizontal);
+                Ok(true)
+            }
+            "trbrdrv" => {
+                self.select_nested_table_row_inner_border(TableCellBorderSide::RowVertical);
+                Ok(true)
+            }
+            "trbrdrl" => {
+                self.select_nested_table_row_inner_border(TableCellBorderSide::Left);
+                Ok(true)
+            }
+            "trbrdrr" => {
+                self.select_nested_table_row_inner_border(TableCellBorderSide::Right);
+                Ok(true)
+            }
+            "trbrdrt" => {
+                self.select_nested_table_row_inner_border(TableCellBorderSide::Top);
+                Ok(true)
+            }
+            "trbrdrb" => {
+                self.select_nested_table_row_inner_border(TableCellBorderSide::Bottom);
                 Ok(true)
             }
             "clbrdrl" => {
@@ -11218,7 +11555,7 @@ impl Parser {
             }
             "clNoWrap" | "clnowrap" => {
                 self.update_nested_cell_properties(|properties| {
-                    properties.fit_text = false;
+                    properties.no_wrap = control.parameter.unwrap_or(1) != 0;
                 });
                 Ok(true)
             }
@@ -11316,6 +11653,19 @@ impl Parser {
 
     fn finish_nested_table_cell(&mut self) {
         self.finish_nested_table_paragraph();
+        let page_width_twips = self.current_page_content_width_twips();
+        let max_width_twips = self.limits().max_page_dimension_twips.max(1);
+        let preferred_width_twips = self
+            .current_table_row
+            .as_ref()
+            .and_then(|row| row.nested_table_capture.as_ref())
+            .and_then(|capture| {
+                normalized_preferred_table_width_twips(
+                    capture.current_cell_preferred_width,
+                    page_width_twips,
+                    max_width_twips,
+                )
+            });
         if let Some(row) = self.current_table_row.as_mut()
             && let Some(capture) = row.nested_table_capture.as_mut()
         {
@@ -11328,18 +11678,45 @@ impl Parser {
             capture
                 .current_row_properties
                 .push(std::mem::take(&mut capture.current_cell_properties));
+            capture.current_cell_properties.padding = capture.current_row_padding;
+            capture.current_cell_properties.spacing = capture.current_row_spacing;
+            capture.current_cell_properties.shading_color_index =
+                capture.current_row_shading_color_index;
+            capture.current_cell_properties.shading_basis_points =
+                capture.current_row_shading_basis_points;
+            capture.current_cell_properties.shading_pattern = capture.current_row_shading_pattern;
+            capture
+                .current_row_cell_preferred_widths_twips
+                .push(preferred_width_twips);
+            capture.current_cell_preferred_width = PreferredTableWidth::default();
             capture.current_cell_border_side = None;
         }
     }
 
     fn finish_nested_table_row(&mut self) {
         self.finish_nested_table_cell();
+        let page_width_twips = self.current_page_content_width_twips();
+        let max_width_twips = self.limits().max_page_dimension_twips.max(1);
+        let preferred_row_width_twips = self
+            .current_table_row
+            .as_ref()
+            .and_then(|row| row.nested_table_capture.as_ref())
+            .and_then(|capture| {
+                normalized_preferred_table_width_twips(
+                    capture.current_row_preferred_width,
+                    page_width_twips,
+                    max_width_twips,
+                )
+            });
         if let Some(row) = self.current_table_row.as_mut()
             && let Some(capture) = row.nested_table_capture.as_mut()
         {
             capture.current_row_right_edge_twips = 0;
             if !capture.current_row.is_empty() {
                 capture.rows.push(std::mem::take(&mut capture.current_row));
+                capture.cell_preferred_widths_twips.push(std::mem::take(
+                    &mut capture.current_row_cell_preferred_widths_twips,
+                ));
                 capture
                     .cell_borders
                     .push(std::mem::take(&mut capture.current_row_borders));
@@ -11349,7 +11726,155 @@ impl Parser {
                 capture
                     .row_heights_twips
                     .push(capture.current_row_height_twips.take());
+                capture.row_alignments.push(capture.current_row_alignment);
+                capture
+                    .row_left_offsets_twips
+                    .push(capture.current_row_left_offset_twips);
+                capture
+                    .row_keep_togethers
+                    .push(capture.current_row_keep_together);
+                capture
+                    .row_keep_with_nexts
+                    .push(capture.current_row_keep_with_next);
+                capture
+                    .row_right_to_lefts
+                    .push(capture.current_row_right_to_left);
+                capture
+                    .row_outer_left_borders
+                    .push(capture.current_row_outer_left_border.take());
+                capture
+                    .row_outer_right_borders
+                    .push(capture.current_row_outer_right_border.take());
+                capture
+                    .row_outer_top_borders
+                    .push(capture.current_row_outer_top_border.take());
+                capture
+                    .row_outer_bottom_borders
+                    .push(capture.current_row_outer_bottom_border.take());
+                capture
+                    .row_inner_horizontal_borders
+                    .push(capture.current_row_inner_horizontal_border.take());
+                capture
+                    .row_inner_vertical_borders
+                    .push(capture.current_row_inner_vertical_border.take());
+                capture
+                    .row_repeat_headers
+                    .push(capture.current_row_repeat_header);
+                capture
+                    .row_preferred_widths_twips
+                    .push(preferred_row_width_twips);
+                capture.current_row_alignment = TableRowAlignment::Left;
+                capture.current_row_left_offset_twips = 0;
+                capture.current_row_keep_together = false;
+                capture.current_row_keep_with_next = false;
+                capture.current_row_right_to_left = false;
+                capture.current_row_border_side = None;
+                capture.current_row_outer_left_border = None;
+                capture.current_row_outer_right_border = None;
+                capture.current_row_outer_top_border = None;
+                capture.current_row_outer_bottom_border = None;
+                capture.current_row_inner_horizontal_border = None;
+                capture.current_row_inner_vertical_border = None;
+                capture.current_row_preferred_width = PreferredTableWidth::default();
+                capture.current_row_repeat_header = false;
             }
+        }
+    }
+
+    fn set_nested_table_row_alignment(&mut self, alignment: TableRowAlignment) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_alignment = alignment;
+        }
+    }
+
+    fn set_nested_table_row_keep_together(&mut self, keep: bool) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_keep_together = keep;
+        }
+    }
+
+    fn set_nested_table_row_keep_with_next(&mut self, keep: bool) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_keep_with_next = keep;
+        }
+    }
+
+    fn set_nested_table_row_right_to_left(&mut self, right_to_left: bool) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_right_to_left = right_to_left;
+        }
+    }
+
+    fn set_nested_cell_preferred_width_unit(&mut self, value: Option<i32>) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_cell_preferred_width.unit = match value.unwrap_or(0) {
+                2 => PreferredTableWidthUnit::FiftiethsPercent,
+                3 => PreferredTableWidthUnit::Twips,
+                _ => PreferredTableWidthUnit::Auto,
+            };
+        }
+    }
+
+    fn set_nested_cell_preferred_width(&mut self, value: Option<i32>) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_cell_preferred_width.value = value;
+        }
+    }
+
+    fn set_nested_table_row_preferred_width_unit(&mut self, value: Option<i32>) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_preferred_width.unit = match value.unwrap_or(0) {
+                2 => PreferredTableWidthUnit::FiftiethsPercent,
+                3 => PreferredTableWidthUnit::Twips,
+                _ => PreferredTableWidthUnit::Auto,
+            };
+        }
+    }
+
+    fn set_nested_table_row_preferred_width(&mut self, value: Option<i32>) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_preferred_width.value = value;
+        }
+    }
+
+    fn set_nested_table_row_repeat_header(&mut self, repeat_header: bool) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_repeat_header = repeat_header;
+        }
+    }
+
+    fn capture_nested_table_row_left_offset(&mut self, value: Option<i32>, offset: usize) {
+        let requested = value.unwrap_or(0);
+        let max_offset = self.limits().max_table_row_offset_twips.max(0);
+        let clamped = requested.clamp(-max_offset, max_offset);
+        if clamped != requested {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("nested table row left offset clamped from {requested} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_left_offset_twips = clamped;
         }
     }
 
@@ -11415,6 +11940,22 @@ impl Parser {
         });
     }
 
+    fn set_nested_table_row_padding(&mut self, side: &str, value: Option<i32>, offset: usize) {
+        let padding = self.normalized_cell_padding(value, side, offset);
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            match side {
+                "left" => capture.current_row_padding.left_twips = Some(padding),
+                "right" => capture.current_row_padding.right_twips = Some(padding),
+                "top" => capture.current_row_padding.top_twips = Some(padding),
+                "bottom" => capture.current_row_padding.bottom_twips = Some(padding),
+                _ => {}
+            }
+            capture.current_cell_properties.padding = capture.current_row_padding;
+        }
+    }
+
     fn set_nested_cell_spacing(&mut self, side: &str, value: Option<i32>, offset: usize) {
         let spacing = self.normalized_cell_spacing(value, side, offset);
         self.update_nested_cell_properties(|properties| match side {
@@ -11424,6 +11965,76 @@ impl Parser {
             "bottom" => properties.spacing.bottom_twips = Some(spacing),
             _ => {}
         });
+    }
+
+    fn set_nested_table_row_spacing(&mut self, side: &str, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, side, offset);
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            match side {
+                "left" => capture.current_row_spacing.left_twips = Some(spacing),
+                "right" => capture.current_row_spacing.right_twips = Some(spacing),
+                "top" => capture.current_row_spacing.top_twips = Some(spacing),
+                "bottom" => capture.current_row_spacing.bottom_twips = Some(spacing),
+                _ => {}
+            }
+            capture.current_cell_properties.spacing = capture.current_row_spacing;
+        }
+    }
+
+    fn set_nested_table_cell_gap(&mut self, value: Option<i32>, offset: usize) {
+        let gap = value.unwrap_or(DEFAULT_TABLE_CELL_GAP_TWIPS).max(0);
+        let clamped = gap.min(self.limits().max_table_cell_gap_twips);
+        if clamped != gap {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("nested table cell gap clamped from {gap} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        self.update_nested_cell_properties(|properties| {
+            if properties.padding.left_twips.is_none() {
+                properties.padding.left_twips = Some(clamped);
+            }
+            if properties.padding.right_twips.is_none() {
+                properties.padding.right_twips = Some(clamped);
+            }
+        });
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_padding.left_twips = Some(clamped);
+            capture.current_row_padding.right_twips = Some(clamped);
+        }
+    }
+
+    fn set_nested_table_row_shading(&mut self, color_index: usize) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_shading_color_index = (color_index > 0).then_some(color_index);
+            capture.current_cell_properties.shading_color_index =
+                capture.current_row_shading_color_index;
+        }
+    }
+
+    fn set_nested_table_row_shading_basis(&mut self, value: Option<i32>, offset: usize) {
+        let basis = self.clamp_shading_basis(value.unwrap_or(10_000), "nested table row", offset);
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_shading_basis_points = basis;
+            capture.current_cell_properties.shading_basis_points = basis;
+        }
+    }
+
+    fn set_nested_table_row_shading_pattern(&mut self, pattern: ShadingPattern) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_shading_pattern = pattern;
+            capture.current_cell_properties.shading_pattern = pattern;
+        }
     }
 
     fn set_nested_cell_text_direction(&mut self, direction: TableCellTextDirection) {
@@ -11454,7 +12065,17 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut()
             && let Some(capture) = row.nested_table_capture.as_mut()
         {
+            capture.current_row_border_side = None;
             capture.current_cell_border_side = Some(side);
+        }
+    }
+
+    fn select_nested_table_row_inner_border(&mut self, side: TableCellBorderSide) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_cell_border_side = None;
+            capture.current_row_border_side = Some(side);
         }
     }
 
@@ -11468,6 +12089,31 @@ impl Parser {
         let Some(capture) = row.nested_table_capture.as_mut() else {
             return false;
         };
+        if let Some(side) = capture.current_row_border_side {
+            let border = match side {
+                TableCellBorderSide::Left => capture
+                    .current_row_outer_left_border
+                    .get_or_insert_with(TableCellBorder::default),
+                TableCellBorderSide::Right => capture
+                    .current_row_outer_right_border
+                    .get_or_insert_with(TableCellBorder::default),
+                TableCellBorderSide::Top => capture
+                    .current_row_outer_top_border
+                    .get_or_insert_with(TableCellBorder::default),
+                TableCellBorderSide::Bottom => capture
+                    .current_row_outer_bottom_border
+                    .get_or_insert_with(TableCellBorder::default),
+                TableCellBorderSide::RowHorizontal => capture
+                    .current_row_inner_horizontal_border
+                    .get_or_insert_with(TableCellBorder::default),
+                TableCellBorderSide::RowVertical => capture
+                    .current_row_inner_vertical_border
+                    .get_or_insert_with(TableCellBorder::default),
+                _ => return false,
+            };
+            update(border);
+            return true;
+        }
         let Some(side) = capture.current_cell_border_side else {
             return false;
         };
@@ -11598,13 +12244,14 @@ impl Parser {
             && let Some(capture) = row.nested_table_capture.as_mut()
             && !capture.current_cell_paragraph.runs.is_empty()
         {
-            let paragraph = std::mem::replace(
+            let mut paragraph = std::mem::replace(
                 &mut capture.current_cell_paragraph,
                 Paragraph {
                     style: self.state.paragraph.clone(),
                     runs: Vec::new(),
                 },
             );
+            paragraph.style = self.state.paragraph.clone();
             capture.current_cell_paragraphs.push(paragraph);
         }
     }
@@ -24257,6 +24904,7 @@ fn is_nested_table_structural_control(name: &str) -> bool {
                 | "ltrrow"
                 | "trhdr"
                 | "trkeep"
+                | "trcantSplit"
                 | "trkeepfollow"
                 | "trpaddfl"
                 | "trpaddfr"
@@ -24360,6 +25008,15 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     let mut output = derived.clone();
     if output.alignment == default.alignment {
         output.alignment = base.alignment;
+    }
+    if output.table_cell_text_direction.is_none() {
+        output.table_cell_text_direction = base.table_cell_text_direction;
+    }
+    if output.nested_table_row_height_twips.is_none() {
+        output.nested_table_row_height_twips = base.nested_table_row_height_twips;
+    }
+    if output.nested_table_row_vertical_align.is_none() {
+        output.nested_table_row_vertical_align = base.nested_table_row_vertical_align;
     }
     if output.page_break_before == default.page_break_before {
         output.page_break_before = base.page_break_before;
@@ -44185,7 +44842,7 @@ mod tests {
     #[test]
     fn normalizes_nested_table_cells_inside_outer_cell() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\trrh720\clbrdrt\brdrs\brdrw20\clcbpat1\clshdng5000\clpadl120\clvertalc\cltxbtlr\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
+            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\trqr\trleft180\trrh720\trpaddl60\trspdr40\trcbpat2\trshdng5000\clbrdrt\brdrs\brdrw20\clcbpat1\clshdng5000\clpadl120\clvertalc\cltxbtlr\clNoWrap\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -44209,12 +44866,17 @@ mod tests {
         assert_eq!(nested.rows.len(), 1);
         assert_eq!(nested.rows[0].cells.len(), 2);
         assert_eq!(nested.rows[0].height_twips, Some(720));
+        assert_eq!(nested.rows[0].alignment, TableRowAlignment::Right);
+        assert_eq!(nested.rows[0].left_offset_twips, 180);
+        assert_eq!(nested.rows[0].cells[0].padding.left_twips, Some(120));
+        assert_eq!(nested.rows[0].cells[0].spacing.right_twips, Some(40));
         assert_eq!(nested.column_widths_twips, vec![1000, 2000]);
         assert_eq!(
             nested.rows[0].cells[0].paragraphs[0].runs[0].text,
             "Inner A"
         );
         assert!(nested.rows[0].cells[0].paragraphs[0].runs[0].style.bold);
+        assert!(nested.rows[0].cells[0].paragraphs[0].style.no_wrap);
         assert!(nested.rows[0].cells[0].borders.top.visible);
         assert_eq!(
             nested.rows[0].cells[0].borders.top.style,
@@ -44222,6 +44884,8 @@ mod tests {
         );
         assert_eq!(nested.rows[0].cells[0].shading_color_index, Some(1));
         assert_eq!(nested.rows[0].cells[0].shading_basis_points, 5000);
+        assert_eq!(nested.rows[0].cells[1].shading_color_index, Some(2));
+        assert_eq!(nested.rows[0].cells[1].shading_basis_points, 5000);
         assert_eq!(nested.rows[0].cells[0].padding.left_twips, Some(120));
         assert_eq!(
             nested.rows[0].cells[0].vertical_align,
@@ -44250,6 +44914,89 @@ mod tests {
                     .contains("nested table normalized into its containing cell"))
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn deeper_nested_table_structure_stays_passive_in_containing_cell() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\cellx3000 A {\trowd\itap3\cellx1500 Deep\nestcell\cellx3000 Deep2\nestrow} After\nestcell\cellx6000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert_eq!(nested.rows.len(), 1);
+        assert_eq!(nested.rows[0].cells.len(), 2);
+        let first_cell_text = nested.rows[0].cells[0]
+            .paragraphs
+            .iter()
+            .flat_map(|paragraph| paragraph.runs.iter())
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+        assert!(first_cell_text.contains("A"));
+        assert!(first_cell_text.contains("Deep"));
+        assert!(first_cell_text.contains("After"));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("nested table normalized into its containing cell")
+        }));
+    }
+
+    #[test]
+    fn preserves_nested_row_inner_border_controls_as_passive_cell_edges() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trbrdrt\brdrth\brdrw40\trbrdrl\brdrdash\brdrw50\trbrdrr\brdrdot\brdrw60\trbrdrb\brdrdb\brdrw20\trbrdrh\brdrs\brdrw20\trbrdrv\brdrdot\brdrw30\cellx2000 A\nestcell\cellx4000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert_eq!(
+            nested.rows[0].cells[0].borders.bottom.style,
+            BorderStyle::Double
+        );
+        assert_eq!(
+            nested.rows[0].cells[1].borders.bottom.style,
+            BorderStyle::Double
+        );
+        assert_eq!(
+            nested.rows[0].cells[0].borders.right.style,
+            BorderStyle::Dotted
+        );
+        assert_eq!(
+            nested.rows[0].cells[0].borders.top.style,
+            BorderStyle::Thick
+        );
+        assert_eq!(
+            nested.rows[0].cells[0].borders.left.style,
+            BorderStyle::Dashed
+        );
+        assert_eq!(
+            nested.rows[0].cells[1].borders.right.style,
+            BorderStyle::Dotted
+        );
+        assert_eq!(nested.rows[0].cells[0].borders.bottom.width_twips, 20);
+        assert_eq!(nested.rows[0].cells[0].borders.right.width_twips, 30);
+        assert_eq!(nested.rows[0].cells[0].borders.top.width_twips, 40);
+        assert_eq!(nested.rows[0].cells[0].borders.left.width_twips, 50);
+        assert_eq!(nested.rows[0].cells[1].borders.right.width_twips, 60);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
     }
 
@@ -44836,6 +45583,27 @@ mod tests {
     fn normalizes_table_row_keep_together_controls() {
         let output = parse_rtf(
             r"{\rtf1\trowd\trkeep\cellx2000 Kept\cell\row\trowd\trkeep0\cellx2000 Normal\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert!(table.rows[0].keep_together);
+        assert!(!table.rows[1].keep_together);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn normalizes_table_row_cant_split_as_passive_keep_together_metadata() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\trcantSplit\cellx2000 Kept\cell\row\trowd\trcantSplit0\cellx2000 Normal\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
