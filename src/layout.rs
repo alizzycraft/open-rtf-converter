@@ -30,6 +30,7 @@ const PASSIVE_NARROW_FONT_SCALE_PERCENT: i32 = 82;
 const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
 const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
 const LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER: &str = "888";
+const MAX_VERTICAL_TABLE_TEXT_WRAP_POINTS: f32 = 720.0;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -5231,9 +5232,20 @@ fn prepare_table_row(
                     } else {
                         paragraph
                     };
+                    let paragraph_text_direction = layout_paragraph
+                        .style
+                        .table_cell_text_direction
+                        .unwrap_or(cell.text_direction);
+                    let wrap_width = match paragraph_text_direction {
+                        TableCellTextDirection::LeftToRightTopToBottom => cell_content_width,
+                        TableCellTextDirection::TopToBottomRightToLeft
+                        | TableCellTextDirection::BottomToTopLeftToRight => {
+                            cell_content_width.max(MAX_VERTICAL_TABLE_TEXT_WRAP_POINTS)
+                        }
+                    };
                     let mut lines = wrap_paragraph_with_font_provider(
                         layout_paragraph,
-                        cell_content_width,
+                        wrap_width,
                         markers,
                         document,
                         font_provider,
@@ -15855,6 +15867,48 @@ mod tests {
             LayoutItem::Text(fragment)
                 if fragment.text == "XY" && fragment.rotation == TextRotation::CounterClockwise90
         )));
+    }
+
+    #[test]
+    fn keeps_mixed_vertical_fixture_runs_together_before_rotation() {
+        let parsed = parse_rtf(include_str!(
+            "../fixtures/table-cell-text-direction-passive.rtf"
+        ))
+        .expect("text-direction fixture should parse");
+        let table = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Table(table) => Some(table),
+                _ => None,
+            })
+            .expect("expected table block");
+        let prepared = prepare_table_row(
+            &table.rows[0],
+            &[60.0, 60.0, 60.0, 90.0],
+            90.0,
+            &test_markers("1", "1"),
+            &parsed.document,
+            None,
+        );
+        let layout = LayoutEngine::layout(&parsed.document);
+
+        assert_eq!(prepared.cell_lines[2].len(), 1);
+        assert!(
+            layout
+                .pages
+                .iter()
+                .flat_map(|page| page.items.iter())
+                .any(|item| {
+                    matches!(
+                        item,
+                        LayoutItem::Text(fragment)
+                            if fragment.text.contains("Bottom")
+                                && fragment.rotation != TextRotation::None
+                    )
+                })
+        );
     }
 
     #[test]
