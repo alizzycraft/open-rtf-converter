@@ -4569,6 +4569,7 @@ fn layout_table(
             table_width,
             document,
             table.borders_visible,
+            true,
             next_row,
         );
         push_table_row_flow_exclusion(
@@ -4631,6 +4632,7 @@ fn push_repeating_table_headers(
             table_width,
             document,
             borders_visible,
+            true,
             None,
         );
     }
@@ -4685,6 +4687,7 @@ fn push_split_table_row(
     next_row: Option<&TableRow>,
 ) {
     let nested_repeat_header_lines = nested_repeat_header_lines(row, &remaining);
+    let mut render_nested_child_grids = true;
     while prepared_table_row_has_lines(&remaining) {
         let available_height = (*cursor_y - margin_bottom).max(14.0);
         let Some(fragment) = split_prepared_table_row_fragment(&mut remaining, available_height)
@@ -4704,8 +4707,10 @@ fn push_split_table_row(
             table_width,
             document,
             borders_visible,
+            render_nested_child_grids,
             is_final_fragment.then_some(()).and(next_row),
         );
+        render_nested_child_grids = false;
         if !is_final_fragment {
             advance_column_or_page(pages, cursor_y, geometry, current_column);
             margin_left = geometry.body_left(*current_column);
@@ -5596,6 +5601,7 @@ fn push_table_row(
     table_width: f32,
     document: &Document,
     borders_visible: bool,
+    render_nested_child_grids: bool,
     next_row: Option<&TableRow>,
 ) {
     let Some(page_geometry) = pages.last().map(|page| page.geometry) else {
@@ -5658,6 +5664,7 @@ fn push_table_row(
                 cell_top - padding.top,
                 (cell_width - padding.left - padding.right).max(1.0),
                 (cell_height - padding.top - padding.bottom).max(1.0),
+                render_nested_child_grids,
             );
         }
     }
@@ -6053,10 +6060,39 @@ fn push_nested_table_grid(
     top: f32,
     width: f32,
     height: f32,
+    render_child_tables: bool,
 ) {
-    let Some(page) = pages.last_mut() else {
+    push_nested_table_grid_at_depth(
+        pages,
+        table,
+        document,
+        row_range,
+        left,
+        top,
+        width,
+        height,
+        0,
+        render_child_tables,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_nested_table_grid_at_depth(
+    pages: &mut [LayoutPage],
+    table: &Table,
+    document: &Document,
+    row_range: (usize, usize),
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+    depth: usize,
+    render_child_tables: bool,
+) {
+    const MAX_NESTED_GRID_DEPTH: usize = 8;
+    if depth >= MAX_NESTED_GRID_DEPTH {
         return;
-    };
+    }
     let total_row_count = table.rows.len().min(256);
     let row_start = row_range.0.min(total_row_count);
     let row_end = row_range.1.min(total_row_count).max(row_start);
@@ -6123,19 +6159,67 @@ fn push_nested_table_grid(
                 row_end,
                 &row_heights,
             );
-            let Some(color_index) = render_cell.shading_color_index else {
-                continue;
-            };
-            if color_index == 0 {
-                continue;
+            if let Some(color_index) = render_cell.shading_color_index
+                && color_index > 0
+                && let Some(page) = pages.last_mut()
+            {
+                page.items.push(LayoutItem::Highlight {
+                    x: row_left + visual_cell.x_offset,
+                    y: cell_top - cell_height,
+                    width: visual_cell.width.max(1.0),
+                    height: cell_height.max(1.0),
+                    color: shading_color(document, color_index, render_cell.shading_basis_points),
+                });
             }
-            page.items.push(LayoutItem::Highlight {
-                x: row_left + visual_cell.x_offset,
-                y: cell_top - cell_height,
-                width: visual_cell.width.max(1.0),
-                height: cell_height.max(1.0),
-                color: shading_color(document, color_index, render_cell.shading_basis_points),
-            });
+            if render_child_tables && let Some(child_table) = render_cell.nested_table.as_deref() {
+                let left_inset = twips_to_points(
+                    render_cell
+                        .padding
+                        .left_twips
+                        .unwrap_or(0)
+                        .saturating_add(render_cell.spacing.left_twips.unwrap_or(0))
+                        .max(0),
+                );
+                let right_inset = twips_to_points(
+                    render_cell
+                        .padding
+                        .right_twips
+                        .unwrap_or(0)
+                        .saturating_add(render_cell.spacing.right_twips.unwrap_or(0))
+                        .max(0),
+                );
+                let top_inset = twips_to_points(
+                    render_cell
+                        .padding
+                        .top_twips
+                        .unwrap_or(0)
+                        .saturating_add(render_cell.spacing.top_twips.unwrap_or(0))
+                        .max(0),
+                );
+                let bottom_inset = twips_to_points(
+                    render_cell
+                        .padding
+                        .bottom_twips
+                        .unwrap_or(0)
+                        .saturating_add(render_cell.spacing.bottom_twips.unwrap_or(0))
+                        .max(0),
+                );
+                let child_row_count = child_table.rows.len().min(256);
+                if child_row_count > 0 {
+                    push_nested_table_grid_at_depth(
+                        pages,
+                        child_table,
+                        document,
+                        (0, child_row_count),
+                        row_left + visual_cell.x_offset + left_inset,
+                        cell_top - top_inset,
+                        (visual_cell.width - left_inset - right_inset).max(1.0),
+                        (cell_height - top_inset - bottom_inset).max(1.0),
+                        depth + 1,
+                        true,
+                    );
+                }
+            }
         }
     }
     // Decide whether to use the fallback grid from the complete bounded table,
@@ -6154,6 +6238,9 @@ fn push_nested_table_grid(
         })
     });
     if has_explicit_borders {
+        let Some(page) = pages.last_mut() else {
+            return;
+        };
         for (row_index, row) in table
             .rows
             .iter()
@@ -6252,6 +6339,9 @@ fn push_nested_table_grid(
                 || cell.vertical_merge != TableCellVerticalMerge::None
         });
     if has_merges {
+        let Some(page) = pages.last_mut() else {
+            return;
+        };
         let mut y = top;
         for boundary_index in 0..=row_count {
             let mut intervals = Vec::new();
@@ -6337,6 +6427,9 @@ fn push_nested_table_grid(
         }
         return;
     }
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
     let mut y = top;
     for row_index in 0..=row_count {
         page.items.push(LayoutItem::Line {
@@ -15176,7 +15269,7 @@ mod tests {
         };
         let paragraphs = table_cell_paragraphs_for_layout(&cell(
             vec![paragraph("outer")],
-            Some(Box::new(nested)),
+            Some(Box::new(nested.clone())),
         ));
         let text = paragraphs
             .iter()
@@ -15189,6 +15282,49 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(text, vec!["outer", "nested", "deep"]);
+
+        let mut document = Document::default();
+        document.blocks = vec![Block::Table(Table {
+            rows: vec![row(vec![cell(
+                vec![paragraph("outer")],
+                Some(Box::new(nested.clone())),
+            )])],
+            column_widths_twips: vec![2880],
+            borders_visible: true,
+            preserve_authored_widths: false,
+        })];
+        let layout = LayoutEngine::layout(&document);
+        let line_count = layout.pages[0]
+            .items
+            .iter()
+            .filter(|item| matches!(item, LayoutItem::Line { .. }))
+            .count();
+        assert!(
+            line_count >= 8,
+            "recursive nested grids should render both levels: {line_count}"
+        );
+
+        let mut first_fragment_layout = LayoutEngine::layout(&Document::default());
+        push_nested_table_grid(
+            &mut first_fragment_layout.pages,
+            &nested,
+            &Document::default(),
+            (0, 1),
+            0.0,
+            100.0,
+            100.0,
+            100.0,
+            false,
+        );
+        let first_fragment_line_count = first_fragment_layout.pages[0]
+            .items
+            .iter()
+            .filter(|item| matches!(item, LayoutItem::Line { .. }))
+            .count();
+        assert_eq!(
+            first_fragment_line_count, 4,
+            "continuation fragments should omit descendant grids"
+        );
     }
 
     #[test]
