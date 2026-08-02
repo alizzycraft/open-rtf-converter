@@ -677,11 +677,15 @@ struct TableRowBuilder {
 #[derive(Debug, Clone, Default)]
 struct NestedTableCapture {
     rows: Vec<Vec<Vec<Paragraph>>>,
+    cell_borders: Vec<Vec<TableCellBorders>>,
     column_widths_twips: Vec<i32>,
     current_row: Vec<Vec<Paragraph>>,
+    current_row_borders: Vec<TableCellBorders>,
     current_row_right_edge_twips: i32,
     current_cell_paragraphs: Vec<Paragraph>,
     current_cell_paragraph: Paragraph,
+    current_cell_borders: TableCellBorders,
+    current_cell_border_side: Option<TableCellBorderSide>,
 }
 
 fn nested_table_from_capture(
@@ -704,10 +708,12 @@ fn nested_table_from_capture(
     } else {
         vec![1440; column_count]
     };
+    let cell_borders = capture.cell_borders;
     let rows = capture
         .rows
         .into_iter()
-        .map(|cells| TableRow {
+        .enumerate()
+        .map(|(row_index, cells)| TableRow {
             cells: (0..column_count)
                 .map(|index| TableCell {
                     paragraphs: cells
@@ -726,7 +732,11 @@ fn nested_table_from_capture(
                     shading_pattern: ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     spacing: TableCellSpacing::default(),
-                    borders: TableCellBorders::default(),
+                    borders: cell_borders
+                        .get(row_index)
+                        .and_then(|row| row.get(index))
+                        .copied()
+                        .unwrap_or_default(),
                     fit_text: false,
                     text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -11040,6 +11050,79 @@ impl Parser {
                 self.capture_nested_table_cell_boundary(control.parameter, offset)?;
                 Ok(true)
             }
+            "clbrdrl" => {
+                self.select_nested_table_cell_border(TableCellBorderSide::Left);
+                Ok(true)
+            }
+            "clbrdrr" => {
+                self.select_nested_table_cell_border(TableCellBorderSide::Right);
+                Ok(true)
+            }
+            "clbrdrt" => {
+                self.select_nested_table_cell_border(TableCellBorderSide::Top);
+                Ok(true)
+            }
+            "clbrdrb" => {
+                self.select_nested_table_cell_border(TableCellBorderSide::Bottom);
+                Ok(true)
+            }
+            "cldgll" => {
+                self.select_nested_table_cell_border(TableCellBorderSide::DiagonalDown);
+                Ok(true)
+            }
+            "cldglu" => {
+                self.select_nested_table_cell_border(TableCellBorderSide::DiagonalUp);
+                Ok(true)
+            }
+            "brdrnone" | "brdrnil" => {
+                self.set_nested_table_border_visible(false);
+                Ok(true)
+            }
+            "brdrs" => {
+                self.set_nested_table_border_style(BorderStyle::Single);
+                Ok(true)
+            }
+            "brdrth" => {
+                self.set_nested_table_border_style(BorderStyle::Thick);
+                Ok(true)
+            }
+            "brdrhair" => {
+                self.set_nested_table_border_style(BorderStyle::Hairline);
+                Ok(true)
+            }
+            "brdrdb" => {
+                self.set_nested_table_border_style(BorderStyle::Double);
+                Ok(true)
+            }
+            "brdrdot" => {
+                self.set_nested_table_border_style(BorderStyle::Dotted);
+                Ok(true)
+            }
+            "brdrdash" | "brdrdashsm" | "brdrdashd" | "brdrdashdd" | "brdrdashdot"
+            | "brdrdashdotstr" | "brdrdashdotdot" => {
+                self.set_nested_table_border_style(BorderStyle::Dashed);
+                Ok(true)
+            }
+            "brdrwavy" | "brdrwavydb" => {
+                self.set_nested_table_border_style(BorderStyle::Wavy);
+                Ok(true)
+            }
+            name if let Some(style) = word_compound_border_variant_style(name) => {
+                self.set_nested_table_border_style(style);
+                Ok(true)
+            }
+            "brdrw" => {
+                self.set_nested_table_border_width(control.parameter, offset);
+                Ok(true)
+            }
+            "brsp" => {
+                self.set_nested_table_border_spacing(control.parameter, offset);
+                Ok(true)
+            }
+            "brdrcf" => {
+                self.set_nested_table_border_color(control.parameter);
+                Ok(true)
+            }
             "nestrow" | "row" => {
                 self.finish_nested_table_row();
                 self.state.table_nesting_level = 1;
@@ -11094,6 +11177,10 @@ impl Parser {
             capture
                 .current_row
                 .push(std::mem::take(&mut capture.current_cell_paragraphs));
+            capture
+                .current_row_borders
+                .push(std::mem::take(&mut capture.current_cell_borders));
+            capture.current_cell_border_side = None;
         }
     }
 
@@ -11105,8 +11192,89 @@ impl Parser {
             capture.current_row_right_edge_twips = 0;
             if !capture.current_row.is_empty() {
                 capture.rows.push(std::mem::take(&mut capture.current_row));
+                capture
+                    .cell_borders
+                    .push(std::mem::take(&mut capture.current_row_borders));
             }
         }
+    }
+
+    fn select_nested_table_cell_border(&mut self, side: TableCellBorderSide) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_cell_border_side = Some(side);
+        }
+    }
+
+    fn update_nested_table_cell_border(
+        &mut self,
+        update: impl FnOnce(&mut TableCellBorder),
+    ) -> bool {
+        let Some(row) = self.current_table_row.as_mut() else {
+            return false;
+        };
+        let Some(capture) = row.nested_table_capture.as_mut() else {
+            return false;
+        };
+        let Some(side) = capture.current_cell_border_side else {
+            return false;
+        };
+        let border = match side {
+            TableCellBorderSide::Left => &mut capture.current_cell_borders.left,
+            TableCellBorderSide::Right => &mut capture.current_cell_borders.right,
+            TableCellBorderSide::Top => &mut capture.current_cell_borders.top,
+            TableCellBorderSide::Bottom => &mut capture.current_cell_borders.bottom,
+            TableCellBorderSide::DiagonalDown => &mut capture.current_cell_borders.diagonal_down,
+            TableCellBorderSide::DiagonalUp => &mut capture.current_cell_borders.diagonal_up,
+            TableCellBorderSide::RowHorizontal | TableCellBorderSide::RowVertical => return false,
+        };
+        update(border);
+        true
+    }
+
+    fn set_nested_table_border_visible(&mut self, visible: bool) {
+        self.update_nested_table_cell_border(|border| border.visible = visible);
+    }
+
+    fn set_nested_table_border_style(&mut self, style: BorderStyle) {
+        self.update_nested_table_cell_border(|border| {
+            border.visible = true;
+            border.style = style;
+        });
+    }
+
+    fn set_nested_table_border_width(&mut self, value: Option<i32>, offset: usize) {
+        let value = value
+            .unwrap_or(TableCellBorder::default().width_twips)
+            .max(0);
+        let clamped = value.min(self.limits().max_table_border_width_twips);
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("nested table border width clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        self.update_nested_table_cell_border(|border| border.width_twips = clamped);
+    }
+
+    fn set_nested_table_border_spacing(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0).max(0);
+        let clamped = value.min(self.limits().max_page_border_spacing_twips.max(0));
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("nested table border spacing clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        self.update_nested_table_cell_border(|border| border.spacing_twips = clamped);
+    }
+
+    fn set_nested_table_border_color(&mut self, value: Option<i32>) {
+        let color_index = value.unwrap_or(0).max(0) as usize;
+        self.update_nested_table_cell_border(|border| {
+            border.color_index = (color_index > 0).then_some(color_index);
+        });
     }
 
     fn capture_nested_table_cell_boundary(
@@ -43766,7 +43934,7 @@ mod tests {
     #[test]
     fn normalizes_nested_table_cells_inside_outer_cell() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
+            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\clbrdrt\brdrs\brdrw20\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -43795,6 +43963,11 @@ mod tests {
             "Inner A"
         );
         assert!(nested.rows[0].cells[0].paragraphs[0].runs[0].style.bold);
+        assert!(nested.rows[0].cells[0].borders.top.visible);
+        assert_eq!(
+            nested.rows[0].cells[0].borders.top.style,
+            BorderStyle::Single
+        );
         assert_eq!(
             nested.rows[0].cells[1].paragraphs[0].runs[0].text,
             "Inner B"

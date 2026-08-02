@@ -5364,6 +5364,7 @@ fn push_table_row(
             push_nested_table_grid(
                 pages,
                 nested_table,
+                document,
                 cell_left + padding.left,
                 cell_top - padding.top,
                 (cell_width - padding.left - padding.right).max(1.0),
@@ -5733,6 +5734,7 @@ fn push_table_borders(
 fn push_nested_table_grid(
     pages: &mut [LayoutPage],
     table: &Table,
+    document: &Document,
     left: f32,
     top: f32,
     width: f32,
@@ -5755,13 +5757,62 @@ fn push_nested_table_grid(
 
     // Nested tables are normalized into a passive model. Use a stable, light
     // grid when the source did not retain nested border geometry.
-    let color = PdfColor {
+    let fallback_color = PdfColor {
         red: 0.65,
         green: 0.65,
         blue: 0.65,
     };
     let row_height = height / row_count as f32;
-    let column_width = width / column_count as f32;
+    let column_widths = table_column_widths(table, column_count, width);
+    let mut column_positions = Vec::with_capacity(column_count + 1);
+    column_positions.push(left);
+    for column_width in column_widths {
+        column_positions.push(column_positions.last().copied().unwrap_or(left) + column_width);
+    }
+    let has_explicit_borders = table.rows.iter().any(|row| {
+        row.cells.iter().any(|cell| {
+            cell.borders.top.visible
+                || cell.borders.right.visible
+                || cell.borders.bottom.visible
+                || cell.borders.left.visible
+                || cell.borders.diagonal_down.visible
+                || cell.borders.diagonal_up.visible
+        })
+    });
+    if has_explicit_borders {
+        for (row_index, row) in table.rows.iter().take(row_count).enumerate() {
+            let cell_top = top - row_height * row_index as f32;
+            let cell_bottom = cell_top - row_height;
+            for column_index in 0..column_count {
+                let Some(cell) = row.cells.get(column_index) else {
+                    continue;
+                };
+                let x1 = column_positions[column_index];
+                let x2 = column_positions[column_index + 1];
+                for (border, border_x1, border_y1, border_x2, border_y2) in [
+                    (&cell.borders.top, x1, cell_top, x2, cell_top),
+                    (&cell.borders.bottom, x1, cell_bottom, x2, cell_bottom),
+                    (&cell.borders.left, x1, cell_top, x1, cell_bottom),
+                    (&cell.borders.right, x2, cell_top, x2, cell_bottom),
+                ] {
+                    if !border.visible {
+                        continue;
+                    }
+                    let (line_width, color, style) = table_border_stroke(border, document);
+                    page.items.push(LayoutItem::Line {
+                        x1: border_x1,
+                        y1: border_y1,
+                        x2: border_x2,
+                        y2: border_y2,
+                        width: line_width,
+                        color,
+                        style,
+                    });
+                }
+            }
+        }
+        return;
+    }
     for row_index in 0..=row_count {
         let y = top - row_height * row_index as f32;
         page.items.push(LayoutItem::Line {
@@ -5770,19 +5821,19 @@ fn push_nested_table_grid(
             x2: left + width,
             y2: y,
             width: 0.25,
-            color,
+            color: fallback_color,
             style: LineStyle::Solid,
         });
     }
     for column_index in 0..=column_count {
-        let x = left + column_width * column_index as f32;
+        let x = column_positions[column_index];
         page.items.push(LayoutItem::Line {
             x1: x,
             y1: top,
             x2: x,
             y2: top - height,
             width: 0.25,
-            color,
+            color: fallback_color,
             style: LineStyle::Solid,
         });
     }
