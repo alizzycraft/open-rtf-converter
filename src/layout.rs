@@ -745,6 +745,7 @@ struct PreparedTableRow {
     cell_spacings: Vec<ResolvedCellSpacing>,
     cell_text_directions: Vec<TableCellTextDirection>,
     row_height: f32,
+    render_nested_grids: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -4740,6 +4741,7 @@ fn split_prepared_table_row_fragment(
         cell_spacings: remaining.cell_spacings.clone(),
         cell_text_directions: remaining.cell_text_directions.clone(),
         row_height: 14.0,
+        render_nested_grids: remaining.render_nested_grids,
     };
     let mut consumed = Vec::with_capacity(remaining.cell_lines.len());
     for (idx, lines) in remaining.cell_lines.iter().enumerate() {
@@ -4786,6 +4788,7 @@ fn split_prepared_table_row_fragment(
     }
     fragment.row_height = prepared_table_row_content_height(&fragment);
     remaining.row_height = prepared_table_row_content_height(remaining);
+    remaining.render_nested_grids = false;
     Some(fragment)
 }
 
@@ -5202,6 +5205,7 @@ fn prepare_table_row(
         cell_spacings,
         cell_text_directions,
         row_height,
+        render_nested_grids: true,
     }
 }
 
@@ -5359,7 +5363,9 @@ fn push_table_row(
                 cell.shading_pattern,
             );
         }
-        if let Some(nested_table) = cell.nested_table.as_deref() {
+        if prepared.render_nested_grids
+            && let Some(nested_table) = cell.nested_table.as_deref()
+        {
             let padding = prepared.cell_paddings[idx];
             push_nested_table_grid(
                 pages,
@@ -14150,6 +14156,30 @@ mod tests {
         )));
         assert!(layout_text(page).contains("Hairline"));
         assert!(layout_text(page).contains("Dashed"));
+    }
+
+    #[test]
+    fn does_not_repeat_nested_grid_on_split_outer_row_fragments() {
+        let mut input = String::from(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\cellx1000 Inner A\nestcell\cellx3000 Inner B\nestrow}",
+        );
+        for index in 0..100 {
+            input.push_str(&format!(
+                r"{{\trowd\itap2\cellx1000 Row {index}\nestcell\cellx3000 Value {index}\nestrow}}"
+            ));
+        }
+        input.push_str(r" Outer after\cell\row}");
+
+        let parsed = crate::rtf::parse_rtf(&input).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        assert!(layout.pages.len() > 1);
+        let line_count = layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .filter(|item| matches!(item, LayoutItem::Line { .. }))
+            .count();
+        assert_eq!(line_count, 820);
     }
 
     #[test]
