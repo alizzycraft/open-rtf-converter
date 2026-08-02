@@ -942,6 +942,14 @@ pub enum Alignment {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParagraphStyle {
     pub alignment: Alignment,
+    /// Safe direction hint used when a bounded nested-table row is flattened
+    /// into a passive paragraph. `None` retains the containing cell's normal
+    /// direction behavior.
+    pub table_cell_text_direction: Option<TableCellTextDirection>,
+    /// Bounded authored nested-table row height, in twips, when present.
+    pub nested_table_row_height_twips: Option<i32>,
+    /// Safe homogeneous nested-row vertical alignment for authored row height.
+    pub nested_table_row_vertical_align: Option<TableCellVerticalAlign>,
     pub page_break_before: bool,
     pub keep_together: bool,
     pub keep_with_next: bool,
@@ -977,6 +985,9 @@ impl Default for ParagraphStyle {
     fn default() -> Self {
         Self {
             alignment: Alignment::Left,
+            table_cell_text_direction: None,
+            nested_table_row_height_twips: None,
+            nested_table_row_vertical_align: None,
             page_break_before: false,
             keep_together: false,
             keep_with_next: false,

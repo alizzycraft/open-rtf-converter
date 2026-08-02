@@ -752,6 +752,7 @@ struct PreparedCellLine {
     line: Line,
     style: ParagraphStyle,
     paragraph_index: usize,
+    text_direction: TableCellTextDirection,
     is_first_line: bool,
     is_last_line: bool,
     space_before: f32,
@@ -4683,6 +4684,7 @@ fn push_split_table_row(
     borders_visible: bool,
     next_row: Option<&TableRow>,
 ) {
+    let nested_repeat_header_lines = nested_repeat_header_lines(row, &remaining);
     while prepared_table_row_has_lines(&remaining) {
         let available_height = (*cursor_y - margin_bottom).max(14.0);
         let Some(fragment) = split_prepared_table_row_fragment(&mut remaining, available_height)
@@ -4722,7 +4724,77 @@ fn push_split_table_row(
                 font_provider,
                 borders_visible,
             );
+            prepend_nested_repeat_header_lines(&mut remaining, &nested_repeat_header_lines);
         }
+    }
+}
+
+fn nested_repeat_header_lines(
+    row: &TableRow,
+    prepared: &PreparedTableRow,
+) -> Vec<Vec<PreparedCellLine>> {
+    prepared
+        .visual_cells
+        .iter()
+        .enumerate()
+        .map(|(idx, visual_cell)| {
+            let Some(cell) = row.cells.get(visual_cell.cell_index) else {
+                return Vec::new();
+            };
+            let Some(nested_table) = cell.nested_table.as_deref() else {
+                return Vec::new();
+            };
+            let header_count = nested_table
+                .rows
+                .iter()
+                .take_while(|nested_row| nested_row.repeat_header)
+                .count();
+            if header_count == 0 {
+                return Vec::new();
+            }
+            let paragraph_prefix = cell.paragraphs.len();
+            prepared
+                .cell_lines
+                .get(idx)
+                .into_iter()
+                .flatten()
+                .filter(|line| {
+                    line.paragraph_index
+                        .checked_sub(paragraph_prefix)
+                        .is_some_and(|nested_row_index| nested_row_index < header_count)
+                })
+                .cloned()
+                .collect()
+        })
+        .collect()
+}
+
+fn prepend_nested_repeat_header_lines(
+    remaining: &mut PreparedTableRow,
+    nested_repeat_headers: &[Vec<PreparedCellLine>],
+) {
+    for (idx, lines) in remaining.cell_lines.iter_mut().enumerate() {
+        let Some(headers) = nested_repeat_headers.get(idx) else {
+            continue;
+        };
+        if headers.is_empty() || lines.is_empty() {
+            continue;
+        }
+        let header_paragraph_indices = headers
+            .iter()
+            .map(|header| header.paragraph_index)
+            .collect::<Vec<_>>();
+        let starts_inside_header = header_paragraph_indices.contains(&lines[0].paragraph_index);
+        let has_body_line = lines
+            .iter()
+            .any(|line| !header_paragraph_indices.contains(&line.paragraph_index));
+        if starts_inside_header || !has_body_line {
+            continue;
+        }
+        let mut repeated = Vec::with_capacity(headers.len() + lines.len());
+        repeated.extend(headers.iter().cloned());
+        repeated.append(lines);
+        *lines = repeated;
     }
 }
 
@@ -4753,17 +4825,52 @@ fn split_prepared_table_row_fragment(
         let capacity = (max_height - fixed).max(0.0);
         let mut used = 0.0;
         let mut take = 0usize;
-        let direction = remaining
-            .cell_text_directions
-            .get(idx)
-            .copied()
-            .unwrap_or_default();
-        for line in lines {
-            let height =
-                prepared_cell_line_extent(line, direction) + line.space_before + line.space_after;
+        let mut line_index = 0usize;
+        while line_index < lines.len() {
+            let line = &lines[line_index];
+            if line.style.keep_together || line.style.keep_with_next {
+                let mut group_end = line_index + 1;
+                while group_end < lines.len()
+                    && lines[group_end].paragraph_index == line.paragraph_index
+                {
+                    group_end += 1;
+                }
+                if line.style.keep_with_next && group_end < lines.len() {
+                    let next_paragraph_index = lines[group_end].paragraph_index;
+                    while group_end < lines.len()
+                        && lines[group_end].paragraph_index == next_paragraph_index
+                    {
+                        group_end += 1;
+                    }
+                }
+                let group_height = lines[line_index..group_end]
+                    .iter()
+                    .map(|group_line| {
+                        prepared_cell_line_extent(group_line, group_line.text_direction)
+                            + group_line.space_before
+                            + group_line.space_after
+                    })
+                    .sum::<f32>();
+                if used > 0.0 && used + group_height > capacity {
+                    break;
+                }
+                if used == 0.0 && group_height > capacity {
+                    take += 1;
+                    break;
+                }
+                take = group_end;
+                used += group_height;
+                line_index = group_end;
+                continue;
+            }
+
+            let height = prepared_cell_line_extent(line, line.text_direction)
+                + line.space_before
+                + line.space_after;
             if take == 0 || used + height <= capacity {
                 take += 1;
                 used += height;
+                line_index += 1;
             } else {
                 break;
             }
@@ -4814,12 +4921,14 @@ fn prepared_table_row_content_height(prepared: &PreparedTableRow) -> f32 {
 
 fn prepared_cell_lines_height(
     lines: &[PreparedCellLine],
-    direction: TableCellTextDirection,
+    _direction: TableCellTextDirection,
 ) -> f32 {
     lines
         .iter()
         .map(|line| {
-            prepared_cell_line_extent(line, direction) + line.space_before + line.space_after
+            prepared_cell_line_extent(line, line.text_direction)
+                + line.space_before
+                + line.space_after
         })
         .sum::<f32>()
 }
@@ -5139,16 +5248,50 @@ fn prepare_table_row(
                     let suppress_contextual_space_after = paragraphs
                         .get(paragraph_idx + 1)
                         .is_some_and(|next| paragraph_spacing_is_contextual(paragraph, next));
+                    let nested_row_extra = paragraph
+                        .style
+                        .nested_table_row_height_twips
+                        .map(|height_twips| {
+                            let requested_height =
+                                twips_to_points(height_twips.saturating_abs().clamp(0, 100_000));
+                            let paragraph_direction = paragraph
+                                .style
+                                .table_cell_text_direction
+                                .unwrap_or(cell.text_direction);
+                            let natural_height = lines
+                                .iter()
+                                .map(|line| match paragraph_direction {
+                                    TableCellTextDirection::LeftToRightTopToBottom => line.height,
+                                    TableCellTextDirection::TopToBottomRightToLeft
+                                    | TableCellTextDirection::BottomToTopLeftToRight => {
+                                        line.width.max(line.height)
+                                    }
+                                })
+                                .sum::<f32>();
+                            (requested_height - natural_height).max(0.0)
+                        })
+                        .unwrap_or(0.0);
+                    let (nested_extra_before, nested_extra_after) = match paragraph
+                        .style
+                        .nested_table_row_vertical_align
+                        .unwrap_or(TableCellVerticalAlign::Top)
+                    {
+                        TableCellVerticalAlign::Top => (0.0, nested_row_extra),
+                        TableCellVerticalAlign::Center => {
+                            (nested_row_extra / 2.0, nested_row_extra / 2.0)
+                        }
+                        TableCellVerticalAlign::Bottom => (nested_row_extra, 0.0),
+                    };
                     let paragraph_space_before = if suppress_contextual_space_before {
                         0.0
                     } else {
                         twips_to_points(effective_space_before_twips(&paragraph.style))
-                    };
+                    } + nested_extra_before;
                     let paragraph_space_after = if suppress_contextual_space_after {
                         0.0
                     } else {
                         twips_to_points(effective_space_after_twips(&paragraph.style))
-                    };
+                    } + nested_extra_after;
                     lines
                         .into_iter()
                         .enumerate()
@@ -5156,6 +5299,10 @@ fn prepare_table_row(
                             line,
                             style: paragraph.style.clone(),
                             paragraph_index: paragraph_idx,
+                            text_direction: paragraph
+                                .style
+                                .table_cell_text_direction
+                                .unwrap_or(cell.text_direction),
                             is_first_line: idx == 0,
                             is_last_line: idx + 1 == line_count,
                             space_before: if idx == 0 {
@@ -5221,30 +5368,167 @@ fn append_nested_table_paragraphs(paragraphs: &mut Vec<Paragraph>, table: &Table
     }
     for row in &table.rows {
         let mut runs = Vec::new();
-        for (cell_index, cell) in row.cells.iter().enumerate() {
-            if cell_index > 0 {
+        let mut deferred_child_paragraphs = Vec::new();
+        let source_widths = if table.column_widths_twips.len() >= row.cells.len() {
+            table
+                .column_widths_twips
+                .iter()
+                .take(row.cells.len().max(1))
+                .map(|width| twips_to_points((*width).max(1)))
+                .collect::<Vec<_>>()
+        } else {
+            vec![twips_to_points(1440); row.cells.len().max(1)]
+        };
+        let visual_cells = table_visual_cells(row, &source_widths, 72.0);
+        for (visual_index, visual_cell) in visual_cells.iter().enumerate() {
+            let Some(cell) = row.cells.get(visual_cell.cell_index) else {
+                continue;
+            };
+            if visual_index > 0 {
                 runs.push(Run {
                     text: "\t".to_string(),
                     style: CharacterStyle::default(),
                 });
             }
-            for paragraph in &cell.paragraphs {
+            for (paragraph_index, paragraph) in cell.paragraphs.iter().enumerate() {
+                if paragraph_index > 0 {
+                    runs.push(Run {
+                        text: "\n".to_string(),
+                        style: CharacterStyle::default(),
+                    });
+                }
                 runs.extend(paragraph.runs.clone());
             }
             if let Some(nested_table) = cell.nested_table.as_deref() {
-                append_nested_table_paragraphs(paragraphs, nested_table, depth + 1);
+                append_nested_table_paragraphs(
+                    &mut deferred_child_paragraphs,
+                    nested_table,
+                    depth + 1,
+                );
             }
         }
-        paragraphs.push(Paragraph {
-            style: row
-                .cells
-                .first()
-                .and_then(|cell| cell.paragraphs.first())
-                .map(|paragraph| paragraph.style.clone())
-                .unwrap_or_default(),
-            runs,
-        });
+        let mut style = row
+            .cells
+            .get(
+                visual_cells
+                    .first()
+                    .map(|cell| cell.cell_index)
+                    .unwrap_or(0),
+            )
+            .and_then(|cell| cell.paragraphs.first())
+            .map(|paragraph| paragraph.style.clone())
+            .unwrap_or_default();
+        style.keep_together |= row.keep_together;
+        style.keep_with_next |= row.keep_with_next;
+        if let Some(first_cell) = visual_cells
+            .first()
+            .and_then(|visual_cell| row.cells.get(visual_cell.cell_index))
+        {
+            style.left_indent_twips = style
+                .left_indent_twips
+                .saturating_add(nested_cell_left_inset_twips(first_cell));
+        }
+        style.left_indent_twips = style
+            .left_indent_twips
+            .saturating_add(row.left_offset_twips);
+        let stop_count = visual_cells.len().saturating_sub(1).min(64);
+        if stop_count > 0 {
+            let mut position_twips = 0i32;
+            let mut stops = Vec::with_capacity(stop_count);
+            for (visual_index, visual_cell) in visual_cells.iter().take(stop_count).enumerate() {
+                let end_column = visual_cells
+                    .iter()
+                    .find(|candidate| candidate.cell_index > visual_cell.cell_index)
+                    .map(|candidate| candidate.cell_index)
+                    .unwrap_or(row.cells.len());
+                let span_width = table
+                    .column_widths_twips
+                    .iter()
+                    .skip(visual_cell.cell_index)
+                    .take(end_column.saturating_sub(visual_cell.cell_index))
+                    .copied()
+                    .fold(0i32, |total, width| total.saturating_add(width.max(1)));
+                let span_width = if span_width > 0 {
+                    span_width
+                } else {
+                    let span_count =
+                        i32::try_from(end_column.saturating_sub(visual_cell.cell_index))
+                            .unwrap_or(i32::MAX);
+                    1440i32.saturating_mul(span_count)
+                };
+                position_twips = position_twips.saturating_add(span_width.max(1));
+                let next_cell_inset = visual_cells
+                    .get(visual_index + 1)
+                    .and_then(|visual_cell| row.cells.get(visual_cell.cell_index))
+                    .map(nested_cell_left_inset_twips)
+                    .unwrap_or(0);
+                stops.push(position_twips.saturating_add(next_cell_inset));
+            }
+            if stops.len() == stop_count {
+                style.tab_stops_twips = stops;
+                style.tab_stop_leaders = vec![TabLeader::None; stop_count];
+                style.tab_stop_alignments = visual_cells
+                    .iter()
+                    .skip(1)
+                    .take(stop_count)
+                    .filter_map(|visual_cell| row.cells.get(visual_cell.cell_index))
+                    .map(|cell| {
+                        match cell
+                            .paragraphs
+                            .first()
+                            .map(|paragraph| paragraph.style.alignment)
+                            .unwrap_or(Alignment::Left)
+                        {
+                            Alignment::Center => TabAlignment::Center,
+                            Alignment::Right => TabAlignment::Right,
+                            Alignment::Justified => TabAlignment::Left,
+                            Alignment::Left => TabAlignment::Left,
+                        }
+                    })
+                    .collect();
+            }
+        }
+        if let Some(direction) = visual_cells
+            .first()
+            .and_then(|visual_cell| row.cells.get(visual_cell.cell_index))
+            .map(|cell| cell.text_direction)
+            .filter(|direction| *direction != TableCellTextDirection::LeftToRightTopToBottom)
+            && visual_cells.iter().all(|visual_cell| {
+                row.cells
+                    .get(visual_cell.cell_index)
+                    .is_some_and(|cell| cell.text_direction == direction)
+            })
+        {
+            style.table_cell_text_direction = Some(direction);
+        }
+        if let Some(height_twips) = row.height_twips {
+            style.nested_table_row_height_twips = Some(height_twips.clamp(-1_000_000, 1_000_000));
+        }
+        if let Some(vertical_align) = visual_cells
+            .first()
+            .and_then(|visual_cell| row.cells.get(visual_cell.cell_index))
+            .map(|cell| cell.vertical_align)
+            .filter(|vertical_align| *vertical_align != TableCellVerticalAlign::Top)
+            && visual_cells.iter().all(|visual_cell| {
+                row.cells
+                    .get(visual_cell.cell_index)
+                    .is_some_and(|cell| cell.vertical_align == vertical_align)
+            })
+        {
+            style.nested_table_row_vertical_align = Some(vertical_align);
+        }
+        paragraphs.push(Paragraph { style, runs });
+        paragraphs.extend(deferred_child_paragraphs);
     }
+}
+
+fn nested_cell_left_inset_twips(cell: &TableCell) -> i32 {
+    cell.padding
+        .left_twips
+        .unwrap_or(0)
+        .max(0)
+        .saturating_add(cell.spacing.left_twips.unwrap_or(0).max(0))
+        .min(100_000)
 }
 
 fn passive_fit_text_paragraph(paragraph: &Paragraph) -> Paragraph {
@@ -5408,7 +5692,8 @@ fn push_table_row(
         let mut line_top = top - spacing.top - padding.top - vertical_offset;
         for prepared_line in lines {
             line_top -= prepared_line.space_before;
-            let line_extent = prepared_cell_line_extent(prepared_line, cell.text_direction);
+            let line_extent =
+                prepared_cell_line_extent(prepared_line, prepared_line.text_direction);
             if line_top - line_extent < content_bottom {
                 break;
             }
@@ -5472,7 +5757,7 @@ fn push_table_row(
                 document,
                 false,
             );
-            let rotation = table_cell_text_rotation(cell.text_direction);
+            let rotation = table_cell_text_rotation(prepared_line.text_direction);
             if rotation == TextRotation::None {
                 push_bar_tab_stops(
                     pages,
@@ -5495,7 +5780,7 @@ fn push_table_row(
                     cell_content_width,
                     line_top,
                     &prepared_line.line,
-                    cell.text_direction,
+                    prepared_line.text_direction,
                 );
                 push_line_with_rotation(
                     pages,
@@ -5798,8 +6083,8 @@ fn push_nested_table_grid(
     let column_widths = table_column_widths(table, column_count, width);
     let mut column_positions = Vec::with_capacity(column_count + 1);
     column_positions.push(left);
-    for column_width in column_widths {
-        column_positions.push(column_positions.last().copied().unwrap_or(left) + column_width);
+    for column_width in &column_widths {
+        column_positions.push(column_positions.last().copied().unwrap_or(left) + *column_width);
     }
     for (row_index, row) in table
         .rows
@@ -5809,42 +6094,65 @@ fn push_nested_table_grid(
         .enumerate()
     {
         let cell_top = top - row_heights[..row_index].iter().sum::<f32>();
-        let cell_height = row_heights[row_index];
-        for column_index in 0..column_count {
-            let Some(cell) = row.cells.get(column_index) else {
+        let table_row_index = row_start + row_index;
+        let row_left = nested_table_row_left(
+            left + twips_to_points(row.left_offset_twips),
+            width,
+            row.alignment,
+            &column_widths,
+        );
+        let visual_cells = table_visual_cells(row, &column_widths, width / column_count as f32);
+        for visual_cell in visual_cells {
+            let Some(cell) = row.cells.get(visual_cell.cell_index) else {
                 continue;
             };
-            let Some(color_index) = cell.shading_color_index else {
+            let render_cell = if cell.vertical_merge == TableCellVerticalMerge::Continuation {
+                nested_vertical_merge_origin(table, table_row_index, visual_cell.cell_index)
+                    .and_then(|(origin_row, origin_cell)| {
+                        table.rows.get(origin_row)?.cells.get(origin_cell)
+                    })
+                    .unwrap_or(cell)
+            } else {
+                cell
+            };
+            let cell_height = nested_vertical_span_height(
+                table,
+                table_row_index,
+                visual_cell.cell_index,
+                row_start,
+                row_end,
+                &row_heights,
+            );
+            let Some(color_index) = render_cell.shading_color_index else {
                 continue;
             };
             if color_index == 0 {
                 continue;
             }
             page.items.push(LayoutItem::Highlight {
-                x: column_positions[column_index],
+                x: row_left + visual_cell.x_offset,
                 y: cell_top - cell_height,
-                width: (column_positions[column_index + 1] - column_positions[column_index])
-                    .max(1.0),
+                width: visual_cell.width.max(1.0),
                 height: cell_height.max(1.0),
-                color: shading_color(document, color_index, cell.shading_basis_points),
+                color: shading_color(document, color_index, render_cell.shading_basis_points),
             });
         }
     }
-    let has_explicit_borders = table
-        .rows
-        .iter()
-        .skip(row_start)
-        .take(row_count)
-        .any(|row| {
-            row.cells.iter().any(|cell| {
-                cell.borders.top.visible
-                    || cell.borders.right.visible
-                    || cell.borders.bottom.visible
-                    || cell.borders.left.visible
-                    || cell.borders.diagonal_down.visible
-                    || cell.borders.diagonal_up.visible
-            })
-        });
+    // Decide whether to use the fallback grid from the complete bounded table,
+    // not only the currently visible continuation range. A nested table may
+    // author borders on its first/last rows while middle rows remain borderless;
+    // switching to a synthetic grid on a later fragment changes the visible
+    // Word-like result and can introduce lines that were never authored.
+    let has_explicit_borders = table.rows.iter().any(|row| {
+        row.cells.iter().any(|cell| {
+            cell.borders.top.visible
+                || cell.borders.right.visible
+                || cell.borders.bottom.visible
+                || cell.borders.left.visible
+                || cell.borders.diagonal_down.visible
+                || cell.borders.diagonal_up.visible
+        })
+    });
     if has_explicit_borders {
         for (row_index, row) in table
             .rows
@@ -5854,19 +6162,67 @@ fn push_nested_table_grid(
             .enumerate()
         {
             let cell_top = top - row_heights[..row_index].iter().sum::<f32>();
-            let cell_bottom = cell_top - row_heights[row_index];
-            for column_index in 0..column_count {
-                let Some(cell) = row.cells.get(column_index) else {
+            let table_row_index = row_start + row_index;
+            let row_left = nested_table_row_left(
+                left + twips_to_points(row.left_offset_twips),
+                width,
+                row.alignment,
+                &column_widths,
+            );
+            let visual_cells = table_visual_cells(row, &column_widths, width / column_count as f32);
+            for visual_cell in visual_cells {
+                let Some(cell) = row.cells.get(visual_cell.cell_index) else {
                     continue;
                 };
-                let x1 = column_positions[column_index];
-                let x2 = column_positions[column_index + 1];
-                for (border, border_x1, border_y1, border_x2, border_y2) in [
-                    (&cell.borders.top, x1, cell_top, x2, cell_top),
-                    (&cell.borders.bottom, x1, cell_bottom, x2, cell_bottom),
-                    (&cell.borders.left, x1, cell_top, x1, cell_bottom),
-                    (&cell.borders.right, x2, cell_top, x2, cell_bottom),
-                ] {
+                let merge_origin = if cell.vertical_merge == TableCellVerticalMerge::Continuation {
+                    nested_vertical_merge_origin(table, table_row_index, visual_cell.cell_index)
+                } else {
+                    None
+                };
+                let border_cell = merge_origin
+                    .and_then(|(origin_row, origin_cell)| {
+                        table.rows.get(origin_row)?.cells.get(origin_cell)
+                    })
+                    .unwrap_or(cell);
+                let cell_height = nested_vertical_span_height(
+                    table,
+                    table_row_index,
+                    visual_cell.cell_index,
+                    row_start,
+                    row_end,
+                    &row_heights,
+                );
+                let x1 = row_left + visual_cell.x_offset;
+                let x2 = x1 + visual_cell.width;
+                let cell_bottom = cell_top - cell_height;
+                let continuation_has_next_row = merge_origin.is_some()
+                    && table
+                        .rows
+                        .get(table_row_index + 1)
+                        .and_then(|next_row| next_row.cells.get(visual_cell.cell_index))
+                        .is_some_and(|next_cell| {
+                            next_cell.vertical_merge == TableCellVerticalMerge::Continuation
+                        });
+                for (border_index, (border, border_x1, border_y1, border_x2, border_y2)) in [
+                    (&border_cell.borders.top, x1, cell_top, x2, cell_top),
+                    (
+                        &border_cell.borders.bottom,
+                        x1,
+                        cell_bottom,
+                        x2,
+                        cell_bottom,
+                    ),
+                    (&border_cell.borders.left, x1, cell_top, x1, cell_bottom),
+                    (&border_cell.borders.right, x2, cell_top, x2, cell_bottom),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    if merge_origin.is_some()
+                        && (border_index == 0 || (border_index == 1 && continuation_has_next_row))
+                    {
+                        continue;
+                    }
                     if !border.visible {
                         continue;
                     }
@@ -5881,6 +6237,102 @@ fn push_nested_table_grid(
                         style,
                     });
                 }
+            }
+        }
+        return;
+    }
+    let has_merges = table
+        .rows
+        .iter()
+        .skip(row_start)
+        .take(row_count)
+        .flat_map(|row| row.cells.iter())
+        .any(|cell| {
+            cell.horizontal_merge != TableCellHorizontalMerge::None
+                || cell.vertical_merge != TableCellVerticalMerge::None
+        });
+    if has_merges {
+        let mut y = top;
+        for boundary_index in 0..=row_count {
+            let mut intervals = Vec::new();
+            if boundary_index > 0 && boundary_index < row_count {
+                if let Some(row) = table.rows.get(row_start + boundary_index) {
+                    let visual_cells =
+                        table_visual_cells(row, &column_widths, width / column_count as f32);
+                    for visual_cell in visual_cells {
+                        if row.cells.get(visual_cell.cell_index).is_some_and(|cell| {
+                            cell.vertical_merge == TableCellVerticalMerge::Continuation
+                        }) {
+                            intervals.push((
+                                left + visual_cell.x_offset,
+                                left + visual_cell.x_offset + visual_cell.width,
+                            ));
+                        }
+                    }
+                }
+            }
+            intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut segment_start = left;
+            for (interval_start, interval_end) in intervals {
+                if interval_start > segment_start {
+                    page.items.push(LayoutItem::Line {
+                        x1: segment_start,
+                        y1: y,
+                        x2: interval_start,
+                        y2: y,
+                        width: 0.25,
+                        color: fallback_color,
+                        style: LineStyle::Solid,
+                    });
+                }
+                segment_start = segment_start.max(interval_end);
+            }
+            if segment_start < left + width {
+                page.items.push(LayoutItem::Line {
+                    x1: segment_start,
+                    y1: y,
+                    x2: left + width,
+                    y2: y,
+                    width: 0.25,
+                    color: fallback_color,
+                    style: LineStyle::Solid,
+                });
+            }
+            if boundary_index < row_count {
+                y -= row_heights[boundary_index];
+            }
+        }
+        for (row_index, row) in table
+            .rows
+            .iter()
+            .skip(row_start)
+            .take(row_count)
+            .enumerate()
+        {
+            let row_top = top - row_heights[..row_index].iter().sum::<f32>();
+            let row_bottom = row_top - row_heights[row_index];
+            let visual_cells = table_visual_cells(row, &column_widths, width / column_count as f32);
+            let mut boundaries = visual_cells
+                .iter()
+                .flat_map(|visual_cell| {
+                    [
+                        left + visual_cell.x_offset,
+                        left + visual_cell.x_offset + visual_cell.width,
+                    ]
+                })
+                .collect::<Vec<_>>();
+            boundaries.sort_by(|a, b| a.total_cmp(b));
+            boundaries.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+            for x in boundaries {
+                page.items.push(LayoutItem::Line {
+                    x1: x,
+                    y1: row_top,
+                    x2: x,
+                    y2: row_bottom,
+                    width: 0.25,
+                    color: fallback_color,
+                    style: LineStyle::Solid,
+                });
             }
         }
         return;
@@ -5911,6 +6363,76 @@ fn push_nested_table_grid(
             color: fallback_color,
             style: LineStyle::Solid,
         });
+    }
+}
+
+fn nested_vertical_span_height(
+    table: &Table,
+    row_index: usize,
+    cell_index: usize,
+    row_start: usize,
+    row_end: usize,
+    row_heights: &[f32],
+) -> f32 {
+    let local_index = row_index.saturating_sub(row_start);
+    let mut height = row_heights.get(local_index).copied().unwrap_or(0.0);
+    if table
+        .rows
+        .get(row_index)
+        .and_then(|row| row.cells.get(cell_index))
+        .is_none_or(|cell| cell.vertical_merge != TableCellVerticalMerge::First)
+    {
+        return height;
+    }
+    let mut next_row = row_index + 1;
+    while next_row < row_end {
+        let continues = table
+            .rows
+            .get(next_row)
+            .and_then(|row| row.cells.get(cell_index))
+            .is_some_and(|cell| cell.vertical_merge == TableCellVerticalMerge::Continuation);
+        if !continues {
+            break;
+        }
+        let next_local_index = next_row.saturating_sub(row_start);
+        height += row_heights.get(next_local_index).copied().unwrap_or(0.0);
+        next_row += 1;
+    }
+    height
+}
+
+fn nested_vertical_merge_origin(
+    table: &Table,
+    row_index: usize,
+    cell_index: usize,
+) -> Option<(usize, usize)> {
+    let current = table.rows.get(row_index)?.cells.get(cell_index)?;
+    if current.vertical_merge != TableCellVerticalMerge::Continuation {
+        return None;
+    }
+    for candidate_row in (0..row_index).rev() {
+        let candidate = table.rows.get(candidate_row)?.cells.get(cell_index)?;
+        match candidate.vertical_merge {
+            TableCellVerticalMerge::First => return Some((candidate_row, cell_index)),
+            TableCellVerticalMerge::Continuation => {}
+            TableCellVerticalMerge::None => return None,
+        }
+    }
+    None
+}
+
+fn nested_table_row_left(
+    left: f32,
+    width: f32,
+    alignment: TableRowAlignment,
+    column_widths: &[f32],
+) -> f32 {
+    let row_width = column_widths.iter().sum::<f32>().min(width.max(0.0));
+    let remaining = (width - row_width).max(0.0);
+    match alignment {
+        TableRowAlignment::Center => left + remaining / 2.0,
+        TableRowAlignment::Right => left + remaining,
+        _ => left,
     }
 }
 
@@ -14267,6 +14789,542 @@ mod tests {
     }
 
     #[test]
+    fn preserves_nested_cell_boundaries_as_bounded_tab_stops() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\cellx1000 A\nestcell\cellx3000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert_eq!(nested_row.style.tab_stops_twips, vec![1000]);
+        assert_eq!(nested_row.style.tab_stop_leaders, vec![TabLeader::None]);
+        assert_eq!(
+            nested_row.style.tab_stop_alignments,
+            vec![TabAlignment::Left]
+        );
+    }
+
+    #[test]
+    fn applies_nested_cell_insets_to_row_origin_and_tab_targets() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\clpadl120\cellx1000 A\nestcell\clpadl80\cellx3000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert_eq!(nested_row.style.left_indent_twips, 120);
+        assert_eq!(nested_row.style.tab_stops_twips, vec![1080]);
+    }
+
+    #[test]
+    fn preserves_nested_row_padding_and_spacing_defaults() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trpaddl60\trpaddr80\trspdl40\trspdr100\cellx2000 A\nestcell\cellx4000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert_eq!(nested.rows[0].cells[0].padding.left_twips, Some(60));
+        assert_eq!(nested.rows[0].cells[0].padding.right_twips, Some(80));
+        assert_eq!(nested.rows[0].cells[0].spacing.left_twips, Some(40));
+        assert_eq!(nested.rows[0].cells[0].spacing.right_twips, Some(100));
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert_eq!(nested_row.style.left_indent_twips, 100);
+        assert_eq!(nested_row.style.tab_stops_twips, vec![2100]);
+    }
+
+    #[test]
+    fn preserves_nested_cell_paragraph_breaks_as_passive_line_breaks() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\cellx2000 A\par B\nestcell\cellx4000 C\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert_eq!(
+            nested_row
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "A\nB\tC"
+        );
+    }
+
+    #[test]
+    fn retains_nested_row_shading_defaults_for_passive_cells() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trcbpat2\trshdng2500\cellx2000 A\nestcell\clcbpat1\cellx4000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert_eq!(nested.rows[0].cells[0].shading_color_index, Some(2));
+        assert_eq!(nested.rows[0].cells[0].shading_basis_points, 2500);
+        assert_eq!(nested.rows[0].cells[1].shading_color_index, Some(1));
+        assert_eq!(nested.rows[0].cells[1].shading_basis_points, 2500);
+    }
+
+    #[test]
+    fn propagates_nested_row_keep_hints_to_passive_paragraph_flow() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trcantSplit\trkeepfollow\cellx2000 A\nestcell\cellx4000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert!(nested.rows[0].keep_together);
+        assert!(nested.rows[0].keep_with_next);
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert!(nested_row.style.keep_together);
+        assert!(nested_row.style.keep_with_next);
+    }
+
+    #[test]
+    fn preserves_nested_rtl_row_cell_order_as_passive_visual_order() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}\trowd\cellx6000 Outer {\trowd\itap2\rtlrow\clcbpat1\cellx2000 Right\nestcell\clcbpat2\cellx4000 Left\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert_eq!(nested.rows[0].cells[0].paragraphs[0].runs[0].text, "Left");
+        assert_eq!(nested.rows[0].cells[1].paragraphs[0].runs[0].text, "Right");
+        assert_eq!(nested.rows[0].cells[0].shading_color_index, Some(2));
+        assert_eq!(nested.rows[0].cells[1].shading_color_index, Some(1));
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert_eq!(
+            nested_row
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "Left\tRight"
+        );
+    }
+
+    #[test]
+    fn applies_homogeneous_nested_cell_text_direction_to_passive_lines() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\cltxtbrl\cellx2000 A\nestcell\cltxtbrl\cellx4000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        assert_eq!(
+            paragraphs
+                .last()
+                .and_then(|paragraph| { paragraph.style.table_cell_text_direction }),
+            Some(TableCellTextDirection::TopToBottomRightToLeft)
+        );
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        assert!(layout.pages.iter().any(|page| {
+            page.items.iter().any(|item| {
+                matches!(
+                    item,
+                    LayoutItem::Text(fragment)
+                        if fragment.rotation == TextRotation::Clockwise90
+                )
+            })
+        }));
+    }
+
+    #[test]
+    fn preserves_nested_authored_row_height_in_containing_cell_flow() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1{\colortbl;\red220\green230\blue240;}\trowd\clcbpat1\cellx6000 Outer {\trowd\itap2\trrh2880\cellx2000 A\nestcell\cellx4000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let outer_height = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Highlight { height, .. } => Some(*height),
+                _ => None,
+            })
+            .fold(0.0, f32::max);
+        assert!(
+            outer_height >= 140.0,
+            "nested row height collapsed: {outer_height}"
+        );
+    }
+
+    #[test]
+    fn applies_homogeneous_nested_vertical_alignment_to_authored_height() {
+        fn first_text_baseline(input: &str) -> f32 {
+            let parsed = crate::rtf::parse_rtf(input).unwrap();
+            LayoutEngine::layout(&parsed.document)
+                .pages
+                .iter()
+                .flat_map(|page| page.items.iter())
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.contains('A') => {
+                        Some(fragment.baseline_y)
+                    }
+                    _ => None,
+                })
+                .expect("nested text baseline")
+        }
+
+        let top = first_text_baseline(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trrh2880\cellx2000 A\nestcell\cellx4000 B\nestrow}\cell\row}",
+        );
+        let centered = first_text_baseline(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trrh2880\clvertalc\cellx2000 A\nestcell\clvertalc\cellx4000 B\nestrow}\cell\row}",
+        );
+        assert!(
+            centered < top - 20.0,
+            "centered nested row did not move within authored height: top={top}, centered={centered}"
+        );
+    }
+
+    #[test]
+    fn uses_nested_preferred_cell_widths_without_cell_boundaries() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\clftsWidth3\clwWidth1000 A\nestcell\clftsWidth3\clwWidth3000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert_eq!(nested.column_widths_twips, vec![1000, 3000]);
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert_eq!(nested_row.style.tab_stops_twips, vec![1000]);
+    }
+
+    #[test]
+    fn uses_nested_preferred_row_width_without_cell_widths() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trftsWidth3\trwWidth4000 A\nestcell B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert_eq!(nested.column_widths_twips, vec![2000, 2000]);
+    }
+
+    #[test]
+    fn preserves_nested_repeat_header_row_state() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trhdr\cellx2000 Header\nestcell\cellx4000 H2\nestrow}{\trowd\itap2\trhdr0\cellx2000 Body\nestcell\cellx4000 B2\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert!(nested.rows[0].repeat_header);
+        assert!(!nested.rows[1].repeat_header);
+    }
+
+    #[test]
+    fn repeats_nested_header_text_on_split_outer_row_fragments() {
+        let mut input = String::from(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trhdr\cellx2000 Nested Header\nestcell\cellx4000 Header Value\nestrow}",
+        );
+        for index in 0..80 {
+            input.push_str(&format!(
+                r"{{\trowd\itap2\trhdr0\cellx2000 Nested Row {index}\nestcell\cellx4000 Value {index}\nestrow}}"
+            ));
+        }
+        input.push_str(r" Outer after\cell\row}");
+
+        let parsed = crate::rtf::parse_rtf(&input).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        assert!(layout.pages.len() > 1);
+        assert!(layout_text(&layout.pages[0]).contains("Nested Header"));
+        assert!(
+            layout
+                .pages
+                .iter()
+                .skip(1)
+                .map(layout_text)
+                .any(|text| text.contains("Nested Header"))
+        );
+    }
+
+    #[test]
+    fn maps_nested_tab_alignment_from_visual_cells_after_merge_continuations() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\clmgf\cellx1000 A\nestcell\clmrg\cellx3000 B\nestcell\cellx5000\qr C\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert_eq!(nested_row.style.tab_stops_twips, vec![3000]);
+        assert_eq!(
+            nested_row.style.tab_stop_alignments,
+            vec![TabAlignment::Right]
+        );
+    }
+
+    #[test]
+    fn emits_nested_child_table_after_its_containing_row() {
+        let paragraph = |text: &str| Paragraph {
+            style: ParagraphStyle::default(),
+            runs: vec![Run {
+                text: text.to_string(),
+                style: CharacterStyle::default(),
+            }],
+        };
+        let cell = |paragraphs: Vec<Paragraph>, nested_table: Option<Box<Table>>| TableCell {
+            paragraphs,
+            nested_table,
+            shading_color_index: None,
+            shading_basis_points: 10_000,
+            shading_pattern: ShadingPattern::None,
+            padding: TableCellPadding::default(),
+            spacing: TableCellSpacing::default(),
+            borders: TableCellBorders::default(),
+            fit_text: false,
+            text_direction: TableCellTextDirection::default(),
+            vertical_align: TableCellVerticalAlign::default(),
+            horizontal_merge: TableCellHorizontalMerge::default(),
+            vertical_merge: TableCellVerticalMerge::default(),
+        };
+        let row = |cells: Vec<TableCell>| TableRow {
+            cells,
+            height_twips: None,
+            left_offset_twips: 0,
+            vertical_offset_twips: 0,
+            wrap_margins: TableRowWrapMargins::default(),
+            cell_gap_twips: 0,
+            alignment: TableRowAlignment::Left,
+            repeat_header: false,
+            keep_together: false,
+            keep_with_next: false,
+            no_overlap: false,
+        };
+        let grandchild = Table {
+            rows: vec![row(vec![cell(vec![paragraph("deep")], None)])],
+            column_widths_twips: vec![720],
+            borders_visible: true,
+            preserve_authored_widths: false,
+        };
+        let nested = Table {
+            rows: vec![row(vec![cell(
+                vec![paragraph("nested")],
+                Some(Box::new(grandchild)),
+            )])],
+            column_widths_twips: vec![1440],
+            borders_visible: true,
+            preserve_authored_widths: false,
+        };
+        let paragraphs = table_cell_paragraphs_for_layout(&cell(
+            vec![paragraph("outer")],
+            Some(Box::new(nested)),
+        ));
+        let text = paragraphs
+            .iter()
+            .map(|paragraph| {
+                paragraph
+                    .runs
+                    .iter()
+                    .map(|run| run.text.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(text, vec!["outer", "nested", "deep"]);
+    }
+
+    #[test]
+    fn positions_nested_right_aligned_rows_inside_available_width() {
+        assert_eq!(
+            nested_table_row_left(10.0, 100.0, TableRowAlignment::Right, &[30.0, 10.0]),
+            70.0
+        );
+        assert_eq!(
+            nested_table_row_left(10.0, 100.0, TableRowAlignment::Center, &[30.0, 10.0]),
+            40.0
+        );
+    }
+
+    #[test]
+    fn omits_tabs_for_nested_horizontal_merge_continuations() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\clmgf\cellx1000 A\nestcell\clmrg\cellx3000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let nested_row = paragraphs.last().expect("nested row paragraph");
+        assert_eq!(
+            nested_row
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "A"
+        );
+        assert!(nested_row.style.tab_stops_twips.is_empty());
+    }
+
+    #[test]
+    fn spans_nested_vertical_merge_geometry_across_authored_rows() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trrh720\clvmgf\cellx1000 A\nestcell\cellx2000 B\nestrow}{\trowd\itap2\trrh720\clvmrg\cellx1000 C\nestcell\cellx2000 D\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+        assert_eq!(
+            nested.rows[0].cells[0].vertical_merge,
+            TableCellVerticalMerge::First
+        );
+        assert_eq!(
+            nested.rows[1].cells[0].vertical_merge,
+            TableCellVerticalMerge::Continuation
+        );
+        assert_eq!(
+            nested_vertical_span_height(nested, 0, 0, 0, 2, &[36.0, 36.0]),
+            72.0
+        );
+    }
+
+    #[test]
+    fn carries_nested_vertical_merge_shading_to_split_continuations() {
+        let mut input = String::from(
+            r"{\rtf1{\colortbl;\red255\green220\blue180;}\trowd\cellx6000 Outer {\trowd\itap2\trrh720\clvmgf\clcbpat1\clbrdrl\brdrs\brdrw20\clbrdrr\brdrs\brdrw20\cellx1000 Merged\nestcell\cellx3000 Row 0\nestrow}",
+        );
+        for index in 1..140 {
+            input.push_str(&format!(
+                r"{{\trowd\itap2\trrh720\clvmrg\cellx1000 \nestcell\cellx3000 Row {index}\nestrow}}"
+            ));
+        }
+        input.push_str(r" Outer after\cell\row}");
+
+        let parsed = crate::rtf::parse_rtf(&input).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        assert!(layout.pages.len() > 1);
+        assert!(layout.pages.iter().skip(1).any(|page| {
+            page.items
+                .iter()
+                .any(|item| matches!(item, LayoutItem::Highlight { .. }))
+        }));
+        assert!(layout.pages.iter().skip(1).any(|page| {
+            page.items
+                .iter()
+                .any(|item| matches!(item, LayoutItem::Line { .. }))
+        }));
+    }
+
+    #[test]
+    fn does_not_synthesize_nested_fallback_grid_on_borderless_continuation_rows() {
+        let mut input = String::from(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trrh720\clbrdrt\brdrs\brdrw20\cellx3000 First A\nestcell\cellx6000 First B\nestrow}",
+        );
+        for index in 1..140 {
+            input.push_str(&format!(
+                r"{{\trowd\itap2\trrh720\clbrdrt\brdrnone\cellx3000 Row {index} A\nestcell\cellx6000 Row {index} B\nestrow}}"
+            ));
+        }
+        input.push_str(r" Outer after\cell\row}");
+
+        let parsed = crate::rtf::parse_rtf(&input).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        assert!(layout.pages.len() > 1);
+        let fallback_color = PdfColor {
+            red: 0.65,
+            green: 0.65,
+            blue: 0.65,
+        };
+        let fallback_counts = layout
+            .pages
+            .iter()
+            .skip(1)
+            .map(|page| {
+                page.items
+                    .iter()
+                    .filter(|item| {
+                        matches!(
+                            item,
+                            LayoutItem::Line { color, width, .. }
+                                if *color == fallback_color && (*width - 0.25).abs() < 0.01
+                        )
+                    })
+                    .count()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            fallback_counts.iter().all(|count| *count == 0),
+            "fallback counts: {fallback_counts:?}"
+        );
+    }
+
+    #[test]
     fn lays_out_shaded_table_cell_background() {
         let mut document = Document::default();
         document.colors = vec![
@@ -16616,6 +17674,115 @@ mod tests {
         assert!(first_page_text.contains("Line 00"));
         assert!(!first_page_text.contains("Line 13"));
         assert!(later_page_text.contains("Line 13"));
+    }
+
+    #[test]
+    fn keeps_nested_keep_together_paragraph_lines_in_one_split_fragment() {
+        let mut protected_style = ParagraphStyle::default();
+        protected_style.keep_together = true;
+        let line = |paragraph_index: usize, height: f32, style: ParagraphStyle| PreparedCellLine {
+            line: Line {
+                runs: Vec::new(),
+                width: 0.0,
+                height,
+            },
+            style,
+            paragraph_index,
+            text_direction: TableCellTextDirection::LeftToRightTopToBottom,
+            is_first_line: true,
+            is_last_line: true,
+            space_before: 0.0,
+            space_after: 0.0,
+        };
+        let mut remaining = PreparedTableRow {
+            visual_cells: vec![VisualTableCell {
+                cell_index: 0,
+                x_offset: 0.0,
+                width: 100.0,
+            }],
+            cell_lines: vec![vec![
+                line(0, 10.0, ParagraphStyle::default()),
+                line(1, 10.0, protected_style.clone()),
+                line(1, 10.0, protected_style),
+            ]],
+            cell_paddings: vec![ResolvedCellPadding {
+                left: 0.0,
+                right: 0.0,
+                top: 0.0,
+                bottom: 0.0,
+            }],
+            cell_spacings: vec![ResolvedCellSpacing {
+                left: 0.0,
+                right: 0.0,
+                top: 0.0,
+                bottom: 0.0,
+            }],
+            cell_text_directions: vec![TableCellTextDirection::LeftToRightTopToBottom],
+            row_height: 30.0,
+        };
+
+        let fragment = split_prepared_table_row_fragment(&mut remaining, 25.0)
+            .expect("fragment should contain the unprotected line");
+        assert_eq!(fragment.cell_lines[0].len(), 1);
+        assert_eq!(remaining.cell_lines[0].len(), 2);
+        assert!(
+            remaining.cell_lines[0]
+                .iter()
+                .all(|line| line.style.keep_together)
+        );
+    }
+
+    #[test]
+    fn keeps_nested_keep_with_next_paragraph_groups_in_one_split_fragment() {
+        let mut keep_next_style = ParagraphStyle::default();
+        keep_next_style.keep_with_next = true;
+        let line = |paragraph_index: usize, style: ParagraphStyle| PreparedCellLine {
+            line: Line {
+                runs: Vec::new(),
+                width: 0.0,
+                height: 10.0,
+            },
+            style,
+            paragraph_index,
+            text_direction: TableCellTextDirection::LeftToRightTopToBottom,
+            is_first_line: true,
+            is_last_line: true,
+            space_before: 0.0,
+            space_after: 0.0,
+        };
+        let mut remaining = PreparedTableRow {
+            visual_cells: vec![VisualTableCell {
+                cell_index: 0,
+                x_offset: 0.0,
+                width: 100.0,
+            }],
+            cell_lines: vec![vec![
+                line(0, ParagraphStyle::default()),
+                line(1, keep_next_style),
+                line(2, ParagraphStyle::default()),
+            ]],
+            cell_paddings: vec![ResolvedCellPadding {
+                left: 0.0,
+                right: 0.0,
+                top: 0.0,
+                bottom: 0.0,
+            }],
+            cell_spacings: vec![ResolvedCellSpacing {
+                left: 0.0,
+                right: 0.0,
+                top: 0.0,
+                bottom: 0.0,
+            }],
+            cell_text_directions: vec![TableCellTextDirection::LeftToRightTopToBottom],
+            row_height: 30.0,
+        };
+
+        let fragment = split_prepared_table_row_fragment(&mut remaining, 25.0)
+            .expect("fragment should contain the preceding line");
+        assert_eq!(fragment.cell_lines[0].len(), 1);
+        assert_eq!(remaining.cell_lines[0].len(), 2);
+        assert_eq!(remaining.cell_lines[0][0].paragraph_index, 1);
+        assert_eq!(remaining.cell_lines[0][1].paragraph_index, 2);
     }
 
     #[test]
