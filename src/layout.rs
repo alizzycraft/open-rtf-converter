@@ -5894,12 +5894,19 @@ fn lines_for_cell<'a>(prepared: &'a PreparedTableRow, index: usize) -> &'a [Prep
 }
 
 fn nested_table_row_range(cell: &TableCell, lines: &[PreparedCellLine]) -> Option<(usize, usize)> {
+    let nested_row_count = cell.nested_table.as_deref()?.rows.len().min(256);
+    if nested_row_count == 0 {
+        return None;
+    }
     let prefix = cell.paragraphs.len();
     let mut range: Option<(usize, usize)> = None;
     for line in lines {
         let Some(row_index) = line.paragraph_index.checked_sub(prefix) else {
             continue;
         };
+        if row_index >= nested_row_count {
+            continue;
+        }
         range = Some(match range {
             Some((start, end)) => (start.min(row_index), end.max(row_index + 1)),
             None => (row_index, row_index + 1),
@@ -15377,6 +15384,23 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
         })];
+        let outer_table = match &document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected outer table"),
+        };
+        let prepared = prepare_table_row(
+            &outer_table.rows[0],
+            &[144.0],
+            144.0,
+            &test_markers("1", "1"),
+            &document,
+            None,
+        );
+        assert_eq!(
+            nested_table_row_range(&outer_table.rows[0].cells[0], lines_for_cell(&prepared, 0)),
+            Some((0, 1)),
+            "descendant paragraphs must not expand the parent nested-grid row range"
+        );
         let layout = LayoutEngine::layout(&document);
         let line_count = layout.pages[0]
             .items
