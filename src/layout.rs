@@ -5100,10 +5100,11 @@ fn prepare_table_row(
         .zip(cell_spacings.iter())
         .map(|((visual_cell, padding), spacing)| {
             let cell = &row.cells[visual_cell.cell_index];
+            let paragraphs = table_cell_paragraphs_for_layout(cell);
             let cell_content_width =
                 (visual_cell.width - spacing.left - spacing.right - padding.left - padding.right)
                     .max(12.0);
-            cell.paragraphs
+            paragraphs
                 .iter()
                 .enumerate()
                 .flat_map(|(paragraph_idx, paragraph)| {
@@ -5130,12 +5131,11 @@ fn prepare_table_row(
                     let line_count = lines.len();
                     let suppress_contextual_space_before = paragraph_idx
                         .checked_sub(1)
-                        .and_then(|previous_idx| cell.paragraphs.get(previous_idx))
+                        .and_then(|previous_idx| paragraphs.get(previous_idx))
                         .is_some_and(|previous| {
                             paragraph_spacing_is_contextual(previous, paragraph)
                         });
-                    let suppress_contextual_space_after = cell
-                        .paragraphs
+                    let suppress_contextual_space_after = paragraphs
                         .get(paragraph_idx + 1)
                         .is_some_and(|next| paragraph_spacing_is_contextual(paragraph, next));
                     let paragraph_space_before = if suppress_contextual_space_before {
@@ -5202,6 +5202,46 @@ fn prepare_table_row(
         cell_spacings,
         cell_text_directions,
         row_height,
+    }
+}
+
+fn table_cell_paragraphs_for_layout(cell: &TableCell) -> Vec<Paragraph> {
+    let mut paragraphs = cell.paragraphs.clone();
+    if let Some(nested_table) = cell.nested_table.as_deref() {
+        append_nested_table_paragraphs(&mut paragraphs, nested_table, 0);
+    }
+    paragraphs
+}
+
+fn append_nested_table_paragraphs(paragraphs: &mut Vec<Paragraph>, table: &Table, depth: usize) {
+    if depth >= 16 {
+        return;
+    }
+    for row in &table.rows {
+        let mut runs = Vec::new();
+        for (cell_index, cell) in row.cells.iter().enumerate() {
+            if cell_index > 0 {
+                runs.push(Run {
+                    text: "\t".to_string(),
+                    style: CharacterStyle::default(),
+                });
+            }
+            for paragraph in &cell.paragraphs {
+                runs.extend(paragraph.runs.clone());
+            }
+            if let Some(nested_table) = cell.nested_table.as_deref() {
+                append_nested_table_paragraphs(paragraphs, nested_table, depth + 1);
+            }
+        }
+        paragraphs.push(Paragraph {
+            style: row
+                .cells
+                .first()
+                .and_then(|cell| cell.paragraphs.first())
+                .map(|paragraph| paragraph.style.clone())
+                .unwrap_or_default(),
+            runs,
+        });
     }
 }
 
@@ -5317,6 +5357,17 @@ fn push_table_row(
                 color_index,
                 cell.shading_basis_points,
                 cell.shading_pattern,
+            );
+        }
+        if let Some(nested_table) = cell.nested_table.as_deref() {
+            let padding = prepared.cell_paddings[idx];
+            push_nested_table_grid(
+                pages,
+                nested_table,
+                cell_left + padding.left,
+                cell_top - padding.top,
+                (cell_width - padding.left - padding.right).max(1.0),
+                (cell_height - padding.top - padding.bottom).max(1.0),
             );
         }
     }
@@ -5676,6 +5727,64 @@ fn push_table_borders(
                 style,
             });
         }
+    }
+}
+
+fn push_nested_table_grid(
+    pages: &mut [LayoutPage],
+    table: &Table,
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+) {
+    let Some(page) = pages.last_mut() else {
+        return;
+    };
+    let row_count = table.rows.len().min(256);
+    let column_count = table
+        .rows
+        .iter()
+        .map(|row| row.cells.len())
+        .max()
+        .unwrap_or(0)
+        .min(64);
+    if row_count == 0 || column_count == 0 {
+        return;
+    }
+
+    // Nested tables are normalized into a passive model. Use a stable, light
+    // grid when the source did not retain nested border geometry.
+    let color = PdfColor {
+        red: 0.65,
+        green: 0.65,
+        blue: 0.65,
+    };
+    let row_height = height / row_count as f32;
+    let column_width = width / column_count as f32;
+    for row_index in 0..=row_count {
+        let y = top - row_height * row_index as f32;
+        page.items.push(LayoutItem::Line {
+            x1: left,
+            y1: y,
+            x2: left + width,
+            y2: y,
+            width: 0.25,
+            color,
+            style: LineStyle::Solid,
+        });
+    }
+    for column_index in 0..=column_count {
+        let x = left + column_width * column_index as f32;
+        page.items.push(LayoutItem::Line {
+            x1: x,
+            y1: top,
+            x2: x,
+            y2: top - height,
+            width: 0.25,
+            color,
+            style: LineStyle::Solid,
+        });
     }
 }
 
@@ -13454,6 +13563,7 @@ mod tests {
                 no_overlap: false,
                 cells: vec![
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -13474,6 +13584,7 @@ mod tests {
                         }],
                     },
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -13554,6 +13665,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -13607,6 +13719,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -13668,6 +13781,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -13736,6 +13850,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -13823,6 +13938,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -13966,6 +14082,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14063,6 +14180,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14125,6 +14243,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14181,6 +14300,7 @@ mod tests {
                 no_overlap: false,
                 cells: vec![
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -14201,6 +14321,7 @@ mod tests {
                         }],
                     },
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -14265,6 +14386,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14315,6 +14437,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14374,6 +14497,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14452,6 +14576,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14513,6 +14638,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14568,6 +14694,7 @@ mod tests {
                     keep_with_next: false,
                     no_overlap: false,
                     cells: vec![TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -14647,6 +14774,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -14744,6 +14872,7 @@ mod tests {
                     keep_with_next: false,
                     no_overlap: false,
                     cells: vec![TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -14894,6 +15023,7 @@ mod tests {
                     keep_with_next: false,
                     no_overlap: false,
                     cells: vec![TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -14926,6 +15056,7 @@ mod tests {
                     keep_with_next: false,
                     no_overlap: false,
                     cells: vec![TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -14980,6 +15111,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -15063,6 +15195,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -15125,6 +15258,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -15254,6 +15388,7 @@ mod tests {
                     keep_with_next: false,
                     no_overlap: false,
                     cells: vec![TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15286,6 +15421,7 @@ mod tests {
                     keep_with_next: false,
                     no_overlap: false,
                     cells: vec![TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15357,6 +15493,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -15410,6 +15547,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -15467,6 +15605,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -15539,6 +15678,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -15609,6 +15749,7 @@ mod tests {
                 no_overlap: false,
                 cells: vec![
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15634,6 +15775,7 @@ mod tests {
                         }],
                     },
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15713,6 +15855,7 @@ mod tests {
                 no_overlap: false,
                 cells: vec![
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15733,6 +15876,7 @@ mod tests {
                         }],
                     },
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15753,6 +15897,7 @@ mod tests {
                         }],
                     },
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15814,6 +15959,7 @@ mod tests {
                 no_overlap: false,
                 cells: vec![
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15834,6 +15980,7 @@ mod tests {
                         }],
                     },
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15854,6 +16001,7 @@ mod tests {
                         }],
                     },
                     TableCell {
+                        nested_table: None,
                         shading_color_index: None,
                         shading_basis_points: 10_000,
                         shading_pattern: crate::model::ShadingPattern::None,
@@ -15926,6 +16074,7 @@ mod tests {
                     no_overlap: false,
                     cells: vec![
                         TableCell {
+                            nested_table: None,
                             shading_color_index: Some(1),
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
@@ -15946,6 +16095,7 @@ mod tests {
                             }],
                         },
                         TableCell {
+                            nested_table: None,
                             shading_color_index: None,
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
@@ -15980,6 +16130,7 @@ mod tests {
                     no_overlap: false,
                     cells: vec![
                         TableCell {
+                            nested_table: None,
                             shading_color_index: None,
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
@@ -16000,6 +16151,7 @@ mod tests {
                             }],
                         },
                         TableCell {
+                            nested_table: None,
                             shading_color_index: None,
                             shading_basis_points: 10_000,
                             shading_pattern: crate::model::ShadingPattern::None,
@@ -16076,6 +16228,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -16141,6 +16294,7 @@ mod tests {
                 keep_with_next,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -16203,6 +16357,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -16267,6 +16422,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -16326,6 +16482,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -17762,6 +17919,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 5_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -18049,6 +18207,7 @@ mod tests {
                     keep_with_next: false,
                     no_overlap: false,
                     cells: vec![TableCell {
+                        nested_table: None,
                         shading_color_index: Some(1),
                         shading_basis_points: 5_000,
                         shading_pattern: ShadingPattern::Vertical,
@@ -18143,6 +18302,7 @@ mod tests {
                     keep_with_next: false,
                     no_overlap: false,
                     cells: vec![TableCell {
+                        nested_table: None,
                         shading_color_index: Some(1),
                         shading_basis_points: 10_000,
                         shading_pattern: ShadingPattern::DarkCross,
@@ -18389,6 +18549,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,
@@ -18798,6 +18959,7 @@ mod tests {
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,

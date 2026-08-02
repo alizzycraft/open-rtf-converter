@@ -9165,6 +9165,7 @@ endstream
                 keep_with_next: false,
                 no_overlap: false,
                 cells: vec![TableCell {
+                    nested_table: None,
                     shading_color_index: Some(1),
                     shading_basis_points: 10_000,
                     shading_pattern: crate::model::ShadingPattern::None,

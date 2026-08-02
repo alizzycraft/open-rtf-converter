@@ -790,6 +790,8 @@ pub enum TableRowAlignment {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableCell {
     pub paragraphs: Vec<Paragraph>,
+    /// A bounded nested table parsed from this cell, when present.
+    pub nested_table: Option<Box<Table>>,
     pub shading_color_index: Option<usize>,
     pub shading_basis_points: i32,
     pub shading_pattern: ShadingPattern,

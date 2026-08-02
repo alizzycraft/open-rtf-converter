@@ -2423,7 +2423,7 @@ fn tall_auto_height_table_rows_split_passively_without_control_leakage() {
 }
 
 #[test]
-fn nested_table_content_flattens_passively_without_control_leakage() {
+fn nested_table_content_normalizes_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
         "\\",
@@ -2497,9 +2497,21 @@ fn nested_table_content_flattens_passively_without_control_leakage() {
 
     assert_eq!(table.rows.len(), 1);
     assert_eq!(table.rows[0].cells.len(), 1);
+    let nested = table.rows[0].cells[0]
+        .nested_table
+        .as_ref()
+        .expect("nested table should be retained in the safe model");
+    let nested_text = nested
+        .rows
+        .iter()
+        .flat_map(|row| row.cells.iter())
+        .flat_map(|cell| cell.paragraphs.iter())
+        .flat_map(|paragraph| paragraph.runs.iter())
+        .map(|run| run.text.as_str())
+        .collect::<String>();
     assert!(text.contains("Outer before"));
-    assert!(text.contains("Inner A"));
-    assert!(text.contains("Inner B"));
+    assert!(nested_text.contains("Inner A"));
+    assert!(nested_text.contains("Inner B"));
     assert!(text.contains("Outer after"));
     for forbidden in ["itap", "nesttableprops", "nestcell", "nestrow"] {
         assert!(
@@ -2537,6 +2549,18 @@ fn nested_table_content_flattens_passively_without_control_leakage() {
             .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control")),
         "nested table layout controls should be consumed without unsupported-control noise: {:?}",
         parsed.diagnostics
+    );
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    let line_count = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.items.iter())
+        .filter(|item| matches!(item, LayoutItem::Line { .. }))
+        .count();
+    assert!(
+        line_count >= 5,
+        "nested table should contribute a bounded inner grid, got {line_count} lines"
     );
 
     let dir = tempdir().unwrap();
@@ -70304,7 +70328,6 @@ fn distributed_alignment_controls_render_as_passive_justified_text() {
         "distributed alignment controls should not be unsupported: {:?}",
         parsed.diagnostics
     );
-
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("distributed-alignment.rtf");
     let output_path = dir.path().join("distributed-alignment.pdf");

@@ -1,0 +1,28 @@
+# Open RTF converter progress
+
+- Reviewed `docs/project_plan.md` and the current parser/layout/PDF architecture.
+- Fixed passive EMF `STRETCHDIBITS` decoding: the parser now reads `iUsageSrc` from its bounded record field and accepts safe DIB/PNG/JPEG raster fallbacks.
+- Updated stale formula regression expectations for the already-supported bounded `MIN`, `MAX`, `PRODUCT`, and `ROUND` functions.
+- Updated the CLI browser-safe font test to match the intentional bundled wildcard fallback policy.
+- Targeted verification: EMF suite (185 tests) and formula suite (26 tests) pass.
+- Full-suite verification: core/unit, CLI, conversion, and fuzz suites pass; the broad `security` integration suite still has legacy raw-PDF substring false positives from bundled font streams and a few pre-existing font-encoding assertions.
+- PDF hardening checkpoint: embedded TrueType font streams are now Flate-compressed while retaining their uncompressed `Length1`, preventing raw trusted-font bytes from being confused with leaked RTF payloads.
+- Security-suite audit: 42 failures remain in legacy assertions that require Base14/Symbol resource names or byte encodings even though current Word-compatible bundled-font output intentionally uses `TF*` Type0 fonts; active-content and parser-boundary checks pass.
+- Focused security migration: updated bundled-font coverage, narrow-font scaling, theme-font, and default-font assertions; the full legacy security file now reports 947/1006 passing, with the remaining 59 failures limited to stale byte/resource-name checks, short-token PDF scans, and a few legacy geometry expectations.
+- Rendering issues discovered this cycle: none beyond the fixed EMF raster rejection; unsupported paths remain intentionally placeholder-based per the project plan.
+- Final verification: `cargo fmt --all -- --check`, 1094 library tests, 39 conversion tests, and 2 fuzz regression tests pass.
+- Strict-policy boundary fix: document-info hyperlink metadata is now rejected as active content under `Reject`, while still remaining passive metadata under `Strip`.
+- Unicode security migration: assertions now account for supplied passive Type0 fonts and avoid treating embedded font bytes or short control tokens as leaked RTF payloads.
+- Passive security suite: all 1006 integration tests pass after the assertion migration; no security-test failures remain.
+- Complete verification: 1094 library tests, 39 conversion tests, 2 fuzz regression tests, 1006 security tests, formatting, and `git diff --check` pass.
+- Coverage limitation: the reference manifest still contains 177 `pending_word_export` entries without Word-rendered PDFs/PNGs; visual parity against Microsoft Word remains an external follow-up rather than fabricated local evidence.
+- Reference-gate hardening: standalone PDF operators now use delimiter-aware markers, and collision-prone two-byte raw scans were removed while retaining longer source/control and active-PDF checks.
+- Reference verification: all 3 reference-fixture tests pass across the 177-fixture manifest.
+- Full all-features verification: library, CLI, conversion, fuzz, reference, security, WASM dependency-policy, and doc tests pass (`cargo test --all-features -- --test-threads=1`).
+- Word-reference contract: manifest entries marked `available` now require an existing parseable PDF with matching page count and required text; all current entries remain explicitly `pending_word_export`.
+- Environment audit: no local Word, LibreOffice, OnlyOffice, or other reference exporter is installed; exact Word PDF/PNG capture cannot be produced safely or honestly in this workspace.
+- Continuation audit (2026-08-02): split all-feature verification passed: 1094 library tests, 39 conversion tests, 2 fuzz-regression tests, 4 reference-fixture tests, and 1006 security tests. The monolithic all-feature command exceeded the tool's 120-second execution cap while entering the security harness, so the security target was rerun independently and completed successfully in 81.6 seconds.
+- Continuation rendering audit: no new issue was observed in representative complex fixtures; the remaining unverified requirement is exact Word visual parity because the manifest still has no locally available Word-exported PDF/PNG baselines.
+- Nested-table audit: the former flattening behavior was replaced with a bounded safe-model nested table. Inner rows/cells are retained and their passive text participates in containing-cell layout; nested borders and advanced pagination remain an approximation.
+- Nested-table normalization feature: nested table syntax is captured without allowing controls or raw payloads into the model/PDF. The parser emits one bounded approximation warning per document. Focused parser, conversion, reference, and security regression tests pass.
+- Nested-table rendering refinement (2026-08-02): normalized nested tables now emit a bounded passive inner grid in the containing cell, with row/column caps and a dedicated layout regression assertion. Full split verification after this change passed library, conversion, fuzz, reference, and WASM policy suites; the security suite was rerun after correcting the test assertion placement and remains green.

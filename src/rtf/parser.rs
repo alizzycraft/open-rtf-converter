@@ -671,6 +671,72 @@ struct TableRowBuilder {
     current_cell_paragraphs: Vec<Paragraph>,
     current_cell_paragraph: Paragraph,
     cell_open: bool,
+    nested_table_capture: Option<NestedTableCapture>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct NestedTableCapture {
+    rows: Vec<Vec<String>>,
+    current_row: Vec<String>,
+    current_cell: String,
+}
+
+fn nested_table_from_capture(
+    capture: NestedTableCapture,
+    paragraph_style: &ParagraphStyle,
+) -> Option<Table> {
+    if capture.rows.is_empty() {
+        return None;
+    }
+    let column_count = capture.rows.iter().map(Vec::len).max().unwrap_or(0);
+    if column_count == 0 {
+        return None;
+    }
+    let rows = capture
+        .rows
+        .into_iter()
+        .map(|cells| TableRow {
+            cells: (0..column_count)
+                .map(|index| TableCell {
+                    paragraphs: vec![Paragraph {
+                        style: paragraph_style.clone(),
+                        runs: vec![Run {
+                            text: cells.get(index).cloned().unwrap_or_default(),
+                            style: CharacterStyle::default(),
+                        }],
+                    }],
+                    nested_table: None,
+                    shading_color_index: None,
+                    shading_basis_points: 10_000,
+                    shading_pattern: ShadingPattern::None,
+                    padding: TableCellPadding::default(),
+                    spacing: TableCellSpacing::default(),
+                    borders: TableCellBorders::default(),
+                    fit_text: false,
+                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
+                    vertical_align: TableCellVerticalAlign::Top,
+                    horizontal_merge: TableCellHorizontalMerge::None,
+                    vertical_merge: TableCellVerticalMerge::None,
+                })
+                .collect(),
+            height_twips: None,
+            left_offset_twips: 0,
+            vertical_offset_twips: 0,
+            wrap_margins: TableRowWrapMargins::default(),
+            cell_gap_twips: 0,
+            alignment: TableRowAlignment::Left,
+            repeat_header: false,
+            keep_together: false,
+            keep_with_next: false,
+            no_overlap: false,
+        })
+        .collect::<Vec<_>>();
+    Some(Table {
+        column_widths_twips: vec![1440; column_count],
+        rows,
+        borders_visible: true,
+        preserve_authored_widths: false,
+    })
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1406,6 +1472,7 @@ struct Parser {
     current_color_seen: bool,
     current_table: Option<TableBuilder>,
     current_table_row: Option<TableRowBuilder>,
+    nested_table_warning_emitted: bool,
     preserve_authored_table_widths: bool,
     table_cell_count: usize,
     table_cell_boundary_count: usize,
@@ -1611,6 +1678,7 @@ impl Parser {
             current_color_seen: false,
             current_table: None,
             current_table_row: None,
+            nested_table_warning_emitted: false,
             preserve_authored_table_widths: false,
             table_cell_count: 0,
             table_cell_boundary_count: 0,
@@ -5838,6 +5906,9 @@ impl Parser {
         if self.state.metadata_property.is_some() {
             return self.push_document_property_text(text, offset);
         }
+        if self.capture_nested_table_text(text, offset)? {
+            return Ok(());
+        }
 
         self.push_escaped_text(text, offset)
     }
@@ -5945,6 +6016,9 @@ impl Parser {
         }
         if self.state.metadata_property.is_some() {
             return self.push_document_property_text(&visible_text, offset);
+        }
+        if self.capture_nested_table_text(&visible_text, offset)? {
+            return Ok(());
         }
 
         match self.state.destination {
@@ -10862,6 +10936,7 @@ impl Parser {
                 runs: Vec::new(),
             },
             cell_open: true,
+            nested_table_capture: None,
         }
     }
 
@@ -10881,6 +10956,7 @@ impl Parser {
             runs: Vec::new(),
         };
         row.cell_open = true;
+        row.nested_table_capture = None;
         self.current_table_row = Some(row);
     }
 
@@ -10896,6 +10972,7 @@ impl Parser {
             runs: Vec::new(),
         };
         template.cell_open = true;
+        template.nested_table_capture = None;
         template
     }
 
@@ -10910,6 +10987,8 @@ impl Parser {
 
         match control.name.as_str() {
             "itap" if control.parameter.unwrap_or(1) > 1 => {
+                self.warn_nested_table_approximation(offset);
+                self.begin_nested_table_capture();
                 self.set_table_nesting_level(control.parameter.unwrap_or(2).max(2), offset)?;
                 return Ok(true);
             }
@@ -10918,6 +10997,8 @@ impl Parser {
                 return Ok(true);
             }
             "trowd" => {
+                self.warn_nested_table_approximation(offset);
+                self.begin_nested_table_capture();
                 self.set_table_nesting_level(self.state.table_nesting_level.max(2), offset)?;
                 return Ok(true);
             }
@@ -10930,11 +11011,11 @@ impl Parser {
 
         match control.name.as_str() {
             "nestcell" | "cell" => {
-                self.push_text("\t", offset)?;
+                self.finish_nested_table_cell();
                 Ok(true)
             }
             "nestrow" | "row" => {
-                self.push_text("\n", offset)?;
+                self.finish_nested_table_row();
                 self.state.table_nesting_level = 1;
                 Ok(true)
             }
@@ -10958,6 +11039,69 @@ impl Parser {
         }
         self.state.table_nesting_level = level;
         Ok(())
+    }
+
+    fn warn_nested_table_approximation(&mut self, offset: usize) {
+        if self.nested_table_warning_emitted {
+            return;
+        }
+        self.nested_table_warning_emitted = true;
+        self.diagnostics.push(Diagnostic::warning(
+            "nested table normalized into its containing cell; nested borders and layout use a bounded passive approximation",
+            Some(offset),
+        ));
+    }
+
+    fn begin_nested_table_capture(&mut self) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && row.nested_table_capture.is_none()
+        {
+            row.nested_table_capture = Some(NestedTableCapture::default());
+        }
+    }
+
+    fn finish_nested_table_cell(&mut self) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture
+                .current_row
+                .push(std::mem::take(&mut capture.current_cell));
+        }
+    }
+
+    fn finish_nested_table_row(&mut self) {
+        self.finish_nested_table_cell();
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+            && !capture.current_row.is_empty()
+        {
+            capture.rows.push(std::mem::take(&mut capture.current_row));
+        }
+    }
+
+    fn capture_nested_table_text(&mut self, text: &str, offset: usize) -> Result<bool, ParseError> {
+        if self.state.destination != Destination::Body
+            || self.state.table_nesting_level <= 1
+            || self.state.character.hidden
+        {
+            return Ok(false);
+        }
+        self.output_text_chars = self
+            .output_text_chars
+            .checked_add(text.chars().count())
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
+        if self.output_text_chars > self.limits().max_output_text_chars {
+            return Err(ParseError::OutputTextTooLarge(offset));
+        }
+        self.begin_nested_table_capture();
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_cell.push_str(text);
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     fn push_table_cell_boundary(
@@ -12065,6 +12209,7 @@ impl Parser {
         let max_table_cells = self.limits().max_table_cells;
         let page_content_width_twips = self.current_page_content_width_twips();
         let max_width_twips = self.limits().max_page_dimension_twips;
+        let nested_paragraph_style = self.state.paragraph.clone();
         self.ensure_carried_table_row();
         let Some(row) = self.current_table_row.as_mut() else {
             return self.push_text("\t", offset);
@@ -12162,8 +12307,14 @@ impl Parser {
             .get(cell_index)
             .copied()
             .unwrap_or_default();
+        let nested_table = row
+            .nested_table_capture
+            .take()
+            .and_then(|capture| nested_table_from_capture(capture, &nested_paragraph_style))
+            .map(Box::new);
         row.cells.push(TableCell {
             paragraphs,
+            nested_table,
             shading_color_index,
             shading_basis_points,
             shading_pattern,
@@ -43527,7 +43678,7 @@ mod tests {
     }
 
     #[test]
-    fn flattens_nested_table_cells_inside_outer_cell() {
+    fn normalizes_nested_table_cells_inside_outer_cell() {
         let output = parse_rtf(
             r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\cellx1000 Inner A\nestcell\cellx2000 Inner B\nestrow} Outer after\cell\row}",
         )
@@ -43545,13 +43696,36 @@ mod tests {
 
         assert_eq!(table.rows.len(), 1);
         assert_eq!(table.rows[0].cells.len(), 1);
-        assert!(text.contains("Outer before Inner A\tInner B\n"));
         assert!(text.contains("Outer after"));
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table should be normalized into the outer cell");
+        assert_eq!(nested.rows.len(), 1);
+        assert_eq!(nested.rows[0].cells.len(), 2);
+        assert_eq!(
+            nested.rows[0].cells[0].paragraphs[0].runs[0].text,
+            "Inner A"
+        );
+        assert_eq!(
+            nested.rows[0].cells[1].paragraphs[0].runs[0].text,
+            "Inner B"
+        );
         assert!(
             output
                 .diagnostics
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+        assert_eq!(
+            output
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic
+                    .message
+                    .contains("nested table normalized into its containing cell"))
+                .count(),
+            1
         );
     }
 
