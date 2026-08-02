@@ -678,16 +678,50 @@ struct TableRowBuilder {
 struct NestedTableCapture {
     rows: Vec<Vec<Vec<Paragraph>>>,
     cell_borders: Vec<Vec<TableCellBorders>>,
+    cell_properties: Vec<Vec<NestedCellProperties>>,
     column_widths_twips: Vec<i32>,
     row_heights_twips: Vec<Option<i32>>,
     current_row: Vec<Vec<Paragraph>>,
     current_row_borders: Vec<TableCellBorders>,
+    current_row_properties: Vec<NestedCellProperties>,
     current_row_height_twips: Option<i32>,
     current_row_right_edge_twips: i32,
     current_cell_paragraphs: Vec<Paragraph>,
     current_cell_paragraph: Paragraph,
     current_cell_borders: TableCellBorders,
     current_cell_border_side: Option<TableCellBorderSide>,
+    current_cell_properties: NestedCellProperties,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct NestedCellProperties {
+    shading_color_index: Option<usize>,
+    shading_basis_points: i32,
+    shading_pattern: ShadingPattern,
+    padding: TableCellPadding,
+    spacing: TableCellSpacing,
+    fit_text: bool,
+    text_direction: TableCellTextDirection,
+    vertical_align: TableCellVerticalAlign,
+    horizontal_merge: TableCellHorizontalMerge,
+    vertical_merge: TableCellVerticalMerge,
+}
+
+impl Default for NestedCellProperties {
+    fn default() -> Self {
+        Self {
+            shading_color_index: None,
+            shading_basis_points: 10_000,
+            shading_pattern: ShadingPattern::None,
+            padding: TableCellPadding::default(),
+            spacing: TableCellSpacing::default(),
+            fit_text: false,
+            text_direction: TableCellTextDirection::default(),
+            vertical_align: TableCellVerticalAlign::default(),
+            horizontal_merge: TableCellHorizontalMerge::default(),
+            vertical_merge: TableCellVerticalMerge::default(),
+        }
+    }
 }
 
 fn nested_table_from_capture(
@@ -711,6 +745,7 @@ fn nested_table_from_capture(
         vec![1440; column_count]
     };
     let cell_borders = capture.cell_borders;
+    let cell_properties = capture.cell_properties;
     let row_heights_twips = capture.row_heights_twips;
     let rows = capture
         .rows
@@ -718,33 +753,40 @@ fn nested_table_from_capture(
         .enumerate()
         .map(|(row_index, cells)| TableRow {
             cells: (0..column_count)
-                .map(|index| TableCell {
-                    paragraphs: cells
-                        .get(index)
-                        .cloned()
-                        .filter(|paragraphs| !paragraphs.is_empty())
-                        .unwrap_or_else(|| {
-                            vec![Paragraph {
-                                style: paragraph_style.clone(),
-                                runs: Vec::new(),
-                            }]
-                        }),
-                    nested_table: None,
-                    shading_color_index: None,
-                    shading_basis_points: 10_000,
-                    shading_pattern: ShadingPattern::None,
-                    padding: TableCellPadding::default(),
-                    spacing: TableCellSpacing::default(),
-                    borders: cell_borders
+                .map(|index| {
+                    let properties = cell_properties
                         .get(row_index)
                         .and_then(|row| row.get(index))
                         .copied()
-                        .unwrap_or_default(),
-                    fit_text: false,
-                    text_direction: TableCellTextDirection::LeftToRightTopToBottom,
-                    vertical_align: TableCellVerticalAlign::Top,
-                    horizontal_merge: TableCellHorizontalMerge::None,
-                    vertical_merge: TableCellVerticalMerge::None,
+                        .unwrap_or_default();
+                    TableCell {
+                        paragraphs: cells
+                            .get(index)
+                            .cloned()
+                            .filter(|paragraphs| !paragraphs.is_empty())
+                            .unwrap_or_else(|| {
+                                vec![Paragraph {
+                                    style: paragraph_style.clone(),
+                                    runs: Vec::new(),
+                                }]
+                            }),
+                        nested_table: None,
+                        shading_color_index: properties.shading_color_index,
+                        shading_basis_points: properties.shading_basis_points,
+                        shading_pattern: properties.shading_pattern,
+                        padding: properties.padding,
+                        spacing: properties.spacing,
+                        borders: cell_borders
+                            .get(row_index)
+                            .and_then(|row| row.get(index))
+                            .copied()
+                            .unwrap_or_default(),
+                        fit_text: properties.fit_text,
+                        text_direction: properties.text_direction,
+                        vertical_align: properties.vertical_align,
+                        horizontal_merge: properties.horizontal_merge,
+                        vertical_merge: properties.vertical_merge,
+                    }
                 })
                 .collect(),
             height_twips: row_heights_twips.get(row_index).copied().flatten(),
@@ -11130,6 +11172,102 @@ impl Parser {
                 self.set_nested_table_border_color(control.parameter);
                 Ok(true)
             }
+            "clcbpat" | "clcfpat" => {
+                self.set_nested_cell_shading(control.parameter.unwrap_or(0).max(0) as usize);
+                Ok(true)
+            }
+            "clshdng" => {
+                self.set_nested_cell_shading_basis(control.parameter, offset);
+                Ok(true)
+            }
+            name if let Some(pattern) = table_cell_shading_pattern_control(name) => {
+                self.set_nested_cell_shading_pattern(pattern);
+                Ok(true)
+            }
+            "clpadl" => {
+                self.set_nested_cell_padding("left", control.parameter, offset);
+                Ok(true)
+            }
+            "clpadr" => {
+                self.set_nested_cell_padding("right", control.parameter, offset);
+                Ok(true)
+            }
+            "clpadt" => {
+                self.set_nested_cell_padding("top", control.parameter, offset);
+                Ok(true)
+            }
+            "clpadb" => {
+                self.set_nested_cell_padding("bottom", control.parameter, offset);
+                Ok(true)
+            }
+            "clspdl" => {
+                self.set_nested_cell_spacing("left", control.parameter, offset);
+                Ok(true)
+            }
+            "clspdr" => {
+                self.set_nested_cell_spacing("right", control.parameter, offset);
+                Ok(true)
+            }
+            "clspdt" => {
+                self.set_nested_cell_spacing("top", control.parameter, offset);
+                Ok(true)
+            }
+            "clspdb" => {
+                self.set_nested_cell_spacing("bottom", control.parameter, offset);
+                Ok(true)
+            }
+            "clNoWrap" | "clnowrap" => {
+                self.update_nested_cell_properties(|properties| {
+                    properties.fit_text = false;
+                });
+                Ok(true)
+            }
+            "clFitText" | "clfittext" => {
+                self.update_nested_cell_properties(|properties| {
+                    properties.fit_text = control.parameter.unwrap_or(1) != 0;
+                });
+                Ok(true)
+            }
+            "cltxlrtb" => {
+                self.set_nested_cell_text_direction(TableCellTextDirection::LeftToRightTopToBottom);
+                Ok(true)
+            }
+            "cltxtbrl" | "cltxtbrlv" | "cltxlrtbv" => {
+                self.set_nested_cell_text_direction(TableCellTextDirection::TopToBottomRightToLeft);
+                Ok(true)
+            }
+            "cltxbtlr" => {
+                self.set_nested_cell_text_direction(TableCellTextDirection::BottomToTopLeftToRight);
+                Ok(true)
+            }
+            "clvertalt" => {
+                self.set_nested_cell_vertical_align(TableCellVerticalAlign::Top);
+                Ok(true)
+            }
+            "clvertalc" => {
+                self.set_nested_cell_vertical_align(TableCellVerticalAlign::Center);
+                Ok(true)
+            }
+            "clvertalb" => {
+                self.set_nested_cell_vertical_align(TableCellVerticalAlign::Bottom);
+                Ok(true)
+            }
+            "clmgf" => {
+                self.set_nested_cell_horizontal_merge(TableCellHorizontalMerge::First);
+                Ok(true)
+            }
+            "clmrg" => {
+                self.set_nested_cell_horizontal_merge(TableCellHorizontalMerge::Continuation);
+                Ok(true)
+            }
+            "clvmgf" => {
+                self.set_nested_cell_vertical_merge(TableCellVerticalMerge::First);
+                Ok(true)
+            }
+            "clvmrg" => {
+                self.set_nested_cell_vertical_merge(TableCellVerticalMerge::Continuation);
+                Ok(true)
+            }
             "nestrow" | "row" => {
                 self.finish_nested_table_row();
                 self.state.table_nesting_level = 1;
@@ -11187,6 +11325,9 @@ impl Parser {
             capture
                 .current_row_borders
                 .push(std::mem::take(&mut capture.current_cell_borders));
+            capture
+                .current_row_properties
+                .push(std::mem::take(&mut capture.current_cell_properties));
             capture.current_cell_border_side = None;
         }
     }
@@ -11202,6 +11343,9 @@ impl Parser {
                 capture
                     .cell_borders
                     .push(std::mem::take(&mut capture.current_row_borders));
+                capture
+                    .cell_properties
+                    .push(std::mem::take(&mut capture.current_row_properties));
                 capture
                     .row_heights_twips
                     .push(capture.current_row_height_twips.take());
@@ -11231,6 +11375,79 @@ impl Parser {
             capture.current_row_height_twips = Some(height);
         }
         Ok(())
+    }
+
+    fn update_nested_cell_properties(&mut self, update: impl FnOnce(&mut NestedCellProperties)) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            update(&mut capture.current_cell_properties);
+        }
+    }
+
+    fn set_nested_cell_shading(&mut self, color_index: usize) {
+        self.update_nested_cell_properties(|properties| {
+            properties.shading_color_index = (color_index > 0).then_some(color_index);
+        });
+    }
+
+    fn set_nested_cell_shading_basis(&mut self, value: Option<i32>, offset: usize) {
+        let basis = self.clamp_shading_basis(value.unwrap_or(10_000), "nested table cell", offset);
+        self.update_nested_cell_properties(|properties| {
+            properties.shading_basis_points = basis;
+        });
+    }
+
+    fn set_nested_cell_shading_pattern(&mut self, pattern: ShadingPattern) {
+        self.update_nested_cell_properties(|properties| {
+            properties.shading_pattern = pattern;
+        });
+    }
+
+    fn set_nested_cell_padding(&mut self, side: &str, value: Option<i32>, offset: usize) {
+        let padding = self.normalized_cell_padding(value, side, offset);
+        self.update_nested_cell_properties(|properties| match side {
+            "left" => properties.padding.left_twips = Some(padding),
+            "right" => properties.padding.right_twips = Some(padding),
+            "top" => properties.padding.top_twips = Some(padding),
+            "bottom" => properties.padding.bottom_twips = Some(padding),
+            _ => {}
+        });
+    }
+
+    fn set_nested_cell_spacing(&mut self, side: &str, value: Option<i32>, offset: usize) {
+        let spacing = self.normalized_cell_spacing(value, side, offset);
+        self.update_nested_cell_properties(|properties| match side {
+            "left" => properties.spacing.left_twips = Some(spacing),
+            "right" => properties.spacing.right_twips = Some(spacing),
+            "top" => properties.spacing.top_twips = Some(spacing),
+            "bottom" => properties.spacing.bottom_twips = Some(spacing),
+            _ => {}
+        });
+    }
+
+    fn set_nested_cell_text_direction(&mut self, direction: TableCellTextDirection) {
+        self.update_nested_cell_properties(|properties| {
+            properties.text_direction = direction;
+        });
+    }
+
+    fn set_nested_cell_vertical_align(&mut self, align: TableCellVerticalAlign) {
+        self.update_nested_cell_properties(|properties| {
+            properties.vertical_align = align;
+        });
+    }
+
+    fn set_nested_cell_horizontal_merge(&mut self, merge: TableCellHorizontalMerge) {
+        self.update_nested_cell_properties(|properties| {
+            properties.horizontal_merge = merge;
+        });
+    }
+
+    fn set_nested_cell_vertical_merge(&mut self, merge: TableCellVerticalMerge) {
+        self.update_nested_cell_properties(|properties| {
+            properties.vertical_merge = merge;
+        });
     }
 
     fn select_nested_table_cell_border(&mut self, side: TableCellBorderSide) {
@@ -43968,7 +44185,7 @@ mod tests {
     #[test]
     fn normalizes_nested_table_cells_inside_outer_cell() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\trrh720\clbrdrt\brdrs\brdrw20\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
+            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\trrh720\clbrdrt\brdrs\brdrw20\clcbpat1\clshdng5000\clpadl120\clvertalc\cltxbtlr\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -44002,6 +44219,17 @@ mod tests {
         assert_eq!(
             nested.rows[0].cells[0].borders.top.style,
             BorderStyle::Single
+        );
+        assert_eq!(nested.rows[0].cells[0].shading_color_index, Some(1));
+        assert_eq!(nested.rows[0].cells[0].shading_basis_points, 5000);
+        assert_eq!(nested.rows[0].cells[0].padding.left_twips, Some(120));
+        assert_eq!(
+            nested.rows[0].cells[0].vertical_align,
+            TableCellVerticalAlign::Center
+        );
+        assert_eq!(
+            nested.rows[0].cells[0].text_direction,
+            TableCellTextDirection::BottomToTopLeftToRight
         );
         assert_eq!(
             nested.rows[0].cells[1].paragraphs[0].runs[0].text,

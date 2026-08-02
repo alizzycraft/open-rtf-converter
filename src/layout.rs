@@ -5801,6 +5801,35 @@ fn push_nested_table_grid(
     for column_width in column_widths {
         column_positions.push(column_positions.last().copied().unwrap_or(left) + column_width);
     }
+    for (row_index, row) in table
+        .rows
+        .iter()
+        .skip(row_start)
+        .take(row_count)
+        .enumerate()
+    {
+        let cell_top = top - row_heights[..row_index].iter().sum::<f32>();
+        let cell_height = row_heights[row_index];
+        for column_index in 0..column_count {
+            let Some(cell) = row.cells.get(column_index) else {
+                continue;
+            };
+            let Some(color_index) = cell.shading_color_index else {
+                continue;
+            };
+            if color_index == 0 {
+                continue;
+            }
+            page.items.push(LayoutItem::Highlight {
+                x: column_positions[column_index],
+                y: cell_top - cell_height,
+                width: (column_positions[column_index + 1] - column_positions[column_index])
+                    .max(1.0),
+                height: cell_height.max(1.0),
+                color: shading_color(document, color_index, cell.shading_basis_points),
+            });
+        }
+    }
     let has_explicit_borders = table
         .rows
         .iter()
@@ -14204,7 +14233,7 @@ mod tests {
     #[test]
     fn does_not_repeat_nested_grid_on_split_outer_row_fragments() {
         let mut input = String::from(
-            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\cellx1000 Inner A\nestcell\cellx3000 Inner B\nestrow}",
+            r"{\rtf1{\colortbl;\red255\green220\blue180;}\trowd\cellx6000 Outer {\trowd\itap2\clcbpat1\cellx1000 Inner A\nestcell\cellx3000 Inner B\nestrow}",
         );
         for index in 0..100 {
             input.push_str(&format!(
@@ -14229,6 +14258,11 @@ mod tests {
                 .filter(|item| matches!(item, LayoutItem::Line { .. }))
                 .count()
                 > 4
+        }));
+        assert!(layout.pages.iter().any(|page| {
+            page.items
+                .iter()
+                .any(|item| matches!(item, LayoutItem::Highlight { .. }))
         }));
     }
 
