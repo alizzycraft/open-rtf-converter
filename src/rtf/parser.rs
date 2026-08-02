@@ -9,8 +9,8 @@ use crate::model::{
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER,
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
     FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnotePlacement,
-    ImageCrop, ImageFormat, ImageToneAdjustment, LineNumberRestart, NoteNumberRestart,
-    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
+    ImageCrop, ImageFormat, ImageToneAdjustment, LineNumberRestart, NESTED_TABLE_ANCHOR_MARKER,
+    NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
     PageVerticalAlignment, Paragraph, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
@@ -834,6 +834,37 @@ fn nested_table_from_capture(
     let row_inner_horizontal_borders = capture.row_inner_horizontal_borders;
     let row_inner_vertical_borders = capture.row_inner_vertical_borders;
     let row_repeat_headers = capture.row_repeat_headers;
+    let borders_visible = cell_borders.iter().flatten().any(|borders| {
+        borders.top.visible
+            || borders.right.visible
+            || borders.bottom.visible
+            || borders.left.visible
+            || borders.diagonal_down.visible
+            || borders.diagonal_up.visible
+    }) || row_outer_left_borders
+        .iter()
+        .flatten()
+        .any(|border| border.visible)
+        || row_outer_right_borders
+            .iter()
+            .flatten()
+            .any(|border| border.visible)
+        || row_outer_top_borders
+            .iter()
+            .flatten()
+            .any(|border| border.visible)
+        || row_outer_bottom_borders
+            .iter()
+            .flatten()
+            .any(|border| border.visible)
+        || row_inner_horizontal_borders
+            .iter()
+            .flatten()
+            .any(|border| border.visible)
+        || row_inner_vertical_borders
+            .iter()
+            .flatten()
+            .any(|border| border.visible);
     let rows = capture
         .rows
         .into_iter()
@@ -961,7 +992,7 @@ fn nested_table_from_capture(
     Some(Table {
         column_widths_twips,
         rows,
-        borders_visible: true,
+        borders_visible,
         preserve_authored_widths: false,
     })
 }
@@ -11647,6 +11678,10 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut()
             && row.nested_table_capture.is_none()
         {
+            row.current_cell_paragraph.runs.push(Run {
+                text: NESTED_TABLE_ANCHOR_MARKER.to_string(),
+                style: self.state.character.clone(),
+            });
             row.nested_table_capture = Some(NestedTableCapture::default());
         }
     }
@@ -44865,6 +44900,7 @@ mod tests {
             .expect("nested table should be normalized into the outer cell");
         assert_eq!(nested.rows.len(), 1);
         assert_eq!(nested.rows[0].cells.len(), 2);
+        assert!(!nested.borders_visible);
         assert_eq!(nested.rows[0].height_twips, Some(720));
         assert_eq!(nested.rows[0].alignment, TableRowAlignment::Right);
         assert_eq!(nested.rows[0].left_offset_twips, 180);

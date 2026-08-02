@@ -9,6 +9,7 @@ pub const DOCUMENT_WORDS_MARKER: &str = "\u{f0008}";
 pub const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
 pub const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
 pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
+pub const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
 pub const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
 pub const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
 pub const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";

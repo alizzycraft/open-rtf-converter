@@ -8,16 +8,17 @@ use crate::model::{
     DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END,
     EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
     FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
-    NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
-    PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
-    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS,
-    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
-    TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
+    NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
+    PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
+    ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
+    Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
+    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TableRowWrapMargins, UnderlineStyle,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -5360,8 +5361,74 @@ fn prepare_table_row(
 }
 
 fn table_cell_paragraphs_for_layout(cell: &TableCell) -> Vec<Paragraph> {
-    let mut paragraphs = cell.paragraphs.clone();
-    if let Some(nested_table) = cell.nested_table.as_deref() {
+    let Some(nested_table) = cell.nested_table.as_deref() else {
+        return cell.paragraphs.clone();
+    };
+
+    let has_anchor = cell.paragraphs.iter().any(|paragraph| {
+        paragraph
+            .runs
+            .iter()
+            .any(|run| run.text.contains(NESTED_TABLE_ANCHOR_MARKER))
+    });
+    if !has_anchor {
+        let mut paragraphs = cell.paragraphs.clone();
+        append_nested_table_paragraphs(&mut paragraphs, nested_table, 0);
+        return paragraphs;
+    }
+
+    let mut paragraphs = Vec::new();
+    let mut nested_inserted = false;
+    for paragraph in &cell.paragraphs {
+        if nested_inserted {
+            paragraphs.push(paragraph.clone());
+            continue;
+        }
+        let Some((anchor_run_index, anchor_byte_index)) =
+            paragraph.runs.iter().enumerate().find_map(|(index, run)| {
+                run.text
+                    .find(NESTED_TABLE_ANCHOR_MARKER)
+                    .map(|byte_index| (index, byte_index))
+            })
+        else {
+            paragraphs.push(paragraph.clone());
+            continue;
+        };
+
+        let mut before = paragraph.runs[..anchor_run_index].to_vec();
+        let anchor_run = &paragraph.runs[anchor_run_index];
+        if anchor_byte_index > 0 {
+            before.push(Run {
+                text: anchor_run.text[..anchor_byte_index].to_string(),
+                style: anchor_run.style.clone(),
+            });
+        }
+        if !before.is_empty() {
+            paragraphs.push(Paragraph {
+                style: paragraph.style.clone(),
+                runs: before,
+            });
+        }
+        append_nested_table_paragraphs(&mut paragraphs, nested_table, 0);
+
+        let suffix_start = anchor_byte_index + NESTED_TABLE_ANCHOR_MARKER.len();
+        let mut after = Vec::new();
+        if suffix_start < anchor_run.text.len() {
+            after.push(Run {
+                text: anchor_run.text[suffix_start..].to_string(),
+                style: anchor_run.style.clone(),
+            });
+        }
+        after.extend(paragraph.runs[anchor_run_index + 1..].iter().cloned());
+        if !after.is_empty() {
+            paragraphs.push(Paragraph {
+                style: paragraph.style.clone(),
+                runs: after,
+            });
+        }
+        nested_inserted = true;
+    }
+    if !nested_inserted {
         append_nested_table_paragraphs(&mut paragraphs, nested_table, 0);
     }
     paragraphs
@@ -6326,6 +6393,9 @@ fn push_nested_table_grid_at_depth(
                 }
             }
         }
+        return;
+    }
+    if !table.borders_visible {
         return;
     }
     let has_merges = table
@@ -7816,6 +7886,7 @@ fn split_run_for_wrapping(run: &Run, markers: &MarkerContext) -> Vec<FlowRun> {
     let text = if contains_inline_marker(&run.text) {
         resolved_text = run
             .text
+            .replace(NESTED_TABLE_ANCHOR_MARKER, "")
             .replace(PAGE_NUMBER_MARKER, &markers.page_number)
             .replace(SECTION_NUMBER_MARKER, &markers.section_number)
             .replace(DOCUMENT_WORDS_MARKER, &markers.document_words)
@@ -7910,6 +7981,7 @@ fn contains_inline_marker(text: &str) -> bool {
         || text.contains(ENDNOTE_REFERENCE_MARKER)
         || text.contains(ENDNOTE_REFERENCE_MARKER_END)
         || text.contains(PASSIVE_ADVANCE_MARKER)
+        || text.contains(NESTED_TABLE_ANCHOR_MARKER)
 }
 
 fn paragraph_contains_page_number_marker(paragraph: &Paragraph) -> bool {
@@ -15325,6 +15397,27 @@ mod tests {
             first_fragment_line_count, 4,
             "continuation fragments should omit descendant grids"
         );
+    }
+
+    #[test]
+    fn preserves_nested_table_text_at_its_authored_cell_position() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\ansi\trowd\cellx6000 Outer before {\trowd\itap2\cellx1000 Inner A\nestcell\cellx2000 Inner B\nestrow} Outer after\cell\row}",
+        )
+        .expect("nested table fixture should parse");
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let paragraphs = table_cell_paragraphs_for_layout(&table.rows[0].cells[0]);
+        let text = paragraphs
+            .iter()
+            .flat_map(|paragraph| paragraph.runs.iter())
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+        assert!(text.find("Outer before").unwrap() < text.find("Inner A").unwrap());
+        assert!(text.find("Inner B").unwrap() < text.find("Outer after").unwrap());
+        assert!(!text.contains(NESTED_TABLE_ANCHOR_MARKER));
     }
 
     #[test]
