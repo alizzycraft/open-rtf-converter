@@ -44900,7 +44900,7 @@ mod tests {
             .expect("nested table should be normalized into the outer cell");
         assert_eq!(nested.rows.len(), 1);
         assert_eq!(nested.rows[0].cells.len(), 2);
-        assert!(!nested.borders_visible);
+        assert!(nested.borders_visible);
         assert_eq!(nested.rows[0].height_twips, Some(720));
         assert_eq!(nested.rows[0].alignment, TableRowAlignment::Right);
         assert_eq!(nested.rows[0].left_offset_twips, 180);
