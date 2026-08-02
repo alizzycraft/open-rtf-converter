@@ -5898,10 +5898,10 @@ fn nested_table_row_range(cell: &TableCell, lines: &[PreparedCellLine]) -> Optio
     if nested_row_count == 0 {
         return None;
     }
-    let prefix = cell.paragraphs.len();
+    let nested_start = nested_table_paragraph_start(cell);
     let mut range: Option<(usize, usize)> = None;
     for line in lines {
-        let Some(row_index) = line.paragraph_index.checked_sub(prefix) else {
+        let Some(row_index) = line.paragraph_index.checked_sub(nested_start) else {
             continue;
         };
         if row_index >= nested_row_count {
@@ -5913,6 +5913,33 @@ fn nested_table_row_range(cell: &TableCell, lines: &[PreparedCellLine]) -> Optio
         });
     }
     range
+}
+
+fn nested_table_paragraph_start(cell: &TableCell) -> usize {
+    let Some((paragraph_index, run_index, byte_index)) = cell
+        .paragraphs
+        .iter()
+        .enumerate()
+        .find_map(|(paragraph_index, paragraph)| {
+            paragraph
+                .runs
+                .iter()
+                .enumerate()
+                .find_map(|(run_index, run)| {
+                    run.text
+                        .find(NESTED_TABLE_ANCHOR_MARKER)
+                        .map(|byte_index| (paragraph_index, run_index, byte_index))
+                })
+        })
+    else {
+        return cell.paragraphs.len();
+    };
+
+    let has_prefix_text = byte_index > 0
+        || cell.paragraphs[paragraph_index].runs[..run_index]
+            .iter()
+            .any(|run| !run.text.is_empty());
+    paragraph_index + usize::from(has_prefix_text)
 }
 
 fn paragraph_border_line_position(is_first_line: bool, is_last_line: bool) -> (usize, usize) {
@@ -15454,6 +15481,31 @@ mod tests {
         assert!(text.find("Outer before").unwrap() < text.find("Inner A").unwrap());
         assert!(text.find("Inner B").unwrap() < text.find("Outer after").unwrap());
         assert!(!text.contains(NESTED_TABLE_ANCHOR_MARKER));
+    }
+
+    #[test]
+    fn anchors_nested_grid_range_after_prior_cell_paragraphs() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\trowd\cellx6000 First paragraph\par Outer before {\trowd\itap2\cellx1000 Inner\nestcell\cellx2000 Value\nestrow} Outer after\cell\row}",
+        )
+        .expect("nested paragraph-anchor fixture should parse");
+        let table = match &parsed.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let prepared = prepare_table_row(
+            &table.rows[0],
+            &[300.0],
+            300.0,
+            &test_markers("1", "1"),
+            &parsed.document,
+            None,
+        );
+
+        assert_eq!(
+            nested_table_row_range(&table.rows[0].cells[0], lines_for_cell(&prepared, 0)),
+            Some((0, 1))
+        );
     }
 
     #[test]
