@@ -676,9 +676,10 @@ struct TableRowBuilder {
 
 #[derive(Debug, Clone, Default)]
 struct NestedTableCapture {
-    rows: Vec<Vec<String>>,
-    current_row: Vec<String>,
-    current_cell: String,
+    rows: Vec<Vec<Vec<Paragraph>>>,
+    current_row: Vec<Vec<Paragraph>>,
+    current_cell_paragraphs: Vec<Paragraph>,
+    current_cell_paragraph: Paragraph,
 }
 
 fn nested_table_from_capture(
@@ -698,13 +699,16 @@ fn nested_table_from_capture(
         .map(|cells| TableRow {
             cells: (0..column_count)
                 .map(|index| TableCell {
-                    paragraphs: vec![Paragraph {
-                        style: paragraph_style.clone(),
-                        runs: vec![Run {
-                            text: cells.get(index).cloned().unwrap_or_default(),
-                            style: CharacterStyle::default(),
-                        }],
-                    }],
+                    paragraphs: cells
+                        .get(index)
+                        .cloned()
+                        .filter(|paragraphs| !paragraphs.is_empty())
+                        .unwrap_or_else(|| {
+                            vec![Paragraph {
+                                style: paragraph_style.clone(),
+                                runs: Vec::new(),
+                            }]
+                        }),
                     nested_table: None,
                     shading_color_index: None,
                     shading_basis_points: 10_000,
@@ -8245,6 +8249,9 @@ impl Parser {
     }
 
     fn push_visible_control_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        if self.capture_nested_table_text(text, offset)? {
+            return Ok(());
+        }
         match self.state.destination {
             Destination::Body => {
                 if self.current_table.is_some() && self.current_table_row.is_none() {
@@ -10504,6 +10511,10 @@ impl Parser {
         &mut self,
         offset: usize,
     ) -> Result<(), ParseError> {
+        if self.state.destination == Destination::Body && self.state.table_nesting_level > 1 {
+            self.finish_nested_table_paragraph();
+            return Ok(());
+        }
         let advance_next_style = match self.state.destination {
             Destination::Body => {
                 self.finish_paragraph(offset)?;
@@ -11061,12 +11072,13 @@ impl Parser {
     }
 
     fn finish_nested_table_cell(&mut self) {
+        self.finish_nested_table_paragraph();
         if let Some(row) = self.current_table_row.as_mut()
             && let Some(capture) = row.nested_table_capture.as_mut()
         {
             capture
                 .current_row
-                .push(std::mem::take(&mut capture.current_cell));
+                .push(std::mem::take(&mut capture.current_cell_paragraphs));
         }
     }
 
@@ -11098,10 +11110,29 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut()
             && let Some(capture) = row.nested_table_capture.as_mut()
         {
-            capture.current_cell.push_str(text);
+            capture.current_cell_paragraph.runs.push(Run {
+                text: text.to_string(),
+                style: self.state.character.clone(),
+            });
             return Ok(true);
         }
         Ok(false)
+    }
+
+    fn finish_nested_table_paragraph(&mut self) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+            && !capture.current_cell_paragraph.runs.is_empty()
+        {
+            let paragraph = std::mem::replace(
+                &mut capture.current_cell_paragraph,
+                Paragraph {
+                    style: self.state.paragraph.clone(),
+                    runs: Vec::new(),
+                },
+            );
+            capture.current_cell_paragraphs.push(paragraph);
+        }
     }
 
     fn push_table_cell_boundary(
@@ -43680,7 +43711,7 @@ mod tests {
     #[test]
     fn normalizes_nested_table_cells_inside_outer_cell() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\cellx1000 Inner A\nestcell\cellx2000 Inner B\nestrow} Outer after\cell\row}",
+            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\cellx1000 {\b Inner A}\par\b0\nestcell\cellx2000 Inner B\nestrow} Outer after\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -43707,6 +43738,7 @@ mod tests {
             nested.rows[0].cells[0].paragraphs[0].runs[0].text,
             "Inner A"
         );
+        assert!(nested.rows[0].cells[0].paragraphs[0].runs[0].style.bold);
         assert_eq!(
             nested.rows[0].cells[1].paragraphs[0].runs[0].text,
             "Inner B"
