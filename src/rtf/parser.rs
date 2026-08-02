@@ -679,8 +679,10 @@ struct NestedTableCapture {
     rows: Vec<Vec<Vec<Paragraph>>>,
     cell_borders: Vec<Vec<TableCellBorders>>,
     column_widths_twips: Vec<i32>,
+    row_heights_twips: Vec<Option<i32>>,
     current_row: Vec<Vec<Paragraph>>,
     current_row_borders: Vec<TableCellBorders>,
+    current_row_height_twips: Option<i32>,
     current_row_right_edge_twips: i32,
     current_cell_paragraphs: Vec<Paragraph>,
     current_cell_paragraph: Paragraph,
@@ -709,6 +711,7 @@ fn nested_table_from_capture(
         vec![1440; column_count]
     };
     let cell_borders = capture.cell_borders;
+    let row_heights_twips = capture.row_heights_twips;
     let rows = capture
         .rows
         .into_iter()
@@ -744,7 +747,7 @@ fn nested_table_from_capture(
                     vertical_merge: TableCellVerticalMerge::None,
                 })
                 .collect(),
-            height_twips: None,
+            height_twips: row_heights_twips.get(row_index).copied().flatten(),
             left_offset_twips: 0,
             vertical_offset_twips: 0,
             wrap_margins: TableRowWrapMargins::default(),
@@ -11050,6 +11053,10 @@ impl Parser {
                 self.capture_nested_table_cell_boundary(control.parameter, offset)?;
                 Ok(true)
             }
+            "trrh" => {
+                self.capture_nested_table_row_height(control.parameter, offset)?;
+                Ok(true)
+            }
             "clbrdrl" => {
                 self.select_nested_table_cell_border(TableCellBorderSide::Left);
                 Ok(true)
@@ -11195,8 +11202,35 @@ impl Parser {
                 capture
                     .cell_borders
                     .push(std::mem::take(&mut capture.current_row_borders));
+                capture
+                    .row_heights_twips
+                    .push(capture.current_row_height_twips.take());
             }
         }
+    }
+
+    fn capture_nested_table_row_height(
+        &mut self,
+        height_twips: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let Some(height_twips) = height_twips else {
+            return Ok(());
+        };
+        let max_height = self.limits().max_table_row_height_twips.max(1);
+        let height = height_twips.clamp(-max_height, max_height);
+        if height != height_twips {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("nested table row height clamped from {height_twips} to {height} twips"),
+                Some(offset),
+            ));
+        }
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_height_twips = Some(height);
+        }
+        Ok(())
     }
 
     fn select_nested_table_cell_border(&mut self, side: TableCellBorderSide) {
@@ -43934,7 +43968,7 @@ mod tests {
     #[test]
     fn normalizes_nested_table_cells_inside_outer_cell() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\clbrdrt\brdrs\brdrw20\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
+            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\trrh720\clbrdrt\brdrs\brdrw20\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -43957,6 +43991,7 @@ mod tests {
             .expect("nested table should be normalized into the outer cell");
         assert_eq!(nested.rows.len(), 1);
         assert_eq!(nested.rows[0].cells.len(), 2);
+        assert_eq!(nested.rows[0].height_twips, Some(720));
         assert_eq!(nested.column_widths_twips, vec![1000, 2000]);
         assert_eq!(
             nested.rows[0].cells[0].paragraphs[0].runs[0].text,

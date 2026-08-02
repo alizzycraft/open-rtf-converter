@@ -5762,7 +5762,7 @@ fn push_nested_table_grid(
         green: 0.65,
         blue: 0.65,
     };
-    let row_height = height / row_count as f32;
+    let row_heights = nested_table_row_heights(table, row_count, height);
     let column_widths = table_column_widths(table, column_count, width);
     let mut column_positions = Vec::with_capacity(column_count + 1);
     column_positions.push(left);
@@ -5781,8 +5781,8 @@ fn push_nested_table_grid(
     });
     if has_explicit_borders {
         for (row_index, row) in table.rows.iter().take(row_count).enumerate() {
-            let cell_top = top - row_height * row_index as f32;
-            let cell_bottom = cell_top - row_height;
+            let cell_top = top - row_heights[..row_index].iter().sum::<f32>();
+            let cell_bottom = cell_top - row_heights[row_index];
             for column_index in 0..column_count {
                 let Some(cell) = row.cells.get(column_index) else {
                     continue;
@@ -5813,8 +5813,8 @@ fn push_nested_table_grid(
         }
         return;
     }
+    let mut y = top;
     for row_index in 0..=row_count {
-        let y = top - row_height * row_index as f32;
         page.items.push(LayoutItem::Line {
             x1: left,
             y1: y,
@@ -5824,6 +5824,9 @@ fn push_nested_table_grid(
             color: fallback_color,
             style: LineStyle::Solid,
         });
+        if row_index < row_count {
+            y -= row_heights[row_index];
+        }
     }
     for column_index in 0..=column_count {
         let x = column_positions[column_index];
@@ -5837,6 +5840,49 @@ fn push_nested_table_grid(
             style: LineStyle::Solid,
         });
     }
+}
+
+fn nested_table_row_heights(table: &Table, row_count: usize, height: f32) -> Vec<f32> {
+    let default_height = height / row_count as f32;
+    let mut heights = table
+        .rows
+        .iter()
+        .take(row_count)
+        .map(|row| {
+            row.height_twips
+                .map(|twips| twips_to_points(twips.saturating_abs()).max(1.0))
+        })
+        .collect::<Vec<_>>();
+    let missing_count = heights.iter().filter(|height| height.is_none()).count();
+    let requested_total = heights.iter().flatten().sum::<f32>();
+    if missing_count > 0 {
+        let remaining = (height - requested_total).max(0.0);
+        let missing_height = if remaining > 0.0 {
+            remaining / missing_count as f32
+        } else {
+            default_height
+        };
+        for row_height in &mut heights {
+            if row_height.is_none() {
+                *row_height = Some(missing_height);
+            }
+        }
+    }
+    let mut heights = heights
+        .into_iter()
+        .map(Option::unwrap_or_default)
+        .collect::<Vec<_>>();
+    let total = heights.iter().sum::<f32>();
+    if total > height && total > 0.0 {
+        let scale = height / total;
+        for row_height in &mut heights {
+            *row_height *= scale;
+        }
+    } else if total < height && !heights.is_empty() {
+        let last = heights.len() - 1;
+        heights[last] += height - total;
+    }
+    heights
 }
 
 fn next_row_continues_vertical_merge(
