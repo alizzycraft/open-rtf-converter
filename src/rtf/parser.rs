@@ -677,7 +677,9 @@ struct TableRowBuilder {
 #[derive(Debug, Clone, Default)]
 struct NestedTableCapture {
     rows: Vec<Vec<Vec<Paragraph>>>,
+    column_widths_twips: Vec<i32>,
     current_row: Vec<Vec<Paragraph>>,
+    current_row_right_edge_twips: i32,
     current_cell_paragraphs: Vec<Paragraph>,
     current_cell_paragraph: Paragraph,
 }
@@ -693,6 +695,15 @@ fn nested_table_from_capture(
     if column_count == 0 {
         return None;
     }
+    let column_widths_twips = if capture.column_widths_twips.len() >= column_count {
+        capture
+            .column_widths_twips
+            .into_iter()
+            .take(column_count)
+            .collect()
+    } else {
+        vec![1440; column_count]
+    };
     let rows = capture
         .rows
         .into_iter()
@@ -736,7 +747,7 @@ fn nested_table_from_capture(
         })
         .collect::<Vec<_>>();
     Some(Table {
-        column_widths_twips: vec![1440; column_count],
+        column_widths_twips,
         rows,
         borders_visible: true,
         preserve_authored_widths: false,
@@ -11025,6 +11036,10 @@ impl Parser {
                 self.finish_nested_table_cell();
                 Ok(true)
             }
+            "cellx" => {
+                self.capture_nested_table_cell_boundary(control.parameter, offset)?;
+                Ok(true)
+            }
             "nestrow" | "row" => {
                 self.finish_nested_table_row();
                 self.state.table_nesting_level = 1;
@@ -11086,10 +11101,50 @@ impl Parser {
         self.finish_nested_table_cell();
         if let Some(row) = self.current_table_row.as_mut()
             && let Some(capture) = row.nested_table_capture.as_mut()
-            && !capture.current_row.is_empty()
         {
-            capture.rows.push(std::mem::take(&mut capture.current_row));
+            capture.current_row_right_edge_twips = 0;
+            if !capture.current_row.is_empty() {
+                capture.rows.push(std::mem::take(&mut capture.current_row));
+            }
         }
+    }
+
+    fn capture_nested_table_cell_boundary(
+        &mut self,
+        right_edge_twips: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let Some(right_edge_twips) = right_edge_twips else {
+            return Ok(());
+        };
+        let max_width_twips = self.limits().max_page_dimension_twips.max(1);
+        let max_cells = self.limits().max_table_cells;
+        let Some(row) = self.current_table_row.as_mut() else {
+            return Ok(());
+        };
+        let Some(capture) = row.nested_table_capture.as_mut() else {
+            return Ok(());
+        };
+        if right_edge_twips <= capture.current_row_right_edge_twips {
+            return Ok(());
+        }
+        let width_twips = right_edge_twips
+            .saturating_sub(capture.current_row_right_edge_twips)
+            .clamp(1, max_width_twips);
+        let column_index = capture.current_row.len();
+        if column_index >= max_cells {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "nested table cell widths".to_string(),
+                offset,
+            });
+        }
+        if capture.column_widths_twips.len() <= column_index {
+            capture.column_widths_twips.push(width_twips);
+        } else if let Some(width) = capture.column_widths_twips.get_mut(column_index) {
+            *width = (*width).max(width_twips);
+        }
+        capture.current_row_right_edge_twips = right_edge_twips;
+        Ok(())
     }
 
     fn capture_nested_table_text(&mut self, text: &str, offset: usize) -> Result<bool, ParseError> {
@@ -43711,7 +43766,7 @@ mod tests {
     #[test]
     fn normalizes_nested_table_cells_inside_outer_cell() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\cellx1000 {\b Inner A}\par\b0\nestcell\cellx2000 Inner B\nestrow} Outer after\cell\row}",
+            r"{\rtf1\trowd\cellx6000 Outer before {\trowd\itap2\cellx1000 {\b Inner A}\par\b0\nestcell\cellx3000 Inner B\nestrow} Outer after\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -43734,6 +43789,7 @@ mod tests {
             .expect("nested table should be normalized into the outer cell");
         assert_eq!(nested.rows.len(), 1);
         assert_eq!(nested.rows[0].cells.len(), 2);
+        assert_eq!(nested.column_widths_twips, vec![1000, 2000]);
         assert_eq!(
             nested.rows[0].cells[0].paragraphs[0].runs[0].text,
             "Inner A"
