@@ -745,13 +745,13 @@ struct PreparedTableRow {
     cell_spacings: Vec<ResolvedCellSpacing>,
     cell_text_directions: Vec<TableCellTextDirection>,
     row_height: f32,
-    render_nested_grids: bool,
 }
 
 #[derive(Debug, Clone)]
 struct PreparedCellLine {
     line: Line,
     style: ParagraphStyle,
+    paragraph_index: usize,
     is_first_line: bool,
     is_last_line: bool,
     space_before: f32,
@@ -4741,7 +4741,6 @@ fn split_prepared_table_row_fragment(
         cell_spacings: remaining.cell_spacings.clone(),
         cell_text_directions: remaining.cell_text_directions.clone(),
         row_height: 14.0,
-        render_nested_grids: remaining.render_nested_grids,
     };
     let mut consumed = Vec::with_capacity(remaining.cell_lines.len());
     for (idx, lines) in remaining.cell_lines.iter().enumerate() {
@@ -4788,7 +4787,6 @@ fn split_prepared_table_row_fragment(
     }
     fragment.row_height = prepared_table_row_content_height(&fragment);
     remaining.row_height = prepared_table_row_content_height(remaining);
-    remaining.render_nested_grids = false;
     Some(fragment)
 }
 
@@ -5157,6 +5155,7 @@ fn prepare_table_row(
                         .map(move |(idx, line)| PreparedCellLine {
                             line,
                             style: paragraph.style.clone(),
+                            paragraph_index: paragraph_idx,
                             is_first_line: idx == 0,
                             is_last_line: idx + 1 == line_count,
                             space_before: if idx == 0 {
@@ -5205,7 +5204,6 @@ fn prepare_table_row(
         cell_spacings,
         cell_text_directions,
         row_height,
-        render_nested_grids: true,
     }
 }
 
@@ -5363,14 +5361,15 @@ fn push_table_row(
                 cell.shading_pattern,
             );
         }
-        if prepared.render_nested_grids
-            && let Some(nested_table) = cell.nested_table.as_deref()
+        if let Some(nested_table) = cell.nested_table.as_deref()
+            && let Some(row_range) = nested_table_row_range(cell, lines_for_cell(prepared, idx))
         {
             let padding = prepared.cell_paddings[idx];
             push_nested_table_grid(
                 pages,
                 nested_table,
                 document,
+                row_range,
                 cell_left + padding.left,
                 cell_top - padding.top,
                 (cell_width - padding.left - padding.right).max(1.0),
@@ -5513,6 +5512,29 @@ fn push_table_row(
     }
 
     *cursor_y -= prepared.row_height;
+}
+
+fn lines_for_cell<'a>(prepared: &'a PreparedTableRow, index: usize) -> &'a [PreparedCellLine] {
+    prepared
+        .cell_lines
+        .get(index)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn nested_table_row_range(cell: &TableCell, lines: &[PreparedCellLine]) -> Option<(usize, usize)> {
+    let prefix = cell.paragraphs.len();
+    let mut range: Option<(usize, usize)> = None;
+    for line in lines {
+        let Some(row_index) = line.paragraph_index.checked_sub(prefix) else {
+            continue;
+        };
+        range = Some(match range {
+            Some((start, end)) => (start.min(row_index), end.max(row_index + 1)),
+            None => (row_index, row_index + 1),
+        });
+    }
+    range
 }
 
 fn paragraph_border_line_position(is_first_line: bool, is_last_line: bool) -> (usize, usize) {
@@ -5741,6 +5763,7 @@ fn push_nested_table_grid(
     pages: &mut [LayoutPage],
     table: &Table,
     document: &Document,
+    row_range: (usize, usize),
     left: f32,
     top: f32,
     width: f32,
@@ -5749,7 +5772,10 @@ fn push_nested_table_grid(
     let Some(page) = pages.last_mut() else {
         return;
     };
-    let row_count = table.rows.len().min(256);
+    let total_row_count = table.rows.len().min(256);
+    let row_start = row_range.0.min(total_row_count);
+    let row_end = row_range.1.min(total_row_count).max(row_start);
+    let row_count = row_end.saturating_sub(row_start);
     let column_count = table
         .rows
         .iter()
@@ -5768,25 +5794,36 @@ fn push_nested_table_grid(
         green: 0.65,
         blue: 0.65,
     };
-    let row_heights = nested_table_row_heights(table, row_count, height);
+    let row_heights = nested_table_row_heights(table, row_start, row_count, height);
     let column_widths = table_column_widths(table, column_count, width);
     let mut column_positions = Vec::with_capacity(column_count + 1);
     column_positions.push(left);
     for column_width in column_widths {
         column_positions.push(column_positions.last().copied().unwrap_or(left) + column_width);
     }
-    let has_explicit_borders = table.rows.iter().any(|row| {
-        row.cells.iter().any(|cell| {
-            cell.borders.top.visible
-                || cell.borders.right.visible
-                || cell.borders.bottom.visible
-                || cell.borders.left.visible
-                || cell.borders.diagonal_down.visible
-                || cell.borders.diagonal_up.visible
-        })
-    });
+    let has_explicit_borders = table
+        .rows
+        .iter()
+        .skip(row_start)
+        .take(row_count)
+        .any(|row| {
+            row.cells.iter().any(|cell| {
+                cell.borders.top.visible
+                    || cell.borders.right.visible
+                    || cell.borders.bottom.visible
+                    || cell.borders.left.visible
+                    || cell.borders.diagonal_down.visible
+                    || cell.borders.diagonal_up.visible
+            })
+        });
     if has_explicit_borders {
-        for (row_index, row) in table.rows.iter().take(row_count).enumerate() {
+        for (row_index, row) in table
+            .rows
+            .iter()
+            .skip(row_start)
+            .take(row_count)
+            .enumerate()
+        {
             let cell_top = top - row_heights[..row_index].iter().sum::<f32>();
             let cell_bottom = cell_top - row_heights[row_index];
             for column_index in 0..column_count {
@@ -5848,11 +5885,17 @@ fn push_nested_table_grid(
     }
 }
 
-fn nested_table_row_heights(table: &Table, row_count: usize, height: f32) -> Vec<f32> {
+fn nested_table_row_heights(
+    table: &Table,
+    row_start: usize,
+    row_count: usize,
+    height: f32,
+) -> Vec<f32> {
     let default_height = height / row_count as f32;
     let mut heights = table
         .rows
         .iter()
+        .skip(row_start)
         .take(row_count)
         .map(|row| {
             row.height_twips
@@ -14180,6 +14223,13 @@ mod tests {
             .filter(|item| matches!(item, LayoutItem::Line { .. }))
             .count();
         assert_eq!(line_count, 820);
+        assert!(layout.pages.iter().skip(1).all(|page| {
+            page.items
+                .iter()
+                .filter(|item| matches!(item, LayoutItem::Line { .. }))
+                .count()
+                > 4
+        }));
     }
 
     #[test]
