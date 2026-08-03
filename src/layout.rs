@@ -11260,7 +11260,12 @@ fn push_line_with_rotation(
             push_underline_items(
                 page,
                 run_x,
-                run_baseline_y - 2.0,
+                run_baseline_y
+                    - if style.underline == UnderlineStyle::Thick {
+                        2.8
+                    } else {
+                        2.0
+                    },
                 text_width,
                 &text,
                 &style,
@@ -12564,6 +12569,10 @@ fn measure_text_with_document_font(
         if is_zero_width_format_char(ch) {
             continue;
         }
+        if let Some(source_width) = source_dingbat_advance_points(source_font, ch, size) {
+            width += source_width;
+            continue;
+        }
         let font_width = font_provider
             .zip(source_font)
             .filter(|_| !matches!(family, PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats))
@@ -12573,6 +12582,43 @@ fn measure_text_with_document_font(
     }
     (width + character_spacing_width(text, style) + passive_kerning_width(text, style, family))
         * style.horizontal_scale()
+}
+
+fn source_dingbat_advance_points(font: Option<&FontDef>, ch: char, size: f32) -> Option<f32> {
+    let name = font?.name.to_ascii_lowercase();
+    let em = if name.contains("wingdings 3") || name.contains("wingdings3") {
+        match ch {
+            '\u{2190}' | '\u{2192}' => 0.89,
+            '\u{2191}' | '\u{2193}' => 0.602,
+            ch if ch.is_whitespace() => 1.0,
+            _ => return None,
+        }
+    } else if name.contains("wingdings 2") || name.contains("wingdings2") {
+        match ch {
+            '\u{2717}' => 0.645,
+            '\u{2713}' | '\u{2714}' => 0.766,
+            '\u{2610}' | '\u{2611}' | '\u{2612}' => 0.892,
+            ch if ch.is_whitespace() => 1.0,
+            _ => return None,
+        }
+    } else if name.contains("wingdings") {
+        match ch {
+            '\u{2610}' | '\u{2611}' | '\u{2612}' => 0.892,
+            '\u{2713}' | '\u{2714}' => 0.786,
+            '\u{2717}' => 0.635,
+            ch if ch.is_whitespace() => 1.0,
+            _ => return None,
+        }
+    } else if name.contains("webdings") {
+        match ch {
+            '\u{25a1}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{2713}' | '\u{2714}' => 1.0,
+            ch if ch.is_whitespace() => 0.5,
+            _ => return None,
+        }
+    } else {
+        return None;
+    };
+    Some(size * em)
 }
 
 fn supplied_font_glyph_metrics(
@@ -22851,6 +22897,37 @@ mod tests {
         assert!(layout.pages[0].items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::ZapfDingbats)
         ));
+    }
+
+    #[test]
+    fn measures_legacy_dingbat_glyphs_with_word_source_font_advances() {
+        let font = |name: &str| FontDef {
+            index: 1,
+            name: name.to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Tech,
+            pitch: FontPitch::Default,
+        };
+        let size = 12.0;
+
+        assert_eq!(
+            source_dingbat_advance_points(Some(&font("Wingdings 3")), ' ', size),
+            Some(12.0)
+        );
+        assert_eq!(
+            source_dingbat_advance_points(Some(&font("Wingdings 3")), '\u{2190}', size),
+            Some(10.68)
+        );
+        assert_eq!(
+            source_dingbat_advance_points(Some(&font("Webdings")), ' ', size),
+            Some(6.0)
+        );
+        assert_eq!(
+            source_dingbat_advance_points(Some(&font("Wingdings 2")), '\u{2611}', size),
+            Some(10.704)
+        );
     }
 
     #[test]

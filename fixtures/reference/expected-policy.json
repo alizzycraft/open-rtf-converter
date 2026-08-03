@@ -2275,7 +2275,7 @@
     {
       "id": "field-hyperlink-passive-result",
       "input": "fixtures/field-hyperlink-passive.rtf",
-      "category": "intentional_security_difference",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/field-hyperlink-passive.pdf",
       "word_reference_pages": [],
@@ -2323,7 +2323,7 @@
     {
       "id": "generated-reference-fields-passive-placeholders",
       "input": "fixtures/generated-reference-fields-passive.rtf",
-      "category": "intentional_security_difference",
+      "category": "must_match_closely",
       "word_reference_status": "pending_word_export",
       "word_reference_pdf": null,
       "word_reference_pages": [],
@@ -2374,7 +2374,7 @@
     {
       "id": "mail-merge-prompt-fields-passive-placeholders",
       "input": "fixtures/mail-merge-prompt-fields-passive.rtf",
-      "category": "intentional_security_difference",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/mail-merge-prompt-fields-passive.pdf",
       "word_reference_pages": [],
@@ -4560,11 +4560,11 @@
         "After form field."
       ],
       "intentional_security_differences": [
-        "Stored form field results are rendered with bounded passive fill shading instead of creating PDF form fields, widgets, actions, or executable macros.",
+        "Stored form field results render as ordinary passive text without creating PDF form fields, widgets, actions, or executable macros; Word's editor-only form shading is not printed.",
         "Form metadata, macro hooks, and datafield payloads are stripped before the PDF layer."
       ],
       "expected_diagnostics": [
-        "form-field shading rendered as bounded passive fill",
+        "form-field shading is editor-only and omitted from passive print output",
         "rendering stored result for passive form field FORMTEXT without creating PDF form actions"
       ],
       "forbidden_pdf_markers": [
@@ -4586,7 +4586,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact passive form shading bounds and color."
+        "The Word 16.0 reference contains no drawing objects because form-field shading is an editor display aid; converter print output now omits it identically, with only bundled Arial-compatible text metric drift remaining."
       ]
     },
     {
@@ -5470,7 +5470,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact associated-control bold/italic/color/underline/spacing/baseline rendering."
+        "Word-compatible low-ANSI associated controls now match Word's bold-italic red text, 1.2-point underline, natural spacing, and unshifted baseline; the converter intentionally adds an embedded-object removal placeholder where Word silently omits the malformed object, shifting subsequent flow by one line."
       ]
     },
     {
@@ -5816,7 +5816,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact copy/paste text extraction behavior for zero-width formatting marks."
+        "The registered Word reference and converter both omit all zero-width controls from visible and selectable PDF text without changing adjacent character spacing. Remaining sub-point vertical and width differences are the shared bundled Times-compatible font-metric residual."
       ]
     },
     {
@@ -5856,7 +5856,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Symbol glyph mapping, font metrics, and PDF text extraction behavior."
+        "The registered Word reference and converter visibly match the authored bullet, less-than-or-equal, plus/minus, and square-root glyphs. Word extracts the latter three as Symbol-font private-use code points; the converter intentionally exposes semantic Unicode characters for safer, meaningful copy/paste while retaining the same passive appearance."
       ]
     },
     {
@@ -5893,7 +5893,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact resultless SYMBOL field glyph mapping and field fallback behavior."
+        "The registered Word reference and converter both render resultless `SYMBOL 65` as an ordinary inline `A` with identical line flow and no drawings. The converter derives only the bounded passive glyph and strips the field instruction before PDF emission."
       ]
     },
     {
@@ -5907,11 +5907,11 @@
       "must_preserve_text": [
         "Before pntext list.",
         "Bullet item",
-        "I.Roman item",
+        "Roman item",
         "After pntext list."
       ],
       "intentional_security_differences": [
-        "Explicit pntext list markers are normalized into bounded passive paragraph text while stale pn metadata is ignored.",
+        "Word-compatible mode suppresses explicit pntext markers when the paired ignorable legacy pn metadata makes Word discard the compatibility-list construct; StrictSpec retains bounded marker recovery.",
         "Raw list marker controls, font table metadata, Symbol font metadata, and active link/action targets are stripped before PDF rendering."
       ],
       "expected_diagnostics": [],
@@ -5936,7 +5936,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact explicit pntext bullet and Roman marker spacing."
+        "The registered Word reference suppresses both paired legacy pntext markers and their hanging indents. Word-compatible output now matches its four-line flow and 36-point left origin; the remaining roughly one-point vertical difference is the shared bundled Arial-compatible metric residual."
       ]
     },
     {
@@ -5981,7 +5981,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Wingdings checkbox glyph mapping, checkbox vector geometry, and field fallback spacing."
+        "Word's Wingdings space glyph advances by a full 12-point em; the converter now preserves that measured spacing around bounded vectors. Remaining gaps are glyph geometry (notably source 0xA3 is Word's bullseye rather than an empty box) and the vector-expanded line height."
       ]
     },
     {
@@ -6021,13 +6021,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Wingdings 2 checkbox glyph mapping, checkbox vector geometry, and field fallback spacing."
+        "Word's Wingdings 2 spaces advance by a full 12-point em and its mapped checkbox advances are now preserved around bounded vectors. Remaining gaps are exact checkbox/check/X geometry and the vector-expanded line height."
       ]
     },
     {
       "id": "wingdings3-arrows-passive-symbol-encoding",
       "input": "fixtures/wingdings3-arrows-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wingdings3-arrows-passive.pdf",
       "word_reference_pages": [],
@@ -6060,7 +6060,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Wingdings 3 arrow glyph mapping, Symbol-encoded PDF output, and field fallback spacing."
+        "Wingdings 3 arrows are emitted as semantic Unicode through passive Symbol encoding, while measured source-font advances reproduce Word's full-em spaces and distinct horizontal/vertical arrow widths. Visible sequence endpoints are within 0.12 points; remaining vertical drift is the shared fallback-font metric residual."
       ]
     },
     {
@@ -6103,7 +6103,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Webdings checkbox glyph mapping, checkbox vector geometry, and field fallback spacing."
+        "Word's Webdings spaces advance by a measured half em and its checkbox-like glyphs by a full em; the converter now preserves those advances around bounded vectors. Remaining gaps are exact Webdings glyph geometry and the vector-expanded line height."
       ]
     },
     {
@@ -6164,10 +6164,11 @@
         "After form checkboxes."
       ],
       "intentional_security_differences": [
-        "FORMCHECKBOX fields are normalized into bounded passive checked/unchecked checkbox text and vector output without creating PDF form widgets.",
+        "FORMCHECKBOX fields preserve Word's blank printed position without creating PDF form widgets; StrictSpec retains bounded passive checkbox vectors.",
         "Raw form field metadata, macro hooks, datafield payloads, ZapfDingbats dependencies, and active PDF form/action features are stripped before PDF rendering."
       ],
       "expected_diagnostics": [
+        "form checkbox is editor-only and omitted from passive print output",
         "rendering passive form field FORMCHECKBOX without creating PDF form actions"
       ],
       "forbidden_pdf_markers": [
@@ -6198,7 +6199,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact checked and unchecked form checkbox vector geometry and label spacing."
+        "The Word 16.0 reference contains no checkbox drawing or glyph for either field; converter print output now matches that blank inline position, with only bundled Times-compatible text metric drift remaining."
       ]
     },
     {
@@ -6212,21 +6213,20 @@
       "must_preserve_text": [
         "Visible before form text and dropdown fields.",
         "Stored text Visible stored value",
-        "Default text Default",
-        "value empty text [Field removed: no passive result]",
-        "Dropdown Second",
-        "choice",
+        "Default text  empty text",
+        "Dropdown",
         "Visible after form text and dropdown fields."
       ],
       "intentional_security_differences": [
-        "FORMTEXT fields render stored results or bounded passive defaults without creating PDF form widgets.",
-        "FORMDROPDOWN fields render the selected bounded passive list entry without creating interactive PDF controls.",
+        "FORMTEXT fields render a stored result when present; resultless editor controls print as blank without creating PDF form widgets. StrictSpec retains bounded passive defaults.",
+        "Resultless FORMDROPDOWN editor controls print as blank without creating interactive PDF controls; StrictSpec retains the bounded selected-entry fallback.",
         "Raw form field metadata, macro hooks, datafield payloads, and active PDF form/action features are stripped before PDF rendering."
       ],
       "expected_diagnostics": [
         "rendering stored result for passive form field FORMTEXT without creating PDF form actions",
+        "form field FORMTEXT is editor-only and omitted from passive print output",
         "rendering passive form field FORMTEXT without creating PDF form actions",
-        "field FORMTEXT has no stored result and was not evaluated dynamically",
+        "form field FORMDROPDOWN is editor-only and omitted from passive print output",
         "rendering passive form field FORMDROPDOWN without creating PDF form actions"
       ],
       "forbidden_pdf_markers": [
@@ -6265,7 +6265,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact FORMTEXT default spacing, Unicode form value glyph rendering, and FORMDROPDOWN selected-entry spacing."
+        "The Word 16.0 reference prints only the stored FORMTEXT result; resultless FORMTEXT defaults, empty text controls, and FORMDROPDOWN selections are blank. Converter output now matches its five-line flow and zero drawings, with only bundled Times-compatible metric drift remaining."
       ]
     },
     {

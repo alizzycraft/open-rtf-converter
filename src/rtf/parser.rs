@@ -66,6 +66,14 @@ pub struct ParseOutput {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CharacterSelector {
+    Unspecified,
+    LowAnsi,
+    HighAnsi,
+    DoubleByte,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct ParserState {
     character: CharacterStyle,
@@ -88,6 +96,7 @@ struct ParserState {
     current_tab_leader: TabLeader,
     current_tab_alignment: TabAlignment,
     code_page: CodePage,
+    character_selector: CharacterSelector,
     unicode_skip: usize,
     pending_unicode_high_surrogate: Option<u16>,
     skip_bytes: usize,
@@ -246,6 +255,7 @@ impl Default for ParserState {
             current_tab_leader: TabLeader::None,
             current_tab_alignment: TabAlignment::Left,
             code_page: CodePage::Windows1252,
+            character_selector: CharacterSelector::Unspecified,
             unicode_skip: 1,
             pending_unicode_high_surrogate: None,
             skip_bytes: 0,
@@ -1783,6 +1793,7 @@ struct Parser {
     current_list_override_level: Option<ListLevelOverride>,
     list_counters: Vec<ListCounter>,
     pending_old_style_list_marker: Option<OldStyleListMarker>,
+    suppress_word_legacy_list_paragraph: bool,
     field_sequence_counters: Vec<FieldSequenceCounter>,
     field_auto_number_counter: i32,
     field_list_number_counters: Vec<FieldSequenceCounter>,
@@ -1995,6 +2006,7 @@ impl Parser {
             current_list_override_level: None,
             list_counters: Vec::new(),
             pending_old_style_list_marker: None,
+            suppress_word_legacy_list_paragraph: false,
             field_sequence_counters: Vec::new(),
             field_auto_number_counter: 0,
             field_list_number_counters: Vec::new(),
@@ -3043,6 +3055,16 @@ impl Parser {
         let visible_ignorable_list_marker_destination = control_follows_ignorable_destination_marker
             && matches!(control.name.as_str(), "listtext" | "pntext")
             && destination_allows_visible_old_style_list_marker(&self.state);
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+            && control_follows_ignorable_destination_marker
+            && control.name == "pn"
+            && (!self.pending_list_marker.is_empty() || !self.pending_list_marker_runs.is_empty())
+        {
+            self.pending_list_marker.clear();
+            self.pending_list_marker_runs.clear();
+            self.pending_old_style_list_marker = None;
+            self.suppress_word_legacy_list_paragraph = true;
+        }
         if control_follows_ignorable_destination_marker
             && control.name != "*"
             && !visible_ignorable_list_marker_destination
@@ -5480,11 +5502,26 @@ impl Parser {
             "sbkeven" => self.state.section_break_kind = SectionBreakKind::EvenPage,
             "sbkodd" => self.state.section_break_kind = SectionBreakKind::OddPage,
             "sbkcol" => self.state.section_break_kind = SectionBreakKind::Column,
+            "loch" => self.state.character_selector = CharacterSelector::LowAnsi,
+            "hich" => self.state.character_selector = CharacterSelector::HighAnsi,
+            "dbch" => self.state.character_selector = CharacterSelector::DoubleByte,
             "b" | "ab" => self.state.character.bold = control.parameter.unwrap_or(1) != 0,
             "i" | "ai" => self.state.character.italic = control.parameter.unwrap_or(1) != 0,
-            "ul" | "aul" => {
+            "ul" => {
                 self.state.character.underline = if control.parameter.unwrap_or(1) == 0 {
                     UnderlineStyle::None
+                } else {
+                    UnderlineStyle::Single
+                }
+            }
+            "aul" => {
+                self.state.character.underline = if control.parameter.unwrap_or(1) == 0 {
+                    UnderlineStyle::None
+                } else if self.options.compatibility_mode
+                    == CompatibilityMode::WordCompatiblePassive
+                    && self.state.character_selector == CharacterSelector::LowAnsi
+                {
+                    UnderlineStyle::Thick
                 } else {
                     UnderlineStyle::Single
                 }
@@ -5624,12 +5661,16 @@ impl Parser {
                 self.state.character.font_size_scale_percent = 100;
             }
             "aup" => {
-                self.state.character.baseline_shift_half_points = control
-                    .parameter
-                    .unwrap_or(6)
-                    .max(0)
-                    .min(MAX_BASELINE_SHIFT_HALF_POINTS);
-                self.state.character.font_size_scale_percent = 100;
+                if self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive
+                    || self.state.character_selector != CharacterSelector::LowAnsi
+                {
+                    self.state.character.baseline_shift_half_points = control
+                        .parameter
+                        .unwrap_or(6)
+                        .max(0)
+                        .min(MAX_BASELINE_SHIFT_HALF_POINTS);
+                    self.state.character.font_size_scale_percent = 100;
+                }
             }
             "dn" => {
                 self.state.character.baseline_shift_half_points = -control
@@ -5640,12 +5681,16 @@ impl Parser {
                 self.state.character.font_size_scale_percent = 100;
             }
             "adn" => {
-                self.state.character.baseline_shift_half_points = -control
-                    .parameter
-                    .unwrap_or(6)
-                    .max(0)
-                    .min(MAX_BASELINE_SHIFT_HALF_POINTS);
-                self.state.character.font_size_scale_percent = 100;
+                if self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive
+                    || self.state.character_selector != CharacterSelector::LowAnsi
+                {
+                    self.state.character.baseline_shift_half_points = -control
+                        .parameter
+                        .unwrap_or(6)
+                        .max(0)
+                        .min(MAX_BASELINE_SHIFT_HALF_POINTS);
+                    self.state.character.font_size_scale_percent = 100;
+                }
             }
             "expnd" => {
                 let half_points = control.parameter.unwrap_or(0);
@@ -5657,9 +5702,13 @@ impl Parser {
                     self.clamp_character_spacing(control.parameter.unwrap_or(0), offset);
             }
             "aexpnd" => {
-                let quarter_points = control.parameter.unwrap_or(0);
-                self.state.character.character_spacing_twips =
-                    self.clamp_character_spacing(quarter_points.saturating_mul(5), offset);
+                if self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive
+                    || self.state.character_selector != CharacterSelector::LowAnsi
+                {
+                    let quarter_points = control.parameter.unwrap_or(0);
+                    self.state.character.character_spacing_twips =
+                        self.clamp_character_spacing(quarter_points.saturating_mul(5), offset);
+                }
             }
             "kerning" => {
                 self.state.character.character_kerning_half_points =
@@ -5798,16 +5847,20 @@ impl Parser {
             "dropcapli" => self.set_drop_cap_lines(control.parameter, offset),
             "dropcapt" => self.set_drop_cap_type(control.parameter),
             "li" | "lin" => {
-                self.state.paragraph.left_indent_twips =
-                    self.clamp_paragraph_indent(control.parameter, "left indent", offset)
+                if !self.suppress_word_legacy_list_paragraph {
+                    self.state.paragraph.left_indent_twips =
+                        self.clamp_paragraph_indent(control.parameter, "left indent", offset)
+                }
             }
             "ri" | "rin" => {
                 self.state.paragraph.right_indent_twips =
                     self.clamp_paragraph_indent(control.parameter, "right indent", offset)
             }
             "fi" => {
-                self.state.paragraph.first_line_indent_twips =
-                    self.clamp_paragraph_indent(control.parameter, "first-line indent", offset)
+                if !self.suppress_word_legacy_list_paragraph {
+                    self.state.paragraph.first_line_indent_twips =
+                        self.clamp_paragraph_indent(control.parameter, "first-line indent", offset)
+                }
             }
             "fin" => {}
             "sb" => {
@@ -5891,8 +5944,15 @@ impl Parser {
                     .push(Diagnostic::warning(message, Some(offset)));
             }
             "formshade" => {
-                self.form_field_shading = control.parameter.unwrap_or(1) != 0;
-                if self.form_field_shading {
+                let requested = control.parameter.unwrap_or(1) != 0;
+                self.form_field_shading = requested
+                    && self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive;
+                if requested && !self.form_field_shading {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "form-field shading is editor-only and omitted from passive print output",
+                        Some(offset),
+                    ));
+                } else if self.form_field_shading {
                     self.diagnostics.push(Diagnostic::warning(
                         "form-field shading rendered as bounded passive fill",
                         Some(offset),
@@ -10190,6 +10250,34 @@ impl Parser {
             self.passive_revision_number_field_result()
         } else if field_instruction_name(instruction) == Some("FILESIZE") {
             self.passive_file_size_field_result()
+        } else if field_instruction_name(instruction)
+            .is_some_and(|name| matches!(name, "FORMTEXT" | "FORMDROPDOWN"))
+            && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+        {
+            let name = field_instruction_name(instruction).expect("matched form field name");
+            self.diagnostics.push(Diagnostic::warning(
+                format!("form field {name} is editor-only and omitted from passive print output"),
+                Some(offset),
+            ));
+            Some(PassiveFieldResult {
+                text: String::new(),
+                font_name: None,
+                font_size_half_points: None,
+                form_field: true,
+            })
+        } else if field_instruction_name(instruction) == Some("FORMCHECKBOX")
+            && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+        {
+            self.diagnostics.push(Diagnostic::warning(
+                "form checkbox is editor-only and omitted from passive print output",
+                Some(offset),
+            ));
+            Some(PassiveFieldResult {
+                text: String::new(),
+                font_name: None,
+                font_size_half_points: None,
+                form_field: true,
+            })
         } else {
             passive_field_result(
                 instruction,
@@ -10894,6 +10982,7 @@ impl Parser {
 
     fn finish_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
         self.flush_pending_paragraph_list_marker(offset)?;
+        self.suppress_word_legacy_list_paragraph = false;
         let paragraph_style_index = self.state.paragraph_style_index;
         let suppress_incomplete_word_drop_cap = self.options.compatibility_mode
             == CompatibilityMode::WordCompatiblePassive
@@ -50452,7 +50541,7 @@ After\par}"#;
     }
 
     #[test]
-    fn ignored_pn_metadata_does_not_override_explicit_pntext_marker() {
+    fn word_suppresses_pntext_marker_when_ignorable_pn_metadata_follows() {
         let output = parse_rtf(
             r"{\rtf1{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}{\pntext\pard\plain\f1 \'b7\tab}{\*\pn\pnlvlblt\pnf1{\pntxtb \'b7}}\pard\fi-360\li360\tx360 Bullet item\par{\pntext I.\tab}{\*\pn\pnucrm{\pntxta .}}\pard\fi-720\li720\tx720 Roman item\par}",
         )
@@ -50466,14 +50555,44 @@ After\par}"#;
             _ => panic!("expected list paragraph"),
         };
 
-        assert_eq!(paragraph_text(0), "\u{2022}\tBullet item");
-        assert_eq!(paragraph_text(1), "I.\tRoman item");
+        assert_eq!(paragraph_text(0), "Bullet item");
+        assert_eq!(paragraph_text(1), "Roman item");
+        let paragraph_style = |index: usize| match &output.document.blocks[index] {
+            Block::Paragraph(paragraph) => &paragraph.style,
+            _ => panic!("expected list paragraph"),
+        };
+        assert_eq!(paragraph_style(0).left_indent_twips, 0);
+        assert_eq!(paragraph_style(0).first_line_indent_twips, 0);
+        assert_eq!(paragraph_style(1).left_indent_twips, 0);
+        assert_eq!(paragraph_style(1).first_line_indent_twips, 0);
         assert!(
             output
                 .diagnostics
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
+    }
+
+    #[test]
+    fn strict_spec_retains_explicit_pntext_marker_and_indents() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}{\pntext\pard\plain\f1 \'b7\tab}{\*\pn\pnlvlblt\pnf1{\pntxtb \'b7}}\pard\fi-360\li360\tx360 Bullet item\par}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected list paragraph"),
+        };
+        assert_eq!(
+            paragraph_plain_text(paragraph).as_deref(),
+            Some("\u{2022}\tBullet item")
+        );
+        assert_eq!(paragraph.style.left_indent_twips, 360);
+        assert_eq!(paragraph.style.first_line_indent_twips, -360);
     }
 
     #[test]
@@ -52163,9 +52282,14 @@ After\par}"#;
     }
 
     #[test]
-    fn resultless_form_text_renders_passive_default_without_metadata() {
-        let output = parse_rtf(
-            r#"{\rtf1 Before {\field{\*\fldinst FORMTEXT}{\formfield{\fftype0}{\ffname HiddenName}{\ffdeftext Default \u937? value}{\ffentrymcr launch.exe}{\datafield 414243}}} After\par}"#,
+    fn strict_spec_resultless_form_text_renders_passive_default_without_metadata() {
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br#"{\rtf1 Before {\field{\*\fldinst FORMTEXT}{\formfield{\fftype0}{\ffname HiddenName}{\ffdeftext Default \u937? value}{\ffentrymcr launch.exe}{\datafield 414243}}} After\par}"#,
+            &options,
         )
         .unwrap();
         let text = document_text(&output.document);
@@ -52191,18 +52315,23 @@ After\par}"#;
     }
 
     #[test]
-    fn resultless_form_text_without_default_uses_existing_placeholder_policy() {
+    fn resultless_form_text_without_default_is_blank_in_word_compatible_output() {
         let output = parse_rtf(
             r"{\rtf1 Before {\field{\*\fldinst FORMTEXT}{\formfield{\fftype0}}} After\par}",
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Before [Field removed: no passive result] After"));
+        assert!(text.contains("Before  After"));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "form field FORMTEXT is editor-only and omitted from passive print output",
+            )
+        }));
     }
 
     #[test]
-    fn resultless_form_checkbox_renders_passive_glyph_without_metadata() {
+    fn resultless_form_checkbox_is_blank_in_word_compatible_print_output() {
         let output = parse_rtf(
             r#"{\rtf1 Before {\field{\*\fldinst FORMCHECKBOX}{\formfield{\fftype1}{\ffname HiddenName}{\ffdefres0}{\ffres1}{\ffentrymcr launch.exe}{\datafield 414243}}} After\par}"#,
         )
@@ -52210,17 +52339,16 @@ After\par}"#;
         let text = document_text(&output.document);
 
         assert!(
-            text.contains("Before \u{2611} After"),
+            text.contains("Before  After"),
             "normalized text was {text:?}; diagnostics were {:?}",
             output.diagnostics
         );
-        assert!(
-            output
-                .document
-                .fonts
-                .iter()
-                .any(|font| font.name == "ZapfDingbats")
-        );
+        assert!(!text.contains(['\u{2610}', '\u{2611}']));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("form checkbox is editor-only and omitted from passive print output")
+        }));
         for forbidden in [
             "FORMCHECKBOX",
             "HiddenName",
@@ -52237,23 +52365,28 @@ After\par}"#;
     }
 
     #[test]
-    fn resultless_form_checkbox_defaults_to_unchecked_passive_glyph() {
+    fn resultless_form_checkbox_defaults_to_blank_word_compatible_output() {
         let output =
             parse_rtf(r"{\rtf1{\field{\*\fldinst FORMCHECKBOX}{\formfield{\fftype1}}}\par}")
                 .unwrap();
         let text = document_text(&output.document);
 
         assert!(
-            text.contains("\u{2610}"),
+            text.is_empty(),
             "normalized text was {text:?}; diagnostics were {:?}",
             output.diagnostics
         );
     }
 
     #[test]
-    fn resultless_form_checkbox_uses_bounded_passive_size_metadata() {
-        let output = parse_rtf(
-            r#"{\rtf1\fs20 Before {\field{\*\fldinst FORMCHECKBOX}{\formfield{\fftype1}{\ffres1}{\ffhps40}{\ffentrymcr launch.exe}{\datafield 414243}}} After\par}"#,
+    fn strict_spec_form_checkbox_uses_bounded_passive_size_metadata() {
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br#"{\rtf1\fs20 Before {\field{\*\fldinst FORMCHECKBOX}{\formfield{\fftype1}{\ffres1}{\ffhps40}{\ffentrymcr launch.exe}{\datafield 414243}}} After\par}"#,
+            &options,
         )
         .unwrap();
         let paragraph = match output.document.blocks.first().expect("paragraph") {
@@ -52285,9 +52418,14 @@ After\par}"#;
     }
 
     #[test]
-    fn resultless_form_dropdown_renders_selected_entry_without_metadata() {
-        let output = parse_rtf(
-            r#"{\rtf1 Before {\field{\*\fldinst FORMDROPDOWN}{\formfield{\fftype2}{\ffname HiddenName}{\ffdefres0}{\ffres1}{\*\ffl First choice}{\*\ffl Second \u937? choice}{\ffentrymcr launch.exe}{\datafield 414243}}} After\par}"#,
+    fn strict_spec_form_dropdown_renders_selected_entry_without_metadata() {
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br#"{\rtf1 Before {\field{\*\fldinst FORMDROPDOWN}{\formfield{\fftype2}{\ffname HiddenName}{\ffdefres0}{\ffres1}{\*\ffl First choice}{\*\ffl Second \u937? choice}{\ffentrymcr launch.exe}{\datafield 414243}}} After\par}"#,
+            &options,
         )
         .unwrap();
         let text = document_text(&output.document);

@@ -1031,7 +1031,7 @@ fn table_row_padding_renders_passively_without_control_leakage() {
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("table-row-padding.rtf");
     let output_path = dir.path().join("table-row-padding.pdf");
-    fs::write(&input_path, input).unwrap();
+    fs::write(&input_path, &input).unwrap();
     convert_rtf_file_to_pdf(
         &input_path,
         &output_path,
@@ -4841,8 +4841,10 @@ fn ignored_pn_metadata_after_explicit_markers_does_not_leak_or_override_visible_
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("Title text"));
-    assert!(text.contains("\u{2022}\tBullet item"));
-    assert!(text.contains("I.\tRoman item"));
+    assert!(text.contains("Bullet item"));
+    assert!(text.contains("Roman item"));
+    assert!(!text.contains("\u{2022}"));
+    assert!(!text.contains("I.\t"));
     assert!(!text.contains(".Title"));
     assert!(!text.contains("\u{2022}\u{2022}"));
     assert!(!text.contains("I.\t.Roman"));
@@ -4887,10 +4889,7 @@ fn ignored_pn_metadata_after_explicit_markers_does_not_leak_or_override_visible_
         rendered_text.contains("Bullet item"),
         "decoded PDF text did not contain bullet item text: {rendered_text:?}"
     );
-    assert!(
-        rendered_text.contains("I.Roman item"),
-        "decoded PDF text did not contain explicit roman marker: {rendered_text:?}"
-    );
+    assert!(!rendered_text.contains("I.Roman item"));
     assert!(
         !rendered_text.contains("I..Roman"),
         "ignored pn suffix metadata should not become visible punctuation: {rendered_text:?}"
@@ -17527,7 +17526,7 @@ fn form_field_metadata_does_not_create_pdf_forms_or_leak_payloads() {
 }
 
 #[test]
-fn form_field_macros_obey_reject_policy_without_breaking_passive_defaults() {
+fn form_field_macros_obey_reject_policy_with_word_compatible_blank_defaults() {
     let input = rtf(&[
         "{",
         "\\",
@@ -17554,7 +17553,7 @@ fn form_field_macros_obey_reject_policy_without_breaking_passive_defaults() {
 
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("Before Passive default After"));
+    assert!(text.contains("Before  After"));
     assert!(!text.contains("launch.exe"));
     assert!(!text.contains("https://example.com/macro"));
 
@@ -17576,7 +17575,7 @@ fn form_field_macros_obey_reject_policy_without_breaking_passive_defaults() {
 }
 
 #[test]
-fn resultless_form_text_renders_default_without_metadata_or_pdf_form() {
+fn resultless_form_text_is_blank_in_word_compatible_pdf_without_metadata() {
     let input = rtf(&[
         "{",
         "\\",
@@ -17607,11 +17606,11 @@ fn resultless_form_text_renders_default_without_metadata_or_pdf_form() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Before Default value After"));
+    assert!(text.contains("Before  After"));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("rendering passive form field FORMTEXT without creating PDF form actions")
+            .contains("form field FORMTEXT is editor-only and omitted from passive print output")
     }));
     for forbidden in [
         "FORMTEXT",
@@ -17647,7 +17646,7 @@ fn resultless_form_text_renders_default_without_metadata_or_pdf_form() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
 
-    assert!(decoded_pdf_text(&content).contains("Before Default value After"));
+    assert!(decoded_pdf_text(&content).contains("Before  After"));
     for forbidden in [
         b"FORMTEXT".as_slice(),
         b"HiddenName",
@@ -17675,7 +17674,7 @@ fn resultless_form_text_renders_default_without_metadata_or_pdf_form() {
 }
 
 #[test]
-fn formshade_renders_passive_form_field_background_without_pdf_form() {
+fn formshade_is_omitted_from_word_compatible_print_output_without_pdf_form() {
     let input = rtf(&[
         "{",
         "\\",
@@ -17709,14 +17708,13 @@ fn formshade_renders_passive_form_field_background_without_pdf_form() {
         Block::Paragraph(paragraph) => paragraph,
         other => panic!("expected paragraph, got {other:?}"),
     };
-    let form_run = paragraph
-        .runs
-        .iter()
-        .find(|run| run.text == "Default value")
-        .expect("form default run");
-
-    assert!(text.contains("Before Default value After"));
-    assert!(form_run.style.form_field_shading);
+    assert!(text.contains("Before  After"));
+    assert!(
+        paragraph
+            .runs
+            .iter()
+            .all(|run| !run.style.form_field_shading)
+    );
     assert!(parsed.diagnostics.iter().all(|diagnostic| {
         !diagnostic
             .message
@@ -17725,7 +17723,7 @@ fn formshade_renders_passive_form_field_background_without_pdf_form() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("form-field shading rendered as bounded passive fill")
+            .contains("form-field shading is editor-only and omitted from passive print output")
     }));
     for forbidden in [
         "FORMTEXT",
@@ -17753,20 +17751,37 @@ fn formshade_renders_passive_form_field_background_without_pdf_form() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(rendered_text.contains("Before Default value After"));
+    assert!(rendered_text.contains("Before  After"));
     assert!(
         content
+            .operations
+            .iter()
+            .all(|operation| operation.operator != "re")
+    );
+    let strict_output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let strict_pdf = PdfDocument::load_mem(&strict_output.pdf).unwrap();
+    let strict_page_id = *strict_pdf.get_pages().values().next().expect("strict page");
+    let strict_content = strict_pdf
+        .get_and_decode_page_content(strict_page_id)
+        .unwrap();
+    assert!(decoded_pdf_text(&strict_content).contains("Before Default value After"));
+    assert!(
+        strict_content
             .operations
             .iter()
             .any(|operation| operation.operator == "re"),
-        "form shading should render as a passive rectangle"
-    );
-    assert!(
-        content
-            .operations
-            .iter()
-            .any(|operation| operation.operator == "f"),
-        "form shading should render as a passive fill"
+        "StrictSpec should retain bounded passive form-field shading"
     );
     for forbidden in [
         b"FORMTEXT".as_slice(),
@@ -17794,7 +17809,7 @@ fn formshade_renders_passive_form_field_background_without_pdf_form() {
 }
 
 #[test]
-fn formshade_applies_to_stored_form_field_result_without_pdf_form() {
+fn formshade_is_omitted_from_stored_form_field_result_in_word_compatible_output() {
     let input = rtf(&[
         "{",
         "\\",
@@ -17833,18 +17848,18 @@ fn formshade_applies_to_stored_form_field_result_without_pdf_form() {
     let form_run = paragraph
         .runs
         .iter()
-        .find(|run| run.text == "Visible value")
+        .find(|run| run.text.contains("Visible value"))
         .expect("stored form result run");
 
     assert!(text.contains("Before Visible value After"));
     assert!(
-        form_run.style.form_field_shading,
-        "stored form-field result should carry passive shading style"
+        !form_run.style.form_field_shading,
+        "stored form-field result should omit editor-only shading in print output"
     );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("form-field shading rendered as bounded passive fill")
+            .contains("form-field shading is editor-only and omitted from passive print output")
     }));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains(
@@ -17887,15 +17902,7 @@ fn formshade_applies_to_stored_form_field_result_without_pdf_form() {
         content
             .operations
             .iter()
-            .any(|operation| operation.operator == "re"),
-        "stored form shading should render as a passive rectangle"
-    );
-    assert!(
-        content
-            .operations
-            .iter()
-            .any(|operation| operation.operator == "f"),
-        "stored form shading should render as a passive fill"
+            .all(|operation| operation.operator != "re")
     );
     for forbidden in [
         b"FORMTEXT".as_slice(),
@@ -17924,7 +17931,7 @@ fn formshade_applies_to_stored_form_field_result_without_pdf_form() {
 }
 
 #[test]
-fn resultless_form_checkbox_renders_passively_without_metadata_or_pdf_form() {
+fn resultless_form_checkbox_is_blank_in_word_compatible_pdf_without_metadata() {
     let input = rtf(&[
         "{",
         "\\",
@@ -17955,19 +17962,17 @@ fn resultless_form_checkbox_renders_passively_without_metadata_or_pdf_form() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Before \u{2611} After"));
+    assert!(text.contains("Before  After"));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
             .contains("rendering passive form field FORMCHECKBOX without creating PDF form actions")
     }));
-    assert!(
-        parsed
-            .document
-            .fonts
-            .iter()
-            .any(|font| font.name == "ZapfDingbats")
-    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("form checkbox is editor-only and omitted from passive print output")
+    }));
     for forbidden in [
         "FORMCHECKBOX",
         "HiddenName",
@@ -17985,7 +17990,7 @@ fn resultless_form_checkbox_renders_passively_without_metadata_or_pdf_form() {
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("form-checkbox.rtf");
     let output_path = dir.path().join("form-checkbox.pdf");
-    fs::write(&input_path, input).unwrap();
+    fs::write(&input_path, &input).unwrap();
     convert_rtf_file_to_pdf(
         &input_path,
         &output_path,
@@ -18008,11 +18013,29 @@ fn resultless_form_checkbox_renders_passively_without_metadata_or_pdf_form() {
 
     assert!(rendered_text.contains("Before "));
     assert!(rendered_text.contains(" After"));
-    assert!(
-        stroke_count >= 1,
-        "checked checkbox should draw vector strokes"
+    assert_eq!(stroke_count, 0, "Word-compatible checkbox should not print");
+    let strict_output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let strict_pdf = PdfDocument::load_mem(&strict_output.pdf).unwrap();
+    let strict_page_id = *strict_pdf.get_pages().values().next().expect("strict page");
+    let strict_content = strict_pdf
+        .get_and_decode_page_content(strict_page_id)
+        .unwrap();
+    assert_passive_checkbox_vectors_without_zapf(
+        &strict_output.pdf,
+        &strict_content,
+        "StrictSpec checked form checkbox",
     );
-    assert_passive_checkbox_vectors_without_zapf(&pdf, &content, "checked form checkbox");
     for forbidden in [
         b"FORMCHECKBOX".as_slice(),
         b"HiddenName",
@@ -18038,7 +18061,7 @@ fn resultless_form_checkbox_renders_passively_without_metadata_or_pdf_form() {
 }
 
 #[test]
-fn unchecked_form_checkbox_renders_passive_font_glyph_without_pdf_form() {
+fn unchecked_form_checkbox_is_blank_in_word_compatible_pdf() {
     let input = rtf(&[
         "{",
         "\\",
@@ -18067,14 +18090,7 @@ fn unchecked_form_checkbox_renders_passive_font_glyph_without_pdf_form() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Before \u{2610} After"));
-    assert!(
-        parsed
-            .document
-            .fonts
-            .iter()
-            .any(|font| font.name == "ZapfDingbats")
-    );
+    assert!(text.contains("Before  After"));
     for forbidden in [
         "FORMCHECKBOX",
         "HiddenUnchecked",
@@ -18110,7 +18126,12 @@ fn unchecked_form_checkbox_renders_passive_font_glyph_without_pdf_form() {
 
     assert!(rendered_text.contains("Before "));
     assert!(rendered_text.contains(" After"));
-    assert_passive_checkbox_vectors_without_zapf(&pdf, &content, "unchecked form checkbox");
+    assert!(
+        content
+            .operations
+            .iter()
+            .all(|operation| operation.operator != "S")
+    );
     for forbidden in [
         b"FORMCHECKBOX".as_slice(),
         b"HiddenUnchecked",
@@ -18136,7 +18157,7 @@ fn unchecked_form_checkbox_renders_passive_font_glyph_without_pdf_form() {
 }
 
 #[test]
-fn sized_form_checkbox_renders_passive_glyph_size_without_metadata_or_pdf_form() {
+fn sized_form_checkbox_is_blank_in_word_compatible_pdf_without_metadata() {
     let input = rtf(&[
         "{",
         "\\",
@@ -18166,11 +18187,9 @@ fn sized_form_checkbox_renders_passive_glyph_size_without_metadata_or_pdf_form()
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    let checkbox_style = run_style_for_text(&parsed.document, "\u{2611}").expect("checkbox run");
-    let before_style = run_style_for_text(&parsed.document, "Before ").expect("ambient run");
+    let before_style = run_style_for_text(&parsed.document, "Before  After").expect("ambient run");
 
-    assert!(text.contains("Before \u{2611} After"));
-    assert_eq!(checkbox_style.font_size_half_points, 40);
+    assert!(text.contains("Before  After"));
     assert_eq!(before_style.font_size_half_points, 20);
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -18193,7 +18212,12 @@ fn sized_form_checkbox_renders_passive_glyph_size_without_metadata_or_pdf_form()
 
     assert!(rendered_text.contains("Before "));
     assert!(rendered_text.contains(" After"));
-    assert_passive_checkbox_vectors_without_zapf(&output.pdf, &content, "sized form checkbox");
+    assert!(
+        content
+            .operations
+            .iter()
+            .all(|operation| operation.operator != "S")
+    );
     for forbidden in [
         b"FORMCHECKBOX".as_slice(),
         b"ffhps",
@@ -18221,7 +18245,7 @@ fn sized_form_checkbox_renders_passive_glyph_size_without_metadata_or_pdf_form()
 }
 
 #[test]
-fn resultless_form_dropdown_renders_selected_entry_without_metadata_or_pdf_form() {
+fn resultless_form_dropdown_is_blank_in_word_compatible_pdf_without_metadata() {
     let input = rtf(&[
         "{",
         "\\",
@@ -18260,11 +18284,11 @@ fn resultless_form_dropdown_renders_selected_entry_without_metadata_or_pdf_form(
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Before Second choice After"));
+    assert!(text.contains("Before  After"));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("rendering passive form field FORMDROPDOWN without creating PDF form actions")
+        diagnostic.message.contains(
+            "form field FORMDROPDOWN is editor-only and omitted from passive print output",
+        )
     }));
     for forbidden in [
         "FORMDROPDOWN",
@@ -18299,7 +18323,7 @@ fn resultless_form_dropdown_renders_selected_entry_without_metadata_or_pdf_form(
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
 
-    assert!(decoded_pdf_text(&content).contains("Before Second choice After"));
+    assert!(decoded_pdf_text(&content).contains("Before  After"));
     for forbidden in [
         b"FORMDROPDOWN".as_slice(),
         b"HiddenName",
@@ -19813,9 +19837,22 @@ fn associated_character_properties_render_passively_without_control_leakage() {
     assert!(styled.style.bold);
     assert!(styled.style.italic);
     assert_eq!(styled.style.color_index, 1);
-    assert_eq!(styled.style.underline, UnderlineStyle::Single);
-    assert_eq!(styled.style.character_spacing_twips, 20);
-    assert_eq!(styled.style.baseline_shift_half_points, 6);
+    assert_eq!(styled.style.underline, UnderlineStyle::Thick);
+    assert_eq!(styled.style.character_spacing_twips, 0);
+    assert_eq!(styled.style.baseline_shift_half_points, 0);
+    let strict = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    let strict_style = run_style_for_text(&strict.document, "Associated styled")
+        .expect("StrictSpec associated style");
+    assert_eq!(strict_style.character_spacing_twips, 20);
+    assert_eq!(strict_style.baseline_shift_half_points, 6);
+    assert_eq!(strict_style.underline, UnderlineStyle::Single);
     for forbidden in ["acf1", "aul", "aexpnd4", "aup6", "objdata", "414243"] {
         assert!(
             !text.contains(forbidden),

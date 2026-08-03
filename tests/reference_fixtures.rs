@@ -3501,7 +3501,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[],
             must_emit_diagnostics: &[
-                "form-field shading rendered as bounded passive fill",
+                "form-field shading is editor-only and omitted from passive print output",
                 "rendering stored result for passive form field FORMTEXT without creating PDF form actions",
             ],
         },
@@ -4406,7 +4406,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_preserve_text: &[
                 "Before pntext list.",
                 "Bullet item",
-                "I.Roman item",
+                "Roman item",
                 "After pntext list.",
             ],
             must_not_leak: &[
@@ -4618,6 +4618,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[],
             must_emit_diagnostics: &[
+                "form checkbox is editor-only and omitted from passive print output",
                 "rendering passive form field FORMCHECKBOX without creating PDF form actions",
             ],
         },
@@ -4627,10 +4628,8 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_preserve_text: &[
                 "Visible before form text and dropdown fields.",
                 "Stored text Visible stored value",
-                "Default text Default",
-                "value empty text [Field removed: no passive result]",
-                "Dropdown Second",
-                "choice",
+                "Default text  empty text",
+                "Dropdown",
                 "Visible after form text and dropdown fields.",
             ],
             must_not_leak: &[
@@ -4670,8 +4669,9 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_contain_pdf: &[],
             must_emit_diagnostics: &[
                 "rendering stored result for passive form field FORMTEXT without creating PDF form actions",
+                "form field FORMTEXT is editor-only and omitted from passive print output",
                 "rendering passive form field FORMTEXT without creating PDF form actions",
-                "field FORMTEXT has no stored result and was not evaluated dynamically",
+                "form field FORMDROPDOWN is editor-only and omitted from passive print output",
                 "rendering passive form field FORMDROPDOWN without creating PDF form actions",
             ],
         },
