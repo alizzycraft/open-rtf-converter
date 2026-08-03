@@ -278,7 +278,7 @@ fn available_word_reference_pdfs_match_manifest_contract() {
                     fixture.input
                 );
                 let rendered_text = decoded_pdf_text(&pdf);
-                for expected in &fixture.must_preserve_text {
+                for expected in &fixture.word_must_preserve_text {
                     assert!(
                         rendered_text.contains(expected),
                         "{} Word reference PDF did not contain {:?}",
@@ -448,6 +448,7 @@ struct ManifestReferenceFixture {
     word_reference_pdf: Option<String>,
     expected_pages: usize,
     must_preserve_text: Vec<String>,
+    word_must_preserve_text: Vec<String>,
     must_not_leak: Vec<String>,
     must_contain_pdf: Vec<String>,
     must_emit_diagnostics: Vec<String>,
@@ -466,15 +467,22 @@ fn manifest_reference_fixtures() -> Vec<ManifestReferenceFixture> {
     let fixtures = json_array_for_key(MANIFEST, "fixtures");
     split_json_objects(fixtures)
         .into_iter()
-        .map(|object| ManifestReferenceFixture {
-            input: json_string_for_key(object, "input"),
-            word_reference_status: json_string_for_key(object, "word_reference_status"),
-            word_reference_pdf: json_nullable_string_for_key(object, "word_reference_pdf"),
-            expected_pages: json_usize_for_key(object, "expected_pages"),
-            must_preserve_text: json_string_array_for_key(object, "must_preserve_text"),
-            must_not_leak: json_string_array_for_key(object, "forbidden_pdf_markers"),
-            must_contain_pdf: json_string_array_for_key(object, "expected_pdf_markers"),
-            must_emit_diagnostics: json_string_array_for_key(object, "expected_diagnostics"),
+        .map(|object| {
+            let must_preserve_text = json_string_array_for_key(object, "must_preserve_text");
+            let word_must_preserve_text =
+                json_optional_string_array_for_key(object, "word_must_preserve_text")
+                    .unwrap_or_else(|| must_preserve_text.clone());
+            ManifestReferenceFixture {
+                input: json_string_for_key(object, "input"),
+                word_reference_status: json_string_for_key(object, "word_reference_status"),
+                word_reference_pdf: json_nullable_string_for_key(object, "word_reference_pdf"),
+                expected_pages: json_usize_for_key(object, "expected_pages"),
+                must_preserve_text,
+                word_must_preserve_text,
+                must_not_leak: json_string_array_for_key(object, "forbidden_pdf_markers"),
+                must_contain_pdf: json_string_array_for_key(object, "expected_pdf_markers"),
+                must_emit_diagnostics: json_string_array_for_key(object, "expected_diagnostics"),
+            }
         })
         .collect()
 }
@@ -6027,6 +6035,12 @@ fn json_string_array_for_key(object: &str, key: &str) -> Vec<String> {
         rest = &rest[consumed..];
     }
     values
+}
+
+fn json_optional_string_array_for_key(object: &str, key: &str) -> Option<Vec<String>> {
+    object
+        .contains(&format!("\"{key}\":"))
+        .then(|| json_string_array_for_key(object, key))
 }
 
 fn json_array_for_key<'a>(object: &'a str, key: &str) -> &'a str {

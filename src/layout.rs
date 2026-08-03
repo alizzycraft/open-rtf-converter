@@ -10542,7 +10542,9 @@ fn is_passive_bullet_text(text: &str) -> bool {
 
 fn font_family_for_style(document: &Document, style: &CharacterStyle) -> PdfFontFamily {
     let Some(font) = font_for_style(document, style) else {
-        return PdfFontFamily::Helvetica;
+        // Legacy Word-compatible RTF rendering uses Times New Roman when the
+        // document provides no usable font table/default-font definition.
+        return PdfFontFamily::Times;
     };
     passive_pdf_font_family_for_font(font)
 }
@@ -21326,6 +21328,29 @@ mod tests {
                 .iter()
                 .any(|item| matches!(item, LayoutItem::Text(fragment) if fragment.font_family == PdfFontFamily::Symbol))
         );
+    }
+
+    #[test]
+    fn uses_word_legacy_serif_default_without_a_font_table() {
+        let mut document = Document::default();
+        document.fonts.clear();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Default text".to_string(),
+                style: CharacterStyle::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let family = layout.pages[0].items.iter().find_map(|item| match item {
+            LayoutItem::Text(fragment) if !fragment.text.trim().is_empty() => {
+                Some(fragment.font_family)
+            }
+            _ => None,
+        });
+
+        assert_eq!(family, Some(PdfFontFamily::Times));
     }
 
     #[test]

@@ -1869,9 +1869,14 @@ fn parse_footnote_reference_marker_id(text: &str) -> Option<usize> {
 impl Parser {
     fn new(tokens: Vec<Token>, options: RtfParseOptions) -> Self {
         let state = ParserState::default();
+        let mut document = Document::default();
+        if let Some(default_font) = document.fonts.iter_mut().find(|font| font.index == 0) {
+            default_font.name = "Times New Roman".to_string();
+            default_font.family = FontFamilyHint::Roman;
+        }
         Self {
             tokens,
-            document: Document::default(),
+            document,
             default_font_index: 0,
             form_field_shading: false,
             default_paragraph_style: state.paragraph.clone(),
@@ -44473,6 +44478,15 @@ mod tests {
         assert_eq!(font_for("Default"), 1);
         assert_eq!(font_for("Sans"), 0);
         assert_eq!(font_for("Back"), 1);
+    }
+
+    #[test]
+    fn fontless_rtf_uses_word_legacy_default_font() {
+        let output = parse_rtf(r"{\rtf1\ansi Default text\par}").unwrap();
+
+        assert_eq!(output.document.fonts[0].index, 0);
+        assert_eq!(output.document.fonts[0].name, "Times New Roman");
+        assert_eq!(output.document.fonts[0].family, FontFamilyHint::Roman);
     }
 
     #[test]

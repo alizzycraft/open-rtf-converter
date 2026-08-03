@@ -6224,9 +6224,17 @@
       "id": "active-control-fields-passive-placeholders",
       "input": "fixtures/active-control-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/active-control-fields-passive.pdf",
       "word_reference_pages": [],
+      "word_must_preserve_text": [
+        "Visible before active controls.",
+        "Button",
+        "Checkbox Error! Bookmark not defined.",
+        "Input Error! Bookmark not defined.",
+        "Select Error! Bookmark not defined.",
+        "Visible after active controls."
+      ],
       "expected_pages": 1,
       "must_preserve_text": [
         "Visible before active controls.",
@@ -6270,7 +6278,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm surrounding text flow and placeholder positioning for active control fields once available."
+        "The converter intentionally emits bounded passive placeholders where Word renders active-field error text; exact inline spacing is therefore not a parity target for this security fixture."
       ]
     },
     {
