@@ -3441,7 +3441,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
         },
         ReferenceFixture {
             input: "fixtures/hyphenation-passive.rtf",
-            expected_pages: 5,
+            expected_pages: 1,
             must_preserve_text: &[
                 "Antidisestabli-",
                 "shmentarian-",
@@ -3461,6 +3461,8 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "document hyphenation rendered as bounded passive soft hyphenation",
                 "paragraph hyphenation rendered as bounded passive soft hyphenation",
+                "top margin 720720 twips exceeds",
+                "bottom margin 720720 twips exceeds",
             ],
         },
         ReferenceFixture {

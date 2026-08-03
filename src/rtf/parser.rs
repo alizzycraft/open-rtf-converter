@@ -6666,13 +6666,19 @@ impl Parser {
         label: &str,
         offset: usize,
     ) -> i32 {
-        self.clamp_page_value(
-            value.unwrap_or(default),
-            0,
-            self.limits().max_page_margin_twips,
-            label,
-            offset,
-        )
+        let value = value.unwrap_or(default);
+        let max = self.limits().max_page_margin_twips.max(0);
+        if value > max {
+            let recovered = default.clamp(0, max);
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "{label} {value} twips exceeds the configured {max}-twip limit; using default {recovered} twips"
+                ),
+                Some(offset),
+            ));
+            return recovered;
+        }
+        self.clamp_page_value(value, 0, max, label, offset)
     }
 
     fn clamp_header_footer_distance(
@@ -54146,8 +54152,31 @@ After\par}"#;
             output
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.message.contains("right margin clamped"))
+                .any(|diagnostic| diagnostic.message.contains("right margin"))
         );
+    }
+
+    #[test]
+    fn recovers_extreme_page_margins_to_bounded_defaults() {
+        let output = parse_rtf(
+            r"{\rtf1\paperw3000\paperh20000\margl720\margr720\margt720720\margb720720 Body\par}",
+        )
+        .unwrap();
+
+        assert_eq!(output.document.page.margin_left_twips, 720);
+        assert_eq!(output.document.page.margin_right_twips, 720);
+        assert_eq!(output.document.page.margin_top_twips, 1_440);
+        assert_eq!(output.document.page.margin_bottom_twips, 1_440);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("top margin 720720 twips exceeds")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("bottom margin 720720 twips exceeds")
+        }));
     }
 
     #[test]

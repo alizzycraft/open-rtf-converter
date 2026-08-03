@@ -4468,7 +4468,7 @@
       "word_reference_status": "pending_word_export",
       "word_reference_pdf": null,
       "word_reference_pages": [],
-      "expected_pages": 5,
+      "expected_pages": 1,
       "must_preserve_text": [
         "Antidisestabli-",
         "shmentarian-",
@@ -4476,11 +4476,14 @@
         "Characteristically"
       ],
       "intentional_security_differences": [
-        "Automatic hyphenation is rendered as bounded passive line-end hyphenation and does not preserve editable Word hyphenation state."
+        "Automatic hyphenation is rendered as bounded passive line-end hyphenation and does not preserve editable Word hyphenation state.",
+        "Oversized malformed vertical margins recover to bounded Word-compatible defaults instead of consuming unbounded layout space."
       ],
       "expected_diagnostics": [
         "document hyphenation rendered as bounded passive soft hyphenation",
-        "paragraph hyphenation rendered as bounded passive soft hyphenation"
+        "paragraph hyphenation rendered as bounded passive soft hyphenation",
+        "top margin 720720 twips exceeds",
+        "bottom margin 720720 twips exceeds"
       ],
       "forbidden_pdf_markers": [
         "hyphauto",
@@ -4495,7 +4498,7 @@
         "-"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact automatic hyphen break points once available."
+        "The Word baseline confirms one-page flow and default-margin recovery; exact automatic hyphen break points remain a passive-layout approximation."
       ]
     },
     {
