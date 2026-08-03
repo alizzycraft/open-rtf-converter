@@ -7009,15 +7009,17 @@ impl Parser {
         if value == 0 {
             return None;
         }
-        let max = self.limits().max_line_spacing_twips;
-        let clamped = value.clamp(-max, max);
-        if clamped != value {
+        let max = self.limits().max_line_spacing_twips.max(0);
+        if value.unsigned_abs() > max as u32 {
             self.diagnostics.push(Diagnostic::warning(
-                format!("line spacing clamped from {value} to {clamped} twips"),
+                format!(
+                    "line spacing {value} twips exceeds the configured {max}-twip limit; using automatic line spacing"
+                ),
                 Some(offset),
             ));
+            return None;
         }
-        Some(clamped)
+        Some(value)
     }
 
     fn push_tab_stop(&mut self, value: Option<i32>, offset: usize) -> Result<(), ParseError> {
@@ -55098,7 +55100,7 @@ After\par}"#;
     }
 
     #[test]
-    fn clamps_extreme_line_spacing_controls() {
+    fn recovers_extreme_line_spacing_controls_as_automatic() {
         let options = RtfParseOptions {
             limits: RtfLimits {
                 max_line_spacing_twips: 720,
@@ -55114,12 +55116,12 @@ After\par}"#;
             _ => panic!("expected paragraph"),
         };
 
-        assert_eq!(paragraph.style.line_spacing_twips, Some(720));
+        assert_eq!(paragraph.style.line_spacing_twips, None);
         assert!(
             output
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.message.contains("line spacing clamped"))
+                .any(|diagnostic| diagnostic.message.contains("using automatic line spacing"))
         );
     }
 

@@ -3280,7 +3280,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
         },
         ReferenceFixture {
             input: "fixtures/line-spacing-passive.rtf",
-            expected_pages: 2,
+            expected_pages: 1,
             must_preserve_text: &[
                 "Before line spacing.",
                 "Double spaced line one",
@@ -3305,7 +3305,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/Annots",
             ],
             must_contain_pdf: &[],
-            must_emit_diagnostics: &["line spacing clamped"],
+            must_emit_diagnostics: &["using automatic line spacing"],
         },
         ReferenceFixture {
             input: "fixtures/soft-breaks-passive.rtf",

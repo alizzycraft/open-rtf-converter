@@ -63,6 +63,14 @@ fn converts_rtf_bytes_to_pdf_without_filesystem_core_api() {
 }
 
 #[test]
+fn word_compatible_extreme_line_spacing_stays_on_one_page() {
+    let input = fs::read("fixtures/line-spacing-passive.rtf").unwrap();
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::default()).unwrap();
+
+    assert_eq!(output.pages, 1);
+}
+
+#[test]
 fn browser_safe_defaults_use_stricter_pdf_output_limit() {
     assert_eq!(RtfLimits::default().max_pdf_output_bytes, 100 * 1024 * 1024);
     assert_eq!(RtfLimits::default().max_document_blocks, 1_000_000);

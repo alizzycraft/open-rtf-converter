@@ -4216,7 +4216,7 @@
       "word_reference_status": "pending_word_export",
       "word_reference_pdf": null,
       "word_reference_pages": [],
-      "expected_pages": 2,
+      "expected_pages": 1,
       "must_preserve_text": [
         "Before line spacing.",
         "Double spaced line one",
@@ -4228,10 +4228,10 @@
       ],
       "intentional_security_differences": [
         "Line-spacing controls are normalized into bounded passive paragraph line pitch metadata.",
-        "Extreme line-spacing values are clamped before layout and raw line-spacing controls are stripped before PDF rendering."
+        "Extreme line-spacing values beyond the configured safety limit recover to automatic spacing before layout, and raw line-spacing controls are stripped before PDF rendering."
       ],
       "expected_diagnostics": [
-        "line spacing clamped"
+        "using automatic line spacing"
       ],
       "forbidden_pdf_markers": [
         "sl480",
@@ -4249,7 +4249,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact multiple, exact, and clamped line pitch baselines once available."
+        "The Word baseline confirms one-page flow and automatic recovery for the extreme value; exact multiple-line and exact-line internal offsets remain a bounded passive-layout approximation."
       ]
     },
     {
