@@ -5732,13 +5732,20 @@ impl Parser {
             "cf" | "acf" => {
                 self.state.character.color_index = control.parameter.unwrap_or(0).max(0) as usize
             }
-            "highlight" | "cb" | "chcbpat" => {
+            "highlight" | "cb" => {
                 let color_index = control.parameter.unwrap_or(0).max(0) as usize;
                 self.state.character.highlight_index = if color_index == 0 {
                     None
                 } else {
                     Some(color_index)
                 };
+            }
+            "chcbpat" => {
+                let color_index = control.parameter.unwrap_or(0).max(0) as usize;
+                // Unlike \highlight0, Word interprets \chcbpat0 as the
+                // automatic (black) character-shading color. It becomes
+                // visible when \chshdng supplies a partial intensity.
+                self.state.character.highlight_index = Some(color_index);
             }
             "chshdng" => {
                 self.state.character.highlight_shading_basis_points =
@@ -35078,6 +35085,7 @@ fn push_emf_text_command(
         x: text.x,
         y: text.y,
         height: normalized_emf_text_height(state.font_height, header, coordinates),
+        bold: false,
         text: text.text,
         color: state.text_color,
         background_color: if text.opaque_bounds.is_none() {
@@ -38501,6 +38509,7 @@ enum WmfObject {
     Font {
         height: i32,
         charset: Option<i32>,
+        bold: bool,
     },
     Other,
 }
@@ -38526,6 +38535,7 @@ struct WmfDrawingState {
     text_word_extra: f32,
     font_height: Option<i32>,
     font_charset: Option<i32>,
+    font_bold: bool,
     stroke_rop2: u16,
     text_horizontal_align: StaticImageTextHorizontalAlign,
     text_vertical_align: StaticImageTextVerticalAlign,
@@ -38568,11 +38578,16 @@ impl Default for WmfDrawingState {
                 green: 255,
                 blue: 255,
             }),
-            text_background_mode: WmfTextBackgroundMode::Transparent,
+            // A fresh GDI device context starts in OPAQUE background mode.
+            // Word preserves that stock state when exporting fontless WMF text.
+            text_background_mode: WmfTextBackgroundMode::Opaque,
             text_character_extra: 0.0,
             text_word_extra: 0.0,
             font_height: None,
             font_charset: None,
+            // A fresh metafile DC uses the stock SYSTEM_FONT. Word's passive
+            // export maps that stock face to an Arial-compatible bold font.
+            font_bold: true,
             stroke_rop2: WMF_ROP2_COPYPEN,
             text_horizontal_align: StaticImageTextHorizontalAlign::Left,
             text_vertical_align: StaticImageTextVerticalAlign::Top,
@@ -40315,9 +40330,14 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                                 state.fill_color = color;
                                 state.fill_pattern = pattern;
                             }
-                            WmfObject::Font { height, charset } => {
+                            WmfObject::Font {
+                                height,
+                                charset,
+                                bold,
+                            } => {
                                 state.font_height = Some(height);
                                 state.font_charset = charset;
+                                state.font_bold = bold;
                             }
                             WmfObject::Other => {
                                 skipped_record_count = skipped_record_count.checked_add(1)?
@@ -40801,6 +40821,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                         x,
                         y,
                         height: normalized_wmf_text_height(state.font_height, window_height),
+                        bold: state.font_bold,
                         text,
                         color: state.text_color,
                         background_color: match state.text_background_mode {
@@ -40864,7 +40885,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                                     state.font_height,
                                     window_height,
                                 ),
-                                text: ext_text.text,
+                                bold: state.font_bold,
                                 color: state.text_color,
                                 background_color: if ext_text.opaque_bounds.is_none() {
                                     match state.text_background_mode {
@@ -40884,7 +40905,22 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                                         }
                                     },
                                 ),
-                                character_extra: state.text_character_extra,
+                                character_extra: if state.font_height.is_none()
+                                    && state.text_character_extra == 0.0
+                                    && state.text_word_extra == 0.0
+                                    && ext_text.text.chars().count() > 1
+                                {
+                                    // Word's stock-font recovery for a fontless
+                                    // META_EXTTEXTOUT advances each subsequent
+                                    // glyph by one metafile frame width. The
+                                    // renderer clips that advance to the passive
+                                    // image frame, matching GDI export without
+                                    // reading beyond the bounded record.
+                                    window_width.max(1) as f32
+                                } else {
+                                    state.text_character_extra
+                                },
+                                text: ext_text.text,
                                 word_extra: state.text_word_extra,
                                 horizontal_align: state.text_horizontal_align,
                                 vertical_align: state.text_vertical_align,
@@ -41319,8 +41355,13 @@ fn wmf_hatch_shading_pattern(hatch: u16) -> ShadingPattern {
 
 fn parse_wmf_font_object(data: &[u8]) -> Option<WmfObject> {
     let height = i32::from(read_le_i16(data, 0)?);
+    let bold = read_le_i16(data, 8).is_some_and(|weight| weight >= 600);
     let charset = data.get(13).copied().map(i32::from);
-    Some(WmfObject::Font { height, charset })
+    Some(WmfObject::Font {
+        height,
+        charset,
+        bold,
+    })
 }
 
 fn parse_wmf_palette_object(data: &[u8]) -> Option<WmfObject> {
@@ -42974,7 +43015,10 @@ fn sanitize_wmf_text_bytes_allow_empty(bytes: &[u8], font_charset: Option<i32>) 
 }
 
 fn normalized_wmf_text_height(font_height: Option<i32>, window_height: i32) -> f32 {
-    let fallback = (window_height.max(1) as f32 / 12.0).clamp(4.0, 48.0);
+    // GDI's stock SYSTEM_FONT is roughly 6.52 points in Word's ordinary
+    // 36-point inline metafile frame. Keep that ratio in normalized source
+    // coordinates so display scaling remains bounded and deterministic.
+    let fallback = (window_height.max(1) as f32 / 5.52).clamp(4.0, 48.0);
     font_height
         .map(|height| height.unsigned_abs().max(1) as f32)
         .unwrap_or(fallback)
@@ -55194,7 +55238,7 @@ After\par}"#;
     #[test]
     fn normalizes_foreground_and_background_color_controls() {
         let output = parse_rtf(
-            r"{\rtf1{\colortbl;\red255\green0\blue0;\red0\green255\blue0;}{\cf1 Red} {\highlight2 Marked} {\highlight0 Plain} {\cb2 Shaded} {\chshdng5000\chcbpat2 Tinted}\par}",
+            r"{\rtf1{\colortbl;\red255\green0\blue0;\red0\green255\blue0;}{\cf1 Red} {\highlight2 Marked} {\highlight0 Plain} {\cb2 Shaded} {\chshdng5000\chcbpat2 Tinted} {\chshdng5000\chcbpat0 Automatic}\par}",
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -55237,6 +55281,14 @@ After\par}"#;
             .expect("tinted run");
         assert_eq!(tinted.style.highlight_index, Some(2));
         assert_eq!(tinted.style.highlight_shading_basis_points, 5_000);
+
+        let automatic = paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.trim() == "Automatic")
+            .expect("automatic-color shaded run");
+        assert_eq!(automatic.style.highlight_index, Some(0));
+        assert_eq!(automatic.style.highlight_shading_basis_points, 5_000);
     }
 
     #[test]
@@ -60638,6 +60690,7 @@ After\par}"#;
                 x: 40.0,
                 y: 20.0,
                 height: 6.6666665,
+                bold: false,
                 text: "Hi\u{2019}".to_string(),
                 color: Some(Color {
                     red: 17,
@@ -60894,6 +60947,7 @@ After\par}"#;
                     x: 40.0,
                     y: 20.0,
                     height: 6.6666665,
+                    bold: false,
                     text: "Hi".to_string(),
                     color: Some(Color::default()),
                     background_color: None,

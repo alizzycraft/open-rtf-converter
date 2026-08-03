@@ -71,6 +71,33 @@ fn inline_wmf_picture_stays_in_its_surrounding_safe_paragraph() {
         1
     );
     assert_eq!(parsed.document.inline_image_block_indices.len(), 1);
+    let command = parsed.document.inline_images[0]
+        .vector_commands
+        .iter()
+        .find_map(|command| match command {
+            StaticImageVectorCommand::Text {
+                height,
+                bold,
+                text,
+                background_color,
+                character_extra,
+                ..
+            } => Some((height, bold, text, background_color, character_extra)),
+            _ => None,
+        })
+        .expect("fontless WMF text command");
+    assert!((command.0 - (80.0 / 5.52)).abs() < 0.01);
+    assert!(*command.1, "Word maps the stock SYSTEM_FONT to bold Arial");
+    assert_eq!(command.2, "Hi");
+    assert_eq!(
+        *command.3,
+        Some(Color {
+            red: 255,
+            green: 255,
+            blue: 255
+        })
+    );
+    assert_eq!(*command.4, 160.0);
     let paragraph = parsed
         .document
         .blocks
@@ -107,6 +134,15 @@ fn inline_wmf_picture_stays_in_its_surrounding_safe_paragraph() {
         })
         .expect("following inline text");
     assert!((after.x - 201.36).abs() < 0.2, "x={}", after.x);
+
+    let converted = convert_rtf_to_pdf(&input, &ConvertOptions::default()).unwrap();
+    assert!(
+        converted
+            .pdf
+            .windows(b"/BaseFont /Helvetica-Bold".len())
+            .any(|window| window == b"/BaseFont /Helvetica-Bold"),
+        "bold WMF text must register its requested passive PDF font resource"
+    );
 }
 
 #[cfg(not(feature = "cli"))]
@@ -23672,18 +23708,14 @@ fn office_math_border_boxes_render_passive_character_borders_without_control_lea
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("Before x+1 After"));
-    let passive_strokes = content
+    let passive_rectangles = content
         .operations
-        .windows(3)
-        .filter(|operations| {
-            operations[0].operator == "m"
-                && operations[1].operator == "l"
-                && operations[2].operator == "S"
-        })
+        .iter()
+        .filter(|operation| operation.operator == "re")
         .count();
     assert!(
-        passive_strokes >= 4,
-        "Office math border box should render as passive line strokes, got {passive_strokes}"
+        passive_rectangles >= 4,
+        "Office math border box should render as passive filled rectangles, got {passive_rectangles}"
     );
     for forbidden in [
         b"mmath".as_slice(),
@@ -72143,12 +72175,12 @@ fn character_borders_are_bounded_passive_pdf_lines() {
         content
             .operations
             .iter()
-            .filter(|operation| operation.operator == "S")
+            .filter(|operation| operation.operator == "re")
             .count()
             >= 4
     );
     assert!(content.operations.iter().any(|operation| {
-        operation.operator == "RG"
+        operation.operator == "rg"
             && operation.operands.len() == 3
             && pdf_operand_number(&operation.operands[0]).is_some_and(|value| value > 0.9)
             && pdf_operand_number(&operation.operands[1]).is_some_and(|value| value < 0.01)

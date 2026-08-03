@@ -332,7 +332,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The bounded inline-image model now matches Word's 72-by-36-point in-paragraph image slot and line flow. Converter origins for `Before WMF text.`, `After WMF `, and the wrapped final `text.` are within 0.23 points horizontally and 0.02 points vertically of Word. The remaining WMF-specific text gap is isolated: Word paints a clipped 6.52-point bold `H` at `(147.58,44.55)`, while the converter paints both `Hi` characters in 4-point Helvetica at `(147.35,44.70)`. Exact metafile font selection and clipping remains pending.",
+        "The bounded inline-image model matches Word's 72-by-36-point in-paragraph image slot. Fontless WMF EXTTEXTOUT now recovers Word's stock bold face, 6.52-point scale, opaque background state, and frame-bounded character advance, so both PDFs visibly paint only the clipped `H`. The converter glyph starts within 0.24 points of Word; its Base14 Helvetica-Bold box extends about 1.69 points lower than Word's embedded Arial Bold box. Broader bundled/system text metrics remain a separate line-flow refinement.",
         "The converter intentionally supports only a hardened passive WMF text subset; unsupported WMF text options remain placeholder or stripped."
       ]
     },
@@ -2032,7 +2032,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact floating table anchor offsets, wrap distance, and no-overlap placement."
+        "The positioned rows now share Word's margin-relative floating origin, wrap margins affect only the surrounding exclusion, and an immediately preceding paragraph receives bounded exclusion lookahead. All visible text line breaks match Word; text origins remain within about 0.86 points vertically and 0.08 points horizontally because of bundled Arial-compatible metrics."
       ]
     },
     {
@@ -3843,16 +3843,14 @@
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/no-wrap-passive.pdf",
       "word_reference_pages": [],
-      "expected_pages": 2,
-      "word_expected_pages": 1,
+      "expected_pages": 1,
       "must_preserve_text": [
         "Alias Alpha Beta",
         "Alias wrapped paragraph",
         "Direct Alpha Beta",
         "Direct wrapped paragraph",
         "Cell Alpha Beta",
-        "Cell wrapped content",
-        "After passive no wrap."
+        "Cell wrapped content"
       ],
       "intentional_security_differences": [
         "Paragraph and table-cell no-wrap controls are normalized into bounded passive line-breaking metadata.",
@@ -3876,7 +3874,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word starts the final fixed-height table row in the remaining page area and clips it at the page boundary; the converter currently moves the bounded row to page 2."
+        "The converter matches Word's bounded recovery by starting the terminal authored-height no-wrap row in the remaining page area, clipping it at the physical page boundary, and suppressing later body flow until an explicit page or section boundary."
       ]
     },
     {
@@ -4497,10 +4495,10 @@
       ],
       "expected_pdf_markers": [
         " rg",
-        " S"
+        " re"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact highlight bounds, character shading tint, border spacing, and clamped border width."
+        "Word-backed highlight, shading, and clamped solid-border geometry is implemented; remaining text-origin drift is under one point from the bundled Times-compatible Base14 metrics."
       ]
     },
     {

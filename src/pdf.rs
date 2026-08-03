@@ -1249,7 +1249,7 @@ fn draw_text_layout_item(
             TextRenderingMode::Fill,
         );
     }
-    if fragment.style.relief != TextRelief::None {
+    let (final_dx, final_dy) = if fragment.style.relief != TextRelief::None {
         let offset = relief_offset(&fragment.style);
         let (first_color, first_dx, first_dy, second_color, second_dx, second_dy) =
             relief_layers(fragment.color, fragment.style.relief, offset);
@@ -1281,7 +1281,10 @@ fn draw_text_layout_item(
             encoded,
             TextRenderingMode::Fill,
         );
-    }
+        (-offset, offset)
+    } else {
+        (0.0, 0.0)
+    };
     set_fill_color(content, fragment.color);
     if fragment.style.outline {
         set_stroke_color(content, fragment.color);
@@ -1294,8 +1297,8 @@ fn draw_text_layout_item(
         passive_kerning_family,
         &fragment.style,
         fragment.word_spacing,
-        fragment.x,
-        fragment.baseline_y,
+        fragment.x + final_dx,
+        fragment.baseline_y + final_dy,
         fragment.rotation,
         encoded,
         if fragment.style.outline {
@@ -1329,6 +1332,9 @@ fn draw_image_layout_item(
     };
     *image_ref_cursor = (*image_ref_cursor).saturating_add(1);
     let draw = image_draw_rect(fragment);
+    if draw.fully_cropped {
+        return;
+    }
     content.save_state();
     if draw.clipped {
         content.rect(fragment.x, fragment.y, fragment.width, fragment.height);
@@ -1401,13 +1407,17 @@ fn collect_used_font_indexes_for_page(
         {
             mark_used_font_resource(&mut used, HELVETICA_REGULAR);
         }
-        if fragment
-            .image
-            .vector_commands
-            .iter()
-            .any(|command| matches!(command, StaticImageVectorCommand::Text { .. }))
-        {
-            mark_used_font_resource(&mut used, HELVETICA_REGULAR);
+        for command in &fragment.image.vector_commands {
+            if let StaticImageVectorCommand::Text { bold, .. } = command {
+                mark_used_font_resource(
+                    &mut used,
+                    if *bold {
+                        HELVETICA_BOLD
+                    } else {
+                        HELVETICA_REGULAR
+                    },
+                );
+            }
         }
     });
     used_font_index_list(&used)
@@ -1720,8 +1730,10 @@ fn supplied_text_encoding_parts_for_text(
         .filter(|(_, asset)| supplied_font_asset_matches_font(asset, source_font))
         .filter_map(|(asset_index, asset)| {
             let (glyphs, encoded) = encode_text_with_font_asset(text, asset)?;
+            let family_priority = supplied_font_asset_match_priority(asset, source_font)?;
             (!glyphs.is_empty()).then(|| {
                 (
+                    family_priority,
                     supplied_font_style_mismatch_score(asset.style, &fragment.style),
                     asset_index,
                     glyphs,
@@ -1729,8 +1741,10 @@ fn supplied_text_encoding_parts_for_text(
                 )
             })
         })
-        .min_by_key(|(score, asset_index, _, _)| (*score, *asset_index))
-        .map(|(_, asset_index, glyphs, encoded)| (asset_index, glyphs, encoded))
+        .min_by_key(|(family_priority, score, asset_index, _, _)| {
+            (*family_priority, *score, *asset_index)
+        })
+        .map(|(_, _, asset_index, glyphs, encoded)| (asset_index, glyphs, encoded))
 }
 
 fn supplied_font_asset_matches_font(asset: &FontAsset, font: &crate::model::FontDef) -> bool {
@@ -1739,6 +1753,18 @@ fn supplied_font_asset_matches_font(asset: &FontAsset, font: &crate::model::Font
             .alternate_name
             .as_deref()
             .is_some_and(|alternate| asset.matches_family(alternate))
+}
+
+fn supplied_font_asset_match_priority(
+    asset: &FontAsset,
+    font: &crate::model::FontDef,
+) -> Option<u8> {
+    let primary = asset.family_match_priority(&font.name);
+    let alternate = font
+        .alternate_name
+        .as_deref()
+        .and_then(|name| asset.family_match_priority(name));
+    primary.into_iter().chain(alternate).min()
 }
 
 fn supplied_pdf_font_base_name(asset: &FontAsset, font_index: usize) -> Vec<u8> {
@@ -1887,6 +1913,7 @@ struct ImageDrawRect {
     width: f32,
     height: f32,
     clipped: bool,
+    fully_cropped: bool,
 }
 
 fn image_draw_rect(fragment: &crate::layout::ImageFragment) -> ImageDrawRect {
@@ -1902,11 +1929,36 @@ fn image_draw_rect(fragment: &crate::layout::ImageFragment) -> ImageDrawRect {
         .unwrap_or(fragment.image.height_px)
         .max(1) as f32
         * 0.75;
+    let (crop_basis_width, crop_basis_height) = match (
+        fragment.image.display_width_twips,
+        fragment.image.display_height_twips,
+    ) {
+        (Some(width), Some(height)) => (twips_to_points(width), twips_to_points(height)),
+        (Some(width), None) => {
+            let width = twips_to_points(width);
+            (width, width * natural_height / natural_width)
+        }
+        (None, Some(height)) => {
+            let height = twips_to_points(height);
+            (height * natural_width / natural_height, height)
+        }
+        (None, None) => (natural_width, natural_height),
+    };
     let crop = fragment.image.crop;
-    let mut left = twips_to_points(crop.left_twips.max(0)) / natural_width;
-    let mut right = twips_to_points(crop.right_twips.max(0)) / natural_width;
-    let mut top = twips_to_points(crop.top_twips.max(0)) / natural_height;
-    let mut bottom = twips_to_points(crop.bottom_twips.max(0)) / natural_height;
+    let fully_cropped = twips_to_points(
+        crop.left_twips
+            .max(0)
+            .saturating_add(crop.right_twips.max(0)),
+    ) >= natural_width
+        || twips_to_points(
+            crop.top_twips
+                .max(0)
+                .saturating_add(crop.bottom_twips.max(0)),
+        ) >= natural_height;
+    let mut left = twips_to_points(crop.left_twips.max(0)) / crop_basis_width.max(1.0);
+    let mut right = twips_to_points(crop.right_twips.max(0)) / crop_basis_width.max(1.0);
+    let mut top = twips_to_points(crop.top_twips.max(0)) / crop_basis_height.max(1.0);
+    let mut bottom = twips_to_points(crop.bottom_twips.max(0)) / crop_basis_height.max(1.0);
     clamp_crop_pair(&mut left, &mut right);
     clamp_crop_pair(&mut top, &mut bottom);
 
@@ -1921,6 +1973,7 @@ fn image_draw_rect(fragment: &crate::layout::ImageFragment) -> ImageDrawRect {
         width,
         height,
         clipped: left > 0.0 || right > 0.0 || top > 0.0 || bottom > 0.0,
+        fully_cropped,
     }
 }
 
@@ -2060,6 +2113,17 @@ fn draw_passive_wmf_vector_image(
     image_ref_cursor: &mut usize,
 ) {
     let draw = image_draw_rect(fragment);
+    if draw.fully_cropped {
+        *image_ref_cursor = (*image_ref_cursor).saturating_add(
+            fragment
+                .image
+                .vector_commands
+                .iter()
+                .filter(|command| matches!(command, StaticImageVectorCommand::RasterImage { .. }))
+                .count(),
+        );
+        return;
+    }
     let source_width = fragment.image.width_px.max(1) as f32;
     let source_height = fragment.image.height_px.max(1) as f32;
 
@@ -2369,6 +2433,7 @@ fn draw_passive_wmf_vector_image(
                 x,
                 y,
                 height,
+                bold,
                 text,
                 color,
                 background_color,
@@ -2381,7 +2446,7 @@ fn draw_passive_wmf_vector_image(
                 let point = vector_command_point(draw, source_width, source_height, *x, *y);
                 let font_size = ((*height / source_height) * draw.height).clamp(4.0, 72.0);
                 let character_extra = ((*character_extra / source_width) * draw.width)
-                    .clamp(-font_size, font_size * 4.0);
+                    .clamp(-font_size, draw.width.max(font_size * 4.0));
                 let word_extra =
                     ((*word_extra / source_width) * draw.width).clamp(-font_size, font_size * 8.0);
                 let clip_rect = clip_bounds.map(|bounds| {
@@ -2399,6 +2464,7 @@ fn draw_passive_wmf_vector_image(
                     content,
                     point,
                     font_size,
+                    *bold,
                     text,
                     *color,
                     *background_color,
@@ -3416,6 +3482,7 @@ fn draw_passive_vector_text(
     content: &mut Content,
     point: crate::layout::LayoutPoint,
     font_size: f32,
+    bold: bool,
     text: &str,
     color: Option<crate::model::Color>,
     background_color: Option<crate::model::Color>,
@@ -3435,6 +3502,7 @@ fn draw_passive_vector_text(
         content.end_path();
     }
     let mut style = CharacterStyle::default();
+    style.bold = bold;
     style.font_size_half_points = (font_size * 2.0).round().clamp(1.0, 144.0) as i32;
     style.character_spacing_twips = (character_extra * 20.0).round().clamp(-1440.0, 5760.0) as i32;
     let metrics = passive_vector_text_metrics(
@@ -3474,7 +3542,11 @@ fn draw_passive_vector_text(
     write_text_fragment(
         content,
         text,
-        HELVETICA_REGULAR,
+        if bold {
+            HELVETICA_BOLD
+        } else {
+            HELVETICA_REGULAR
+        },
         Some(PdfFontFamily::Helvetica),
         &style,
         word_extra,
@@ -4240,7 +4312,7 @@ fn draw_underline(
     match style {
         UnderlineStyle::None => {}
         UnderlineStyle::Single | UnderlineStyle::Words => {
-            stroke_line(content, x, y, x + width, y, 0.5)
+            stroke_line(content, x, y, x + width, y, 0.8)
         }
         UnderlineStyle::Double => {
             stroke_line(content, x, y, x + width, y, 0.5);
@@ -4285,7 +4357,7 @@ fn draw_passive_line(
         }
         LineStyle::Dashed => {
             let dash = (width * 3.0).max(3.0);
-            content.set_dash_pattern([dash, dash * 0.75], 0.0);
+            content.set_dash_pattern([dash, width.max(1.0)], 0.0);
             stroke_line(content, x1, y1, x2, y2, width);
         }
         LineStyle::Double => draw_double_line(content, x1, y1, x2, y2, width),
@@ -6081,7 +6153,7 @@ fn shadow_color(color: PdfColor) -> PdfColor {
 }
 
 fn relief_offset(style: &CharacterStyle) -> f32 {
-    (style.font_size_points() * 0.045).clamp(0.5, 1.5)
+    (style.font_size_points() * 0.08).clamp(0.5, 2.5)
 }
 
 fn relief_layers(
@@ -6089,12 +6161,20 @@ fn relief_layers(
     relief: TextRelief,
     offset: f32,
 ) -> (PdfColor, f32, f32, PdfColor, f32, f32) {
-    let light = lighten_color(color);
+    let light = relief_lighten_color(color);
     let dark = shadow_color(color);
     match relief {
         TextRelief::None => (color, 0.0, 0.0, color, 0.0, 0.0),
-        TextRelief::Emboss => (light, -offset, offset, dark, offset, -offset),
-        TextRelief::Engrave => (dark, -offset, offset, light, offset, -offset),
+        TextRelief::Emboss => (light, 0.0, 0.0, dark, -2.0 * offset, 2.0 * offset),
+        TextRelief::Engrave => (dark, 0.0, 0.0, light, -2.0 * offset, 2.0 * offset),
+    }
+}
+
+fn relief_lighten_color(color: PdfColor) -> PdfColor {
+    PdfColor {
+        red: 0.6 + color.red * 0.4,
+        green: 0.6 + color.green * 0.4,
+        blue: 0.6 + color.blue * 0.4,
     }
 }
 
@@ -7464,7 +7544,7 @@ endstream
     }
 
     #[test]
-    fn writes_character_border_as_passive_strokes() {
+    fn writes_solid_character_border_as_passive_filled_rectangles() {
         let mut document = Document::default();
         document.colors = vec![
             Color::default(),
@@ -7500,12 +7580,12 @@ endstream
             content
                 .operations
                 .iter()
-                .filter(|operation| operation.operator == "S")
+                .filter(|operation| operation.operator == "re")
                 .count()
                 >= 4
         );
         assert!(content.operations.iter().any(|operation| {
-            operation.operator == "RG"
+            operation.operator == "rg"
                 && operation.operands.len() == 3
                 && pdf_number(operation.operands[0].clone()).is_some_and(|value| value == 1.0)
                 && pdf_number(operation.operands[1].clone()).is_some_and(|value| value == 0.0)
@@ -8808,7 +8888,7 @@ endstream
     }
 
     #[test]
-    fn crops_image_against_passive_natural_size_hints() {
+    fn crops_image_against_authored_goal_dimensions() {
         let mut document = Document::default();
         document.blocks = vec![Block::Image(StaticImage {
             format: ImageFormat::Jpeg,
@@ -8851,8 +8931,8 @@ endstream
 
         assert!(
             pdf_number(image_transform.operands[0].clone())
-                .is_some_and(|value| (value - 180.0).abs() < 0.01),
-            "left crop should use passive natural width hint, got {:?}",
+                .is_some_and(|value| (value - 72.0).abs() < 0.01),
+            "left crop should preserve the authored full goal width, got {:?}",
             image_transform.operands
         );
         assert!(
@@ -8868,6 +8948,24 @@ endstream
         assert!(
             !pdf.windows(b"/EmbeddedFile".len())
                 .any(|window| window == b"/EmbeddedFile")
+        );
+    }
+
+    #[test]
+    fn fully_natural_cropped_image_keeps_flow_frame_without_drawing() {
+        let parsed = crate::rtf::parse_rtf(include_str!("../fixtures/picture-scaling-passive.rtf"))
+            .expect("picture scaling fixture should parse");
+        let layout = LayoutEngine::layout(&parsed.document);
+        let pdf = render_pdf(&layout);
+        let parsed_pdf = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+
+        assert!(
+            content
+                .operations
+                .iter()
+                .all(|operation| operation.operator != "Do")
         );
     }
 
@@ -8960,9 +9058,9 @@ endstream
         assert!(content.operations.iter().any(|operation| {
             operation.operator == "rg"
                 && operation.operands.len() == 3
-                && pdf_number(operation.operands[0].clone()).is_some_and(|value| value == 1.0)
-                && pdf_number(operation.operands[1].clone()).is_some_and(|value| value == 0.5)
-                && pdf_number(operation.operands[2].clone()).is_some_and(|value| value == 0.5)
+                && pdf_number(operation.operands[0].clone()).is_some_and(|value| value == 0.5)
+                && pdf_number(operation.operands[1].clone()).is_some_and(|value| value == 0.0)
+                && pdf_number(operation.operands[2].clone()).is_some_and(|value| value == 0.0)
         }));
         assert!(
             content
@@ -9664,11 +9762,27 @@ endstream
                 .count(),
             3
         );
+        let origins = content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "Td")
+            .filter_map(|operation| {
+                Some((
+                    pdf_number(operation.operands.first()?.clone())?,
+                    pdf_number(operation.operands.get(1)?.clone())?,
+                ))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(origins.len(), 3);
+        assert!((origins[1].0 - origins[0].0 + 1.92).abs() < 0.001);
+        assert!((origins[1].1 - origins[0].1 - 1.92).abs() < 0.001);
+        assert!((origins[2].0 - origins[0].0 + 0.96).abs() < 0.001);
+        assert!((origins[2].1 - origins[0].1 - 0.96).abs() < 0.001);
         assert!(content.operations.iter().any(|operation| {
             operation.operator == "rg"
                 && operation.operands.len() == 3
-                && pdf_number(operation.operands[0].clone()).is_some_and(|value| value == 0.75)
-                && pdf_number(operation.operands[1].clone()).is_some_and(|value| value == 0.75)
+                && pdf_number(operation.operands[0].clone()).is_some_and(|value| value == 0.6)
+                && pdf_number(operation.operands[1].clone()).is_some_and(|value| value == 0.6)
                 && pdf_number(operation.operands[2].clone()).is_some_and(|value| value == 1.0)
         }));
         assert!(content.operations.iter().any(|operation| {
