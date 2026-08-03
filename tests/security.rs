@@ -75345,11 +75345,10 @@ fn endnotes_at_end_of_document_render_on_passive_final_page_without_control_leak
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(page_texts.len(), 3);
+    assert_eq!(page_texts.len(), 2);
     assert!(page_texts[0].contains("First page"));
     assert!(page_texts[1].contains("Last page1"));
-    assert!(!page_texts[1].contains("Final endnote"));
-    assert!(page_texts[2].contains("1. Final endnote"));
+    assert!(page_texts[1].contains("1. Final endnote"));
     for forbidden in [
         b"aenddoc".as_slice(),
         b"chftn",
@@ -75623,10 +75622,9 @@ fn fet1_legacy_footnote_groups_render_as_passive_endnotes_without_control_leakag
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(page_texts.len(), 2);
+    assert_eq!(page_texts.len(), 1);
     assert!(page_texts[0].contains("Body1"));
-    assert!(!page_texts[0].contains("Legacy endnote"));
-    assert!(page_texts[1].contains("1. Legacy endnote"));
+    assert!(page_texts[0].contains("1. Legacy endnote"));
     for forbidden in [
         b"fet1".as_slice(),
         b"aenddoc",

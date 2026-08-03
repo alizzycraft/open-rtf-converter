@@ -834,23 +834,11 @@ impl LayoutEngine {
                     );
                 }
                 Block::ContinuousSectionBreak => {
-                    layout_footnotes_for_section(
+                    layout_notes_for_section_boundary(
                         &mut pages,
                         &mut cursor_y,
                         document,
                         &mut rendered_footnote_pages,
-                        section_number,
-                        geometry.content_width,
-                        geometry.margin_left,
-                        geometry.margin_bottom,
-                        &mut geometry,
-                        document_stats,
-                        font_provider,
-                    );
-                    layout_endnotes_for_section(
-                        &mut pages,
-                        &mut cursor_y,
-                        document,
                         &mut rendered_endnote_pages,
                         section_number,
                         geometry.content_width,
@@ -874,23 +862,11 @@ impl LayoutEngine {
                     }
                 }
                 Block::SectionBreak => {
-                    layout_footnotes_for_section(
+                    layout_notes_for_section_boundary(
                         &mut pages,
                         &mut cursor_y,
                         document,
                         &mut rendered_footnote_pages,
-                        section_number,
-                        geometry.content_width,
-                        geometry.margin_left,
-                        geometry.margin_bottom,
-                        &mut geometry,
-                        document_stats,
-                        font_provider,
-                    );
-                    layout_endnotes_for_section(
-                        &mut pages,
-                        &mut cursor_y,
-                        document,
                         &mut rendered_endnote_pages,
                         section_number,
                         geometry.content_width,
@@ -916,23 +892,11 @@ impl LayoutEngine {
                     );
                 }
                 Block::EvenPageSectionBreak => {
-                    layout_footnotes_for_section(
+                    layout_notes_for_section_boundary(
                         &mut pages,
                         &mut cursor_y,
                         document,
                         &mut rendered_footnote_pages,
-                        section_number,
-                        geometry.content_width,
-                        geometry.margin_left,
-                        geometry.margin_bottom,
-                        &mut geometry,
-                        document_stats,
-                        font_provider,
-                    );
-                    layout_endnotes_for_section(
-                        &mut pages,
-                        &mut cursor_y,
-                        document,
                         &mut rendered_endnote_pages,
                         section_number,
                         geometry.content_width,
@@ -959,23 +923,11 @@ impl LayoutEngine {
                     );
                 }
                 Block::OddPageSectionBreak => {
-                    layout_footnotes_for_section(
+                    layout_notes_for_section_boundary(
                         &mut pages,
                         &mut cursor_y,
                         document,
                         &mut rendered_footnote_pages,
-                        section_number,
-                        geometry.content_width,
-                        geometry.margin_left,
-                        geometry.margin_bottom,
-                        &mut geometry,
-                        document_stats,
-                        font_provider,
-                    );
-                    layout_endnotes_for_section(
-                        &mut pages,
-                        &mut cursor_y,
-                        document,
                         &mut rendered_endnote_pages,
                         section_number,
                         geometry.content_width,
@@ -1175,35 +1127,29 @@ impl LayoutEngine {
                         }),
                         None,
                     );
-                    layout_footnotes_until_block(
-                        &mut pages,
-                        &mut cursor_y,
-                        document,
-                        &mut rendered_footnote_pages,
-                        block_idx,
-                        geometry.content_width,
-                        geometry.margin_left,
-                        geometry.margin_bottom,
-                        &mut geometry,
-                        document_stats,
-                        font_provider,
-                    );
+                    let reaches_note_boundary = document
+                        .blocks
+                        .get(block_idx.saturating_add(1))
+                        .is_none_or(section_breaks_end_current_section);
+                    if !reaches_note_boundary {
+                        layout_footnotes_until_block(
+                            &mut pages,
+                            &mut cursor_y,
+                            document,
+                            &mut rendered_footnote_pages,
+                            block_idx,
+                            geometry.content_width,
+                            geometry.margin_left,
+                            geometry.margin_bottom,
+                            &mut geometry,
+                            document_stats,
+                            font_provider,
+                        );
+                    }
                 }
             }
         }
 
-        layout_remaining_footnotes(
-            &mut pages,
-            &mut cursor_y,
-            document,
-            &mut rendered_footnote_pages,
-            geometry.content_width,
-            geometry.margin_left,
-            geometry.margin_bottom,
-            &mut geometry,
-            document_stats,
-            font_provider,
-        );
         layout_remaining_section_endnotes(
             &mut pages,
             &mut cursor_y,
@@ -1222,7 +1168,6 @@ impl LayoutEngine {
             document,
             &mut rendered_endnote_pages,
             EndnotePlacement::AfterBody,
-            false,
             geometry.content_width,
             geometry.margin_left,
             geometry.margin_bottom,
@@ -1236,7 +1181,18 @@ impl LayoutEngine {
             document,
             &mut rendered_endnote_pages,
             EndnotePlacement::EndOfDocument,
-            true,
+            geometry.content_width,
+            geometry.margin_left,
+            geometry.margin_bottom,
+            &mut geometry,
+            document_stats,
+            font_provider,
+        );
+        layout_remaining_footnotes(
+            &mut pages,
+            &mut cursor_y,
+            document,
+            &mut rendered_footnote_pages,
             geometry.content_width,
             geometry.margin_left,
             geometry.margin_bottom,
@@ -2071,7 +2027,6 @@ fn layout_endnotes_for_placement(
     document: &Document,
     rendered_endnote_pages: &mut [Option<usize>],
     placement: EndnotePlacement,
-    force_new_page: bool,
     content_width: f32,
     margin_left: f32,
     margin_bottom: f32,
@@ -2090,10 +2045,6 @@ fn layout_endnotes_for_placement(
     if entries.is_empty() {
         return;
     }
-    if force_new_page && pages.last().is_some_and(|page| !page.items.is_empty()) {
-        let mut endnote_column = 0;
-        start_new_page(pages, cursor_y, geometry, &mut endnote_column);
-    }
     layout_endnote_entries(
         pages,
         cursor_y,
@@ -2110,6 +2061,51 @@ fn layout_endnotes_for_placement(
         document_stats,
         font_provider,
         rendered_endnote_pages,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_notes_for_section_boundary(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    document: &Document,
+    rendered_footnote_pages: &mut [Option<usize>],
+    rendered_endnote_pages: &mut [Option<usize>],
+    section_number: usize,
+    content_width: f32,
+    margin_left: f32,
+    margin_bottom: f32,
+    geometry: &mut PageGeometry,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) {
+    // Endnotes are body-flow content at the section boundary. Commit them before
+    // reserving the page-bottom footnote band so both note kinds can share the page.
+    layout_endnotes_for_section(
+        pages,
+        cursor_y,
+        document,
+        rendered_endnote_pages,
+        section_number,
+        content_width,
+        margin_left,
+        margin_bottom,
+        geometry,
+        document_stats,
+        font_provider,
+    );
+    layout_footnotes_for_section(
+        pages,
+        cursor_y,
+        document,
+        rendered_footnote_pages,
+        section_number,
+        content_width,
+        margin_left,
+        margin_bottom,
+        geometry,
+        document_stats,
+        font_provider,
     );
 }
 
@@ -19860,10 +19856,48 @@ mod tests {
 
         let layout = LayoutEngine::layout(&document);
 
-        assert_eq!(layout.pages.len(), 2);
+        assert_eq!(layout.pages.len(), 1);
         assert!(layout_text(&layout.pages[0]).contains("Body"));
-        assert!(!layout_text(&layout.pages[0]).contains("Endnote text"));
-        assert!(layout_text(&layout.pages[1]).contains("1. Endnote text"));
+        assert!(layout_text(&layout.pages[0]).contains("1. Endnote text"));
+    }
+
+    #[test]
+    fn lays_out_endnotes_before_final_page_footnote_band() {
+        let mut document = Document::default();
+        document.footnote_placement = FootnotePlacement::BottomOfPage;
+        document.endnote_placement = EndnotePlacement::EndOfDocument;
+        document.blocks = vec![paragraph_with_text("Body")];
+        document.endnotes = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Endnote text".to_string(),
+                style: Default::default(),
+            }],
+        }];
+        document.footnotes = vec![Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Footnote text".to_string(),
+                style: Default::default(),
+            }],
+        }];
+
+        let layout = LayoutEngine::layout(&document);
+        let page = &layout.pages[0];
+        let baseline_for = |needle: &str| {
+            page.items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.contains(needle) => {
+                        Some(fragment.baseline_y)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing {needle} in {:?}", layout_text(page)))
+        };
+
+        assert_eq!(layout.pages.len(), 1);
+        assert!(baseline_for("Endnote") > baseline_for("Footnote"));
     }
 
     #[test]

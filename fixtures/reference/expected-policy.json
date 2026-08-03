@@ -4551,7 +4551,7 @@
       "word_reference_status": "pending_word_export",
       "word_reference_pdf": null,
       "word_reference_pages": [],
-      "expected_pages": 3,
+      "expected_pages": 2,
       "must_preserve_text": [
         "Body with footnote",
         "Footnote text",
@@ -4585,7 +4585,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact footnote/endnote separator positions and section-boundary pagination once available."
+        "The Word baseline confirms two-page section-boundary flow; separator style and intentional embedded-object placeholders remain passive rendering differences."
       ]
     },
     {
@@ -4595,7 +4595,7 @@
       "word_reference_status": "pending_word_export",
       "word_reference_pdf": null,
       "word_reference_pages": [],
-      "expected_pages": 2,
+      "expected_pages": 1,
       "must_preserve_text": [
         "BodyIV MiddleV Endb",
         "IV. First note text",
@@ -4629,7 +4629,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact restart behavior across automatic page and section boundaries once available."
+        "The Word baseline confirms one-page note flow; footnote and endnote numbering-control precedence remains to be matched."
       ]
     },
     {

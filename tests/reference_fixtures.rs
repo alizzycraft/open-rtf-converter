@@ -3494,7 +3494,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
         },
         ReferenceFixture {
             input: "fixtures/note-placement-passive.rtf",
-            expected_pages: 3,
+            expected_pages: 2,
             must_preserve_text: &[
                 "Body with footnote",
                 "Footnote text",
@@ -3526,7 +3526,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
         },
         ReferenceFixture {
             input: "fixtures/note-restart-numbering-passive.rtf",
-            expected_pages: 2,
+            expected_pages: 1,
             must_preserve_text: &[
                 "BodyIV MiddleV Endb",
                 "IV. First note text",
