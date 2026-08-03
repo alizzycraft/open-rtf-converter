@@ -4,6 +4,7 @@ param(
     [string]$Fixture = '',
     [int]$Limit = 0,
     [bool]$ShowWord = $true,
+    [switch]$HideWord,
     [bool]$SkipExisting = $true,
     [switch]$ValidateOnly
 )
@@ -117,6 +118,7 @@ if ($Limit -gt 0) { $files = @($files | Select-Object -First $Limit) }
 $completed = 0
 $failed = @()
 $position = 0
+$wordVisible = $ShowWord -and -not $HideWord
 foreach ($file in $files) {
     $position++
     $pdfPath = Join-Path $OutputDirectory ($file.BaseName + '.pdf')
@@ -127,7 +129,7 @@ foreach ($file in $files) {
     }
     Write-Host ("[{0}/{1}] Exporting {2}..." -f $position, $files.Count, $file.Name)
     try {
-        [WordBaselineEarlyBoundExporter]::Export($file.FullName, $pdfPath, $ShowWord)
+        [WordBaselineEarlyBoundExporter]::Export($file.FullName, $pdfPath, $wordVisible)
         $completed++
         Write-Host ("Created {0}" -f $pdfPath)
     }
