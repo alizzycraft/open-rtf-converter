@@ -900,7 +900,7 @@ fn table_row_padding_renders_passively_without_control_leakage() {
 }
 
 #[test]
-fn preferred_cell_widths_render_passively_without_control_leakage() {
+fn preferred_cell_widths_without_cell_boundaries_are_omitted_without_control_leakage() {
     let input = rtf(&[
         "{",
         "\\",
@@ -930,19 +930,20 @@ fn preferred_cell_widths_render_passively_without_control_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    let table = parsed
-        .document
-        .blocks
-        .iter()
-        .find_map(|block| match block {
-            Block::Table(table) => Some(table),
-            _ => None,
-        })
-        .expect("table");
-
-    assert_eq!(table.column_widths_twips, vec![1440, 2880]);
-    assert!(text.contains("Narrow"));
-    assert!(text.contains("Wide percent"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Table(_)))
+    );
+    assert!(!text.contains("Narrow"));
+    assert!(!text.contains("Wide percent"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("table row without authored cell boundaries omitted to match Word recovery")
+    }));
     for forbidden in ["clftsWidth", "clwWidth"] {
         assert!(
             !text.contains(forbidden),
@@ -956,8 +957,8 @@ fn preferred_cell_widths_render_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(rendered_text.contains("Narrow"));
-    assert!(rendered_text.contains("Wide percent"));
+    assert!(!rendered_text.contains("Narrow"));
+    assert!(!rendered_text.contains("Wide percent"));
     for forbidden in [
         b"clftsWidth".as_slice(),
         b"clwWidth",
@@ -978,7 +979,7 @@ fn preferred_cell_widths_render_passively_without_control_leakage() {
 }
 
 #[test]
-fn preferred_row_widths_fill_missing_table_geometry_without_control_leakage() {
+fn preferred_row_widths_without_cell_boundaries_are_omitted_without_control_leakage() {
     let input = rtf(&[
         "{",
         "\\",
@@ -1016,21 +1017,27 @@ fn preferred_row_widths_fill_missing_table_geometry_without_control_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    let table = parsed
-        .document
-        .blocks
-        .iter()
-        .find_map(|block| match block {
-            Block::Table(table) => Some(table),
-            _ => None,
-        })
-        .expect("table");
-
-    assert_eq!(table.column_widths_twips, vec![1440, 1440]);
-    assert!(text.contains("Exact left"));
-    assert!(text.contains("Exact right"));
-    assert!(text.contains("Percent left"));
-    assert!(text.contains("Percent right"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Table(_)))
+    );
+    assert!(!text.contains("Exact left"));
+    assert!(!text.contains("Exact right"));
+    assert!(!text.contains("Percent left"));
+    assert!(!text.contains("Percent right"));
+    assert_eq!(
+        parsed
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message.contains(
+                "table row without authored cell boundaries omitted to match Word recovery"
+            ))
+            .count(),
+        2
+    );
     for forbidden in ["trftsWidth", "trwWidth"] {
         assert!(
             !text.contains(forbidden),
@@ -1044,10 +1051,10 @@ fn preferred_row_widths_fill_missing_table_geometry_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(rendered_text.contains("Exact left"));
-    assert!(rendered_text.contains("Exact right"));
-    assert!(rendered_text.contains("Percent left"));
-    assert!(rendered_text.contains("Percent right"));
+    assert!(!rendered_text.contains("Exact left"));
+    assert!(!rendered_text.contains("Exact right"));
+    assert!(!rendered_text.contains("Percent left"));
+    assert!(!rendered_text.contains("Percent right"));
     for forbidden in [
         b"trftsWidth".as_slice(),
         b"trwWidth",
@@ -1294,7 +1301,9 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "\\",
         "clftsWidth3",
         "\\",
-        "clwWidth1800 Positioned left",
+        "clwWidth1800",
+        "\\",
+        "cellx1800 Positioned left",
         "\\",
         "cell",
         "\\",
@@ -1302,7 +1311,9 @@ fn floating_table_positioning_controls_warn_without_payload_leakage() {
         "\\",
         "clftsWidth3",
         "\\",
-        "clwWidth1800 Positioned right",
+        "clwWidth1800",
+        "\\",
+        "cellx3600 Positioned right",
         "\\",
         "cell",
         "\\",
@@ -3589,9 +3600,9 @@ fn merged_table_cells_render_passively_without_continuation_or_control_leakage()
             "merged-cell hidden/control text leaked to rendered PDF text: {forbidden}"
         );
     }
-    assert!(
-        stroke_count >= 8,
-        "merged table should still render passive grid strokes"
+    assert_eq!(
+        stroke_count, 0,
+        "borderless merged table must not gain synthetic grid strokes"
     );
     for forbidden in [
         b"Hidden horizontal continuation".as_slice(),
@@ -15158,7 +15169,7 @@ fn page_number_start_renders_passively_without_control_leakage() {
         "\\",
         "rtf1",
         "\\",
-        "pgnstarts7{",
+        "pgnstart7{",
         "\\",
         "header Page ",
         "\\",
@@ -15174,6 +15185,7 @@ fn page_number_start_renders_passively_without_control_leakage() {
     let text = collect_text(&parsed.document);
 
     assert_eq!(parsed.document.page.page_number_start, Some(7));
+    assert!(parsed.document.page.restart_page_numbering);
     assert!(text.contains(PAGE_NUMBER_MARKER));
     assert!(!text.contains("pgnstarts"));
     assert!(!text.contains("chpgn"));
@@ -15219,7 +15231,7 @@ fn page_number_format_renders_passively_without_control_leakage() {
         "\\",
         "pgnucrm",
         "\\",
-        "pgnstarts4{",
+        "pgnstart4{",
         "\\",
         "header Page ",
         "\\",
@@ -15289,7 +15301,9 @@ fn section_page_number_restart_renders_passively_without_control_leakage() {
         "\\",
         "sectd",
         "\\",
-        "pgnstarts3 Second",
+        "pgnstarts3",
+        "\\",
+        "pgnrestart Second",
         "\\",
         "page Third",
         "\\",
@@ -15361,17 +15375,19 @@ fn section_page_number_restart_and_continue_render_passively_without_control_lea
         "par}",
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
-    let section_starts: Vec<_> = parsed
+    let section_numbering: Vec<_> = parsed
         .document
         .blocks
         .iter()
         .filter_map(|block| match block {
-            Block::SectionSettings(settings) => Some(settings.page_number_start),
+            Block::SectionSettings(settings) => {
+                Some((settings.page_number_start, settings.restart_page_numbering))
+            }
             _ => None,
         })
         .collect();
 
-    assert_eq!(section_starts, vec![Some(1), None]);
+    assert_eq!(section_numbering, vec![(None, true), (None, false)]);
     assert!(collect_text(&parsed.document).contains(PAGE_NUMBER_MARKER));
 
     let dir = tempdir().unwrap();
@@ -15426,7 +15442,9 @@ fn section_page_number_format_renders_passively_without_control_leakage() {
         "\\",
         "pgnlcltr",
         "\\",
-        "pgnstarts2 Second",
+        "pgnstarts2",
+        "\\",
+        "pgnrestart Second",
         "\\",
         "page Third",
         "\\",
@@ -21529,11 +21547,11 @@ fn stylesheet_next_style_renders_passively_without_control_leakage() {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected paragraph"),
     };
-    assert!(first.runs[0].style.bold);
+    assert!(!first.runs[0].style.bold);
     assert!(!first.runs[0].style.italic);
-    assert_eq!(second.style.alignment, Alignment::Center);
+    assert_eq!(second.style.alignment, Alignment::Left);
     assert!(!second.runs[0].style.bold);
-    assert!(second.runs[0].style.italic);
+    assert!(!second.runs[0].style.italic);
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("stylesheet-next-style.rtf");
@@ -21608,8 +21626,7 @@ fn stylesheet_character_style_renders_passively_without_paragraph_leakage() {
     };
     assert_eq!(paragraph.style.alignment, Alignment::Right);
     assert_eq!(paragraph.style.left_indent_twips, 0);
-    assert!(!paragraph.runs[0].style.bold);
-    assert!(paragraph.runs[1].style.bold);
+    assert!(paragraph.runs.iter().all(|run| !run.style.bold));
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("stylesheet-character-style.rtf");
@@ -21685,12 +21702,9 @@ fn stylesheet_character_style_preserves_direct_formatting_without_metadata_leaka
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected paragraph"),
     };
-    assert_eq!(paragraph.runs[0].style.font_index, 1);
-    assert!(paragraph.runs[0].style.italic);
-    assert!(!paragraph.runs[0].style.bold);
-    assert_eq!(paragraph.runs[1].style.font_index, 1);
-    assert!(paragraph.runs[1].style.italic);
-    assert!(paragraph.runs[1].style.bold);
+    assert!(paragraph.runs.iter().all(|run| run.style.font_index == 1));
+    assert!(paragraph.runs.iter().all(|run| run.style.italic));
+    assert!(paragraph.runs.iter().all(|run| !run.style.bold));
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("stylesheet-character-style-additive.rtf");
@@ -21837,13 +21851,13 @@ fn word_stylesheet_metadata_controls_do_not_warn_or_leak_to_pdf() {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected heading paragraph"),
     };
-    assert_eq!(heading.style.alignment, Alignment::Center);
-    assert!(heading.runs[0].style.bold);
+    assert_eq!(heading.style.alignment, Alignment::Left);
+    assert!(!heading.runs[0].style.bold);
     let linked = match &parsed.document.blocks[1] {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected linked character-style paragraph"),
     };
-    assert!(linked.runs[0].style.italic);
+    assert!(!linked.runs[0].style.italic);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -26597,13 +26611,10 @@ fn paragraph_hyphenation_renders_passive_soft_breaks_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
+    assert_eq!(rendered_text, "Antidisestablishmentarianism");
     assert!(
-        rendered_text.contains('-'),
-        "passive automatic hyphenation should materialize a line-end hyphen: {rendered_text:?}"
-    );
-    assert_eq!(
-        rendered_text.replace('-', ""),
-        "Antidisestablishmentarianism"
+        !rendered_text.contains('-'),
+        "dictionary-free emergency wrapping must not invent punctuation: {rendered_text:?}"
     );
     for forbidden in [
         b"hyphpar".as_slice(),
@@ -26686,11 +26697,9 @@ fn document_hyphenation_default_renders_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(
-        rendered_text.contains('-'),
-        "document automatic hyphenation should materialize a passive line-end hyphen: {rendered_text:?}"
-    );
+    assert!(rendered_text.contains("Antidisestablishmentarianism"));
     assert!(rendered_text.contains("Short"));
+    assert!(!rendered_text.contains('-'));
     for forbidden in [
         b"hyphauto".as_slice(),
         b"/JavaScript",
@@ -26774,7 +26783,7 @@ fn capital_word_hyphenation_control_renders_passively_without_control_leakage() 
 
     assert_eq!(
         rendered_text, "ANTIDISESTABLISHMENTARIANISM",
-        "all-caps automatic hyphenation should be suppressed when hyphcaps0 is active: {rendered_text:?}"
+        "emergency wrapping should preserve all-caps text without synthetic punctuation: {rendered_text:?}"
     );
     for forbidden in [
         b"hyphcaps".as_slice(),
@@ -26849,11 +26858,8 @@ fn consecutive_hyphenation_limit_renders_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(
-        rendered_text.matches('-').count() <= 1,
-        "consecutive automatic hyphenation should be bounded to one line-end hyphen: {rendered_text:?}"
-    );
-    assert_eq!(rendered_text.replace('-', ""), word);
+    assert_eq!(rendered_text, word);
+    assert!(!rendered_text.contains('-'));
     for forbidden in [
         b"hyphconsec".as_slice(),
         b"hyphauto",
@@ -26927,11 +26933,8 @@ fn hyphenation_zone_renders_passively_without_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(
-        rendered_text.contains('-'),
-        "tight hyphenation zone should permit passive line-end hyphenation: {rendered_text:?}"
-    );
-    assert_eq!(rendered_text.replace('-', ""), word);
+    assert_eq!(rendered_text, word);
+    assert!(!rendered_text.contains('-'));
     for forbidden in [
         b"hyphhotz".as_slice(),
         b"hyphauto",
@@ -69615,7 +69618,7 @@ fn header_footer_variants_render_passively_without_control_leakage() {
         "\\",
         "rtf1",
         "\\",
-        "titlepg{",
+        "titlepg\\facingp{",
         "\\",
         "headerf First header",
         "\\",
@@ -73599,7 +73602,7 @@ fn drop_cap_controls_render_passively_without_control_leakage() {
 
     assert!(text.contains("Dropped paragraph"));
     assert!(text.contains("Plain paragraph"));
-    assert_eq!(paragraphs[0].style.drop_cap_lines, 3);
+    assert_eq!(paragraphs[0].style.drop_cap_lines, 0);
     assert_eq!(paragraphs[1].style.drop_cap_lines, 0);
     for forbidden in ["dropcapli", "dropcapt"] {
         assert!(

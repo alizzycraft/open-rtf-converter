@@ -260,6 +260,7 @@ struct PageGeometry {
     base_margin_left: f32,
     base_margin_right: f32,
     gutter: f32,
+    facing_pages: bool,
     mirror_margins: bool,
     gutter_on_right: bool,
     margin_left: f32,
@@ -308,12 +309,14 @@ impl PageGeometry {
         let margin_bottom = twips_to_points(settings.margin_bottom_twips);
         let header_distance = twips_to_points(settings.header_distance_twips.max(0));
         let footer_distance = twips_to_points(settings.footer_distance_twips.max(0));
+        let facing_pages = settings.facing_pages;
         let mirror_margins = settings.mirror_margins;
         let gutter_on_right = settings.gutter_on_right;
         let (margin_left, margin_right) = page_horizontal_margins(
             base_margin_left,
             base_margin_right,
             gutter,
+            facing_pages,
             mirror_margins,
             gutter_on_right,
             physical_page_number,
@@ -330,6 +333,7 @@ impl PageGeometry {
             base_margin_left,
             base_margin_right,
             gutter,
+            facing_pages,
             mirror_margins,
             gutter_on_right,
             margin_left,
@@ -382,6 +386,7 @@ impl PageGeometry {
             self.base_margin_left,
             self.base_margin_right,
             self.gutter,
+            self.facing_pages,
             self.mirror_margins,
             self.gutter_on_right,
             physical_page_number,
@@ -534,22 +539,28 @@ fn page_horizontal_margins(
     base_margin_left: f32,
     base_margin_right: f32,
     gutter: f32,
+    facing_pages: bool,
     mirror_margins: bool,
     gutter_on_right: bool,
     physical_page_number: usize,
 ) -> (f32, f32) {
-    match (
-        mirror_margins,
-        gutter_on_right,
-        physical_page_number % 2 == 0,
-    ) {
-        (true, true, true) => (base_margin_right + gutter, base_margin_left),
-        (true, true, false) => (base_margin_left, base_margin_right + gutter),
-        (true, false, true) => (base_margin_right, base_margin_left + gutter),
-        (true, false, false) => (base_margin_left + gutter, base_margin_right),
-        (false, true, _) => (base_margin_left, base_margin_right + gutter),
-        (false, false, _) => (base_margin_left + gutter, base_margin_right),
+    let is_even_page = physical_page_number % 2 == 0;
+    let (mut margin_left, mut margin_right) = if facing_pages && mirror_margins && is_even_page {
+        (base_margin_right, base_margin_left)
+    } else {
+        (base_margin_left, base_margin_right)
+    };
+    let gutter_is_right = if facing_pages {
+        is_even_page != gutter_on_right
+    } else {
+        gutter_on_right
+    };
+    if gutter_is_right {
+        margin_right += gutter;
+    } else {
+        margin_left += gutter;
     }
+    (margin_left, margin_right)
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -562,7 +573,11 @@ struct PageNumbering {
 impl PageNumbering {
     fn from_page_settings(settings: &PageSettings, base_physical_page: usize) -> Self {
         Self {
-            start: settings.page_number_start.unwrap_or(1).max(1) as usize,
+            start: if settings.restart_page_numbering {
+                settings.page_number_start.unwrap_or(1).max(1) as usize
+            } else {
+                1
+            },
             base_physical_page: base_physical_page.max(1),
             format: settings
                 .page_number_format
@@ -573,10 +588,11 @@ impl PageNumbering {
     fn with_section_settings(self, settings: &PageSettings, base_physical_page: usize) -> Self {
         let current_number = self.display_page_number_value(base_physical_page);
         Self {
-            start: settings
-                .page_number_start
-                .unwrap_or(current_number.min(i32::MAX as usize) as i32)
-                .max(1) as usize,
+            start: if settings.restart_page_numbering {
+                settings.page_number_start.unwrap_or(1).max(1) as usize
+            } else {
+                current_number
+            },
             base_physical_page: base_physical_page.max(1),
             format: settings.page_number_format.unwrap_or(self.format),
         }
@@ -1202,6 +1218,10 @@ impl LayoutEngine {
         );
 
         apply_page_vertical_alignment(&mut pages);
+        let body_item_counts = pages
+            .iter()
+            .map(|page| page.items.len())
+            .collect::<Vec<_>>();
         layout_column_separators(&mut pages);
         layout_page_borders(&mut pages, document);
         layout_repeating_header_footer(
@@ -1211,6 +1231,7 @@ impl LayoutEngine {
             true,
             document_stats,
             font_provider,
+            Some(&body_item_counts),
         );
         layout_repeating_header_footer(
             &mut pages,
@@ -1219,6 +1240,7 @@ impl LayoutEngine {
             false,
             document_stats,
             font_provider,
+            None,
         );
         layout_background_shapes(
             &mut pages,
@@ -3631,7 +3653,11 @@ struct VerticalBounds {
 }
 
 fn page_body_item_bounds(page: &LayoutPage) -> Option<VerticalBounds> {
-    page.items
+    layout_items_vertical_bounds(&page.items)
+}
+
+fn layout_items_vertical_bounds(items: &[LayoutItem]) -> Option<VerticalBounds> {
+    items
         .iter()
         .filter_map(layout_item_vertical_bounds)
         .reduce(|acc, bounds| VerticalBounds {
@@ -3976,6 +4002,7 @@ fn layout_repeating_header_footer(
     is_header: bool,
     document_stats: DocumentStats,
     font_provider: Option<&FontProvider>,
+    body_item_counts: Option<&[usize]>,
 ) {
     for (page_idx, page) in pages.iter_mut().enumerate() {
         let geometry = page.geometry;
@@ -4010,11 +4037,12 @@ fn layout_repeating_header_footer(
             page.section_number.to_string(),
             document_stats,
         );
-        let mut cursor_y = if is_header {
+        let initial_cursor_y = if is_header {
             (page.height - geometry.header_distance).clamp(0.0, page.height)
         } else {
             geometry.footer_distance.clamp(0.0, page.height)
         };
+        let mut cursor_y = initial_cursor_y;
 
         for paragraph in paragraphs {
             let paragraph_contains_page_number = paragraph_contains_page_number_marker(paragraph);
@@ -4161,6 +4189,37 @@ fn layout_repeating_header_footer(
             );
         }
 
+        if is_header {
+            let body_item_count = body_item_counts
+                .and_then(|counts| counts.get(page_idx))
+                .copied()
+                .unwrap_or(0)
+                .min(page.items.len());
+            let body_bounds = layout_items_vertical_bounds(&page.items[..body_item_count]);
+            let header_bounds = page_body_item_bounds(&scratch_pages[0]);
+            if let (Some(body_bounds), Some(header_bounds)) = (body_bounds, header_bounds) {
+                let flow_collision = (page.height - geometry.margin_top - cursor_y).max(0.0);
+                let visual_collision = (body_bounds.top - header_bounds.bottom).max(0.0);
+                let available_shift = (body_bounds.bottom - geometry.margin_bottom).max(0.0);
+                let shift_down = flow_collision.min(visual_collision).min(available_shift);
+                if shift_down > 0.01 {
+                    for item in page.items.iter_mut().take(body_item_count) {
+                        translate_layout_item_y(item, -shift_down);
+                    }
+                    for exclusion in &mut page.flow_exclusions {
+                        exclusion.y -= shift_down;
+                    }
+                }
+            }
+        } else {
+            let shift_up = (initial_cursor_y - cursor_y).max(0.0);
+            if shift_up > 0.01 {
+                for item in &mut scratch_pages[0].items {
+                    translate_layout_item_y(item, shift_up);
+                }
+            }
+        }
+
         page.items.extend(scratch_pages.remove(0).items);
     }
 }
@@ -4188,7 +4247,7 @@ fn repeating_paragraphs_for_page<'a>(
                 return paragraphs;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if geometry.facing_pages && physical_page_number % 2 == 0 {
             let paragraphs = first_non_empty(&section.even_page_header, &document.even_page_header);
             if !paragraphs.is_empty() {
                 return paragraphs;
@@ -4203,7 +4262,7 @@ fn repeating_paragraphs_for_page<'a>(
                 return paragraphs;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if geometry.facing_pages && physical_page_number % 2 == 0 {
             let paragraphs = first_non_empty(&section.even_page_footer, &document.even_page_footer);
             if !paragraphs.is_empty() {
                 return paragraphs;
@@ -4246,7 +4305,7 @@ fn select_repeating_header_footer_images<'a>(
                 return images;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if geometry.facing_pages && physical_page_number % 2 == 0 {
             let images = first_non_empty_images(
                 &section.even_page_header_images,
                 &document.even_page_header_images,
@@ -4266,7 +4325,7 @@ fn select_repeating_header_footer_images<'a>(
                 return images;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if geometry.facing_pages && physical_page_number % 2 == 0 {
             let images = first_non_empty_images(
                 &section.even_page_footer_images,
                 &document.even_page_footer_images,
@@ -4315,7 +4374,7 @@ fn select_repeating_header_footer_shapes<'a>(
                 return shapes;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if geometry.facing_pages && physical_page_number % 2 == 0 {
             let shapes = first_non_empty_shapes(
                 &section.even_page_header_shapes,
                 &document.even_page_header_shapes,
@@ -4335,7 +4394,7 @@ fn select_repeating_header_footer_shapes<'a>(
                 return shapes;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if geometry.facing_pages && physical_page_number % 2 == 0 {
             let shapes = first_non_empty_shapes(
                 &section.even_page_footer_shapes,
                 &document.even_page_footer_shapes,
@@ -4384,8 +4443,6 @@ fn layout_table(
         .max()
         .unwrap_or(0)
         .max(1);
-    let column_widths = table_column_widths(table, column_count, content_width);
-    let table_width: f32 = column_widths.iter().sum();
     let header_rows = table
         .rows
         .iter()
@@ -4395,6 +4452,8 @@ fn layout_table(
     let mut has_flow_exclusion = false;
 
     for (row_idx, row) in table.rows.iter().enumerate() {
+        let column_widths = table_row_column_widths(table, row, column_count, content_width);
+        let table_width: f32 = column_widths.iter().sum();
         let next_row = table.rows.get(row_idx + 1);
         let mut prepared = prepare_table_row(
             row,
@@ -6056,6 +6115,30 @@ fn table_column_widths(table: &Table, column_count: usize, content_width: f32) -
     vec![content_width / column_count as f32; column_count]
 }
 
+fn table_row_column_widths(
+    table: &Table,
+    row: &TableRow,
+    column_count: usize,
+    content_width: f32,
+) -> Vec<f32> {
+    if row.column_widths_twips.len() < column_count {
+        return table_column_widths(table, column_count, content_width);
+    }
+
+    let widths = row
+        .column_widths_twips
+        .iter()
+        .take(column_count)
+        .map(|width| twips_to_points(*width).max(12.0))
+        .collect::<Vec<_>>();
+    let total: f32 = widths.iter().sum();
+    if total > content_width && !table.preserve_authored_widths {
+        let scale = content_width / total;
+        return widths.into_iter().map(|width| width * scale).collect();
+    }
+    widths
+}
+
 fn push_table_borders(
     pages: &mut [LayoutPage],
     left: f32,
@@ -7607,6 +7690,15 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 font_provider,
             );
         }
+        if !paragraph.style.no_wrap {
+            segments = apply_emergency_word_wrapping(
+                segments,
+                content_width,
+                &paragraph.style,
+                document,
+                font_provider,
+            );
+        }
         for segment in segments {
             if segment.text == "\n" {
                 let finished_height = current.height;
@@ -7824,6 +7916,92 @@ fn segment_can_auto_hyphenate(segment: &FlowRun, paragraph_style: &ParagraphStyl
         && (paragraph_style.hyphenate_caps || !is_all_caps_word(&segment.text))
 }
 
+fn apply_emergency_word_wrapping(
+    segments: Vec<FlowRun>,
+    content_width: f32,
+    paragraph_style: &ParagraphStyle,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> Vec<FlowRun> {
+    let max_line_width = paragraph_line_width(content_width, paragraph_style, false)
+        .max(paragraph_line_width(content_width, paragraph_style, true));
+    let mut output = Vec::new();
+
+    for segment in segments {
+        if segment.tab_stop_position.is_some()
+            || segment.text == "\t"
+            || segment.text == "\n"
+            || contains_inline_marker(&segment.text)
+            || segment.text.chars().count() < 2
+            || segment.text.chars().any(char::is_whitespace)
+        {
+            output.push(segment);
+            continue;
+        }
+        let display = display_text(&segment.text, &segment.style);
+        let family = font_family_for_run_text(document, &segment.style, &display);
+        if measure_text_with_document_font(
+            &display,
+            &segment.style,
+            family,
+            document,
+            font_provider,
+        ) <= max_line_width
+        {
+            output.push(segment);
+            continue;
+        }
+
+        push_emergency_wrapped_segment(
+            &mut output,
+            segment,
+            max_line_width,
+            family,
+            document,
+            font_provider,
+        );
+    }
+
+    output
+}
+
+fn push_emergency_wrapped_segment(
+    output: &mut Vec<FlowRun>,
+    segment: FlowRun,
+    max_line_width: f32,
+    family: PdfFontFamily,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) {
+    let chars = segment.text.chars().collect::<Vec<_>>();
+    let mut start = 0;
+    while start < chars.len() {
+        let mut end = chars.len();
+        while end > start + 1 {
+            let text = chars[start..end].iter().collect::<String>();
+            if measure_text_with_document_font(
+                &text,
+                &segment.style,
+                family,
+                document,
+                font_provider,
+            ) <= max_line_width
+            {
+                break;
+            }
+            end -= 1;
+        }
+        let is_last = end == chars.len();
+        push_flow_run(
+            output,
+            &chars[start..end].iter().collect::<String>(),
+            &segment.style,
+            is_last && segment.soft_hyphen_after,
+        );
+        start = end;
+    }
+}
+
 fn is_all_caps_word(text: &str) -> bool {
     let mut has_uppercase = false;
     for ch in text.chars().filter(|ch| ch.is_alphabetic()) {
@@ -7883,14 +8061,7 @@ fn push_auto_hyphenated_segment(
                 document,
                 font_provider,
             );
-            let hyphen_width = measure_text_with_document_font(
-                "-",
-                &segment.style,
-                family,
-                document,
-                font_provider,
-            );
-            if text_width + hyphen_width <= max_line_width {
+            if text_width <= max_line_width {
                 break;
             }
             end -= 1;
@@ -7911,7 +8082,7 @@ fn push_auto_hyphenated_segment(
             output,
             &chars[start..end].iter().collect::<String>(),
             &segment.style,
-            true,
+            false,
         );
         *consecutive_hyphenated = consecutive_hyphenated.saturating_add(1);
         start = end;
@@ -8115,6 +8286,7 @@ fn document_stats(document: &Document) -> DocumentStats {
         &document.first_page_header,
         &document.even_page_header,
         document.page.title_page,
+        document.page.facing_pages,
         page_visibility,
     );
     push_repeating_image_variant_stats(
@@ -8126,6 +8298,7 @@ fn document_stats(document: &Document) -> DocumentStats {
         &document.first_page_header_images,
         &document.even_page_header_images,
         document.page.title_page,
+        document.page.facing_pages,
         page_visibility,
         document_content_width,
     );
@@ -8138,6 +8311,7 @@ fn document_stats(document: &Document) -> DocumentStats {
         &document.first_page_header_shapes,
         &document.even_page_header_shapes,
         document.page.title_page,
+        document.page.facing_pages,
         page_visibility,
     );
     push_repeating_paragraph_variant_stats(
@@ -8149,6 +8323,7 @@ fn document_stats(document: &Document) -> DocumentStats {
         &document.first_page_footer,
         &document.even_page_footer,
         document.page.title_page,
+        document.page.facing_pages,
         page_visibility,
     );
     push_repeating_image_variant_stats(
@@ -8160,6 +8335,7 @@ fn document_stats(document: &Document) -> DocumentStats {
         &document.first_page_footer_images,
         &document.even_page_footer_images,
         document.page.title_page,
+        document.page.facing_pages,
         page_visibility,
         document_content_width,
     );
@@ -8172,6 +8348,7 @@ fn document_stats(document: &Document) -> DocumentStats {
         &document.first_page_footer_shapes,
         &document.even_page_footer_shapes,
         document.page.title_page,
+        document.page.facing_pages,
         page_visibility,
     );
     push_background_shape_stats(
@@ -8227,6 +8404,7 @@ fn push_block_stats(
                 &document.first_page_header,
                 &document.even_page_header,
                 settings.title_page,
+                settings.facing_pages,
                 page_visibility,
             );
             push_repeating_image_variant_stats(
@@ -8238,6 +8416,7 @@ fn push_block_stats(
                 &document.first_page_header_images,
                 &document.even_page_header_images,
                 settings.title_page,
+                settings.facing_pages,
                 page_visibility,
                 section_content_width,
             );
@@ -8250,6 +8429,7 @@ fn push_block_stats(
                 &document.first_page_header_shapes,
                 &document.even_page_header_shapes,
                 settings.title_page,
+                settings.facing_pages,
                 page_visibility,
             );
             push_repeating_paragraph_variant_stats(
@@ -8261,6 +8441,7 @@ fn push_block_stats(
                 &document.first_page_footer,
                 &document.even_page_footer,
                 settings.title_page,
+                settings.facing_pages,
                 page_visibility,
             );
             push_repeating_image_variant_stats(
@@ -8272,6 +8453,7 @@ fn push_block_stats(
                 &document.first_page_footer_images,
                 &document.even_page_footer_images,
                 settings.title_page,
+                settings.facing_pages,
                 page_visibility,
                 section_content_width,
             );
@@ -8284,6 +8466,7 @@ fn push_block_stats(
                 &document.first_page_footer_shapes,
                 &document.even_page_footer_shapes,
                 settings.title_page,
+                settings.facing_pages,
                 page_visibility,
             );
             push_background_shape_stats(
@@ -8429,6 +8612,7 @@ fn push_repeating_paragraph_variant_stats(
     fallback_first: &[Paragraph],
     fallback_even: &[Paragraph],
     title_page: bool,
+    facing_pages: bool,
     visibility: PageVariantVisibility,
 ) {
     for physical_page_number in visibility.first_page..=visibility.last_page {
@@ -8440,7 +8624,7 @@ fn push_repeating_paragraph_variant_stats(
                 continue;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if facing_pages && physical_page_number % 2 == 0 {
             let selected = first_non_empty(even, fallback_even);
             if !selected.is_empty() {
                 builder.push_repeating_paragraphs_once(selected);
@@ -8460,6 +8644,7 @@ fn push_repeating_shape_variant_stats(
     fallback_first: &[StaticShape],
     fallback_even: &[StaticShape],
     title_page: bool,
+    facing_pages: bool,
     visibility: PageVariantVisibility,
 ) {
     for physical_page_number in visibility.first_page..=visibility.last_page {
@@ -8471,7 +8656,7 @@ fn push_repeating_shape_variant_stats(
                 continue;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if facing_pages && physical_page_number % 2 == 0 {
             let selected = first_non_empty_shapes(even, fallback_even);
             if !selected.is_empty() {
                 builder.push_repeating_shapes_once(selected);
@@ -8491,6 +8676,7 @@ fn push_repeating_image_variant_stats(
     fallback_first: &[StaticImage],
     fallback_even: &[StaticImage],
     title_page: bool,
+    facing_pages: bool,
     visibility: PageVariantVisibility,
     content_width: f32,
 ) {
@@ -8503,7 +8689,7 @@ fn push_repeating_image_variant_stats(
                 continue;
             }
         }
-        if physical_page_number % 2 == 0 {
+        if facing_pages && physical_page_number % 2 == 0 {
             let selected = first_non_empty_images(even, fallback_even);
             if !selected.is_empty() {
                 builder.push_repeating_images_once(selected, content_width);
@@ -14457,6 +14643,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -14550,6 +14737,24 @@ mod tests {
         assert!((preserved[0] - 200.0).abs() < 0.01);
         assert!((preserved[1] - 200.0).abs() < 0.01);
         assert!((preserved.iter().sum::<f32>() - 400.0).abs() < 0.01);
+
+        let row = TableRow {
+            cells: Vec::new(),
+            column_widths_twips: vec![2_400, 2_400],
+            height_twips: None,
+            left_offset_twips: 0,
+            vertical_offset_twips: 0,
+            wrap_margins: TableRowWrapMargins::default(),
+            cell_gap_twips: 0,
+            alignment: TableRowAlignment::Left,
+            repeat_header: false,
+            keep_together: false,
+            keep_with_next: false,
+            no_overlap: false,
+        };
+        let row_widths = table_row_column_widths(&table, &row, 2, 288.0);
+        assert!((row_widths[0] - 120.0).abs() < 0.01);
+        assert!((row_widths[1] - 120.0).abs() < 0.01);
     }
 
     #[test]
@@ -14560,6 +14765,7 @@ mod tests {
             borders_visible: false,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -14614,6 +14820,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -14676,6 +14883,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -14745,6 +14953,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -14833,6 +15042,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -14982,7 +15192,7 @@ mod tests {
             .flat_map(|page| page.items.iter())
             .filter(|item| matches!(item, LayoutItem::Line { .. }))
             .count();
-        assert_eq!(line_count, 820);
+        assert_eq!(line_count, 808);
         assert!(layout.pages.iter().skip(1).all(|page| {
             page.items
                 .iter()
@@ -15356,6 +15566,7 @@ mod tests {
             vertical_merge: TableCellVerticalMerge::default(),
         };
         let row = |cells: Vec<TableCell>| TableRow {
+            column_widths_twips: Vec::new(),
             cells,
             height_twips: None,
             left_offset_twips: 0,
@@ -15655,6 +15866,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -15753,6 +15965,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -15816,6 +16029,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(-360),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -15872,6 +16086,7 @@ mod tests {
             preserve_authored_widths: true,
             column_widths_twips: vec![1440, 1440],
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(1440),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -16001,6 +16216,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(-360),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -16052,6 +16268,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -16112,6 +16329,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -16191,6 +16409,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -16253,6 +16472,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 720,
                 vertical_offset_twips: 0,
@@ -16309,6 +16529,7 @@ mod tests {
                 borders_visible: true,
                 preserve_authored_widths: false,
                 rows: vec![TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips,
@@ -16389,6 +16610,7 @@ mod tests {
     fn lays_out_table_row_wrap_margins_as_passive_outer_spacing() {
         fn row(text: &str, wrap_margins: TableRowWrapMargins) -> TableRow {
             TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -16482,6 +16704,7 @@ mod tests {
                 borders_visible: true,
                 preserve_authored_widths: false,
                 rows: vec![TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: Some(720),
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -16638,6 +16861,7 @@ mod tests {
             preserve_authored_widths: false,
             rows: vec![
                 TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -16671,6 +16895,7 @@ mod tests {
                     }],
                 },
                 TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -16726,6 +16951,7 @@ mod tests {
     fn mirrored_pages_resolve_inside_outside_table_alignment_by_parity() {
         fn aligned_row(text: &str, alignment: TableRowAlignment) -> TableRow {
             TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -16768,8 +16994,8 @@ mod tests {
                 borders_visible: true,
                 preserve_authored_widths: false,
                 rows: vec![
-                    aligned_row("OddInside", TableRowAlignment::Inside),
-                    aligned_row("OddOutside", TableRowAlignment::Outside),
+                    aligned_row("OddIn", TableRowAlignment::Inside),
+                    aligned_row("OddOut", TableRowAlignment::Outside),
                 ],
             }),
             Block::PageBreak,
@@ -16778,8 +17004,8 @@ mod tests {
                 borders_visible: true,
                 preserve_authored_widths: false,
                 rows: vec![
-                    aligned_row("EvenInside", TableRowAlignment::Inside),
-                    aligned_row("EvenOutside", TableRowAlignment::Outside),
+                    aligned_row("EvenIn", TableRowAlignment::Inside),
+                    aligned_row("EvenOut", TableRowAlignment::Outside),
                 ],
             }),
         ];
@@ -16796,10 +17022,10 @@ mod tests {
                 .expect("aligned table text")
         };
 
-        assert!((page_text_x(0, "OddInside") - 75.0).abs() < 0.01);
-        assert!((page_text_x(0, "OddOutside") - 471.0).abs() < 0.01);
-        assert!((page_text_x(1, "EvenInside") - 471.0).abs() < 0.01);
-        assert!((page_text_x(1, "EvenOutside") - 75.0).abs() < 0.01);
+        assert!((page_text_x(0, "OddIn") - 75.0).abs() < 0.01);
+        assert!((page_text_x(0, "OddOut") - 471.0).abs() < 0.01);
+        assert!((page_text_x(1, "EvenIn") - 471.0).abs() < 0.01);
+        assert!((page_text_x(1, "EvenOut") - 75.0).abs() < 0.01);
     }
 
     #[test]
@@ -16810,6 +17036,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -16873,6 +17100,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(489),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17003,6 +17231,7 @@ mod tests {
             preserve_authored_widths: false,
             rows: vec![
                 TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -17036,6 +17265,7 @@ mod tests {
                     }],
                 },
                 TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -17108,6 +17338,7 @@ mod tests {
             borders_visible: false,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17162,6 +17393,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17220,6 +17452,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17293,6 +17526,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17363,6 +17597,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17469,6 +17704,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(1440),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17573,6 +17809,7 @@ mod tests {
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17688,6 +17925,7 @@ mod tests {
             preserve_authored_widths: false,
             rows: vec![
                 TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: Some(720),
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -17744,6 +17982,7 @@ mod tests {
                     ],
                 },
                 TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: Some(720),
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -17843,6 +18082,7 @@ mod tests {
     fn repeats_table_header_rows_after_page_breaks() {
         fn row(text: &str, repeat_header: bool) -> TableRow {
             TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17909,6 +18149,7 @@ mod tests {
     fn table_row_keep_with_next_starts_pair_on_next_page_when_pair_would_split() {
         fn row(text: &str, keep_with_next: bool) -> TableRow {
             TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: Some(720),
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -17972,6 +18213,7 @@ mod tests {
     fn splits_tall_auto_height_table_rows_across_pages() {
         fn row(text: String, repeat_header: bool) -> TableRow {
             TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -18146,6 +18388,7 @@ mod tests {
     fn repeats_table_header_on_split_tall_row_continuation_pages() {
         fn row(text: String, repeat_header: bool) -> TableRow {
             TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -18206,6 +18449,7 @@ mod tests {
     fn splits_tall_positive_minimum_height_table_rows_across_pages() {
         fn row(text: String, height_twips: Option<i32>) -> TableRow {
             TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -18754,7 +18998,7 @@ mod tests {
     }
 
     #[test]
-    fn passive_auto_hyphenation_breaks_long_overflow_words() {
+    fn emergency_wrapping_breaks_long_words_without_synthetic_hyphens() {
         let document = Document::default();
         let style = CharacterStyle::default();
         let word = "Antidisestablishmentarianism";
@@ -18777,19 +19021,17 @@ mod tests {
         let plain_lines = wrap_paragraph(&plain, width, &markers, &document);
         let hyphenated_lines = wrap_paragraph(&hyphenated, width, &markers, &document);
 
-        assert_eq!(plain_lines.len(), 1);
+        assert!(plain_lines.len() > 1);
         assert!(hyphenated_lines.len() > 1);
-        assert!(line_text(&hyphenated_lines[0]).ends_with('-'));
-        let joined = hyphenated_lines
-            .iter()
-            .map(line_text)
-            .collect::<String>()
-            .replace('-', "");
-        assert_eq!(joined, word);
+        for lines in [&plain_lines, &hyphenated_lines] {
+            assert!(lines.iter().all(|line| line.width <= width + 0.01));
+            assert!(lines.iter().all(|line| !line_text(line).contains('-')));
+            assert_eq!(lines.iter().map(line_text).collect::<String>(), word);
+        }
     }
 
     #[test]
-    fn passive_auto_hyphenation_respects_hot_zone() {
+    fn emergency_wrapping_still_bounds_words_inside_a_wide_hyphenation_zone() {
         let document = Document::default();
         let style = CharacterStyle::default();
         let word = "Antidisestablishment";
@@ -18820,13 +19062,16 @@ mod tests {
         let wide_lines = wrap_paragraph(&wide_zone, width, &markers, &document);
 
         assert!(tight_lines.len() > 1);
-        assert!(line_text(&tight_lines[0]).ends_with('-'));
-        assert_eq!(wide_lines.len(), 1);
-        assert_eq!(line_text(&wide_lines[0]), word);
+        assert!(wide_lines.len() > 1);
+        for lines in [&tight_lines, &wide_lines] {
+            assert!(lines.iter().all(|line| line.width <= width + 0.01));
+            assert!(lines.iter().all(|line| !line_text(line).contains('-')));
+            assert_eq!(lines.iter().map(line_text).collect::<String>(), word);
+        }
     }
 
     #[test]
-    fn passive_auto_hyphenation_respects_capital_word_suppression() {
+    fn capital_word_suppression_does_not_disable_emergency_wrapping() {
         let document = Document::default();
         let style = CharacterStyle::default();
         let word = "ANTIDISESTABLISHMENTARIANISM";
@@ -18852,13 +19097,16 @@ mod tests {
         let suppressed_lines = wrap_paragraph(&suppressed, width, &markers, &document);
 
         assert!(hyphenated_lines.len() > 1);
-        assert!(line_text(&hyphenated_lines[0]).ends_with('-'));
-        assert_eq!(suppressed_lines.len(), 1);
-        assert_eq!(line_text(&suppressed_lines[0]), word);
+        assert!(suppressed_lines.len() > 1);
+        for lines in [&hyphenated_lines, &suppressed_lines] {
+            assert!(lines.iter().all(|line| line.width <= width + 0.01));
+            assert!(lines.iter().all(|line| !line_text(line).contains('-')));
+            assert_eq!(lines.iter().map(line_text).collect::<String>(), word);
+        }
     }
 
     #[test]
-    fn passive_auto_hyphenation_limits_consecutive_hyphenated_lines() {
+    fn consecutive_hyphenation_limit_never_reintroduces_synthetic_hyphens() {
         let document = Document::default();
         let style = CharacterStyle::default();
         let word = "AntidisestablishmentarianismAntidisestablishmentarianism";
@@ -18882,25 +19130,12 @@ mod tests {
         let width = measure_text("Antidis", &style);
         let unlimited_lines = wrap_paragraph(&unlimited, width, &markers, &document);
         let limited_lines = wrap_paragraph(&limited, width, &markers, &document);
-        let unlimited_hyphens = unlimited_lines
-            .iter()
-            .filter(|line| line_text(line).ends_with('-'))
-            .count();
-        let limited_hyphens = limited_lines
-            .iter()
-            .filter(|line| line_text(line).ends_with('-'))
-            .count();
-
-        assert!(unlimited_hyphens > 1);
-        assert_eq!(limited_lines.len(), 2);
-        assert!(line_text(&limited_lines[0]).ends_with('-'));
-        assert_eq!(limited_hyphens, 1);
-        let joined = limited_lines
-            .iter()
-            .map(line_text)
-            .collect::<String>()
-            .replace('-', "");
-        assert_eq!(joined, word);
+        for lines in [&unlimited_lines, &limited_lines] {
+            assert!(lines.len() > 1);
+            assert!(lines.iter().all(|line| line.width <= width + 0.01));
+            assert!(lines.iter().all(|line| !line_text(line).contains('-')));
+            assert_eq!(lines.iter().map(line_text).collect::<String>(), word);
+        }
     }
 
     #[test]
@@ -19368,6 +19603,7 @@ mod tests {
         document.page.margin_left_twips = 720;
         document.page.margin_right_twips = 360;
         document.page.gutter_twips = 720;
+        document.page.facing_pages = true;
         document.page.mirror_margins = true;
         document.blocks = vec![
             paragraph_with_text("Odd"),
@@ -19393,6 +19629,7 @@ mod tests {
         document.page.margin_right_twips = 360;
         document.page.gutter_twips = 720;
         document.page.gutter_on_right = true;
+        document.page.facing_pages = true;
         document.page.mirror_margins = true;
         document.blocks = vec![
             paragraph_with_text("Odd"),
@@ -19643,6 +19880,7 @@ mod tests {
             borders_visible: false,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -19969,6 +20207,7 @@ mod tests {
                 borders_visible: false,
                 preserve_authored_widths: false,
                 rows: vec![TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -20064,6 +20303,7 @@ mod tests {
                 borders_visible: false,
                 preserve_authored_widths: false,
                 rows: vec![TableRow {
+                    column_widths_twips: Vec::new(),
                     height_twips: None,
                     left_offset_twips: 0,
                     vertical_offset_twips: 0,
@@ -20311,6 +20551,7 @@ mod tests {
             borders_visible: false,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -20721,6 +20962,7 @@ mod tests {
             borders_visible: false,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,
@@ -22690,7 +22932,7 @@ mod tests {
             "header_y={header_y}, height={}",
             layout.pages[0].height
         );
-        assert!((footer_y - 42.75).abs() < 0.01, "footer_y={footer_y}");
+        assert!((footer_y - 57.75).abs() < 0.01, "footer_y={footer_y}");
     }
 
     #[test]
@@ -22777,7 +23019,7 @@ mod tests {
             layout.pages[1].height
         );
         assert!(
-            (second_footer_y - 42.75).abs() < 0.01,
+            (second_footer_y - 57.75).abs() < 0.01,
             "second_footer_y={second_footer_y}"
         );
     }
@@ -22826,6 +23068,7 @@ mod tests {
 
         let mut document = Document::default();
         document.page.title_page = true;
+        document.page.facing_pages = true;
         document.header = vec![repeating_paragraph("Odd header")];
         document.first_page_header = vec![repeating_paragraph("First header")];
         document.even_page_header = vec![repeating_paragraph("Even header")];
@@ -22850,6 +23093,35 @@ mod tests {
         assert!(layout_text(&layout.pages[1]).contains("Even footer"));
         assert!(layout_text(&layout.pages[2]).contains("Odd header"));
         assert!(layout_text(&layout.pages[2]).contains("Odd footer"));
+    }
+
+    #[test]
+    fn ignores_even_header_footer_variants_without_facing_pages() {
+        let mut document = Document::default();
+        document.page.margin_top_twips = 720;
+        document.header = vec![repeating_paragraph("RightHeader")];
+        document.even_page_header = vec![repeating_paragraph("LeftHeader")];
+        document.footer = vec![repeating_paragraph("RightFooter")];
+        document.even_page_footer = vec![repeating_paragraph("LeftFooter")];
+        document.blocks = vec![
+            paragraph_with_text("PageOne"),
+            Block::PageBreak,
+            paragraph_with_text("PageTwo"),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert_eq!(layout.pages.len(), 2);
+        assert!(layout_text(&layout.pages[1]).contains("RightHeader"));
+        assert!(layout_text(&layout.pages[1]).contains("RightFooter"));
+        assert!(!layout_text(&layout.pages[1]).contains("LeftHeader"));
+        assert!(!layout_text(&layout.pages[1]).contains("LeftFooter"));
+        let header_y = text_baseline_for(&layout.pages[0], "RightHeader");
+        let body_y = text_baseline_for(&layout.pages[0], "PageOne");
+        assert!(
+            (header_y - body_y - 15.0).abs() < 0.01,
+            "header_y={header_y}, body_y={body_y}"
+        );
     }
 
     #[test]
@@ -22925,6 +23197,7 @@ mod tests {
     fn resolves_page_number_markers_from_configured_start() {
         let mut document = Document::default();
         document.page.page_number_start = Some(7);
+        document.page.restart_page_numbering = true;
         document.header = vec![Paragraph {
             style: Default::default(),
             runs: vec![Run {
@@ -22951,6 +23224,7 @@ mod tests {
     fn resolves_page_number_markers_from_configured_format() {
         let mut document = Document::default();
         document.page.page_number_start = Some(4);
+        document.page.restart_page_numbering = true;
         document.page.page_number_format = Some(PageNumberFormat::UpperRoman);
         document.header = vec![Paragraph {
             style: Default::default(),
@@ -23061,6 +23335,7 @@ mod tests {
         }];
         let mut second_section = PageSettings::default();
         second_section.page_number_start = Some(3);
+        second_section.restart_page_numbering = true;
         document.blocks = vec![
             paragraph_with_text("First section"),
             Block::SectionBreak,
@@ -23119,6 +23394,7 @@ mod tests {
         }];
         let mut second_section = PageSettings::default();
         second_section.page_number_start = Some(2);
+        second_section.restart_page_numbering = true;
         second_section.page_number_format = Some(PageNumberFormat::LowerLetter);
         document.blocks = vec![
             paragraph_with_text("First section"),

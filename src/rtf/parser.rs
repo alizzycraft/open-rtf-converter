@@ -1,7 +1,7 @@
 use jpeg_decoder::{Decoder as JpegDecoder, PixelFormat as JpegPixelFormat};
 use thiserror::Error;
 
-use crate::config::{ActiveContentPolicy, RtfLimits, RtfParseOptions};
+use crate::config::{ActiveContentPolicy, CompatibilityMode, RtfLimits, RtfParseOptions};
 use crate::diagnostics::Diagnostic;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
@@ -31,7 +31,7 @@ const DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS: i32 = 6;
 const DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS: i32 = -6;
 const DEFAULT_SCRIPT_FONT_SCALE_PERCENT: i32 = 65;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
-const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 60;
+const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 0;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
 const DEFAULT_SHAPE_TEXT_MARGIN_TWIPS: i32 = 80;
 const DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS: i32 = DEFAULT_SHAPE_WRAP_MARGIN_TWIPS;
@@ -77,6 +77,7 @@ struct ParserState {
     style_name_text: String,
     style_name_terminated: bool,
     paragraph_style_index: Option<i32>,
+    paragraph_frame_dimensions_seen: bool,
     list_override_index: Option<i32>,
     list_level_index: usize,
     list_context: ListContext,
@@ -232,6 +233,7 @@ impl Default for ParserState {
             style_name_text: String::new(),
             style_name_terminated: false,
             paragraph_style_index: None,
+            paragraph_frame_dimensions_seen: false,
             list_override_index: None,
             list_level_index: 0,
             list_context: ListContext::None,
@@ -585,7 +587,7 @@ impl Default for TableBuilder {
         Self {
             rows: Vec::new(),
             cell_right_edges_twips: Vec::new(),
-            borders_visible: true,
+            borders_visible: false,
             preserve_authored_widths: false,
         }
     }
@@ -614,6 +616,7 @@ impl TableBuilder {
 struct TableRowBuilder {
     cells: Vec<TableCell>,
     cell_right_edges_twips: Vec<i32>,
+    has_authored_cell_boundaries: bool,
     cell_shading_color_indices: Vec<Option<usize>>,
     cell_shading_basis_points: Vec<i32>,
     cell_shading_patterns: Vec<ShadingPattern>,
@@ -924,6 +927,7 @@ fn nested_table_from_capture(
                 })
                 .collect();
             TableRow {
+                column_widths_twips: Vec::new(),
                 cells: {
                     let horizontal_border = row_inner_horizontal_borders
                         .get(row_index)
@@ -5806,6 +5810,7 @@ impl Parser {
             }
             "pard" => {
                 self.state.paragraph = self.default_paragraph_style.clone();
+                self.state.paragraph_frame_dimensions_seen = false;
                 self.state.current_tab_leader = TabLeader::None;
                 self.state.current_tab_alignment = TabAlignment::Left;
                 self.state.list_override_index = None;
@@ -5871,7 +5876,11 @@ impl Parser {
                     self.clamp_page_gutter(control.parameter, offset);
                 self.upsert_current_section_settings();
             }
-            "facingp" | "margmirror" | "margmirsxn" => {
+            "facingp" => {
+                self.current_section_page.facing_pages = control.parameter.unwrap_or(1) != 0;
+                self.upsert_current_section_settings();
+            }
+            "margmirror" | "margmirsxn" => {
                 self.current_section_page.mirror_margins = control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
@@ -5960,22 +5969,24 @@ impl Parser {
                 self.current_section_page.vertical_alignment = PageVerticalAlignment::Bottom;
                 self.upsert_current_section_settings();
             }
-            "pgnstarts" | "pgnstart" => {
+            "pgnstarts" => {
                 self.current_section_page.page_number_start =
                     Some(self.clamp_page_number_start(control.parameter, offset));
                 self.upsert_current_section_settings();
             }
+            "pgnstart" => {
+                self.current_section_page.page_number_start =
+                    Some(self.clamp_page_number_start(control.parameter, offset));
+                self.current_section_page.restart_page_numbering = true;
+                self.upsert_current_section_settings();
+            }
             "pgnrestart" => {
-                self.current_section_page.page_number_start = if control.parameter.unwrap_or(1) == 0
-                {
-                    None
-                } else {
-                    Some(1)
-                };
+                self.current_section_page.restart_page_numbering =
+                    control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
             "pgncont" => {
-                self.current_section_page.page_number_start = None;
+                self.current_section_page.restart_page_numbering = false;
                 self.upsert_current_section_settings();
             }
             "pgnx" => {
@@ -6041,6 +6052,9 @@ impl Parser {
                 self.reject_active_content_only(feature, offset)?;
             }
             name if let Some(message) = word_layout_compatibility_control_message(name) => {
+                if matches!(name, "absw" | "absh") {
+                    self.state.paragraph_frame_dimensions_seen = true;
+                }
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
             }
@@ -10681,6 +10695,9 @@ impl Parser {
     fn finish_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
         self.flush_pending_paragraph_list_marker(offset)?;
         let paragraph_style_index = self.state.paragraph_style_index;
+        let suppress_incomplete_word_drop_cap = self.options.compatibility_mode
+            == CompatibilityMode::WordCompatiblePassive
+            && !self.state.paragraph_frame_dimensions_seen;
         let mut pending_style_reference_text = None;
         let mut pending_style_reference_number_text = None;
         if self.state.destination == Destination::ShapeText {
@@ -10689,13 +10706,16 @@ impl Parser {
         }
         if let Some(row) = self.current_table_row.as_mut() {
             if !row.current_cell_paragraph.runs.is_empty() {
-                let paragraph = std::mem::replace(
+                let mut paragraph = std::mem::replace(
                     &mut row.current_cell_paragraph,
                     Paragraph {
                         style: self.state.paragraph.clone(),
                         runs: Vec::new(),
                     },
                 );
+                if suppress_incomplete_word_drop_cap {
+                    paragraph.style.drop_cap_lines = 0;
+                }
                 if paragraph_style_index.is_some() {
                     pending_style_reference_text = paragraph_plain_text(&paragraph);
                     pending_style_reference_number_text =
@@ -10717,13 +10737,16 @@ impl Parser {
         }
 
         if !self.current_paragraph.runs.is_empty() {
-            let paragraph = std::mem::replace(
+            let mut paragraph = std::mem::replace(
                 &mut self.current_paragraph,
                 Paragraph {
                     style: self.state.paragraph.clone(),
                     runs: Vec::new(),
                 },
             );
+            if suppress_incomplete_word_drop_cap {
+                paragraph.style.drop_cap_lines = 0;
+            }
             if let Some(index) = paragraph_style_index {
                 if let Some(text) = paragraph_plain_text(&paragraph) {
                     self.store_style_reference_text(index, text, offset)?;
@@ -10887,43 +10910,32 @@ impl Parser {
             self.finish_nested_table_paragraph();
             return Ok(());
         }
-        let advance_next_style = match self.state.destination {
+        match self.state.destination {
             Destination::Body => {
                 self.finish_paragraph(offset)?;
-                true
             }
             destination if is_header_destination(destination) => {
                 self.finish_header_paragraph(offset)?;
-                true
             }
             destination if is_footer_destination(destination) => {
                 self.finish_footer_paragraph(offset)?;
-                true
             }
             Destination::Footnote => {
                 self.finish_footnote_paragraph(offset)?;
-                true
             }
             Destination::Endnote => {
                 self.finish_endnote_paragraph(offset)?;
-                true
             }
             destination if is_note_separator_destination(destination) => {
                 self.finish_note_separator_paragraph(offset)?;
-                true
             }
             Destination::ShapeText => {
                 self.finish_shape_text_paragraph();
-                true
             }
-            Destination::ListText => false,
+            Destination::ListText => {}
             _ => {
                 self.finish_paragraph(offset)?;
-                false
             }
-        };
-        if advance_next_style {
-            self.apply_next_style_after_paragraph(offset);
         }
         Ok(())
     }
@@ -11259,6 +11271,7 @@ impl Parser {
         TableRowBuilder {
             cells: Vec::new(),
             cell_right_edges_twips: Vec::new(),
+            has_authored_cell_boundaries: false,
             cell_shading_color_indices: Vec::new(),
             cell_shading_basis_points: Vec::new(),
             cell_shading_patterns: Vec::new(),
@@ -12429,6 +12442,7 @@ impl Parser {
         let page_content_width_twips = self.current_page_content_width_twips();
         let max_width_twips = self.limits().max_page_dimension_twips;
         if let Some(row) = self.current_table_row.as_mut() {
+            row.has_authored_cell_boundaries = true;
             let preferred_width_twips = normalized_preferred_table_width_twips(
                 row.current_cell_preferred_width,
                 page_content_width_twips,
@@ -13069,13 +13083,18 @@ impl Parser {
     }
 
     fn set_current_border_style(&mut self, style: BorderStyle) {
-        if !self.update_current_cell_border(|border| {
+        let updated_cell = self.update_current_cell_border(|border| {
             border.visible = true;
             border.style = style;
-        }) && !self.update_current_table_row_border(|border| {
-            border.visible = true;
-            border.style = style;
-        }) && !self.update_current_paragraph_border(|border| {
+        });
+        let updated_row = !updated_cell
+            && self.update_current_table_row_border(|border| {
+                border.visible = true;
+                border.style = style;
+            });
+        if updated_cell || updated_row {
+            self.set_current_table_borders_visible(true);
+        } else if !self.update_current_paragraph_border(|border| {
             border.visible = true;
             border.style = style;
         }) && !self.update_current_page_border(|border| {
@@ -13096,10 +13115,15 @@ impl Parser {
     }
 
     fn set_current_border_visible(&mut self, visible: bool) {
-        if !self.set_current_cell_border_visible(visible)
-            && !self.update_current_table_row_border(|border| {
+        let updated_cell = self.set_current_cell_border_visible(visible);
+        let updated_row = !updated_cell
+            && self.update_current_table_row_border(|border| {
                 border.visible = visible;
-            })
+            });
+        if (updated_cell || updated_row) && visible {
+            self.set_current_table_borders_visible(true);
+        } else if !updated_cell
+            && !updated_row
             && !self.update_current_paragraph_border(|border| {
                 border.visible = visible;
             })
@@ -13672,6 +13696,14 @@ impl Parser {
             row = active_row;
         }
 
+        if !row.has_authored_cell_boundaries {
+            self.diagnostics.push(Diagnostic::warning(
+                "table row without authored cell boundaries omitted to match Word recovery",
+                Some(offset),
+            ));
+            return Ok(());
+        }
+
         self.apply_table_row_preferred_width_fallback(&mut row);
         self.apply_table_row_vertical_position_alignment(&mut row, offset);
 
@@ -13696,10 +13728,12 @@ impl Parser {
             });
         }
 
+        let column_widths_twips = Self::table_row_cell_widths_twips(&row.cell_right_edges_twips);
         let table = self.current_table.get_or_insert_with(TableBuilder::default);
         table.merge_cell_right_edges(&row.cell_right_edges_twips);
         table.rows.push(TableRow {
             cells: row.cells,
+            column_widths_twips,
             height_twips: row.height_twips,
             left_offset_twips: row.left_offset_twips,
             vertical_offset_twips: row.vertical_offset_twips,
@@ -18643,6 +18677,10 @@ impl Parser {
                 ));
                 return false;
             }
+            if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                self.state.paragraph_style_index = Some(index);
+                return true;
+            }
             self.state.paragraph = style.paragraph;
             self.state.character = style.character;
             self.state.paragraph_style_index = Some(index);
@@ -18663,6 +18701,9 @@ impl Parser {
 
     fn apply_character_style(&mut self, index: i32, offset: usize) -> bool {
         if let Some(style) = self.resolve_style(index) {
+            if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                return true;
+            }
             self.state.character = inherit_character_style(&self.state.character, &style.character);
             true
         } else if index == 0 {
@@ -18675,19 +18716,6 @@ impl Parser {
                 Some(offset),
             ));
             false
-        }
-    }
-
-    fn apply_next_style_after_paragraph(&mut self, offset: usize) {
-        let Some(current_style_index) = self.state.paragraph_style_index else {
-            return;
-        };
-        let Some(current_style) = self.resolve_style(current_style_index) else {
-            self.state.paragraph_style_index = None;
-            return;
-        };
-        if let Some(next_style_index) = current_style.next_style {
-            self.apply_paragraph_style(next_style_index, offset);
         }
     }
 
@@ -44688,8 +44716,13 @@ mod tests {
 
     #[test]
     fn applies_stylesheet_paragraph_and_character_styles() {
-        let output = parse_rtf(
-            r"{\rtf1{\stylesheet{\s1\qc\li720\b Heading;}{\s2\ri360 Plain;}}\s1 Styled\par\s2 Plain\par}",
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\stylesheet{\s1\qc\li720\b Heading;}{\s2\ri360 Plain;}}\s1 Styled\par\s2 Plain\par}",
+            &options,
         )
         .unwrap();
 
@@ -44732,7 +44765,7 @@ mod tests {
         };
 
         assert_eq!(document_text(&output.document), "BoldNormalUnknown");
-        assert!(first.runs[0].style.bold);
+        assert!(!first.runs[0].style.bold);
         assert!(!second.runs[0].style.bold);
         assert_eq!(second.style, ParagraphStyle::default());
         assert_eq!(third.runs[0].text, "Unknown");
@@ -44752,8 +44785,13 @@ mod tests {
 
     #[test]
     fn applies_character_styles_without_resetting_paragraph_style() {
-        let output = parse_rtf(
-            r"{\rtf1{\stylesheet{\cs5\qc\li1440\b Emphasis;}}\qr Right \cs5 Bold only\par}",
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\stylesheet{\cs5\qc\li1440\b Emphasis;}}\qr Right \cs5 Bold only\par}",
+            &options,
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -44771,8 +44809,13 @@ mod tests {
 
     #[test]
     fn character_styles_preserve_direct_character_formatting() {
-        let output = parse_rtf(
-            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\stylesheet{\cs5\b Emphasis;}}\f1\i Direct \cs5 Direct and styled\par}",
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\stylesheet{\cs5\b Emphasis;}}\f1\i Direct \cs5 Direct and styled\par}",
+            &options,
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -44792,8 +44835,13 @@ mod tests {
 
     #[test]
     fn applies_stylesheet_based_on_inheritance() {
-        let output = parse_rtf(
-            r"{\rtf1{\stylesheet{\s2\sbasedon1\i Child;}{\s1\qc\li720\b Base;}}\s2 Inherited\par}",
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\stylesheet{\s2\sbasedon1\i Child;}{\s1\qc\li720\b Base;}}\s2 Inherited\par}",
+            &options,
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -44809,9 +44857,14 @@ mod tests {
     }
 
     #[test]
-    fn applies_stylesheet_next_style_after_paragraph_break() {
-        let output = parse_rtf(
-            r"{\rtf1{\stylesheet{\s1\snext2\b Heading;}{\s2\qc\i Body;}}\s1 Heading\par Body text\par}",
+    fn retains_stylesheet_next_style_as_editor_metadata_only() {
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\stylesheet{\s1\snext2\b Heading;}{\s2\qc\i Body;}}\s1 Heading\par Body text\par}",
+            &options,
         )
         .unwrap();
 
@@ -44829,15 +44882,20 @@ mod tests {
         assert!(!first.runs[0].style.italic);
 
         assert_eq!(second.runs[0].text, "Body text");
-        assert_eq!(second.style.alignment, Alignment::Center);
-        assert!(!second.runs[0].style.bold);
-        assert!(second.runs[0].style.italic);
+        assert_eq!(second.style.alignment, Alignment::Left);
+        assert!(second.runs[0].style.bold);
+        assert!(!second.runs[0].style.italic);
     }
 
     #[test]
     fn cyclic_stylesheet_inheritance_is_bounded() {
-        let output = parse_rtf(
-            r"{\rtf1{\stylesheet{\s1\sbasedon2\b First;}{\s2\sbasedon1\i Second;}}\s1 Safe\par}",
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\stylesheet{\s1\sbasedon2\b First;}{\s2\sbasedon1\i Second;}}\s1 Safe\par}",
+            &options,
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -44848,6 +44906,37 @@ mod tests {
         assert!(paragraph.runs[0].style.bold);
         assert!(paragraph.runs[0].style.italic);
         assert_eq!(paragraph.runs[0].text, "Safe");
+    }
+
+    #[test]
+    fn word_compatible_stylesheet_references_keep_only_direct_formatting() {
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\stylesheet{\s1\qc\b Base;}{\s2\sbasedon1\i Child;}{\cs5\b Emphasis;}}\s2 Plain\par\pard\qr Right \cs5 still plain\par\pard\f1\i Direct \cs5 remains direct\par}",
+        )
+        .unwrap();
+
+        let inherited = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected inherited paragraph"),
+        };
+        assert_eq!(inherited.style.alignment, Alignment::Left);
+        assert!(!inherited.runs[0].style.bold);
+        assert!(!inherited.runs[0].style.italic);
+
+        let right = match &output.document.blocks[1] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected right paragraph"),
+        };
+        assert_eq!(right.style.alignment, Alignment::Right);
+        assert!(right.runs.iter().all(|run| !run.style.bold));
+
+        let direct = match &output.document.blocks[2] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected direct paragraph"),
+        };
+        assert!(direct.runs.iter().all(|run| run.style.italic));
+        assert!(direct.runs.iter().all(|run| run.style.font_index == 1));
+        assert!(direct.runs.iter().all(|run| !run.style.bold));
     }
 
     #[test]
@@ -44928,7 +45017,9 @@ mod tests {
             _ => panic!("expected table block"),
         };
         assert_eq!(table.column_widths_twips, vec![2000, 2000]);
-        assert!(table.borders_visible);
+        assert_eq!(table.rows[0].column_widths_twips, vec![2000, 2000]);
+        assert_eq!(table.rows[0].cell_gap_twips, 0);
+        assert!(!table.borders_visible);
         assert_eq!(table.rows.len(), 1);
         assert_eq!(table.rows[0].cells.len(), 2);
         assert_eq!(table.rows[0].cells[0].paragraphs[0].runs[0].text, "Name");
@@ -45913,24 +46004,26 @@ mod tests {
     }
 
     #[test]
-    fn uses_preferred_cell_widths_when_table_cell_boundaries_are_missing() {
+    fn omits_preferred_width_rows_when_authored_cell_boundaries_are_missing() {
         let output = parse_rtf(
             r"{\rtf1\trowd\clftsWidth3\clwWidth1440 A\cell\clftsWidth3\clwWidth2880 B\cell\row}",
         )
         .unwrap();
-        let table = match &output.document.blocks[0] {
-            Block::Table(table) => table,
-            _ => panic!("expected table block"),
-        };
-
-        assert_eq!(table.column_widths_twips, vec![1440, 2880]);
-        assert_eq!(table.rows[0].cells[0].paragraphs[0].runs[0].text, "A");
-        assert_eq!(table.rows[0].cells[1].paragraphs[0].runs[0].text, "B");
+        assert!(
+            output
+                .document
+                .blocks
+                .iter()
+                .all(|block| !matches!(block, Block::Table(_)))
+        );
+        assert!(document_text(&output.document).is_empty());
         assert!(
             output
                 .diagnostics
                 .iter()
-                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+                .any(|diagnostic| diagnostic.message.contains(
+                    "table row without authored cell boundaries omitted to match Word recovery"
+                ))
         );
     }
 
@@ -45945,32 +46038,35 @@ mod tests {
             _ => panic!("expected table block"),
         };
 
-        assert_eq!(table.column_widths_twips, vec![2880, 1440]);
-        assert_eq!(table.rows[1].cells[0].paragraphs[0].runs[0].text, "Exact");
+        assert_eq!(table.column_widths_twips, vec![1000]);
+        assert_eq!(table.rows.len(), 1);
+        assert_eq!(table.rows[0].cells[0].paragraphs[0].runs[0].text, "Exact");
     }
 
     #[test]
-    fn preferred_row_widths_fill_missing_cell_geometry() {
+    fn omits_preferred_row_widths_without_authored_cell_geometry() {
         let output = parse_rtf(
             r"{\rtf1\paperw7200\margl720\margr720\trowd\trftsWidth3\trwWidth2880 A\cell B\cell\row\trowd\trftsWidth2\trwWidth2500 C\cell D\cell\row}",
         )
         .unwrap();
-        let table = match &output.document.blocks[0] {
-            Block::Table(table) => table,
-            _ => panic!("expected table block"),
-        };
-
-        assert_eq!(table.column_widths_twips, vec![1440, 1440]);
-        assert_eq!(table.rows.len(), 2);
-        assert_eq!(table.rows[0].cells.len(), 2);
-        assert_eq!(table.rows[1].cells.len(), 2);
-        let text = document_text(&output.document);
-        for forbidden in ["trftsWidth", "trwWidth"] {
-            assert!(
-                !text.contains(forbidden),
-                "row preferred-width control leaked to text: {forbidden}"
-            );
-        }
+        assert!(
+            output
+                .document
+                .blocks
+                .iter()
+                .all(|block| !matches!(block, Block::Table(_)))
+        );
+        assert!(document_text(&output.document).is_empty());
+        assert_eq!(
+            output
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.message.contains(
+                    "table row without authored cell boundaries omitted to match Word recovery"
+                ))
+                .count(),
+            2
+        );
     }
 
     #[test]
@@ -45985,6 +46081,7 @@ mod tests {
 
         assert!(table.preserve_authored_widths);
         assert_eq!(table.column_widths_twips, vec![4_000, 4_000]);
+        assert_eq!(table.rows[0].column_widths_twips, vec![4_000, 4_000]);
         assert!(output.diagnostics.iter().all(|diagnostic| {
             !diagnostic
                 .message
@@ -46427,6 +46524,7 @@ mod tests {
         let output = parse_rtf(r"{\rtf1\pgnstarts7{\header Page \chpgn\par}Body\par}").unwrap();
 
         assert_eq!(output.document.page.page_number_start, Some(7));
+        assert!(!output.document.page.restart_page_numbering);
         assert_eq!(
             output.document.header[0].runs[0].text,
             format!("Page {PAGE_NUMBER_MARKER}")
@@ -46507,6 +46605,7 @@ mod tests {
             panic!("expected section page settings block");
         };
         assert_eq!(settings.page_number_start, Some(3));
+        assert!(!settings.restart_page_numbering);
     }
 
     #[test]
@@ -46517,7 +46616,8 @@ mod tests {
         let Block::SectionSettings(settings) = &output.document.blocks[2] else {
             panic!("expected section page settings block");
         };
-        assert_eq!(settings.page_number_start, Some(1));
+        assert_eq!(settings.page_number_start, None);
+        assert!(settings.restart_page_numbering);
 
         let output =
             parse_rtf(r"{\rtf1\pgnstarts7 First\par\sect\sectd\pgncont Second\par}").unwrap();
@@ -46525,12 +46625,22 @@ mod tests {
             panic!("expected section page settings block");
         };
         assert_eq!(settings.page_number_start, None);
+        assert!(!settings.restart_page_numbering);
 
         let output = parse_rtf(r"{\rtf1 First\par\sect\sectd\pgnrestart0 Second\par}").unwrap();
         let Block::SectionSettings(settings) = &output.document.blocks[2] else {
             panic!("expected section page settings block");
         };
         assert_eq!(settings.page_number_start, None);
+        assert!(!settings.restart_page_numbering);
+
+        let output =
+            parse_rtf(r"{\rtf1 First\par\sect\sectd\pgnstarts3\pgnrestart Second\par}").unwrap();
+        let Block::SectionSettings(settings) = &output.document.blocks[2] else {
+            panic!("expected section page settings block");
+        };
+        assert_eq!(settings.page_number_start, Some(3));
+        assert!(settings.restart_page_numbering);
     }
 
     #[test]
@@ -46560,6 +46670,7 @@ mod tests {
             parse_rtf_bytes_with_options(br"{\rtf1\pgnstart999 Body\par}", &options).unwrap();
 
         assert_eq!(output.document.page.page_number_start, Some(9));
+        assert!(output.document.page.restart_page_numbering);
         assert!(
             output
                 .diagnostics
@@ -53163,13 +53274,18 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_facing_page_mirror_margin_controls_as_safe_metadata() {
+    fn normalizes_facing_page_and_mirror_margin_controls_as_distinct_safe_metadata() {
         let output = parse_rtf(r"{\rtf1\facingp\gutter360 Body\par}").unwrap();
 
-        assert!(output.document.page.mirror_margins);
+        assert!(output.document.page.facing_pages);
+        assert!(!output.document.page.mirror_margins);
         assert_eq!(output.document.page.gutter_twips, 360);
 
+        let output = parse_rtf(r"{\rtf1\facingp0 Body\par}").unwrap();
+        assert!(!output.document.page.facing_pages);
+
         let output = parse_rtf(r"{\rtf1\margmirror0 Body\par}").unwrap();
+        assert!(!output.document.page.facing_pages);
         assert!(!output.document.page.mirror_margins);
 
         let output = parse_rtf(r"{\rtf1\margmirsxn\gutter360 Body\par}").unwrap();
@@ -53494,14 +53610,15 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_later_section_mirror_margins_as_safe_metadata() {
+    fn normalizes_later_section_facing_pages_as_safe_metadata() {
         let output = parse_rtf(r"{\rtf1 First\par\sect\sectd\facingp Second\par}").unwrap();
 
         assert!(matches!(output.document.blocks[1], Block::SectionBreak));
         let Block::SectionSettings(settings) = &output.document.blocks[2] else {
             panic!("expected section page settings block");
         };
-        assert!(settings.mirror_margins);
+        assert!(settings.facing_pages);
+        assert!(!settings.mirror_margins);
     }
 
     #[test]
@@ -54096,7 +54213,7 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_drop_cap_controls_as_safe_paragraph_metadata() {
+    fn word_compatible_mode_ignores_drop_cap_without_frame_dimensions() {
         let output = parse_rtf(r"{\rtf1\dropcapli3\dropcapt1 Dropped\par\pard Plain\par}").unwrap();
         let first = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
@@ -54107,7 +54224,7 @@ After\par}"#;
             _ => panic!("expected second paragraph"),
         };
 
-        assert_eq!(first.style.drop_cap_lines, 3);
+        assert_eq!(first.style.drop_cap_lines, 0);
         assert_eq!(second.style.drop_cap_lines, 0);
         assert_eq!(first.runs[0].text, "Dropped");
         assert_eq!(second.runs[0].text, "Plain");
@@ -54120,8 +54237,45 @@ After\par}"#;
     }
 
     #[test]
+    fn word_compatible_mode_retains_drop_cap_with_frame_dimensions() {
+        let output =
+            parse_rtf(r"{\rtf1\absw1440\absh720\dropcapli3\dropcapt1 Dropped\par}").unwrap();
+        let first = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected first paragraph"),
+        };
+
+        assert_eq!(first.style.drop_cap_lines, 3);
+    }
+
+    #[test]
+    fn strict_spec_mode_retains_standalone_drop_cap_metadata() {
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output =
+            parse_rtf_bytes_with_options(br"{\rtf1\dropcapli3\dropcapt1 Dropped\par}", &options)
+                .unwrap();
+        let first = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected first paragraph"),
+        };
+
+        assert_eq!(first.style.drop_cap_lines, 3);
+    }
+
+    #[test]
     fn clamps_extreme_drop_cap_line_controls() {
-        let output = parse_rtf(r"{\rtf1\dropcapli999 Oversized\par\dropcapt0 Normal\par}").unwrap();
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\dropcapli999 Oversized\par\dropcapt0 Normal\par}",
+            &options,
+        )
+        .unwrap();
         let first = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected first paragraph"),

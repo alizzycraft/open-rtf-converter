@@ -9154,6 +9154,7 @@ endstream
             borders_visible: true,
             preserve_authored_widths: false,
             rows: vec![TableRow {
+                column_widths_twips: Vec::new(),
                 height_twips: None,
                 left_offset_twips: 0,
                 vertical_offset_twips: 0,

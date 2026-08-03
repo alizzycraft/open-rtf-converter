@@ -3251,13 +3251,23 @@
       "id": "page-number-format-restart-passive-layout",
       "input": "fixtures/page-number-format-restart-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/page-number-format-restart-passive.pdf",
       "word_reference_pages": [],
+      "word_must_preserve_text": [
+        "Page I",
+        "Page II",
+        "Page 1",
+        "Page 2",
+        "First roman page.",
+        "Second roman page.",
+        "Restarted decimal section.",
+        "Continued decimal page."
+      ],
       "expected_pages": 4,
       "must_preserve_text": [
-        "Page IV",
-        "Page V",
+        "Page I",
+        "Page II",
         "Page 1",
         "Page 2",
         "First roman page.",
@@ -3285,37 +3295,40 @@
         "/Annots"
       ],
       "expected_pdf_markers": [],
-      "known_gaps": [
-        "Word-exported reference should confirm exact page-number format transition, restart behavior, and header placement once available."
-      ]
+      "known_gaps": []
     },
     {
       "id": "table-spacing-autofit-passive-layout",
       "input": "fixtures/table-spacing-autofit-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-spacing-autofit-passive.pdf",
       "word_reference_pages": [],
+      "word_must_preserve_text": [
+        "Before table spacing.",
+        "Unit left",
+        "Unit right",
+        "Authored left",
+        "Authored right",
+        "After table spacing."
+      ],
       "expected_pages": 1,
       "must_preserve_text": [
         "Before table spacing.",
         "Unit left",
         "Unit right",
-        "Preferred narrow",
-        "Preferred percent",
-        "Row exact left",
-        "Row exact right",
         "Authored left",
         "Authored right",
         "After table spacing."
       ],
       "intentional_security_differences": [
-        "Table autofit, preferred width, authored width, and cell spacing controls are normalized into bounded passive table width and border-gap layout metadata."
+        "Table autofit, preferred width, authored width, and cell spacing controls are normalized into bounded passive table width and border-gap layout metadata; malformed rows without authored cell boundaries are omitted like Word."
       ],
       "expected_diagnostics": [
         "table row autofit interpreted through bounded passive table width layout",
         "table autofit growth disabled through bounded passive authored widths",
-        "table cell spacing rendered as bounded passive border gaps"
+        "table cell spacing rendered as bounded passive border gaps",
+        "table row without authored cell boundaries omitted to match Word recovery"
       ],
       "forbidden_pdf_markers": [
         "trowd",
@@ -3345,7 +3358,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact preferred-width fallback, table autofit width preservation, and cell gap geometry once available."
+        "Word distributes the fixture's non-standard clspdl/clspdr aliases three points differently around the explicitly spaced row; authored cell boundaries, the borderless appearance, and ordinary zero-gap rows otherwise match closely."
       ]
     },
     {
@@ -4289,9 +4302,9 @@
     {
       "id": "drop-cap-passive-layout",
       "input": "fixtures/drop-cap-passive.rtf",
-      "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/drop-cap-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4300,7 +4313,7 @@
         "Plain paragraph follows normal baseline flow."
       ],
       "intentional_security_differences": [
-        "Drop-cap controls are normalized into bounded passive paragraph layout metadata and rendered as static text geometry.",
+        "Word-compatible mode ignores incomplete standalone drop-cap controls unless paragraph frame dimensions are also authored; strict-spec mode retains standalone bounded drop-cap metadata.",
         "Raw drop-cap and paragraph reset controls are stripped before PDF rendering."
       ],
       "expected_diagnostics": [],
@@ -4318,7 +4331,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact drop-cap character scale, baseline, and adjacent text wrapping once available."
+        "Bundled Arial-compatible font metrics differ slightly from Word's Arial metrics; observed baselines differ by at most about 0.8 points."
       ]
     },
     {
@@ -4465,18 +4478,25 @@
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/hyphenation-passive.pdf",
       "word_reference_pages": [],
+      "word_must_preserve_text": [
+        "Antidisestablis",
+        "hmentarianis",
+        "Characteristic",
+        "ally"
+      ],
       "expected_pages": 1,
       "must_preserve_text": [
-        "Antidisestabli-",
-        "shmentarian-",
+        "Antidisestablis",
+        "hmentarian",
         "ism",
-        "Characteristically"
+        "Characteristic",
+        "ally"
       ],
       "intentional_security_differences": [
-        "Automatic hyphenation is rendered as bounded passive line-end hyphenation and does not preserve editable Word hyphenation state.",
+        "Automatic hyphenation is rendered as bounded passive emergency word wrapping and does not preserve editable Word hyphenation state.",
         "Oversized malformed vertical margins recover to bounded Word-compatible defaults instead of consuming unbounded layout space."
       ],
       "expected_diagnostics": [
@@ -4494,11 +4514,9 @@
         "/OpenAction",
         "/AcroForm"
       ],
-      "expected_pdf_markers": [
-        "-"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word baseline confirms one-page flow and default-margin recovery; exact automatic hyphen break points remain a passive-layout approximation."
+        "The converter wraps the final `ism` one character earlier than Word because the bounded bundled Arial-compatible font has slightly different metrics; all text, line count, and vertical placement remain close."
       ]
     },
     {
@@ -6965,8 +6983,8 @@
       "id": "stylesheet-semantics-passive-rendering",
       "input": "fixtures/stylesheet-semantics-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/stylesheet-semantics-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6977,8 +6995,8 @@
         "Direct Direct and styled"
       ],
       "intentional_security_differences": [
-        "Stylesheet inheritance, next-style selection, and character styles are applied only as passive formatting in the normalized model.",
-        "Character styles do not leak paragraph-only metadata into the paragraph layout, and direct formatting remains preserved when character styles are applied.",
+        "Word-compatible mode retains stylesheet definitions and references as passive metadata while rendering only concrete formatting emitted in the document stream; strict-spec mode can resolve stylesheet formatting.",
+        "Next-style selection remains editor metadata and does not mutate an already-authored following paragraph; character-style references cannot overwrite direct formatting in Word-compatible mode.",
         "Raw stylesheet, font table, style names, and style-control metadata are stripped before PDF rendering."
       ],
       "expected_diagnostics": [],
@@ -7005,7 +7023,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact style inheritance, next-style, and character-style visual formatting once available."
+        "Bundled Arial/Courier metrics differ slightly from Word's installed fonts (up to about 3.3 points in run width and 1.3 points vertically), while alignment, direct formatting, text, and one-page flow match."
       ]
     },
     {
@@ -7125,24 +7143,29 @@
       "id": "header-footer-variants-passive-layout",
       "input": "fixtures/header-footer-variants-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/header-footer-variants-passive.pdf",
       "word_reference_pages": [],
-      "expected_pages": 3,
-      "must_preserve_text": [
+      "word_must_preserve_text": [
         "First header",
-        "Even header",
         "Odd header",
         "First footer",
-        "Even footer",
         "Odd footer",
         "Page one body.",
         "Page two body.",
         "Page three body."
       ],
-      "intentional_security_differences": [
-        "First, even, and odd page header/footer destinations are normalized into bounded passive page text, not preserved as editable Word section state."
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "First header",
+        "Odd header",
+        "First footer",
+        "Odd footer",
+        "Page one body.",
+        "Page two body.",
+        "Page three body."
       ],
+      "intentional_security_differences": [],
       "expected_diagnostics": [],
       "forbidden_pdf_markers": [
         "headerf",
@@ -7152,6 +7175,8 @@
         "footerl",
         "footerr",
         "titlepg",
+        "Even header",
+        "Even footer",
         "/JavaScript",
         "/EmbeddedFile",
         "/Launch",
@@ -7161,9 +7186,7 @@
         "/Annots"
       ],
       "expected_pdf_markers": [],
-      "known_gaps": [
-        "Word-exported reference should confirm exact first/even/odd header/footer selection and vertical placement once available."
-      ]
+      "known_gaps": []
     },
     {
       "id": "header-footer-distance-passive-layout",

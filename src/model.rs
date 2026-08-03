@@ -127,6 +127,7 @@ pub struct PageSettings {
     pub margin_top_twips: i32,
     pub margin_bottom_twips: i32,
     pub gutter_twips: i32,
+    pub facing_pages: bool,
     pub mirror_margins: bool,
     pub gutter_on_right: bool,
     pub header_distance_twips: i32,
@@ -140,6 +141,7 @@ pub struct PageSettings {
     pub title_page: bool,
     pub vertical_alignment: PageVerticalAlignment,
     pub page_number_start: Option<i32>,
+    pub restart_page_numbering: bool,
     pub page_number_format: Option<PageNumberFormat>,
     pub page_number_x_twips: Option<i32>,
     pub page_number_y_twips: Option<i32>,
@@ -181,6 +183,7 @@ impl Default for PageSettings {
             margin_top_twips: 1_440,
             margin_bottom_twips: 1_440,
             gutter_twips: 0,
+            facing_pages: false,
             mirror_margins: false,
             gutter_on_right: false,
             header_distance_twips: 720,
@@ -194,6 +197,7 @@ impl Default for PageSettings {
             title_page: false,
             vertical_alignment: PageVerticalAlignment::Top,
             page_number_start: None,
+            restart_page_numbering: false,
             page_number_format: None,
             page_number_x_twips: None,
             page_number_y_twips: None,
@@ -754,6 +758,11 @@ pub struct Table {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableRow {
     pub cells: Vec<TableCell>,
+    /// Bounded widths derived from this row's authored `\\cellx` boundaries.
+    ///
+    /// Rows may define different cell boundaries within one RTF table. Layout
+    /// falls back to `Table::column_widths_twips` when this vector is empty.
+    pub column_widths_twips: Vec<i32>,
     pub height_twips: Option<i32>,
     pub left_offset_twips: i32,
     pub vertical_offset_twips: i32,

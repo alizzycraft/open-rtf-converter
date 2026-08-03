@@ -323,9 +323,6 @@ fn load_cli_font_provider(
     } else {
         FontProvider::default()
     };
-    if specs.is_empty() && font_dirs.is_empty() && font_substitutes.is_empty() {
-        return Ok(provider);
-    }
     let substitutions = effective_font_substitutions(font_substitutes)?;
 
     let requested_asset_count =
@@ -379,8 +376,32 @@ fn load_cli_font_provider(
             total_bytes,
         )?;
     }
+    if !browser_safe
+        && (provider.assets.is_empty()
+            || requested_font_families
+                .iter()
+                .any(|family| !provider.has_asset_for_family(family)))
+    {
+        append_bundled_cli_fallback_assets(&mut provider, &mut total_bytes);
+    }
     provider.validate().map_err(CliFontError::Provider)?;
     Ok(provider)
+}
+
+fn append_bundled_cli_fallback_assets(provider: &mut FontProvider, total_bytes: &mut usize) {
+    for asset in FontProvider::browser_safe_defaults().assets {
+        if provider.assets.len() >= provider.limits.max_assets {
+            break;
+        }
+        let Some(next_total) = total_bytes.checked_add(asset.bytes.len()) else {
+            break;
+        };
+        if next_total > provider.limits.max_total_bytes {
+            break;
+        }
+        provider.assets.push(asset);
+        *total_bytes = next_total;
+    }
 }
 
 fn parse_font_spec(spec: &str) -> Result<(Vec<String>, FontAssetStyle, &Path), CliFontError> {
@@ -1198,6 +1219,20 @@ mod tests {
     }
 
     #[test]
+    fn normal_cli_without_system_fonts_keeps_bundled_unicode_fallback() {
+        let provider = load_cli_font_provider(&[], &[], &[], &[], false).unwrap();
+
+        assert_eq!(
+            provider.assets.len(),
+            FontProvider::browser_safe_defaults().assets.len()
+        );
+        assert_eq!(
+            provider.coverage_for_char("Missing Word Font", '\u{2502}'),
+            open_rtf_converter::FontCoverage::Covered
+        );
+    }
+
+    #[test]
     fn loads_cli_font_directory_from_bounded_metadata_names() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::copy("fixtures/fonts/Tuffy.ttf", dir.path().join("Tuffy.ttf")).unwrap();
@@ -1286,12 +1321,15 @@ mod tests {
         .unwrap();
 
         assert!(
-            provider.assets.is_empty(),
+            provider
+                .assets
+                .iter()
+                .all(|asset| { !asset.family_names.iter().any(|family| family == "Tuffy") }),
             "unrequested directory font should not be loaded"
         );
         assert_eq!(
-            provider.coverage_for_char("Tuffy", 'A'),
-            open_rtf_converter::FontCoverage::NoAsset
+            provider.coverage_for_char("Missing Word Font", '\u{2502}'),
+            open_rtf_converter::FontCoverage::Covered
         );
     }
 
