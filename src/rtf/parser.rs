@@ -5356,7 +5356,7 @@ impl Parser {
             }
             "sectd" => {
                 self.state.section_break_kind = SectionBreakKind::Page;
-                self.current_section_page = PageSettings::default();
+                self.current_section_page = self.default_section_page_settings();
                 self.current_section_page.page_number_format = Some(PageNumberFormat::Decimal);
                 self.upsert_current_section_settings();
             }
@@ -7095,6 +7095,25 @@ impl Parser {
         match self.document.blocks.last_mut() {
             Some(Block::SectionSettings(existing)) => *existing = page,
             _ => self.document.blocks.push(Block::SectionSettings(page)),
+        }
+    }
+
+    fn default_section_page_settings(&self) -> PageSettings {
+        let document = &self.document.page;
+        PageSettings {
+            width_twips: document.width_twips,
+            height_twips: document.height_twips,
+            margin_left_twips: document.margin_left_twips,
+            margin_right_twips: document.margin_right_twips,
+            margin_top_twips: document.margin_top_twips,
+            margin_bottom_twips: document.margin_bottom_twips,
+            gutter_twips: document.gutter_twips,
+            mirror_margins: document.mirror_margins,
+            gutter_on_right: document.gutter_on_right,
+            header_distance_twips: document.header_distance_twips,
+            footer_distance_twips: document.footer_distance_twips,
+            landscape: document.landscape,
+            ..PageSettings::default()
         }
     }
 
@@ -46242,6 +46261,30 @@ mod tests {
         );
         assert_eq!(output.document.footer.len(), 1);
         assert_eq!(output.document.footer[0].runs[0].text, "Odd footer");
+    }
+
+    #[test]
+    fn section_defaults_preserve_document_page_geometry() {
+        let output = parse_rtf(
+            r"{\rtf1\paperw6120\paperh7920\margl720\margr720\margt720\margb720\sectd Body\par\sect\sectd More\par}",
+        )
+        .unwrap();
+
+        assert_eq!(output.document.page.width_twips, 6120);
+        assert_eq!(output.document.page.height_twips, 7920);
+        let settings = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::SectionSettings(settings) => Some(settings),
+                _ => None,
+            })
+            .expect("expected later section settings");
+        assert_eq!(settings.width_twips, 6120);
+        assert_eq!(settings.height_twips, 7920);
+        assert_eq!(settings.margin_left_twips, 720);
+        assert_eq!(settings.margin_top_twips, 720);
     }
 
     #[test]
