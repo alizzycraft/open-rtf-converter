@@ -22,7 +22,7 @@ use crate::model::{
     TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
     TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
     TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
-    TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
+    TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle, inline_image_marker,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -69,6 +69,8 @@ pub struct ParseOutput {
 #[derive(Debug, Clone, PartialEq)]
 struct ParserState {
     character: CharacterStyle,
+    character_emboss_active: bool,
+    character_engrave_active: bool,
     paragraph: ParagraphStyle,
     style_index: Option<i32>,
     style_based_on: Option<i32>,
@@ -225,6 +227,8 @@ impl Default for ParserState {
     fn default() -> Self {
         Self {
             character: CharacterStyle::default(),
+            character_emboss_active: false,
+            character_engrave_active: false,
             paragraph: ParagraphStyle::default(),
             style_index: None,
             style_based_on: None,
@@ -1036,6 +1040,17 @@ enum TableCellBorderSide {
     RowVertical,
 }
 
+fn hidden_table_cell_borders() -> TableCellBorders {
+    let mut borders = TableCellBorders::default();
+    borders.left.visible = false;
+    borders.right.visible = false;
+    borders.top.visible = false;
+    borders.bottom.visible = false;
+    borders.diagonal_down.visible = false;
+    borders.diagonal_up.visible = false;
+    borders
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum TableRowWrapMarginSide {
     Left,
@@ -1110,6 +1125,7 @@ impl TableCellBorderFlags {
 struct PictureBuilder {
     kind: PictureKind,
     owner_destination: Destination,
+    flushed_inline_body_paragraph: bool,
     bytes: Vec<u8>,
     pending_hex: Option<u8>,
     blip_uid_hex_nibbles_remaining: usize,
@@ -1135,6 +1151,7 @@ impl Default for PictureBuilder {
         Self {
             kind: PictureKind::Unknown,
             owner_destination: Destination::Body,
+            flushed_inline_body_paragraph: false,
             bytes: Vec::new(),
             pending_hex: None,
             blip_uid_hex_nibbles_remaining: 0,
@@ -1338,6 +1355,7 @@ enum ShapePolylinePreset {
 #[derive(Debug, Clone)]
 struct ShapeBuilder {
     owner_destination: Destination,
+    legacy_drawing: bool,
     kind: Option<StaticShapeKind>,
     rounded_rectangle: bool,
     polygon_preset: Option<ShapePolygonPreset>,
@@ -1400,6 +1418,7 @@ struct ShapeBuilder {
     text: Vec<Paragraph>,
     current_text_paragraph: Paragraph,
     points: Vec<StaticShapePoint>,
+    declared_point_count: Option<usize>,
     pending_point_x_twips: Option<i32>,
     right_twips: Option<i32>,
     bottom_twips: Option<i32>,
@@ -1410,6 +1429,7 @@ impl Default for ShapeBuilder {
     fn default() -> Self {
         Self {
             owner_destination: Destination::Body,
+            legacy_drawing: false,
             kind: None,
             rounded_rectangle: false,
             polygon_preset: None,
@@ -1476,6 +1496,7 @@ impl Default for ShapeBuilder {
             text: Vec::new(),
             current_text_paragraph: Paragraph::default(),
             points: Vec::new(),
+            declared_point_count: None,
             pending_point_x_twips: None,
             right_twips: None,
             bottom_twips: None,
@@ -1507,6 +1528,7 @@ enum PictureKind {
     Emf,
     Dib,
     WindowsBitmap,
+    WordSuppressed,
     Unsupported,
 }
 
@@ -1528,6 +1550,8 @@ struct ListLevelDefinition {
     no_restart: bool,
     character_style: CharacterStyle,
     has_character_style: bool,
+    emboss_active: bool,
+    engrave_active: bool,
 }
 
 impl Default for ListLevelDefinition {
@@ -1543,6 +1567,8 @@ impl Default for ListLevelDefinition {
             no_restart: false,
             character_style: CharacterStyle::default(),
             has_character_style: false,
+            emboss_active: false,
+            engrave_active: false,
         }
     }
 }
@@ -1745,6 +1771,7 @@ struct Parser {
     pending_list_marker_runs: Vec<Run>,
     current_picture: Option<PictureBuilder>,
     current_shape: Option<ShapeBuilder>,
+    current_paragraph_has_modern_shape_anchor: bool,
     last_table_row_template: Option<TableRowBuilder>,
     image_count: usize,
     shape_count: usize,
@@ -1956,6 +1983,7 @@ impl Parser {
             pending_list_marker_runs: Vec::new(),
             current_picture: None,
             current_shape: None,
+            current_paragraph_has_modern_shape_anchor: false,
             last_table_row_template: None,
             image_count: 0,
             shape_count: 0,
@@ -2060,15 +2088,27 @@ impl Parser {
         let old_len = self.document.blocks.len();
         let mut old_to_new = vec![None; old_len];
         let mut retained = Vec::with_capacity(old_len);
+        let mut previous_was_wrapping_shape = false;
         for (old_idx, block) in self.document.blocks.drain(..).enumerate() {
-            if document_block_is_visible(&block) {
+            let retains_modern_shape_anchor = self.options.compatibility_mode
+                == CompatibilityMode::WordCompatiblePassive
+                && previous_was_wrapping_shape
+                && matches!(&block, Block::Paragraph(paragraph) if paragraph.runs.is_empty());
+            let current_is_wrapping_shape =
+                matches!(&block, Block::Shape(shape) if shape.text_wrap);
+            if document_block_is_visible(&block) || retains_modern_shape_anchor {
                 old_to_new[old_idx] = Some(retained.len());
                 retained.push(block);
             }
+            previous_was_wrapping_shape = current_is_wrapping_shape;
         }
         self.document.blocks = retained;
         let retained_len = self.document.blocks.len();
         for block_index in &mut self.document.footnote_block_indices {
+            *block_index =
+                remap_retained_document_block_index(*block_index, &old_to_new, retained_len);
+        }
+        for block_index in &mut self.document.inline_image_block_indices {
             *block_index =
                 remap_retained_document_block_index(*block_index, &old_to_new, retained_len);
         }
@@ -2145,6 +2185,21 @@ impl Parser {
             font_index: self.default_font_index,
             ..CharacterStyle::default()
         }
+    }
+
+    fn update_current_character_relief(&mut self) {
+        self.state.character.relief = if self.state.character_emboss_active {
+            TextRelief::Emboss
+        } else if self.state.character_engrave_active {
+            TextRelief::Engrave
+        } else {
+            TextRelief::None
+        };
+    }
+
+    fn sync_current_character_relief_controls(&mut self) {
+        self.state.character_emboss_active = self.state.character.relief == TextRelief::Emboss;
+        self.state.character_engrave_active = self.state.character.relief == TextRelief::Engrave;
     }
 
     fn set_default_font(&mut self, font_index: i32) {
@@ -2545,6 +2600,14 @@ impl Parser {
                             ),
                             Some(offset),
                         ));
+                    } else if field_instruction_name(&field_instruction) == Some("FILESIZE")
+                        && self.options.compatibility_mode
+                            == CompatibilityMode::WordCompatiblePassive
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            "resultless FILESIZE suppressed for Word-compatible passive rendering",
+                            Some(offset),
+                        ));
                     } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_layout_positioning_resultless_field(name)
                     {
@@ -2789,6 +2852,14 @@ impl Parser {
                             format!(
                                 "external non-visible field {name} stripped without fetching external resource"
                             ),
+                            Some(offset),
+                        ));
+                    } else if field_instruction_name(&field_instruction) == Some("FILESIZE")
+                        && self.options.compatibility_mode
+                            == CompatibilityMode::WordCompatiblePassive
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            "resultless FILESIZE suppressed for Word-compatible passive rendering",
                             Some(offset),
                         ));
                     } else if let Some(name) = field_instruction_name(&field_instruction)
@@ -3864,10 +3935,14 @@ impl Parser {
                 self.set_current_list_level_double_strike(control.parameter.unwrap_or(1) != 0);
             }
             "ol" | "aol" if self.is_parsing_list_level_definition() => {
-                self.set_current_list_level_overline(control.parameter.unwrap_or(1) != 0);
+                if self.options.compatibility_mode == CompatibilityMode::StrictSpec {
+                    self.set_current_list_level_overline(control.parameter.unwrap_or(1) != 0);
+                }
             }
             "olnone" | "aolnone" if self.is_parsing_list_level_definition() => {
-                self.set_current_list_level_overline(false);
+                if self.options.compatibility_mode == CompatibilityMode::StrictSpec {
+                    self.set_current_list_level_overline(false);
+                }
             }
             "outl" | "aoutl" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_outline(control.parameter.unwrap_or(1) != 0);
@@ -3876,18 +3951,10 @@ impl Parser {
                 self.set_current_list_level_shadow(control.parameter.unwrap_or(1) != 0);
             }
             "embo" if self.is_parsing_list_level_definition() => {
-                self.set_current_list_level_relief(if control.parameter.unwrap_or(1) == 0 {
-                    TextRelief::None
-                } else {
-                    TextRelief::Emboss
-                });
+                self.set_current_list_level_emboss(control.parameter.unwrap_or(1) != 0);
             }
             "impr" if self.is_parsing_list_level_definition() => {
-                self.set_current_list_level_relief(if control.parameter.unwrap_or(1) == 0 {
-                    TextRelief::None
-                } else {
-                    TextRelief::Engrave
-                });
+                self.set_current_list_level_engrave(control.parameter.unwrap_or(1) != 0);
             }
             "accdot" if self.is_parsing_list_level_definition() => {
                 self.set_current_list_level_emphasis_mark(CharacterEmphasisMark::Dot);
@@ -4158,11 +4225,14 @@ impl Parser {
                 }
             }
             "pict" if destination_allows_visible_content(&self.state) => {
+                let flushed_inline_body_paragraph = self.state.destination == Destination::Body
+                    && !self.current_paragraph.runs.is_empty();
                 self.finish_paragraph(offset)?;
                 let owner_destination = self.state.destination;
                 self.state.destination = Destination::Picture;
                 self.current_picture = Some(PictureBuilder {
                     owner_destination,
+                    flushed_inline_body_paragraph,
                     ..PictureBuilder::default()
                 });
                 if self.state.inside_shape {
@@ -4171,6 +4241,9 @@ impl Parser {
             }
             "shp" | "do" if destination_allows_visible_content(&self.state) => {
                 let owner_destination = self.state.destination;
+                let legacy_drawing = control.name == "do";
+                let legacy_word_hairline = legacy_drawing
+                    && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive;
                 self.finish_table(offset)?;
                 self.finish_current_paragraph_for_destination(offset)?;
                 self.state.inside_shape = true;
@@ -4179,6 +4252,27 @@ impl Parser {
                 self.state.destination = Destination::Shape;
                 self.current_shape = Some(ShapeBuilder {
                     owner_destination,
+                    legacy_drawing,
+                    text_wrap: !legacy_drawing
+                        && self.options.compatibility_mode
+                            == CompatibilityMode::WordCompatiblePassive,
+                    wrap_margin_left_twips: if !legacy_drawing
+                        && self.options.compatibility_mode
+                            == CompatibilityMode::WordCompatiblePassive
+                    {
+                        180
+                    } else {
+                        120
+                    },
+                    wrap_margin_right_twips: if !legacy_drawing
+                        && self.options.compatibility_mode
+                            == CompatibilityMode::WordCompatiblePassive
+                    {
+                        180
+                    } else {
+                        120
+                    },
+                    stroke_width_twips: if legacy_word_hairline { 3 } else { 15 },
                     ..ShapeBuilder::default()
                 });
             }
@@ -4265,6 +4359,9 @@ impl Parser {
             }
             "dppolyline" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_kind(StaticShapeKind::Polyline);
+            }
+            "dppolycount" if self.state.destination == Destination::Shape => {
+                self.set_current_shape_declared_point_count(control.parameter, offset)?;
             }
             "dparc" if self.state.destination == Destination::Shape => {
                 self.set_current_shape_polyline_preset(ShapePolylinePreset::Arc);
@@ -4429,7 +4526,13 @@ impl Parser {
                 self.set_picture_kind(PictureKind::Wmf)
             }
             "dibitmap" if self.state.destination == Destination::Picture => {
-                self.set_picture_kind(PictureKind::Dib)
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && control.parameter.is_none()
+                {
+                    self.set_picture_kind(PictureKind::WordSuppressed)
+                } else {
+                    self.set_picture_kind(PictureKind::Dib)
+                }
             }
             "wbitmap" if self.state.destination == Destination::Picture => {
                 self.set_picture_kind(PictureKind::WindowsBitmap)
@@ -5365,7 +5468,14 @@ impl Parser {
                 self.current_section_page.page_number_format = Some(PageNumberFormat::Decimal);
                 self.upsert_current_section_settings();
             }
-            "sbknone" => self.state.section_break_kind = SectionBreakKind::Continuous,
+            "sbknone" => {
+                self.state.section_break_kind =
+                    if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                        SectionBreakKind::Page
+                    } else {
+                        SectionBreakKind::Continuous
+                    }
+            }
             "sbkpage" => self.state.section_break_kind = SectionBreakKind::Page,
             "sbkeven" => self.state.section_break_kind = SectionBreakKind::EvenPage,
             "sbkodd" => self.state.section_break_kind = SectionBreakKind::OddPage,
@@ -5437,23 +5547,24 @@ impl Parser {
                 self.state.character.strike = enabled;
                 self.state.character.double_strike = enabled;
             }
-            "ol" | "aol" => self.state.character.overline = control.parameter.unwrap_or(1) != 0,
-            "olnone" | "aolnone" => self.state.character.overline = false,
+            "ol" | "aol" if self.options.compatibility_mode == CompatibilityMode::StrictSpec => {
+                self.state.character.overline = control.parameter.unwrap_or(1) != 0
+            }
+            "olnone" | "aolnone"
+                if self.options.compatibility_mode == CompatibilityMode::StrictSpec =>
+            {
+                self.state.character.overline = false
+            }
+            "ol" | "aol" | "olnone" | "aolnone" => {}
             "outl" | "aoutl" => self.state.character.outline = control.parameter.unwrap_or(1) != 0,
             "shad" | "ashad" => self.state.character.shadow = control.parameter.unwrap_or(1) != 0,
             "embo" => {
-                self.state.character.relief = if control.parameter.unwrap_or(1) == 0 {
-                    TextRelief::None
-                } else {
-                    TextRelief::Emboss
-                };
+                self.state.character_emboss_active = control.parameter.unwrap_or(1) != 0;
+                self.update_current_character_relief();
             }
             "impr" => {
-                self.state.character.relief = if control.parameter.unwrap_or(1) == 0 {
-                    TextRelief::None
-                } else {
-                    TextRelief::Engrave
-                };
+                self.state.character_engrave_active = control.parameter.unwrap_or(1) != 0;
+                self.update_current_character_relief();
             }
             "accdot" => self.state.character.emphasis_mark = CharacterEmphasisMark::Dot,
             "acccomma" => self.state.character.emphasis_mark = CharacterEmphasisMark::Comma,
@@ -5563,7 +5674,10 @@ impl Parser {
                     self.clamp_character_scaling(control.parameter.unwrap_or(100), offset);
             }
             "fittext" => self.set_character_fit_text(control.parameter, offset),
-            "plain" => self.state.character = self.default_character_style(),
+            "plain" => {
+                self.state.character = self.default_character_style();
+                self.sync_current_character_relief_controls();
+            }
             "fs" | "afs" => {
                 self.state.character.font_size_half_points =
                     self.clamp_font_size(control.parameter.unwrap_or(24), offset)
@@ -5651,7 +5765,8 @@ impl Parser {
             "ql" => self.state.paragraph.alignment = Alignment::Left,
             "qc" => self.state.paragraph.alignment = Alignment::Center,
             "qr" => self.state.paragraph.alignment = Alignment::Right,
-            "qj" | "qd" | "qk" | "qt" => self.state.paragraph.alignment = Alignment::Justified,
+            "qj" | "qk" | "qt" => self.state.paragraph.alignment = Alignment::Justified,
+            "qd" => self.state.paragraph.alignment = Alignment::Distributed,
             "rtlpar" => self.state.paragraph.alignment = Alignment::Right,
             "ltrpar" => self.state.paragraph.alignment = Alignment::Left,
             "pagebb" => {
@@ -5665,9 +5780,11 @@ impl Parser {
             }
             "widctlpar" => self.state.paragraph.widow_control = control.parameter.unwrap_or(1) != 0,
             "nowidctlpar" | "nowidowctrl" => self.state.paragraph.widow_control = false,
-            "nowwrap" | "nowrap" => {
+            "nowwrap" => self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0,
+            "nowrap" if self.options.compatibility_mode == CompatibilityMode::StrictSpec => {
                 self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0
             }
+            "nowrap" => {}
             "noline" => {
                 self.state.paragraph.suppress_line_numbers = control.parameter.unwrap_or(1) != 0
             }
@@ -5681,10 +5798,11 @@ impl Parser {
                 self.state.paragraph.right_indent_twips =
                     self.clamp_paragraph_indent(control.parameter, "right indent", offset)
             }
-            "fi" | "fin" => {
+            "fi" => {
                 self.state.paragraph.first_line_indent_twips =
                     self.clamp_paragraph_indent(control.parameter, "first-line indent", offset)
             }
+            "fin" => {}
             "sb" => {
                 self.state.paragraph.space_before_twips = self.clamp_paragraph_spacing(
                     control.parameter,
@@ -5698,8 +5816,12 @@ impl Parser {
             }
             "sbauto" => {
                 self.state.paragraph.auto_space_before = control.parameter.unwrap_or(1) != 0
+                    && self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive
             }
-            "saauto" => self.state.paragraph.auto_space_after = control.parameter.unwrap_or(1) != 0,
+            "saauto" => {
+                self.state.paragraph.auto_space_after = control.parameter.unwrap_or(1) != 0
+                    && self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive
+            }
             "contextualspace" => {
                 self.state.paragraph.contextual_spacing = control.parameter.unwrap_or(1) != 0
             }
@@ -5802,7 +5924,7 @@ impl Parser {
             "tqc" => self.state.current_tab_alignment = TabAlignment::Center,
             "tqr" => self.state.current_tab_alignment = TabAlignment::Right,
             "tqdec" => self.state.current_tab_alignment = TabAlignment::Decimal,
-            "tb" => self.state.current_tab_alignment = TabAlignment::Bar,
+            "tb" => self.push_bar_tab_stop(control.parameter, offset)?,
             "tx" => self.push_tab_stop(control.parameter, offset)?,
             "deftab" => {
                 self.document.default_tab_width_twips =
@@ -5880,14 +6002,21 @@ impl Parser {
                 self.current_section_page.facing_pages = control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
-            "margmirror" | "margmirsxn" => {
+            "margmirror" => {
                 self.current_section_page.mirror_margins = control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
-            "rtlgutter" | "rtlguttersxn" | "gutterprl" => {
+            "margmirsxn" => {
+                if self.options.compatibility_mode == CompatibilityMode::StrictSpec {
+                    self.current_section_page.mirror_margins = control.parameter.unwrap_or(1) != 0;
+                    self.upsert_current_section_settings();
+                }
+            }
+            "rtlgutter" | "rtlguttersxn" => {
                 self.current_section_page.gutter_on_right = control.parameter.unwrap_or(1) != 0;
                 self.upsert_current_section_settings();
             }
+            "gutterprl" => self.set_parallel_page_gutter(control.parameter.unwrap_or(1) != 0),
             "headery" | "headerysxn" => {
                 self.current_section_page.header_distance_twips = self
                     .clamp_header_footer_distance(
@@ -7052,6 +7181,26 @@ impl Parser {
         Ok(())
     }
 
+    fn push_bar_tab_stop(&mut self, value: Option<i32>, offset: usize) -> Result<(), ParseError> {
+        let Some(value) = value else {
+            self.diagnostics.push(Diagnostic::warning(
+                "parameterless bar tab ignored for Word-compatible recovery",
+                Some(offset),
+            ));
+            return Ok(());
+        };
+        self.insert_paragraph_tab_stop(
+            Some(value),
+            "bar tab stop",
+            offset,
+            TabLeader::None,
+            TabAlignment::Bar,
+        )?;
+        self.state.current_tab_leader = TabLeader::None;
+        self.state.current_tab_alignment = TabAlignment::Left;
+        Ok(())
+    }
+
     fn insert_paragraph_tab_stop(
         &mut self,
         value: Option<i32>,
@@ -7110,15 +7259,48 @@ impl Parser {
 
     fn upsert_current_section_settings(&mut self) {
         let page = normalized_page_settings(self.current_section_page.clone());
-        if !self.has_started_visible_body() {
+        if self.current_section_index <= 1 {
             self.document.page = page;
             return;
         }
 
-        match self.document.blocks.last_mut() {
-            Some(Block::SectionSettings(existing)) => *existing = page,
-            _ => self.document.blocks.push(Block::SectionSettings(page)),
+        let section_boundary = self.document.blocks.iter().rposition(|block| {
+            matches!(
+                block,
+                Block::ContinuousSectionBreak
+                    | Block::SectionBreak
+                    | Block::EvenPageSectionBreak
+                    | Block::OddPageSectionBreak
+            )
+        });
+        let section_start = section_boundary.map_or(0, |index| index.saturating_add(1));
+        if let Some(settings_index) = self.document.blocks[section_start..]
+            .iter()
+            .position(|block| matches!(block, Block::SectionSettings(_)))
+            .map(|relative| section_start + relative)
+        {
+            if let Block::SectionSettings(existing) = &mut self.document.blocks[settings_index] {
+                *existing = page;
+            }
+        } else {
+            self.document
+                .blocks
+                .insert(section_start, Block::SectionSettings(page));
         }
+    }
+
+    fn set_parallel_page_gutter(&mut self, enabled: bool) {
+        // Word treats `\gutterprl` as a document-wide gutter-position
+        // property. For horizontal text, a parallel gutter extends the top
+        // margin; it is distinct from the bidirectional `\rtlgutter` side.
+        self.document.page.gutter_at_top = enabled;
+        self.current_section_page.gutter_at_top = enabled;
+        for block in &mut self.document.blocks {
+            if let Block::SectionSettings(settings) = block {
+                settings.gutter_at_top = enabled;
+            }
+        }
+        self.upsert_current_section_settings();
     }
 
     fn default_section_page_settings(&self) -> PageSettings {
@@ -7133,6 +7315,7 @@ impl Parser {
             gutter_twips: document.gutter_twips,
             mirror_margins: document.mirror_margins,
             gutter_on_right: document.gutter_on_right,
+            gutter_at_top: document.gutter_at_top,
             header_distance_twips: document.header_distance_twips,
             footer_distance_twips: document.footer_distance_twips,
             landscape: document.landscape,
@@ -9902,10 +10085,20 @@ impl Parser {
                 ));
             }
             if advance.horizontal_twips == 0 && advance.vertical_twips == 0 {
-                self.diagnostics.push(Diagnostic::warning(
-                    "layout field ADVANCE normalized with no visible passive cursor movement",
-                    Some(offset),
-                ));
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && let Some(literal) = passive_malformed_advance_literal(instruction)
+                {
+                    self.push_passive_field_text_for_destination(destination, &literal, offset)?;
+                    self.diagnostics.push(Diagnostic::warning(
+                        "malformed ADVANCE arguments recovered as Word-compatible passive literal text",
+                        Some(offset),
+                    ));
+                } else {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "layout field ADVANCE normalized with no visible passive cursor movement",
+                        Some(offset),
+                    ));
+                }
             }
             return Ok(());
         }
@@ -10736,7 +10929,8 @@ impl Parser {
             return Ok(());
         }
 
-        if !self.current_paragraph.runs.is_empty() {
+        if !self.current_paragraph.runs.is_empty() || self.current_paragraph_has_modern_shape_anchor
+        {
             let mut paragraph = std::mem::replace(
                 &mut self.current_paragraph,
                 Paragraph {
@@ -10756,6 +10950,7 @@ impl Parser {
                 }
             }
             self.push_document_block(Block::Paragraph(paragraph), offset)?;
+            self.current_paragraph_has_modern_shape_anchor = false;
         }
         Ok(())
     }
@@ -11296,7 +11491,7 @@ impl Parser {
             current_cell_padding: TableCellPadding::default(),
             default_cell_spacing: TableCellSpacing::default(),
             current_cell_spacing: TableCellSpacing::default(),
-            current_cell_borders: TableCellBorders::default(),
+            current_cell_borders: hidden_table_cell_borders(),
             current_cell_border_flags: TableCellBorderFlags::default(),
             current_cell_border_side: None,
             current_cell_preferred_width: PreferredTableWidth::default(),
@@ -12474,7 +12669,7 @@ impl Parser {
             row.current_cell_shading_basis_points = row.default_cell_shading_basis_points;
             row.current_cell_shading_pattern = row.default_cell_shading_pattern;
             row.current_cell_padding = row.default_cell_padding;
-            row.current_cell_borders = TableCellBorders::default();
+            row.current_cell_borders = hidden_table_cell_borders();
             row.current_cell_border_flags = TableCellBorderFlags::default();
             row.current_cell_border_side = None;
             row.current_cell_preferred_width = PreferredTableWidth::default();
@@ -13918,6 +14113,19 @@ impl Parser {
             return Ok(());
         };
 
+        // `\pict` is an inline paragraph item unless a shape supplies explicit
+        // floating placement. Rejoin text that was flushed only to isolate the
+        // picture destination so the safe model can retain Word's inline flow.
+        if picture.owner_destination == Destination::Body
+            && picture.flushed_inline_body_paragraph
+            && self.current_paragraph.runs.is_empty()
+            && matches!(self.document.blocks.last(), Some(Block::Paragraph(_)))
+            && let Some(Block::Paragraph(paragraph)) = self.document.blocks.pop()
+        {
+            self.document_block_count = self.document_block_count.saturating_sub(1);
+            self.current_paragraph = paragraph;
+        }
+
         if picture.pending_hex.is_some() {
             self.diagnostics.push(Diagnostic::warning(
                 "malformed picture hex data replaced with bounded passive geometry placeholder",
@@ -14152,7 +14360,20 @@ impl Parser {
                 }
             }
             PictureKind::WindowsBitmap => {
-                if let Some(bitmap) =
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "legacy Windows bitmap picture suppressed for Word-compatible passive rendering",
+                        Some(offset),
+                    ));
+                    // Retain a zero-width passive anchor so an otherwise empty
+                    // picture paragraph keeps Word's ordinary line flow. If
+                    // text follows inline, it remains on that same line.
+                    self.push_passive_field_text_for_destination(
+                        picture.owner_destination,
+                        "\u{200b}",
+                        offset,
+                    )?;
+                } else if let Some(bitmap) =
                     parse_windows_bitmap_image_data(&picture, self.limits().max_image_pixels)
                 {
                     self.ensure_image_pixels(bitmap.width_px, bitmap.height_px, offset)?;
@@ -14206,6 +14427,24 @@ impl Parser {
                     )?;
                     self.mark_shape_visual_result_rendered();
                 }
+            }
+            PictureKind::WordSuppressed => {
+                self.diagnostics.push(Diagnostic::warning(
+                    "parameterless DIB picture suppressed for Word-compatible passive rendering",
+                    Some(offset),
+                ));
+                if picture.flushed_inline_body_paragraph
+                    && self.current_paragraph.runs.is_empty()
+                    && matches!(self.document.blocks.last(), Some(Block::Paragraph(_)))
+                    && let Some(Block::Paragraph(paragraph)) = self.document.blocks.pop()
+                {
+                    self.current_paragraph = paragraph;
+                }
+                self.push_passive_field_text_for_destination(
+                    picture.owner_destination,
+                    "\u{200b}",
+                    offset,
+                )?;
             }
             PictureKind::Wmf => {
                 if let Some(wmf) = parse_wmf_vector_image_data(&picture.bytes) {
@@ -14478,6 +14717,26 @@ impl Parser {
                     _ => self.document.footer_images.push(image),
                 }
             }
+        } else if destination == Destination::Body
+            && image.placement.is_none()
+            && !self.current_paragraph.runs.is_empty()
+        {
+            let image_index = self.document.inline_images.len();
+            let marker =
+                inline_image_marker(image_index).ok_or(ParseError::ResourceLimitExceeded {
+                    resource: "inline image references".to_string(),
+                    offset,
+                })?;
+            let block_index = self.document.blocks.len();
+            self.push_document_block(Block::Image(image.clone()), offset)?;
+            self.document.inline_image_block_indices.push(block_index);
+            self.document.inline_images.push(image);
+            push_text_to_paragraph(
+                &mut self.current_paragraph,
+                &marker.to_string(),
+                &self.state.paragraph,
+                &self.state.character,
+            );
         } else {
             self.push_document_block(Block::Image(image), offset)?;
         }
@@ -14655,6 +14914,8 @@ impl Parser {
         let Some(shape) = self.current_shape.take() else {
             return Ok(false);
         };
+        let retains_paragraph_anchor = !shape.legacy_drawing
+            && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive;
         if shape.hidden {
             self.diagnostics.push(Diagnostic::warning(
                 "hidden shape stripped before safe model normalization",
@@ -14675,6 +14936,19 @@ impl Parser {
         };
         if kind == StaticShapeKind::Rectangle && shape.rounded_rectangle {
             kind = StaticShapeKind::RoundedRectangle;
+        }
+        if shape.legacy_drawing
+            && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+            && matches!(kind, StaticShapeKind::Polyline | StaticShapeKind::Polygon)
+            && shape.polyline_preset.is_none()
+            && shape.polygon_preset.is_none()
+            && shape.declared_point_count != Some(shape.points.len())
+        {
+            self.diagnostics.push(Diagnostic::warning(
+                "malformed legacy polyline vertex count suppressed for Word-compatible passive rendering",
+                Some(offset),
+            ));
+            return Ok(true);
         }
         let mut points = shape.points.clone();
         if kind == StaticShapeKind::Polygon && points.is_empty() {
@@ -14989,6 +15263,9 @@ impl Parser {
             },
             offset,
         )?;
+        if retains_paragraph_anchor {
+            self.current_paragraph_has_modern_shape_anchor = true;
+        }
         let shape_diagnostic = if unsupported_or_active_property_stripped {
             "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
         } else {
@@ -15355,6 +15632,24 @@ impl Parser {
         }
     }
 
+    fn set_current_shape_declared_point_count(
+        &mut self,
+        value: Option<i32>,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        let count = value.unwrap_or(0).max(0) as usize;
+        if count > self.limits().max_shape_points {
+            return Err(ParseError::ResourceLimitExceeded {
+                resource: "shape points".to_string(),
+                offset,
+            });
+        }
+        if let Some(shape) = self.current_shape.as_mut() {
+            shape.declared_point_count = Some(count);
+        }
+        Ok(())
+    }
+
     fn push_current_shape_point_y(
         &mut self,
         value: Option<i32>,
@@ -15555,6 +15850,25 @@ impl Parser {
     fn apply_current_shape_property(&mut self, name: &str, value: &str, offset: usize) {
         let name = name.trim();
         let value = value.trim();
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+            && self
+                .current_shape
+                .as_ref()
+                .is_some_and(|shape| shape.legacy_drawing)
+            && matches!(
+                name,
+                "lineDashing"
+                    | "lineEndCap"
+                    | "lineStartArrowhead"
+                    | "lineEndArrowhead"
+                    | "lineStartArrowWidth"
+                    | "lineStartArrowLength"
+                    | "lineEndArrowWidth"
+                    | "lineEndArrowLength"
+            )
+        {
+            return;
+        }
         match name {
             "shapeType" => {
                 if !self.apply_current_shape_type_property(value) {
@@ -16133,6 +16447,7 @@ impl Parser {
         if matches!(image.format, ImageFormat::Png | ImageFormat::PngGrayscale)
             && apply_png_picture_color_mode(
                 &mut image.bytes,
+                &mut image.alpha_mask,
                 image.width_px,
                 image.height_px,
                 image.format,
@@ -18186,6 +18501,10 @@ impl Parser {
         self.update_current_list_level_character_style(|style| {
             *style = default_style;
         });
+        if let Some(level) = self.current_list_level.as_mut() {
+            level.emboss_active = false;
+            level.engrave_active = false;
+        }
     }
 
     fn apply_current_list_level_character_style(&mut self, index: i32, offset: usize) -> bool {
@@ -18250,8 +18569,32 @@ impl Parser {
         self.update_current_list_level_character_style(|style| style.shadow = enabled);
     }
 
-    fn set_current_list_level_relief(&mut self, relief: TextRelief) {
-        self.update_current_list_level_character_style(|style| style.relief = relief);
+    fn set_current_list_level_emboss(&mut self, enabled: bool) {
+        if let Some(level) = self.current_list_level.as_mut() {
+            level.emboss_active = enabled;
+            level.character_style.relief = if level.emboss_active {
+                TextRelief::Emboss
+            } else if level.engrave_active {
+                TextRelief::Engrave
+            } else {
+                TextRelief::None
+            };
+            level.has_character_style = true;
+        }
+    }
+
+    fn set_current_list_level_engrave(&mut self, enabled: bool) {
+        if let Some(level) = self.current_list_level.as_mut() {
+            level.engrave_active = enabled;
+            level.character_style.relief = if level.emboss_active {
+                TextRelief::Emboss
+            } else if level.engrave_active {
+                TextRelief::Engrave
+            } else {
+                TextRelief::None
+            };
+            level.has_character_style = true;
+        }
     }
 
     fn set_current_list_level_emphasis_mark(&mut self, mark: CharacterEmphasisMark) {
@@ -18683,11 +19026,13 @@ impl Parser {
             }
             self.state.paragraph = style.paragraph;
             self.state.character = style.character;
+            self.sync_current_character_relief_controls();
             self.state.paragraph_style_index = Some(index);
             true
         } else if index == 0 {
             self.state.paragraph = self.default_paragraph_style.clone();
             self.state.character = self.default_character_style();
+            self.sync_current_character_relief_controls();
             self.state.paragraph_style_index = Some(0);
             true
         } else {
@@ -18705,10 +19050,12 @@ impl Parser {
                 return true;
             }
             self.state.character = inherit_character_style(&self.state.character, &style.character);
+            self.sync_current_character_relief_controls();
             true
         } else if index == 0 {
             let default_style = self.default_character_style();
             self.state.character = inherit_character_style(&self.state.character, &default_style);
+            self.sync_current_character_relief_controls();
             true
         } else {
             self.diagnostics.push(Diagnostic::warning(
@@ -24511,7 +24858,7 @@ fn rotated_shape_point(
     height_twips: i32,
     rotation_units: i32,
 ) -> StaticShapePoint {
-    let radians = (rotation_units as f64 / 60_000.0).to_radians();
+    let radians = (rotation_units as f64 / 65_536.0).to_radians();
     let (sin, cos) = radians.sin_cos();
     let center_x = width_twips as f64 / 2.0;
     let center_y = height_twips as f64 / 2.0;
@@ -26183,7 +26530,9 @@ fn parse_shape_property_i64(value: &str) -> Option<i64> {
 }
 
 fn parse_shape_rotation_units(value: &str) -> Option<i32> {
-    const OFFICE_ROTATION_UNITS_PER_DEGREE: i64 = 60_000;
+    // OfficeArt's legacy `rotation` property is a 16.16 fixed-point
+    // degree value, unlike DrawingML's later 1/60000-degree angles.
+    const OFFICE_ROTATION_UNITS_PER_DEGREE: i64 = 65_536;
     const FULL_ROTATION_UNITS: i64 = 360 * OFFICE_ROTATION_UNITS_PER_DEGREE;
     let value = parse_shape_property_i64(value)?;
     let normalized = value.rem_euclid(FULL_ROTATION_UNITS);
@@ -26632,6 +26981,21 @@ fn passive_advance_field_offset_twips(
         horizontal_twips: horizontal.clamp(-limit, limit) as i32,
         vertical_twips: vertical.clamp(-limit, limit) as i32,
     }
+}
+
+fn passive_malformed_advance_literal(instruction: &str) -> Option<String> {
+    let rest = field_rest_after_name(instruction)?.trim();
+    if rest.is_empty() || rest.contains('\\') {
+        return None;
+    }
+    let values = rest.split_whitespace().collect::<Vec<_>>();
+    if values.is_empty()
+        || values.len() > 4
+        || values.iter().any(|value| value.parse::<i32>().is_err())
+    {
+        return None;
+    }
+    Some(values.join(" "))
 }
 
 fn apply_field_format_switches(
@@ -37465,7 +37829,8 @@ fn apply_rgb8_picture_color_mode(
 }
 
 fn rgb_luminance(red: u8, green: u8, blue: u8) -> u8 {
-    ((u32::from(red) * 77 + u32::from(green) * 150 + u32::from(blue) * 29 + 128) >> 8) as u8
+    ((u32::from(red) * 2_126 + u32::from(green) * 7_152 + u32::from(blue) * 722 + 5_000) / 10_000)
+        as u8
 }
 
 fn adjust_picture_sample(sample: u8, adjustments: PictureAdjustments) -> u8 {
@@ -37657,6 +38022,7 @@ fn apply_indexed_palette_picture_color_mode(
 
 fn apply_png_picture_color_mode(
     bytes: &mut Vec<u8>,
+    alpha_mask: &mut Option<StaticImageAlphaMask>,
     width_px: u32,
     height_px: u32,
     format: ImageFormat,
@@ -37694,6 +38060,34 @@ fn apply_png_picture_color_mode(
     };
     if !unfilter_png_scanlines(&mut scanlines, row_len, components) {
         return false;
+    }
+    if let Some(mask) = alpha_mask.as_ref() {
+        let Some(alpha_row_len) = width.checked_add(1) else {
+            return false;
+        };
+        let Some(alpha_len) = alpha_row_len.checked_mul(height) else {
+            return false;
+        };
+        let Some(mut alpha) = inflate_zlib_png_scanlines(&mask.bytes, alpha_len) else {
+            return false;
+        };
+        if !unfilter_png_scanlines(&mut alpha, alpha_row_len, 1) {
+            return false;
+        }
+        for (row, alpha_row) in scanlines
+            .chunks_exact_mut(row_len)
+            .zip(alpha.chunks_exact(alpha_row_len))
+        {
+            for (pixel, opacity) in row[1..]
+                .chunks_exact_mut(components)
+                .zip(alpha_row[1..].iter().copied())
+            {
+                for component in pixel {
+                    *component = ((u16::from(*component) * u16::from(opacity) + 127) / 255) as u8;
+                }
+            }
+        }
+        *alpha_mask = None;
     }
 
     for row in scanlines.chunks_exact_mut(row_len) {
@@ -46198,6 +46592,22 @@ mod tests {
     }
 
     #[test]
+    fn explicit_cell_borders_do_not_propagate_to_a_borderless_neighbor() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\clbrdrt\brdrs\brdrw20\clbrdrl\brdrs\brdrw20\clbrdrb\brdrs\brdrw20\clbrdrr\brdrs\brdrw20\cellx2400 Bordered\cell\cellx4800 Borderless\cell\row}",
+        )
+        .unwrap();
+        let Block::Table(table) = &output.document.blocks[0] else {
+            panic!("expected table");
+        };
+        let second = table.rows[0].cells[1].borders;
+        assert!(!second.top.visible);
+        assert!(!second.right.visible);
+        assert!(!second.bottom.visible);
+        assert!(!second.left.visible);
+    }
+
+    #[test]
     fn normalizes_table_cell_diagonal_border_controls() {
         let output = parse_rtf(
             r"{\rtf1\trowd\cldgll\brdrdash\brdrw40\brdrcf1\cldglu\brdrs\brdrw30\cellx2000 Cell\cell\row}",
@@ -47773,7 +48183,7 @@ After\par}"#;
         assert!(text.contains("After"));
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
-            6
+            5
         );
         for forbidden in [
             "FILENAME",
@@ -47810,7 +48220,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("field FILESIZE has no stored result and was not evaluated dynamically")
+                .contains("resultless FILESIZE suppressed for Word-compatible passive rendering")
         }));
         assert!(output.diagnostics.iter().all(|diagnostic| {
             !diagnostic
@@ -47936,6 +48346,24 @@ After\par}"#;
                 .message
                 .contains("ADVANCE stripped without applying cursor positioning")
         }));
+    }
+
+    #[test]
+    fn malformed_resultless_advance_arguments_recover_as_word_literal_text() {
+        let output =
+            parse_rtf(r"{\rtf1 Advance {\field{\*\fldinst ADVANCE \r 240 \d 120}}after\par}")
+                .unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(text, "Advance 240 120after");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(
+                    "malformed ADVANCE arguments recovered as Word-compatible passive literal text"
+                ))
+        );
     }
 
     #[test]
@@ -49871,7 +50299,7 @@ After\par}"#;
                 .document
                 .blocks
                 .iter()
-                .any(|block| matches!(block, Block::ContinuousSectionBreak))
+                .any(|block| matches!(block, Block::SectionBreak))
         );
     }
 
@@ -51472,9 +51900,14 @@ After\par}"#;
     }
 
     #[test]
-    fn resultless_filesize_renders_passive_metadata_byte_count() {
-        let output = parse_rtf(
-            r##"{\rtf1{\info\nofbytes4096}Size {\field{\*\fldinst FILESIZE \\# "#,##0"}} missing {\field{\*\fldinst FILENAME \p}}\par}"##,
+    fn strict_spec_resultless_filesize_renders_passive_metadata_byte_count() {
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br##"{\rtf1{\info\nofbytes4096}Size {\field{\*\fldinst FILESIZE \\# "#,##0"}} missing {\field{\*\fldinst FILENAME \p}}\par}"##,
+            &options,
         )
         .unwrap();
         let text = document_text(&output.document);
@@ -51486,6 +51919,22 @@ After\par}"#;
                 "FILESIZE metadata field leaked unsafe text: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn word_compatible_resultless_filesize_is_suppressed() {
+        let output = parse_rtf(
+            r##"{\rtf1{\info\nofbytes4096}Size {\field{\*\fldinst FILESIZE \\# "#,##0"}} after\par}"##,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+
+        assert_eq!(text, "Size  after");
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("resultless FILESIZE suppressed for Word-compatible passive rendering")
+        }));
     }
 
     #[test]
@@ -52474,9 +52923,13 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_shape_flip_properties_as_safe_metadata() {
-        let output = parse_rtf(
-            r"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn fFlipH}{\sv 1}}{\sp{\sn fFlipV}{\sv 1}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+    fn strict_spec_normalizes_legacy_shape_flip_properties_as_safe_metadata() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn fFlipH}{\sv 1}}{\sp{\sn fFlipV}{\sv 1}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
         )
         .unwrap();
         let shape = output
@@ -52506,9 +52959,13 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_shape_line_dashing_property_as_safe_stroke_style() {
-        let output = parse_rtf(
-            r"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn lineDashing}{\sv dashDot}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+    fn strict_spec_normalizes_legacy_shape_line_dashing_property_as_safe_stroke_style() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn lineDashing}{\sv dashDot}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
         )
         .unwrap();
         let shape = output
@@ -52537,9 +52994,13 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_shape_arrowhead_properties_as_safe_metadata() {
-        let output = parse_rtf(
-            r"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn lineStartArrowhead}{\sv open}}{\sp{\sn lineEndArrowhead}{\sv triangle}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+    fn strict_spec_normalizes_legacy_shape_arrowhead_properties_as_safe_metadata() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1 Before\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn lineStartArrowhead}{\sv open}}{\sp{\sn lineEndArrowhead}{\sv triangle}}{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
         )
         .unwrap();
         let shape = output
@@ -52576,9 +53037,36 @@ After\par}"#;
     }
 
     #[test]
+    fn word_compatible_legacy_drawing_ignores_office_shape_properties() {
+        let output = parse_rtf(
+            r"{\rtf1{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720{\sp{\sn lineDashing}{\sv dashDot}}{\sp{\sn lineEndCap}{\sv round}}{\sp{\sn lineStartArrowhead}{\sv open}}{\sp{\sn lineEndArrowhead}{\sv triangle}}{\sp{\sn lineStartArrowWidth}{\sv wide}}{\sp{\sn lineStartArrowLength}{\sv long}}{\sp{\sn lineEndArrowWidth}{\sv narrow}}{\sp{\sn lineEndArrowLength}{\sv short}}}}",
+        )
+        .unwrap();
+        let shape = output
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("shape");
+
+        assert_eq!(shape.stroke_width_twips, 3);
+        assert_eq!(shape.stroke_style, BorderStyle::Single);
+        assert_eq!(shape.stroke_cap, StaticShapeLineCap::Flat);
+        assert_eq!(shape.start_arrowhead, StaticShapeArrowhead::None);
+        assert_eq!(shape.end_arrowhead, StaticShapeArrowhead::None);
+        assert_eq!(shape.start_arrowhead_width_percent, 100);
+        assert_eq!(shape.start_arrowhead_length_percent, 100);
+        assert_eq!(shape.end_arrowhead_width_percent, 100);
+        assert_eq!(shape.end_arrowhead_length_percent, 100);
+    }
+
+    #[test]
     fn normalizes_legacy_static_drawing_polylines_as_safe_metadata() {
         let output = parse_rtf(
-            r"{\rtf1 Before\par{\do\dppolyline\dplinedash\dplinew30\dpptx360\dppty480\dpptx1080\dppty1200\dpptx1800\dppty480{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+            r"{\rtf1 Before\par{\do\dppolyline\dppolycount3\dplinedash\dplinew30\dpptx360\dppty480\dpptx1080\dppty1200\dpptx1800\dppty480{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
         )
         .unwrap();
         let shape = output
@@ -52636,7 +53124,7 @@ After\par}"#;
     #[test]
     fn normalizes_legacy_static_drawing_polygons_as_safe_metadata() {
         let output = parse_rtf(
-            r"{\rtf1 Before\par{\do\dppolygon\dplinedot\dplinew30\dpfillfgcr10\dpfillfgcg20\dpfillfgcb30\dpptx360\dppty480\dpptx1080\dppty1200\dpptx1800\dppty480{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
+            r"{\rtf1 Before\par{\do\dppolygon\dppolycount3\dplinedot\dplinew30\dpfillfgcr10\dpfillfgcg20\dpfillfgcb30\dpptx360\dppty480\dpptx1080\dppty1200\dpptx1800\dppty480{\sp{\sn pFragments}{\sv hostile-payload}}}After\par}",
         )
         .unwrap();
         let shape = output
@@ -52702,6 +53190,46 @@ After\par}"#;
                 &options,
             ),
             Err(ParseError::ResourceLimitExceeded { resource, .. }) if resource == "shape points"
+        ));
+    }
+
+    #[test]
+    fn suppresses_malformed_legacy_polyline_vertex_counts_in_word_compatible_mode() {
+        for drawing in [
+            r"{\do\dppolyline\dpptx0\dppty0\dpptx10\dppty10\dpptx20\dppty0}",
+            r"{\do\dppolygon\dppolycount2\dpptx0\dppty0\dpptx10\dppty10\dpptx20\dppty0}",
+        ] {
+            let output = parse_rtf(&format!(r"{{\rtf1 Before\par{drawing}After\par}}")).unwrap();
+
+            assert!(
+                output
+                    .document
+                    .blocks
+                    .iter()
+                    .all(|block| !matches!(block, Block::Shape(_)))
+            );
+            assert!(!document_text(&output.document).contains("Shape skipped"));
+            assert!(output.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("malformed legacy polyline vertex count suppressed")
+            }));
+        }
+    }
+
+    #[test]
+    fn strict_spec_recovers_legacy_polyline_without_declared_vertex_count() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\do\dppolyline\dpptx0\dppty0\dpptx10\dppty10\dpptx20\dppty0}}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(output.document.blocks.iter().any(
+            |block| matches!(block, Block::Shape(shape) if shape.kind == StaticShapeKind::Polyline)
         ));
     }
 
@@ -52898,6 +53426,30 @@ After\par}"#;
         assert_eq!(style_for("emboss").relief, TextRelief::Emboss);
         assert_eq!(style_for("engrave").relief, TextRelief::Engrave);
         assert_eq!(style_for("plain").relief, TextRelief::None);
+    }
+
+    #[test]
+    fn disabling_engrave_restores_still_active_emboss_state() {
+        let output = parse_rtf(
+            r"{\rtf1\embo embossed \impr engraved \impr0 embossed again\par next paragraph\par}",
+        )
+        .unwrap();
+        let style_for = |paragraph_index: usize, text: &str| {
+            let Block::Paragraph(paragraph) = &output.document.blocks[paragraph_index] else {
+                panic!("expected paragraph");
+            };
+            paragraph
+                .runs
+                .iter()
+                .find(|run| run.text.contains(text))
+                .map(|run| run.style.relief)
+                .expect("expected matching run")
+        };
+
+        assert_eq!(style_for(0, "embossed "), TextRelief::Emboss);
+        assert_eq!(style_for(0, "engraved"), TextRelief::Emboss);
+        assert_eq!(style_for(0, "embossed again"), TextRelief::Emboss);
+        assert_eq!(style_for(1, "next paragraph"), TextRelief::Emboss);
     }
 
     #[test]
@@ -53274,6 +53826,23 @@ After\par}"#;
     }
 
     #[test]
+    fn final_page_vertical_alignment_applies_to_the_whole_current_section() {
+        let output = parse_rtf(r"{\rtf1\vertalc Centered\par\vertalt Top reset\par}").unwrap();
+
+        assert_eq!(
+            output.document.page.vertical_alignment,
+            PageVerticalAlignment::Top
+        );
+        assert!(
+            !output
+                .document
+                .blocks
+                .iter()
+                .any(|block| matches!(block, Block::SectionSettings(_)))
+        );
+    }
+
+    #[test]
     fn normalizes_facing_page_and_mirror_margin_controls_as_distinct_safe_metadata() {
         let output = parse_rtf(r"{\rtf1\facingp\gutter360 Body\par}").unwrap();
 
@@ -53288,11 +53857,20 @@ After\par}"#;
         assert!(!output.document.page.facing_pages);
         assert!(!output.document.page.mirror_margins);
 
-        let output = parse_rtf(r"{\rtf1\margmirsxn\gutter360 Body\par}").unwrap();
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output =
+            parse_rtf_bytes_with_options(br"{\rtf1\margmirsxn\gutter360 Body\par}", &options)
+                .unwrap();
         assert!(output.document.page.mirror_margins);
         assert_eq!(output.document.page.gutter_twips, 360);
 
         let output = parse_rtf(r"{\rtf1\margmirsxn0 Body\par}").unwrap();
+        assert!(!output.document.page.mirror_margins);
+
+        let output = parse_rtf(r"{\rtf1\margmirsxn Body\par}").unwrap();
         assert!(!output.document.page.mirror_margins);
     }
 
@@ -53307,11 +53885,12 @@ After\par}"#;
         assert!(!output.document.page.gutter_on_right);
 
         let output = parse_rtf(r"{\rtf1\gutterprl\gutter360 Body\par}").unwrap();
-        assert!(output.document.page.gutter_on_right);
+        assert!(output.document.page.gutter_at_top);
+        assert!(!output.document.page.gutter_on_right);
         assert_eq!(output.document.page.gutter_twips, 360);
 
         let output = parse_rtf(r"{\rtf1\gutterprl0 Body\par}").unwrap();
-        assert!(!output.document.page.gutter_on_right);
+        assert!(!output.document.page.gutter_at_top);
     }
 
     #[test]
@@ -53404,6 +53983,28 @@ After\par}"#;
     }
 
     #[test]
+    fn later_section_settings_are_updated_retroactively_after_visible_text() {
+        let output =
+            parse_rtf(r"{\rtf1 First\par\sect\sectd\vertalc Center\par\vertalt Top reset\par}")
+                .unwrap();
+        let settings = match &output.document.blocks[2] {
+            Block::SectionSettings(settings) => settings,
+            _ => panic!("expected section page settings block"),
+        };
+
+        assert_eq!(settings.vertical_alignment, PageVerticalAlignment::Top);
+        assert_eq!(
+            output
+                .document
+                .blocks
+                .iter()
+                .filter(|block| matches!(block, Block::SectionSettings(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn normalizes_later_section_rtl_gutter_as_safe_metadata() {
         let output =
             parse_rtf(r"{\rtf1 First\par\sect\sectd\rtlguttersxn\gutter360 Second\par}").unwrap();
@@ -53413,6 +54014,7 @@ After\par}"#;
         };
 
         assert!(settings.gutter_on_right);
+        assert!(!settings.gutter_at_top);
         assert_eq!(settings.gutter_twips, 360);
 
         let output =
@@ -53422,8 +54024,10 @@ After\par}"#;
             _ => panic!("expected section page settings block"),
         };
 
-        assert!(settings.gutter_on_right);
+        assert!(settings.gutter_at_top);
+        assert!(!settings.gutter_on_right);
         assert_eq!(settings.gutter_twips, 360);
+        assert!(output.document.page.gutter_at_top);
     }
 
     #[test]
@@ -53839,15 +54443,35 @@ After\par}"#;
     }
 
     #[test]
-    fn continuous_section_breaks_do_not_force_page_break_blocks() {
+    fn word_compatible_no_break_section_control_matches_word_page_break_recovery() {
         let output = parse_rtf(r"{\rtf1 First\par\sbknone\sect Second\par}").unwrap();
 
         assert!(
-            !output
+            output
                 .document
                 .blocks
                 .iter()
-                .any(|block| matches!(block, Block::SectionBreak | Block::PageBreak))
+                .any(|block| matches!(block, Block::SectionBreak))
+        );
+    }
+
+    #[test]
+    fn strict_spec_no_break_section_control_remains_continuous() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1 First\par\sbknone\sect Second\par}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(
+            output
+                .document
+                .blocks
+                .iter()
+                .any(|block| matches!(block, Block::ContinuousSectionBreak))
         );
     }
 
@@ -53928,7 +54552,7 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_distributed_alignment_controls_as_justified_metadata() {
+    fn normalizes_distributed_and_thai_alignment_controls() {
         let output = parse_rtf(
             r"{\rtf1\qd Distributed\par\qk Thai distributed\par\qt Thai justified\par\ql Left\par}",
         )
@@ -53939,7 +54563,7 @@ After\par}"#;
             other => panic!("expected paragraph {index}, got {other:?}"),
         };
 
-        assert_eq!(paragraph(0).style.alignment, Alignment::Justified);
+        assert_eq!(paragraph(0).style.alignment, Alignment::Distributed);
         assert_eq!(paragraph(1).style.alignment, Alignment::Justified);
         assert_eq!(paragraph(2).style.alignment, Alignment::Justified);
         assert_eq!(paragraph(3).style.alignment, Alignment::Left);
@@ -54198,7 +54822,7 @@ After\par}"#;
             other => panic!("expected table, got {other:?}"),
         };
 
-        assert!(first.style.no_wrap);
+        assert!(!first.style.no_wrap);
         assert!(!second.style.no_wrap);
         assert!(third.style.no_wrap);
         assert!(!fourth.style.no_wrap);
@@ -54210,6 +54834,28 @@ After\par}"#;
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
+    }
+
+    #[test]
+    fn strict_spec_mode_accepts_no_wrap_alias() {
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\nowrap Alias no wrap\par\nowrap0 Alias wrapped\par}",
+            &options,
+        )
+        .unwrap();
+
+        let Block::Paragraph(first) = &output.document.blocks[0] else {
+            panic!("expected first paragraph");
+        };
+        let Block::Paragraph(second) = &output.document.blocks[1] else {
+            panic!("expected second paragraph");
+        };
+        assert!(first.style.no_wrap);
+        assert!(!second.style.no_wrap);
     }
 
     #[test]
@@ -54266,6 +54912,53 @@ After\par}"#;
     }
 
     #[test]
+    fn direct_overline_controls_are_strict_spec_only() {
+        let input = br"{\rtf1\ol over\ol0 plain \ol again\olnone done\par}";
+        let word = parse_rtf_bytes(input).unwrap();
+        let strict = parse_rtf_bytes_with_options(
+            input,
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        fn paragraph(output: &ParseOutput) -> &Paragraph {
+            match &output.document.blocks[0] {
+                Block::Paragraph(paragraph) => paragraph,
+                _ => panic!("expected paragraph"),
+            }
+        }
+
+        assert!(paragraph(&word).runs.iter().all(|run| !run.style.overline));
+        let strict = paragraph(&strict);
+        assert!(
+            strict
+                .runs
+                .iter()
+                .any(|run| { run.text.trim() == "over" && run.style.overline })
+        );
+        assert!(
+            strict
+                .runs
+                .iter()
+                .any(|run| { run.text.trim() == "again" && run.style.overline })
+        );
+        assert!(
+            strict
+                .runs
+                .iter()
+                .any(|run| { run.text.trim() == "plain" && !run.style.overline })
+        );
+        assert!(
+            strict
+                .runs
+                .iter()
+                .any(|run| { run.text.trim() == "done" && !run.style.overline })
+        );
+    }
+
+    #[test]
     fn clamps_extreme_drop_cap_line_controls() {
         let options = RtfParseOptions {
             compatibility_mode: CompatibilityMode::StrictSpec,
@@ -54309,7 +55002,7 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_word_paragraph_indent_alias_controls() {
+    fn normalizes_word_directional_indents_and_ignores_nonstandard_fin() {
         let output = parse_rtf(r"{\rtf1\lin720\rin360\fin-240 Indented\par}").unwrap();
         let paragraph = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
@@ -54318,7 +55011,7 @@ After\par}"#;
 
         assert_eq!(paragraph.style.left_indent_twips, 720);
         assert_eq!(paragraph.style.right_indent_twips, 360);
-        assert_eq!(paragraph.style.first_line_indent_twips, -240);
+        assert_eq!(paragraph.style.first_line_indent_twips, 0);
         assert!(
             output
                 .diagnostics
@@ -54370,7 +55063,7 @@ After\par}"#;
     }
 
     #[test]
-    fn clamps_extreme_word_paragraph_indent_alias_controls() {
+    fn clamps_extreme_word_directional_indents_and_ignores_nonstandard_fin() {
         let options = RtfParseOptions {
             limits: RtfLimits {
                 max_paragraph_indent_twips: 480,
@@ -54390,7 +55083,7 @@ After\par}"#;
 
         assert_eq!(paragraph.style.left_indent_twips, 480);
         assert_eq!(paragraph.style.right_indent_twips, -480);
-        assert_eq!(paragraph.style.first_line_indent_twips, 480);
+        assert_eq!(paragraph.style.first_line_indent_twips, 0);
         assert!(
             output
                 .diagnostics
@@ -54407,7 +55100,7 @@ After\par}"#;
             output
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.message.contains("first-line indent clamped"))
+                .all(|diagnostic| !diagnostic.message.contains("first-line indent clamped"))
         );
     }
 
@@ -55358,8 +56051,7 @@ After\par}"#;
     #[test]
     fn normalizes_bar_tab_stops_as_passive_tab_metadata() {
         let output =
-            parse_rtf(r"{\rtf1\tb\tx720\tqr\tx1440 Left\tab 9\par\tb\tx2160 Bar only\par}")
-                .unwrap();
+            parse_rtf(r"{\rtf1\tb720\tqr\tx1440 Left\tab 9\par\tb2160 Bar only\par}").unwrap();
         let first = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected paragraph"),
@@ -55378,6 +56070,27 @@ After\par}"#;
         assert_eq!(
             second.style.tab_stop_alignments,
             vec![TabAlignment::Bar, TabAlignment::Right, TabAlignment::Bar]
+        );
+    }
+
+    #[test]
+    fn word_compatible_parameterless_bar_tab_does_not_modify_following_tab_stop() {
+        let output = parse_rtf(r"{\rtf1\tb\tx720\tx1440 Bar tab\tab text\par}").unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.style.tab_stops_twips, vec![720, 1440]);
+        assert_eq!(
+            paragraph.style.tab_stop_alignments,
+            vec![TabAlignment::Left, TabAlignment::Left]
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("parameterless bar tab ignored"))
         );
     }
 
@@ -55457,10 +56170,16 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_paragraph_auto_spacing_controls() {
-        let output =
-            parse_rtf(r"{\rtf1\sb0\sbauto\sa0\saauto Auto\par\sbauto0\saauto0 Manual\par}")
-                .unwrap();
+    fn strict_spec_normalizes_paragraph_auto_spacing_controls() {
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\sb0\sbauto\sa0\saauto Auto\par\sbauto0\saauto0 Manual\par}",
+            &options,
+        )
+        .unwrap();
         let first = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected first paragraph"),
@@ -55476,6 +56195,20 @@ After\par}"#;
         assert!(first.style.auto_space_after);
         assert!(!second.style.auto_space_before);
         assert!(!second.style.auto_space_after);
+    }
+
+    #[test]
+    fn word_compatible_parameterless_auto_spacing_does_not_synthesize_a_gap() {
+        let output =
+            parse_rtf(r"{\rtf1\sb0\sbauto\sa0\saauto Auto\par\sbauto0\saauto0 Manual\par}")
+                .unwrap();
+        let first = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected first paragraph"),
+        };
+
+        assert!(!first.style.auto_space_before);
+        assert!(!first.style.auto_space_after);
     }
 
     #[test]
@@ -55659,7 +56392,7 @@ After\par}"#;
         }));
         let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
             .expect("PNG scanline");
-        assert_eq!(scanlines, vec![0, 77, 77, 77]);
+        assert_eq!(scanlines, vec![0, 54, 54, 54]);
     }
 
     #[test]
@@ -55686,7 +56419,7 @@ After\par}"#;
         );
         let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 10)
             .expect("compressed PNG scanline");
-        assert_eq!(scanlines, vec![0, 77, 77, 77, 149, 149, 149, 29, 29, 29]);
+        assert_eq!(scanlines, vec![0, 54, 54, 54, 182, 182, 182, 18, 18, 18]);
     }
 
     #[test]
@@ -55754,6 +56487,35 @@ After\par}"#;
     }
 
     #[test]
+    fn word_picture_adjustments_flatten_alpha_and_use_rec709_luminance() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/picture-adjustments-passive.rtf"
+        ))
+        .expect("picture adjustment fixture should parse");
+        let images = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Image(image) => Some(image),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(images.len(), 3);
+        assert!(images[0].alpha_mask.is_none());
+        assert!(images[1].alpha_mask.is_none());
+        let grayscale =
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&images[0].bytes, 7)
+                .expect("grayscale scanline");
+        let bilevel = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&images[1].bytes, 7)
+            .expect("bilevel scanline");
+
+        assert_eq!(grayscale, vec![0, 0, 0, 0, 18, 18, 18]);
+        assert_eq!(bilevel, vec![0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
     fn passive_jpeg_tone_adjustment_composes_inverted_rgb_endpoints() {
         assert_eq!(
             passive_jpeg_tone_adjustment(
@@ -55796,7 +56558,7 @@ After\par}"#;
     #[test]
     fn dib_picture_brightness_metadata_updates_safe_rgb_bytes() {
         let input = format!(
-            r"{{\rtf1{{\pict\dibitmap{{\picprop{{\sp{{\sn pictureBrightness}}{{\sv -32768}}}}}}\picwgoal720\pichgoal720 {}}}}}",
+            r"{{\rtf1{{\pict\dibitmap0{{\picprop{{\sp{{\sn pictureBrightness}}{{\sv -32768}}}}}}\picwgoal720\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_24bit_dib_with_rgb_pixels(
                 2,
                 1,
@@ -56478,7 +57240,7 @@ After\par}"#;
     #[test]
     fn normalizes_uncompressed_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_24bit_dib_with_dimensions(2, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56501,7 +57263,7 @@ After\par}"#;
         let mut dib = minimal_compressed_dib_with_payload(2, 1, 4, &jpeg);
         dib.extend_from_slice(b"TRAILING-DIB-JPEG-PAYLOAD");
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&dib)
         );
         let output = parse_rtf(&input).unwrap();
@@ -56522,7 +57284,7 @@ After\par}"#;
     fn normalizes_bi_png_dib_picture_as_safe_static_image() {
         let png = minimal_rgb_png_with_dimensions(2, 1);
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_compressed_dib_with_payload(2, 1, 5, &png))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56543,7 +57305,7 @@ After\par}"#;
     #[test]
     fn normalizes_16bit_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_16bit_dib_with_dimensions(2, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56563,7 +57325,7 @@ After\par}"#;
     #[test]
     fn normalizes_16bit_bitfields_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_16bit_bitfields_dib_with_dimensions(2, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56583,7 +57345,7 @@ After\par}"#;
     #[test]
     fn normalizes_8bit_paletted_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_8bit_dib_with_dimensions(2, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56603,7 +57365,7 @@ After\par}"#;
     #[test]
     fn normalizes_rle8_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_rle8_dib_with_dimensions(3, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56623,7 +57385,7 @@ After\par}"#;
     #[test]
     fn normalizes_rle4_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_rle4_dib_with_dimensions(3, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56643,7 +57405,7 @@ After\par}"#;
     #[test]
     fn normalizes_4bit_paletted_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_4bit_dib_with_dimensions(2, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56663,7 +57425,7 @@ After\par}"#;
     #[test]
     fn normalizes_1bit_paletted_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_1bit_dib_with_dimensions(2, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56683,7 +57445,7 @@ After\par}"#;
     #[test]
     fn normalizes_bitmap_core_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_24bit_bitmap_core_dib_with_dimensions(2, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -56703,7 +57465,7 @@ After\par}"#;
     #[test]
     fn normalizes_paletted_bitmap_core_dib_picture_as_safe_static_image() {
         let input = format!(
-            "{{\\rtf1{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {}}}}}",
+            "{{\\rtf1{{\\pict\\dibitmap0\\picwgoal720\\pichgoal720 {}}}}}",
             bytes_to_hex(&minimal_4bit_bitmap_core_dib_with_dimensions(2, 1))
         );
         let output = parse_rtf(&input).unwrap();
@@ -57004,6 +57766,7 @@ After\par}"#;
                 Block::Image(image) => Some(image),
                 _ => None,
             })
+            .or_else(|| output.document.inline_images.first())
             .expect("passive geometry placeholder");
 
         assert!(text.contains("before"));
@@ -57042,6 +57805,7 @@ After\par}"#;
                 Block::Image(image) => Some(image),
                 _ => None,
             })
+            .or_else(|| output.document.inline_images.first())
             .expect("passive geometry placeholder");
 
         assert!(text.contains("before"));
@@ -57112,7 +57876,7 @@ After\par}"#;
 
     #[test]
     fn unsupported_word_picture_formats_become_placeholders() {
-        for control in ["wmetafile8", "emfblip", "macpict", "pmmetafile1", "wbitmap"] {
+        for control in ["wmetafile8", "emfblip", "macpict", "pmmetafile1"] {
             let input = format!(
                 r"{{\rtf1{{\pict\{control}\picw100\pich50\picwgoal720\pichgoal360 41424344}}}}"
             );
@@ -69207,7 +69971,7 @@ After\par}"#;
     fn unsupported_dib_picture_becomes_placeholder() {
         let mut dib = minimal_24bit_dib_with_dimensions(1, 1);
         dib[16..20].copy_from_slice(&1u32.to_le_bytes());
-        let input = format!("{{\\rtf1{{\\pict\\dibitmap {}}}}}", bytes_to_hex(&dib));
+        let input = format!("{{\\rtf1{{\\pict\\dibitmap0 {}}}}}", bytes_to_hex(&dib));
         let output = parse_rtf(&input).unwrap();
 
         assert!(matches!(
@@ -69230,7 +69994,7 @@ After\par}"#;
     fn excessive_8bit_dib_palette_count_becomes_placeholder() {
         let mut dib = minimal_8bit_dib_with_dimensions(1, 1);
         dib[32..36].copy_from_slice(&257u32.to_le_bytes());
-        let input = format!("{{\\rtf1{{\\pict\\dibitmap {}}}}}", bytes_to_hex(&dib));
+        let input = format!("{{\\rtf1{{\\pict\\dibitmap0 {}}}}}", bytes_to_hex(&dib));
         let output = parse_rtf(&input).unwrap();
 
         assert!(matches!(

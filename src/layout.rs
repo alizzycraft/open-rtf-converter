@@ -18,13 +18,14 @@ use crate::model::{
     TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
     Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
     TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TableRowWrapMargins, UnderlineStyle,
+    TableRowWrapMargins, UnderlineStyle, inline_image_marker_index,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
 const SMALL_CAPS_FONT_SCALE: f32 = 0.7;
 const MAX_SYNTHETIC_DROP_CAP_FONT_SIZE_HALF_POINTS: i32 = 400;
 const AUTO_PARAGRAPH_SPACING_TWIPS: i32 = 240;
+const DEFAULT_PARAGRAPH_BORDER_SIDE_GAP_POINTS: f32 = 1.5;
 const MAX_LAYOUT_COLUMNS: usize = 16;
 const PASSIVE_NARROW_FONT_SCALE_PERCENT: i32 = 82;
 const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
@@ -304,8 +305,18 @@ impl PageGeometry {
         let height = twips_to_points(settings.height_twips);
         let base_margin_left = twips_to_points(settings.margin_left_twips);
         let base_margin_right = twips_to_points(settings.margin_right_twips);
-        let gutter = twips_to_points(settings.gutter_twips.max(0));
-        let margin_top = twips_to_points(settings.margin_top_twips);
+        let authored_gutter = twips_to_points(settings.gutter_twips.max(0));
+        let gutter = if settings.gutter_at_top {
+            0.0
+        } else {
+            authored_gutter
+        };
+        let margin_top = twips_to_points(settings.margin_top_twips)
+            + if settings.gutter_at_top {
+                authored_gutter
+            } else {
+                0.0
+            };
         let margin_bottom = twips_to_points(settings.margin_bottom_twips);
         let header_distance = twips_to_points(settings.header_distance_twips.max(0));
         let footer_distance = twips_to_points(settings.footer_distance_twips.max(0));
@@ -745,6 +756,7 @@ impl HeaderFooterSet {
 struct Line {
     runs: Vec<FlowRun>,
     width: f32,
+    natural_height: f32,
     height: f32,
 }
 
@@ -818,6 +830,7 @@ impl LayoutEngine {
         let mut line_number_state = LineNumberState::new(&document.page);
         let mut rendered_footnote_pages = vec![None; document.footnotes.len()];
         let mut rendered_endnote_pages = vec![None; document.endnotes.len()];
+        let mut last_paragraph_anchor = None;
 
         for (block_idx, block) in document.blocks.iter().enumerate() {
             match block {
@@ -930,12 +943,17 @@ impl LayoutEngine {
                             geometry,
                         );
                     }
+                    let target_parity = if geometry.facing_pages {
+                        PageParity::Even
+                    } else {
+                        PageParity::Odd
+                    };
                     start_new_page_with_parity(
                         &mut pages,
                         &mut cursor_y,
                         &mut geometry,
                         &mut current_column,
-                        PageParity::Even,
+                        target_parity,
                     );
                 }
                 Block::OddPageSectionBreak => {
@@ -1055,6 +1073,9 @@ impl LayoutEngine {
                     );
                 }
                 Block::Image(image) => {
+                    if document.inline_image_block_indices.contains(&block_idx) {
+                        continue;
+                    }
                     layout_image(
                         &mut pages,
                         &mut cursor_y,
@@ -1067,9 +1088,20 @@ impl LayoutEngine {
                     );
                 }
                 Block::Shape(shape) => {
+                    let paragraph_anchor_y = last_paragraph_anchor
+                        .filter(|(page_count, column, _)| {
+                            *page_count == pages.len()
+                                && *column == current_column
+                                && previous_non_shape_block_is_paragraph(
+                                    &document.blocks,
+                                    block_idx,
+                                )
+                        })
+                        .map(|(_, _, y)| y);
                     layout_shape(
                         &mut pages,
                         &mut cursor_y,
+                        paragraph_anchor_y,
                         shape,
                         geometry.body_width(current_column),
                         geometry.body_left(current_column),
@@ -1094,16 +1126,15 @@ impl LayoutEngine {
                         next_paragraph_block(&document.blocks, block_idx).is_some_and(|next| {
                             paragraph_between_border_is_visible(paragraph, next)
                         });
-                    if paragraph.style.keep_with_next
-                        && let Some(next_paragraph) =
-                            next_paragraph_block(&document.blocks, block_idx)
-                    {
+                    let kept_following_paragraphs =
+                        keep_with_next_chain(&document.blocks, block_idx);
+                    if !kept_following_paragraphs.is_empty() {
                         let previous_page_count = pages.len();
                         start_new_page_for_kept_paragraphs(
                             &mut pages,
                             &mut cursor_y,
                             paragraph,
-                            Some(next_paragraph),
+                            &kept_following_paragraphs,
                             geometry.body_width(current_column),
                             geometry.margin_bottom,
                             &mut geometry,
@@ -1119,6 +1150,9 @@ impl LayoutEngine {
                             pages.len(),
                         );
                     }
+                    let paragraph_anchor_y = cursor_y;
+                    let paragraph_anchor_page = pages.len();
+                    let paragraph_anchor_column = current_column;
                     layout_paragraph_with_auto_footnotes(
                         &mut pages,
                         &mut cursor_y,
@@ -1143,6 +1177,11 @@ impl LayoutEngine {
                         }),
                         None,
                     );
+                    last_paragraph_anchor = Some((
+                        paragraph_anchor_page,
+                        paragraph_anchor_column,
+                        paragraph_anchor_y,
+                    ));
                     let reaches_note_boundary = document
                         .blocks
                         .get(block_idx.saturating_add(1))
@@ -2292,7 +2331,7 @@ fn layout_image(
     if image.placement.is_some_and(|placement| placement.text_wrap) {
         return;
     }
-    *cursor_y = y - 6.0;
+    *cursor_y = y;
 }
 
 fn image_layout_frame(image: &StaticImage, content_width: f32) -> (f32, f32, f32, f32) {
@@ -2340,6 +2379,11 @@ fn image_display_size(image: &StaticImage, content_width: f32) -> (f32, f32) {
     };
     width = width.max(1.0);
     height = height.max(1.0);
+    width = (width - twips_to_points(image.crop.left_twips.saturating_add(image.crop.right_twips)))
+        .max(1.0);
+    height = (height
+        - twips_to_points(image.crop.top_twips.saturating_add(image.crop.bottom_twips)))
+    .max(1.0);
     width *= image.scale_x_percent.unwrap_or(100) as f32 / 100.0;
     height *= image.scale_y_percent.unwrap_or(100) as f32 / 100.0;
     width = width.max(1.0);
@@ -2390,6 +2434,7 @@ fn pdf_color_from_model_color(color: crate::model::Color) -> PdfColor {
 fn layout_shape(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
+    paragraph_anchor_y: Option<f32>,
     shape: &StaticShape,
     content_width: f32,
     mut margin_left: f32,
@@ -2411,17 +2456,21 @@ fn layout_shape(
         height *= scale;
     }
     let block_height = top + height;
-    if *cursor_y - block_height < margin_bottom {
+    if shape.text_wrap && *cursor_y - block_height < margin_bottom {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
         margin_left = geometry.body_left(*current_column);
     }
 
     let x = shape_horizontal_origin(shape.horizontal_anchor, margin_left, geometry) + left;
-    let top_y = shape_vertical_origin(shape.vertical_anchor, *cursor_y, geometry) - top;
+    let top_y = shape_vertical_origin(
+        shape.vertical_anchor,
+        paragraph_anchor_y.unwrap_or(*cursor_y),
+        geometry,
+    ) - top;
     let bottom_y = top_y - height;
     let right_x = x + width;
     let stroke_width_points = if shape.stroke_width_twips > 0 {
-        Some(twips_to_points(shape.stroke_width_twips).clamp(0.25, 12.0))
+        Some(twips_to_points(shape.stroke_width_twips).clamp(0.14, 12.0))
     } else {
         None
     };
@@ -2890,9 +2939,6 @@ fn layout_shape(
             shape.stroke_opacity_percent,
         );
     }
-    if !shape.text_wrap {
-        *cursor_y -= block_height + 6.0;
-    }
 }
 
 fn wrap_static_shape_items(
@@ -3328,6 +3374,9 @@ fn layout_shape_text(
         );
         for line in &mut lines {
             line.height = apply_line_spacing(line.height, &paragraph.style);
+            if !paragraph.style.line_spacing_multiple {
+                line.natural_height = line.height;
+            }
         }
         text_height += lines.iter().map(|line| line.height).sum::<f32>();
         let space_after = twips_to_points(effective_space_after_twips(&paragraph.style));
@@ -3387,6 +3436,12 @@ fn layout_shape_text(
                 paragraph_line_width(content_width, &paragraph.style, is_first_line),
                 is_last_line,
             );
+            let character_spacing = distributed_character_spacing(
+                line,
+                &paragraph.style,
+                paragraph_line_width(content_width, &paragraph.style, is_first_line),
+                is_last_line,
+            );
             let (border_line_idx, border_line_count) =
                 paragraph_border_line_position(is_first_line, is_last_line);
             push_paragraph_borders(
@@ -3400,9 +3455,18 @@ fn layout_shape_text(
                 line.height,
                 document,
                 false,
+                false,
             );
             push_bar_tab_stops(pages, &paragraph.style, text_x, cursor_y, line.height);
-            push_line(pages, line, text_x, cursor_y, document, word_spacing);
+            push_line(
+                pages,
+                line,
+                text_x,
+                cursor_y,
+                document,
+                word_spacing,
+                character_spacing,
+            );
             cursor_y -= line.height;
         }
         cursor_y -= space_after;
@@ -3473,7 +3537,7 @@ fn start_new_page_for_kept_paragraphs(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
     paragraph: &Paragraph,
-    next_paragraph: Option<&Paragraph>,
+    following_paragraphs: &[&Paragraph],
     content_width: f32,
     margin_bottom: f32,
     geometry: &mut PageGeometry,
@@ -3482,7 +3546,7 @@ fn start_new_page_for_kept_paragraphs(
     markers: &MarkerContext,
     font_provider: Option<&FontProvider>,
 ) {
-    if !paragraph.style.keep_together && next_paragraph.is_none() {
+    if !paragraph.style.keep_together && following_paragraphs.is_empty() {
         return;
     }
     if pages.last().is_none_or(|page| page.items.is_empty()) {
@@ -3496,7 +3560,8 @@ fn start_new_page_for_kept_paragraphs(
         document,
         *geometry,
         font_provider,
-    ) + next_paragraph
+    ) + following_paragraphs
+        .iter()
         .map(|paragraph| {
             paragraph_block_height(
                 paragraph,
@@ -3507,7 +3572,7 @@ fn start_new_page_for_kept_paragraphs(
                 font_provider,
             )
         })
-        .unwrap_or(0.0);
+        .sum::<f32>();
     let usable_height = (geometry.height - geometry.margin_top - margin_bottom).max(0.0);
     if kept_height <= usable_height && *cursor_y - kept_height < margin_bottom {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
@@ -3519,7 +3584,7 @@ fn kept_paragraphs_would_advance_to_page(
     pages: &[LayoutPage],
     cursor_y: &f32,
     paragraph: &Paragraph,
-    next_paragraph: Option<&Paragraph>,
+    following_paragraphs: &[&Paragraph],
     content_width: f32,
     margin_bottom: f32,
     geometry: &PageGeometry,
@@ -3528,7 +3593,7 @@ fn kept_paragraphs_would_advance_to_page(
     markers: &MarkerContext,
     font_provider: Option<&FontProvider>,
 ) -> bool {
-    if !paragraph.style.keep_together && next_paragraph.is_none() {
+    if !paragraph.style.keep_together && following_paragraphs.is_empty() {
         return false;
     }
     if pages.last().is_none_or(|page| page.items.is_empty()) {
@@ -3542,7 +3607,8 @@ fn kept_paragraphs_would_advance_to_page(
         document,
         *geometry,
         font_provider,
-    ) + next_paragraph
+    ) + following_paragraphs
+        .iter()
         .map(|paragraph| {
             paragraph_block_height(
                 paragraph,
@@ -3553,7 +3619,7 @@ fn kept_paragraphs_would_advance_to_page(
                 font_provider,
             )
         })
-        .unwrap_or(0.0);
+        .sum::<f32>();
     let usable_height = (geometry.height - geometry.margin_top - margin_bottom).max(0.0);
     kept_height <= usable_height
         && *cursor_y - kept_height < margin_bottom
@@ -3579,7 +3645,9 @@ fn paragraph_block_height(
     .map(|line| apply_line_spacing_with_grid(line.height, &paragraph.style, geometry))
     .sum::<f32>();
     twips_to_points(effective_space_before_twips(&paragraph.style))
+        + paragraph_top_border_reserve(&paragraph.style, document)
         + line_height
+        + paragraph_bottom_border_reserve(&paragraph.style, false, document)
         + twips_to_points(effective_space_after_twips(&paragraph.style))
 }
 
@@ -3588,6 +3656,24 @@ fn next_paragraph_block(blocks: &[Block], idx: usize) -> Option<&Paragraph> {
         Block::Paragraph(paragraph) => Some(paragraph),
         _ => None,
     })
+}
+
+fn keep_with_next_chain(blocks: &[Block], idx: usize) -> Vec<&Paragraph> {
+    let mut chain = Vec::new();
+    let mut current_idx = idx;
+    while blocks.get(current_idx).is_some_and(
+        |block| matches!(block, Block::Paragraph(paragraph) if paragraph.style.keep_with_next),
+    ) {
+        let Some(next_idx) = current_idx.checked_add(1) else {
+            break;
+        };
+        let Some(Block::Paragraph(next)) = blocks.get(next_idx) else {
+            break;
+        };
+        chain.push(next);
+        current_idx = next_idx;
+    }
+    chain
 }
 
 fn previous_paragraph_block(blocks: &[Block], idx: usize) -> Option<&Paragraph> {
@@ -3599,8 +3685,16 @@ fn previous_paragraph_block(blocks: &[Block], idx: usize) -> Option<&Paragraph> 
         })
 }
 
+fn previous_non_shape_block_is_paragraph(blocks: &[Block], idx: usize) -> bool {
+    blocks[..idx]
+        .iter()
+        .rev()
+        .find(|block| !matches!(block, Block::Shape(_)))
+        .is_some_and(|block| matches!(block, Block::Paragraph(_)))
+}
+
 fn paragraph_spacing_is_contextual(first: &Paragraph, second: &Paragraph) -> bool {
-    first.style.contextual_spacing && second.style.contextual_spacing
+    first.style.contextual_spacing || second.style.contextual_spacing
 }
 
 fn paragraph_between_border_is_visible(first: &Paragraph, second: &Paragraph) -> bool {
@@ -3964,6 +4058,7 @@ fn layout_background_shapes(
             layout_shape(
                 &mut scratch_pages,
                 &mut cursor_y,
+                None,
                 shape,
                 page.width,
                 0.0,
@@ -4078,6 +4173,12 @@ fn layout_repeating_header_footer(
                     paragraph_line_width(geometry.content_width, &paragraph.style, line_idx == 0),
                     line_idx + 1 == line_count,
                 );
+                let character_spacing = distributed_character_spacing(
+                    &line,
+                    &paragraph.style,
+                    paragraph_line_width(geometry.content_width, &paragraph.style, line_idx == 0),
+                    line_idx + 1 == line_count,
+                );
                 if let Some(color_index) = paragraph.style.shading_color_index
                     && color_index > 0
                 {
@@ -4112,6 +4213,7 @@ fn layout_repeating_header_footer(
                     line.height,
                     document,
                     false,
+                    true,
                 );
                 push_bar_tab_stops(
                     &mut scratch_pages,
@@ -4127,6 +4229,7 @@ fn layout_repeating_header_footer(
                     line_cursor_y,
                     document,
                     word_spacing,
+                    character_spacing,
                 );
                 cursor_y -= line.height;
             }
@@ -4177,6 +4280,7 @@ fn layout_repeating_header_footer(
             layout_shape(
                 &mut scratch_pages,
                 &mut cursor_y,
+                None,
                 shape,
                 geometry.content_width,
                 geometry.margin_left,
@@ -4645,7 +4749,14 @@ fn layout_table(
     if has_flow_exclusion {
         *cursor_y = table_flow_cursor_y;
     } else {
-        *cursor_y -= 6.0;
+        // Word carries half of the final row's authored cell gap below the
+        // table. An omitted `\trgaph` therefore adds no synthetic flow gap.
+        let following_gap = table
+            .rows
+            .last()
+            .map(|row| twips_to_points(row.cell_gap_twips.max(0)) * 0.5)
+            .unwrap_or(0.0);
+        *cursor_y -= following_gap;
     }
 }
 
@@ -4964,7 +5075,7 @@ fn prepared_table_row_has_lines(prepared: &PreparedTableRow) -> bool {
 }
 
 fn prepared_table_row_content_height(prepared: &PreparedTableRow) -> f32 {
-    prepared
+    let height = prepared
         .cell_lines
         .iter()
         .zip(prepared.cell_text_directions.iter())
@@ -4977,22 +5088,30 @@ fn prepared_table_row_content_height(prepared: &PreparedTableRow) -> f32 {
                 + spacing.top
                 + spacing.bottom
         })
-        .fold(0.0, f32::max)
-        .max(14.0)
+        .fold(0.0, f32::max);
+    if prepared_table_row_has_lines(prepared) {
+        height
+    } else {
+        height.max(14.0)
+    }
 }
 
 fn prepared_cell_lines_height(
     lines: &[PreparedCellLine],
-    _direction: TableCellTextDirection,
+    direction: TableCellTextDirection,
 ) -> f32 {
-    lines
-        .iter()
-        .map(|line| {
-            prepared_cell_line_extent(line, line.text_direction)
-                + line.space_before
-                + line.space_after
-        })
-        .sum::<f32>()
+    let line_extent = |line: &PreparedCellLine| {
+        prepared_cell_line_extent(line, line.text_direction) + line.space_before + line.space_after
+    };
+    match direction {
+        TableCellTextDirection::LeftToRightTopToBottom => {
+            lines.iter().map(line_extent).sum::<f32>()
+        }
+        TableCellTextDirection::TopToBottomRightToLeft
+        | TableCellTextDirection::BottomToTopLeftToRight => {
+            lines.iter().map(line_extent).fold(0.0, f32::max)
+        }
+    }
 }
 
 fn prepared_cell_line_extent(line: &PreparedCellLine, direction: TableCellTextDirection) -> f32 {
@@ -5174,16 +5293,18 @@ fn rotated_table_cell_line_origin(
     line_top: f32,
     line: &Line,
     direction: TableCellTextDirection,
+    cross_offset: f32,
 ) -> (f32, f32) {
     match direction {
         TableCellTextDirection::LeftToRightTopToBottom => (content_left, line_top),
         TableCellTextDirection::TopToBottomRightToLeft => (
-            content_left + content_width - (line.height * 0.25),
-            line_top,
+            content_left + content_width - (line.height * 0.75) - cross_offset,
+            line_top + (line.height * 0.75),
         ),
-        TableCellTextDirection::BottomToTopLeftToRight => {
-            (content_left + (line.height * 0.75), line_top - line.width)
-        }
+        TableCellTextDirection::BottomToTopLeftToRight => (
+            content_left + (line.height * 0.825) + cross_offset,
+            line_top - line.width,
+        ),
     }
 }
 
@@ -5282,7 +5403,8 @@ fn prepare_table_row(
                 .flat_map(|(paragraph_idx, paragraph)| {
                     let fit_text_paragraph;
                     let layout_paragraph = if cell.fit_text {
-                        fit_text_paragraph = passive_fit_text_paragraph(paragraph);
+                        fit_text_paragraph =
+                            passive_fit_text_paragraph(paragraph, cell_content_width);
                         &fit_text_paragraph
                     } else {
                         paragraph
@@ -5294,9 +5416,11 @@ fn prepare_table_row(
                     let wrap_width = match paragraph_text_direction {
                         TableCellTextDirection::LeftToRightTopToBottom => cell_content_width,
                         TableCellTextDirection::TopToBottomRightToLeft
-                        | TableCellTextDirection::BottomToTopLeftToRight => {
-                            cell_content_width.max(MAX_VERTICAL_TABLE_TEXT_WRAP_POINTS)
-                        }
+                        | TableCellTextDirection::BottomToTopLeftToRight => row
+                            .height_twips
+                            .filter(|height| *height != 0)
+                            .map(|height| twips_to_points(height.saturating_abs()).max(12.0))
+                            .unwrap_or(MAX_VERTICAL_TABLE_TEXT_WRAP_POINTS),
                     };
                     let mut lines = wrap_paragraph_with_font_provider(
                         layout_paragraph,
@@ -5310,6 +5434,9 @@ fn prepare_table_row(
                             apply_passive_table_cell_fit_text(line, cell_content_width);
                         }
                         line.height = apply_line_spacing(line.height, &layout_paragraph.style);
+                        if !layout_paragraph.style.line_spacing_multiple {
+                            line.natural_height = line.height;
+                        }
                     }
                     let line_count = lines.len();
                     let suppress_contextual_space_before = paragraph_idx
@@ -5394,6 +5521,7 @@ fn prepare_table_row(
         })
         .collect::<Vec<_>>();
 
+    let has_lines = cell_lines.iter().any(|lines| !lines.is_empty());
     let row_height = cell_lines
         .iter()
         .zip(visual_cells.iter())
@@ -5407,8 +5535,12 @@ fn prepare_table_row(
                 + spacing.top
                 + spacing.bottom
         })
-        .fold(0.0, f32::max)
-        .max(14.0);
+        .fold(0.0, f32::max);
+    let row_height = if has_lines {
+        row_height
+    } else {
+        row_height.max(14.0)
+    };
     let row_height = match row.height_twips {
         Some(height) if height < 0 => {
             twips_to_points(height.checked_abs().unwrap_or(i32::MAX)).max(1.0)
@@ -5620,7 +5752,7 @@ fn append_nested_table_paragraphs(paragraphs: &mut Vec<Paragraph>, table: &Table
                         {
                             Alignment::Center => TabAlignment::Center,
                             Alignment::Right => TabAlignment::Right,
-                            Alignment::Justified => TabAlignment::Left,
+                            Alignment::Justified | Alignment::Distributed => TabAlignment::Left,
                             Alignment::Left => TabAlignment::Left,
                         }
                     })
@@ -5670,9 +5802,15 @@ fn nested_cell_left_inset_twips(cell: &TableCell) -> i32 {
         .min(100_000)
 }
 
-fn passive_fit_text_paragraph(paragraph: &Paragraph) -> Paragraph {
+fn passive_fit_text_paragraph(paragraph: &Paragraph, content_width: f32) -> Paragraph {
     let mut paragraph = paragraph.clone();
     paragraph.style.no_wrap = true;
+    let target_twips = (content_width.max(0.1) * 20.0)
+        .round()
+        .clamp(1.0, 100_000.0) as i32;
+    for run in &mut paragraph.runs {
+        run.style.fit_text_width_twips = Some(target_twips);
+    }
     paragraph
 }
 
@@ -5831,11 +5969,12 @@ fn push_table_row(
         };
         let content_bottom = top - span_height + spacing.bottom + padding.bottom;
         let mut line_top = top - spacing.top - padding.top - vertical_offset;
+        let mut vertical_cross_offset = 0.0;
         for prepared_line in lines {
-            line_top -= prepared_line.space_before;
+            let current_line_top = line_top - prepared_line.space_before;
             let line_extent =
                 prepared_cell_line_extent(prepared_line, prepared_line.text_direction);
-            if line_top - line_extent < content_bottom {
+            if current_line_top - line_extent < content_bottom {
                 break;
             }
             let content_left = row_left + visual_cell.x_offset + spacing.left + padding.left;
@@ -5882,6 +6021,16 @@ fn push_table_row(
                 ),
                 prepared_line.is_last_line,
             );
+            let character_spacing = distributed_character_spacing(
+                &prepared_line.line,
+                &prepared_line.style,
+                paragraph_line_width(
+                    cell_content_width,
+                    &prepared_line.style,
+                    prepared_line.is_first_line,
+                ),
+                prepared_line.is_last_line,
+            );
             let (border_line_idx, border_line_count) = paragraph_border_line_position(
                 prepared_line.is_first_line,
                 prepared_line.is_last_line,
@@ -5893,9 +6042,10 @@ fn push_table_row(
                 &prepared_line.style,
                 border_line_idx,
                 border_line_count,
-                line_top,
+                current_line_top,
                 prepared_line.line.height,
                 document,
+                false,
                 false,
             );
             let rotation = table_cell_text_rotation(prepared_line.text_direction);
@@ -5904,24 +6054,32 @@ fn push_table_row(
                     pages,
                     &prepared_line.style,
                     x,
-                    line_top,
+                    current_line_top,
                     prepared_line.line.height,
                 );
                 push_line(
                     pages,
                     &prepared_line.line,
                     x,
-                    line_top,
+                    current_line_top,
                     document,
                     word_spacing,
+                    character_spacing,
                 );
             } else {
+                let rotated_line_top = match prepared_line.text_direction {
+                    TableCellTextDirection::BottomToTopLeftToRight => {
+                        current_line_top - (content_height - line_extent).max(0.0)
+                    }
+                    _ => current_line_top,
+                };
                 let (rotated_x, rotated_y) = rotated_table_cell_line_origin(
                     content_left,
                     cell_content_width,
-                    line_top,
+                    rotated_line_top,
                     &prepared_line.line,
                     prepared_line.text_direction,
+                    vertical_cross_offset,
                 );
                 push_line_with_rotation(
                     pages,
@@ -5930,10 +6088,15 @@ fn push_table_row(
                     rotated_y,
                     document,
                     word_spacing,
+                    character_spacing,
                     rotation,
                 );
             }
-            line_top -= line_extent + prepared_line.space_after;
+            if rotation == TextRotation::None {
+                line_top = current_line_top - line_extent - prepared_line.space_after;
+            } else {
+                vertical_cross_offset += prepared_line.line.height;
+            }
         }
     }
 
@@ -6804,11 +6967,7 @@ fn table_border_stroke(
     let color = border
         .color_index
         .map(|index| color_for_index(document, index))
-        .unwrap_or(PdfColor {
-            red: 0.65,
-            green: 0.65,
-            blue: 0.65,
-        });
+        .unwrap_or_default();
     let style = line_style_for_border_style(border.style);
     (width, color, style)
 }
@@ -6825,6 +6984,7 @@ fn push_paragraph_borders(
     line_height: f32,
     document: &Document,
     render_between_border_after: bool,
+    allow_outward_side_gap: bool,
 ) {
     if line_count == 0 {
         return;
@@ -6835,6 +6995,11 @@ fn push_paragraph_borders(
     let x2 = x1 + paragraph_line_width(content_width, style, line_idx == 0);
     let y1 = top_y;
     let y2 = top_y - line_height;
+    let side_gap = if allow_outward_side_gap {
+        DEFAULT_PARAGRAPH_BORDER_SIDE_GAP_POINTS
+    } else {
+        0.0
+    };
     let Some(page) = pages.last_mut() else {
         return;
     };
@@ -6844,10 +7009,10 @@ fn push_paragraph_borders(
         let (width, color, style) = table_border_stroke(border, document);
         let spacing = twips_to_points(border.spacing_twips.max(0));
         page.items.push(LayoutItem::Line {
-            x1,
-            y1: y1 + spacing,
-            x2,
-            y2: y1 + spacing,
+            x1: x1 - side_gap,
+            y1: y1 + spacing + (width * 0.5),
+            x2: x2 + side_gap,
+            y2: y1 + spacing + (width * 0.5),
             width,
             color,
             style,
@@ -6858,10 +7023,10 @@ fn push_paragraph_borders(
         let (width, color, style) = table_border_stroke(border, document);
         let spacing = twips_to_points(border.spacing_twips.max(0));
         page.items.push(LayoutItem::Line {
-            x1,
-            y1: y2 - spacing,
-            x2,
-            y2: y2 - spacing,
+            x1: x1 - side_gap,
+            y1: y2 - spacing - (width * 0.5),
+            x2: x2 + side_gap,
+            y2: y2 - spacing - (width * 0.5),
             width,
             color,
             style,
@@ -6872,9 +7037,9 @@ fn push_paragraph_borders(
         let (width, color, style) = table_border_stroke(border, document);
         let spacing = twips_to_points(border.spacing_twips.max(0));
         page.items.push(LayoutItem::Line {
-            x1,
+            x1: x1 - side_gap,
             y1: y2 - spacing,
-            x2,
+            x2: x2 + side_gap,
             y2: y2 - spacing,
             width,
             color,
@@ -6885,10 +7050,11 @@ fn push_paragraph_borders(
         let border = &style.borders.left;
         let (width, color, style) = table_border_stroke(border, document);
         let spacing = twips_to_points(border.spacing_twips.max(0));
+        let x = x1 - spacing - side_gap - (width * 0.5);
         page.items.push(LayoutItem::Line {
-            x1: x1 - spacing,
+            x1: x,
             y1,
-            x2: x1 - spacing,
+            x2: x,
             y2,
             width,
             color,
@@ -6899,16 +7065,43 @@ fn push_paragraph_borders(
         let border = &style.borders.right;
         let (width, color, style) = table_border_stroke(border, document);
         let spacing = twips_to_points(border.spacing_twips.max(0));
+        let x = x2 + spacing + side_gap + (width * 0.5);
         page.items.push(LayoutItem::Line {
-            x1: x2 + spacing,
+            x1: x,
             y1,
-            x2: x2 + spacing,
+            x2: x,
             y2,
             width,
             color,
             style,
         });
     }
+}
+
+fn paragraph_top_border_reserve(style: &ParagraphStyle, document: &Document) -> f32 {
+    if style.borders.top.visible {
+        table_border_stroke(&style.borders.top, document).0
+    } else {
+        0.0
+    }
+}
+
+fn paragraph_bottom_border_reserve(
+    style: &ParagraphStyle,
+    render_between_border_after: bool,
+    document: &Document,
+) -> f32 {
+    let bottom = if style.borders.bottom.visible {
+        table_border_stroke(&style.borders.bottom, document).0
+    } else {
+        0.0
+    };
+    let between = if render_between_border_after && style.borders.between.visible {
+        table_border_stroke(&style.borders.between, document).0
+    } else {
+        0.0
+    };
+    bottom.max(between)
 }
 
 struct AutoFootnoteFlush<'a> {
@@ -7013,7 +7206,7 @@ fn layout_paragraph_with_auto_footnotes(
         pages,
         cursor_y,
         paragraph,
-        None,
+        &[],
         content_width,
         margin_bottom,
         geometry,
@@ -7039,7 +7232,7 @@ fn layout_paragraph_with_auto_footnotes(
         pages,
         cursor_y,
         paragraph,
-        None,
+        &[],
         content_width,
         margin_bottom,
         geometry,
@@ -7078,19 +7271,24 @@ fn layout_paragraph_with_auto_footnotes(
         font_provider,
         *cursor_y,
         |line_top_y, line_height| {
-            wrapped_image_text_area_for_line(
+            wrapped_image_text_intervals_for_line(
                 pages,
                 margin_left,
                 content_width,
                 line_top_y,
                 line_height,
             )
-            .map(|(_, width)| width)
-            .unwrap_or(content_width)
+            .unwrap_or_else(|| vec![(margin_left, content_width)])
+            .into_iter()
+            .map(|(left, width)| ((left - margin_left).max(0.0), width))
+            .collect()
         },
     );
     for line in &mut lines {
         line.height = apply_line_spacing_with_grid(line.height, &paragraph.style, *geometry);
+        if !paragraph.style.line_spacing_multiple {
+            line.natural_height = line.height;
+        }
     }
     let line_count = lines.len();
     let mut rendered_current_block_content = false;
@@ -7159,7 +7357,12 @@ fn layout_paragraph_with_auto_footnotes(
             );
             margin_left = geometry.body_left(*current_column);
         }
-        if *cursor_y - line.height < line_margin_bottom {
+        let top_border_reserve = if line_idx == 0 {
+            paragraph_top_border_reserve(&paragraph.style, document)
+        } else {
+            0.0
+        };
+        if *cursor_y - top_border_reserve - line.height < line_margin_bottom {
             flush_auto_footnotes_before_page_advance(
                 pages,
                 cursor_y,
@@ -7189,15 +7392,24 @@ fn layout_paragraph_with_auto_footnotes(
             );
             margin_left = geometry.body_left(*current_column);
         }
+        *cursor_y -= top_border_reserve;
 
-        let (line_margin_left, line_content_width) = wrapped_image_text_area_for_line(
-            pages,
-            margin_left,
-            content_width,
-            *cursor_y,
-            line.height,
-        )
-        .unwrap_or((margin_left, content_width));
+        let uses_segmented_flow = line
+            .runs
+            .iter()
+            .any(|run| run.text.is_empty() && run.width > 0.01);
+        let (line_margin_left, line_content_width) = if uses_segmented_flow {
+            (margin_left, content_width)
+        } else {
+            wrapped_image_text_area_for_line(
+                pages,
+                margin_left,
+                content_width,
+                *cursor_y,
+                line.height,
+            )
+            .unwrap_or((margin_left, content_width))
+        };
 
         let x = aligned_x(
             line_margin_left,
@@ -7236,8 +7448,15 @@ fn layout_paragraph_with_auto_footnotes(
             line.height,
             document,
             render_between_border_after,
+            true,
         );
         let word_spacing = justified_word_spacing(
+            &line,
+            &paragraph.style,
+            paragraph_line_width(line_content_width, &paragraph.style, line_idx == 0),
+            line_idx + 1 == line_count,
+        );
+        let character_spacing = distributed_character_spacing(
             &line,
             &paragraph.style,
             paragraph_line_width(line_content_width, &paragraph.style, line_idx == 0),
@@ -7255,7 +7474,15 @@ fn layout_paragraph_with_auto_footnotes(
             );
         }
         push_bar_tab_stops(pages, &paragraph.style, x, *cursor_y, line.height);
-        push_line(pages, &line, x, *cursor_y, document, word_spacing);
+        push_line(
+            pages,
+            &line,
+            x,
+            *cursor_y,
+            document,
+            word_spacing,
+            character_spacing,
+        );
         if let Some(auto_footnotes) = auto_footnotes.as_mut()
             && let Some(note_index) = max_footnote_reference_index_in_line(line)
         {
@@ -7268,6 +7495,8 @@ fn layout_paragraph_with_auto_footnotes(
         rendered_current_block_content = true;
         *cursor_y -= line.height;
     }
+    *cursor_y -=
+        paragraph_bottom_border_reserve(&paragraph.style, render_between_border_after, document);
     if !suppress_contextual_space_after {
         *cursor_y -= twips_to_points(effective_space_after_twips(&paragraph.style));
     }
@@ -7393,6 +7622,28 @@ fn wrapped_image_text_area_for_line(
     line_top_y: f32,
     line_height: f32,
 ) -> Option<(f32, f32)> {
+    wrapped_image_text_intervals_for_line(
+        pages,
+        margin_left,
+        content_width,
+        line_top_y,
+        line_height,
+    )?
+    .into_iter()
+    .max_by(|(left_a, width_a), (left_b, width_b)| {
+        width_a
+            .total_cmp(width_b)
+            .then_with(|| left_b.total_cmp(left_a))
+    })
+}
+
+fn wrapped_image_text_intervals_for_line(
+    pages: &[LayoutPage],
+    margin_left: f32,
+    content_width: f32,
+    line_top_y: f32,
+    line_height: f32,
+) -> Option<Vec<(f32, f32)>> {
     let page = pages.last()?;
     let content_right = margin_left + content_width;
     let line_bottom_y = line_top_y - line_height.max(0.0);
@@ -7454,15 +7705,13 @@ fn wrapped_image_text_area_for_line(
             placement.wrap_side,
         );
     }
-    free_intervals
-        .into_iter()
-        .map(|(left, right)| (left, (right - left).max(0.0)))
-        .filter(|(_, width)| *width >= 12.0)
-        .max_by(|(left_a, width_a), (left_b, width_b)| {
-            width_a
-                .total_cmp(width_b)
-                .then_with(|| left_b.total_cmp(left_a))
-        })
+    Some(
+        free_intervals
+            .into_iter()
+            .map(|(left, right)| (left, (right - left).max(0.0)))
+            .filter(|(_, width)| *width >= 12.0)
+            .collect(),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7553,7 +7802,7 @@ fn push_passive_line_number(
     }
 
     let mut style = CharacterStyle::default();
-    style.font_size_half_points = 14;
+    style.font_size_half_points = 24;
     let text = current.to_string();
     let width = measure_text_with_family(&text, &style, PdfFontFamily::Helvetica);
     let distance = twips_to_points(geometry.line_numbering.distance_twips.max(0));
@@ -7567,11 +7816,7 @@ fn push_passive_line_number(
         x,
         baseline_y,
         rotation: TextRotation::None,
-        color: PdfColor {
-            red: 0.35,
-            green: 0.35,
-            blue: 0.35,
-        },
+        color: PdfColor::default(),
         font_family: PdfFontFamily::Helvetica,
         word_spacing: 0.0,
         style,
@@ -7651,7 +7896,7 @@ fn wrap_paragraph_with_font_provider(
         document,
         font_provider,
         0.0,
-        |_, _| content_width,
+        |_, _| vec![(0.0, content_width)],
     )
 }
 
@@ -7662,12 +7907,24 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     document: &Document,
     font_provider: Option<&FontProvider>,
     first_line_top_y: f32,
-    mut line_content_width: impl FnMut(f32, f32) -> f32,
+    mut line_content_intervals: impl FnMut(f32, f32) -> Vec<(f32, f32)>,
 ) -> Vec<Line> {
+    let fitted_paragraph;
+    let paragraph = if paragraph
+        .runs
+        .iter()
+        .any(|run| run.style.fit_text_width_twips.is_some())
+    {
+        fitted_paragraph = apply_fit_text_scaling_to_run_groups(paragraph, document, font_provider);
+        &fitted_paragraph
+    } else {
+        paragraph
+    };
     let mut lines = Vec::new();
     let mut current = Line {
         runs: Vec::new(),
         width: 0.0,
+        natural_height: 14.0,
         height: 14.0,
     };
     let mut is_first_line = true;
@@ -7690,7 +7947,15 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 font_provider,
             );
         }
-        if !paragraph.style.no_wrap {
+        if paragraph.style.no_wrap {
+            segments = apply_no_wrap_emergency_boundaries(
+                segments,
+                content_width,
+                &paragraph.style,
+                document,
+                font_provider,
+            );
+        } else {
             segments = apply_emergency_word_wrapping(
                 segments,
                 content_width,
@@ -7699,7 +7964,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 font_provider,
             );
         }
-        for segment in segments {
+        for (segment_index, segment) in segments.iter().cloned().enumerate() {
             if segment.text == "\n" {
                 let finished_height = current.height;
                 lines.push(current);
@@ -7716,25 +7981,100 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 document,
                 font_provider,
             );
-            let requested_content_width = line_content_width(current_line_top_y, current.height);
-            let active_content_width = if content_width >= 12.0 {
-                requested_content_width.clamp(12.0, content_width)
+            let fit_width = inline_image_cluster_width(
+                &segments,
+                segment_index,
+                width,
+                current.width,
+                &paragraph.style,
+                document,
+                font_provider,
+            );
+            let mut intervals = line_content_intervals(current_line_top_y, current.height);
+            intervals.retain(|(_, width)| *width >= 12.0);
+            intervals.sort_by(|(left_a, _), (left_b, _)| left_a.total_cmp(left_b));
+            if intervals.is_empty() {
+                intervals.push((0.0, content_width));
+            }
+            let supports_segmented_flow = paragraph.style.alignment == Alignment::Left
+                && paragraph.style.left_indent_twips == 0
+                && paragraph.style.right_indent_twips == 0
+                && paragraph.style.first_line_indent_twips == 0
+                && paragraph.style.tab_stops_twips.is_empty()
+                && intervals.len() > 1;
+            let line_width = if supports_segmented_flow {
+                let current_interval = intervals
+                    .iter()
+                    .position(|(left, interval_width)| {
+                        current.width + 0.01 >= *left
+                            && current.width <= *left + *interval_width + 0.01
+                    })
+                    .unwrap_or(0);
+                let (interval_left, interval_width) = intervals[current_interval];
+                if current.runs.is_empty() && current.width + 0.01 < interval_left {
+                    push_flow_exclusion_advance(&mut current, interval_left, &segment.style);
+                }
+                let interval_right = interval_left + interval_width;
+                if current.width > 0.0 && current.width + width > interval_right {
+                    if let Some((next_left, _)) = intervals
+                        .iter()
+                        .skip(current_interval + 1)
+                        .find(|(_, next_width)| width <= *next_width)
+                        .copied()
+                    {
+                        let advance = (next_left - current.width).max(0.0);
+                        push_flow_exclusion_advance(&mut current, advance, &segment.style);
+                    }
+                }
+                intervals
+                    .iter()
+                    .find(|(left, interval_width)| {
+                        current.width + 0.01 >= *left
+                            && current.width <= *left + *interval_width + 0.01
+                    })
+                    .map(|(left, interval_width)| left + interval_width)
+                    .unwrap_or(interval_right)
             } else {
-                requested_content_width.clamp(0.0, content_width.max(0.0))
+                let requested_content_width = intervals
+                    .into_iter()
+                    .map(|(_, width)| width)
+                    .max_by(f32::total_cmp)
+                    .unwrap_or(content_width);
+                let active_content_width = if content_width >= 12.0 {
+                    requested_content_width.clamp(12.0, content_width)
+                } else {
+                    requested_content_width.clamp(0.0, content_width.max(0.0))
+                };
+                paragraph_line_width(active_content_width, &paragraph.style, is_first_line)
             };
-            let line_width =
-                paragraph_line_width(active_content_width, &paragraph.style, is_first_line);
-            if !paragraph.style.no_wrap && current.width > 0.0 && current.width + width > line_width
-            {
+            if current.width > 0.0 && current.width + fit_width > line_width {
+                let carried_whitespace = if paragraph.style.no_wrap {
+                    take_trailing_whitespace(&mut current, document, font_provider)
+                } else {
+                    Vec::new()
+                };
                 materialize_line_end_soft_hyphen(&mut current, document, font_provider);
                 let finished_height = current.height;
                 lines.push(current);
                 current_line_top_y -= finished_height;
                 current = empty_line();
                 is_first_line = false;
-                let trimmed = segment.text.trim_start().to_string();
+                let trimmed = if paragraph.style.no_wrap {
+                    segment.text.clone()
+                } else {
+                    segment.text.trim_start().to_string()
+                };
                 if trimmed.is_empty() {
                     continue;
+                }
+                for whitespace in carried_whitespace {
+                    push_segment(
+                        &mut current,
+                        whitespace,
+                        &paragraph.style,
+                        document,
+                        font_provider,
+                    );
                 }
                 push_segment(
                     &mut current,
@@ -7773,6 +8113,71 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     }
 
     lines
+}
+
+fn apply_fit_text_scaling_to_run_groups(
+    paragraph: &Paragraph,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> Paragraph {
+    let mut paragraph = paragraph.clone();
+    let mut group_start = 0usize;
+    while group_start < paragraph.runs.len() {
+        let Some(target_twips) = paragraph.runs[group_start].style.fit_text_width_twips else {
+            group_start += 1;
+            continue;
+        };
+        if target_twips <= 0 {
+            paragraph.runs[group_start].style.fit_text_width_twips = None;
+            group_start += 1;
+            continue;
+        }
+
+        let mut group_end = group_start + 1;
+        while group_end < paragraph.runs.len()
+            && paragraph.runs[group_end].style.fit_text_width_twips == Some(target_twips)
+        {
+            group_end += 1;
+        }
+
+        let mut measured_width = 0.0;
+        for run in &paragraph.runs[group_start..group_end] {
+            let mut style = run.style.clone();
+            style.fit_text_width_twips = None;
+            let flow = FlowRun {
+                text: run.text.clone(),
+                line_height_points: style.font_size_points(),
+                style,
+                width: 0.0,
+                tab_leader: TabLeader::None,
+                tab_alignment: TabAlignment::Left,
+                tab_stop_position: None,
+                soft_hyphen_after: false,
+            };
+            measured_width += measure_flow_run(
+                &flow,
+                measured_width,
+                &paragraph.style,
+                document,
+                font_provider,
+            );
+        }
+
+        if measured_width > 0.0 {
+            let target_width = twips_to_points(target_twips).max(0.1);
+            let group_scale = target_width / measured_width;
+            for run in &mut paragraph.runs[group_start..group_end] {
+                run.style.character_scaling_percent = (run.style.character_scaling_percent as f32
+                    * group_scale)
+                    .round()
+                    .clamp(1.0, 600.0) as i32;
+                run.style.fit_text_width_twips = None;
+            }
+        }
+
+        group_start = group_end;
+    }
+    paragraph
 }
 
 fn split_run_for_wrapping_with_drop_cap(
@@ -7963,6 +8368,90 @@ fn apply_emergency_word_wrapping(
     }
 
     output
+}
+
+fn apply_no_wrap_emergency_boundaries(
+    segments: Vec<FlowRun>,
+    content_width: f32,
+    paragraph_style: &ParagraphStyle,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> Vec<FlowRun> {
+    if !segments.iter().any(|segment| segment.text == "\n") {
+        let mut measured_width = 0.0;
+        for segment in &segments {
+            measured_width += measure_flow_run(
+                segment,
+                measured_width,
+                paragraph_style,
+                document,
+                font_provider,
+            );
+        }
+        let max_line_width = paragraph_line_width(content_width, paragraph_style, false)
+            .max(paragraph_line_width(content_width, paragraph_style, true));
+        if measured_width <= max_line_width + 0.01 {
+            return segments;
+        }
+    }
+
+    let mut output = Vec::new();
+    for segment in segments {
+        if segment.style.fit_text_width_twips.is_some()
+            || segment.tab_stop_position.is_some()
+            || segment.text == "\t"
+            || segment.text == "\n"
+            || contains_inline_marker(&segment.text)
+            || segment.text.chars().count() < 2
+        {
+            output.push(segment);
+            continue;
+        }
+
+        let chars = segment.text.chars().collect::<Vec<_>>();
+        let last = chars.len() - 1;
+        for (index, ch) in chars.into_iter().enumerate() {
+            let mut character = segment.clone();
+            character.text = ch.to_string();
+            character.width = 0.0;
+            character.soft_hyphen_after = index == last && segment.soft_hyphen_after;
+            output.push(character);
+        }
+    }
+    output
+}
+
+fn take_trailing_whitespace(
+    line: &mut Line,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> Vec<FlowRun> {
+    let mut carried = Vec::new();
+    while line.runs.last().is_some_and(|run| {
+        run.tab_stop_position.is_none()
+            && run.text != "\t"
+            && run.text.chars().all(char::is_whitespace)
+    }) {
+        let run = line.runs.pop().expect("trailing run exists");
+        line.width = (line.width - run.width).max(0.0);
+        carried.push(run);
+    }
+    carried.reverse();
+    line.natural_height = natural_line_height_for_runs(&line.runs, document, font_provider);
+    line.height = line.natural_height;
+    carried
+}
+
+fn natural_line_height_for_runs(
+    runs: &[FlowRun],
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
+    runs.iter()
+        .map(|run| flow_run_line_height(run, document, font_provider))
+        .filter(|height| *height > 0.0)
+        .reduce(f32::max)
+        .unwrap_or(14.0)
 }
 
 fn push_emergency_wrapped_segment(
@@ -8507,8 +8996,11 @@ fn estimate_document_page_variant_visibility(document: &Document) -> PageVariant
         {
             break;
         }
-        physical_page_number =
-            advance_physical_page_for_variant_estimate(physical_page_number, block);
+        physical_page_number = advance_physical_page_for_variant_estimate(
+            physical_page_number,
+            block,
+            page_settings_before_block(document, block_idx).facing_pages,
+        );
     }
     PageVariantVisibility {
         first_page: 1,
@@ -8522,11 +9014,20 @@ fn estimate_section_page_variant_visibility(
 ) -> PageVariantVisibility {
     let section_start_page = physical_page_before_block(document, settings_block_idx);
     let mut section_last_page = section_start_page;
-    for block in document.blocks.iter().skip(settings_block_idx + 1) {
+    for (block_idx, block) in document
+        .blocks
+        .iter()
+        .enumerate()
+        .skip(settings_block_idx + 1)
+    {
         if section_breaks_end_current_section(block) {
             break;
         }
-        section_last_page = advance_physical_page_for_variant_estimate(section_last_page, block);
+        section_last_page = advance_physical_page_for_variant_estimate(
+            section_last_page,
+            block,
+            page_settings_before_block(document, block_idx).facing_pages,
+        );
     }
     PageVariantVisibility {
         first_page: section_start_page.max(1),
@@ -8536,9 +9037,12 @@ fn estimate_section_page_variant_visibility(
 
 fn physical_page_before_block(document: &Document, block_idx: usize) -> usize {
     let mut physical_page_number = 1usize;
-    for block in document.blocks.iter().take(block_idx) {
-        physical_page_number =
-            advance_physical_page_for_variant_estimate(physical_page_number, block);
+    for (idx, block) in document.blocks.iter().enumerate().take(block_idx) {
+        physical_page_number = advance_physical_page_for_variant_estimate(
+            physical_page_number,
+            block,
+            page_settings_before_block(document, idx).facing_pages,
+        );
     }
     physical_page_number
 }
@@ -8563,12 +9067,17 @@ fn content_width_for_page_settings(settings: &PageSettings) -> f32 {
     .content_width
 }
 
-fn advance_physical_page_for_variant_estimate(physical_page_number: usize, block: &Block) -> usize {
+fn advance_physical_page_for_variant_estimate(
+    physical_page_number: usize,
+    block: &Block,
+    facing_pages: bool,
+) -> usize {
     match block {
         Block::PageBreak | Block::SectionBreak => physical_page_number.saturating_add(1),
         Block::EvenPageSectionBreak => {
             let next_page = physical_page_number.saturating_add(1);
-            if next_page % 2 == 1 {
+            let target_is_even = facing_pages;
+            if (next_page % 2 == 0) != target_is_even {
                 next_page.saturating_add(1)
             } else {
                 next_page
@@ -9580,7 +10089,8 @@ fn push_text_segments_preserving_tabs(
     let mut start = 0;
     for (idx, ch) in text.char_indices() {
         let is_passive_advance = ch.to_string() == PASSIVE_ADVANCE_MARKER;
-        if ch == '\t' || is_passive_advance {
+        let inline_image_index = inline_image_marker_index(&ch.to_string());
+        if ch == '\t' || is_passive_advance || inline_image_index.is_some() {
             if start < idx {
                 let text = text[start..idx].replace('\u{00ad}', "");
                 if !text.is_empty() {
@@ -9592,6 +10102,20 @@ fn push_text_segments_preserving_tabs(
                     text: PASSIVE_ADVANCE_MARKER.to_string(),
                     style: style.clone(),
                     width: passive_advance_width_points(style),
+                    line_height_points: 0.0,
+                    tab_leader: TabLeader::None,
+                    tab_alignment: TabAlignment::Left,
+                    tab_stop_position: None,
+                    soft_hyphen_after: false,
+                });
+                start = idx + ch.len_utf8();
+                continue;
+            }
+            if inline_image_index.is_some() {
+                output.push(FlowRun {
+                    text: ch.to_string(),
+                    style: style.clone(),
+                    width: 0.0,
                     line_height_points: 0.0,
                     tab_leader: TabLeader::None,
                     tab_alignment: TabAlignment::Left,
@@ -9823,6 +10347,7 @@ fn empty_line() -> Line {
     Line {
         runs: Vec::new(),
         width: 0.0,
+        natural_height: 14.0,
         height: 14.0,
     }
 }
@@ -9858,10 +10383,42 @@ fn push_segment(
         adjust_pending_aligned_tab(line, &segment, document, font_provider);
     }
     line.width += segment.width;
-    line.height = line
-        .height
-        .max(flow_run_line_height(&segment, document, font_provider));
+    if let Some(image) = inline_image_for_marker(document, &segment.text) {
+        let (_, image_height) = image_display_size(image, f32::MAX);
+        line.height = line.height.max(image_height);
+        line.runs.push(segment);
+        return;
+    }
+    let segment_height = flow_run_line_height(&segment, document, font_provider);
+    let has_visible_height = line
+        .runs
+        .iter()
+        .any(|run| flow_run_line_height(run, document, font_provider) > 0.0);
+    if !has_visible_height && segment_height > 0.0 {
+        line.natural_height = segment_height;
+        line.height = segment_height;
+    } else {
+        line.natural_height = line.natural_height.max(segment_height);
+        line.height = line.height.max(segment_height);
+    }
     line.runs.push(segment);
+}
+
+fn push_flow_exclusion_advance(line: &mut Line, width: f32, style: &CharacterStyle) {
+    if width <= 0.01 {
+        return;
+    }
+    line.runs.push(FlowRun {
+        text: String::new(),
+        style: style.clone(),
+        width,
+        line_height_points: 0.0,
+        tab_leader: TabLeader::None,
+        tab_alignment: TabAlignment::Left,
+        tab_stop_position: None,
+        soft_hyphen_after: false,
+    });
+    line.width += width;
 }
 
 fn apply_fit_text_scaling_to_segment(
@@ -9982,9 +10539,9 @@ fn materialize_line_end_soft_hyphen(
     );
     last.width += added_width;
     line.width += added_width;
-    line.height = line
-        .height
-        .max(flow_run_line_height(last, document, font_provider));
+    let run_height = flow_run_line_height(last, document, font_provider);
+    line.natural_height = line.natural_height.max(run_height);
+    line.height = line.height.max(run_height);
 }
 
 fn flow_run_line_height(
@@ -9992,6 +10549,9 @@ fn flow_run_line_height(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
+    if inline_image_marker_index(&run.text).is_some() {
+        return 0.0;
+    }
     if is_passive_advance_marker(&run.text) {
         return 0.0;
     }
@@ -10047,6 +10607,9 @@ fn measure_flow_run(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
+    if let Some(image) = inline_image_for_marker(document, &run.text) {
+        return image_display_size(image, f32::MAX).0;
+    }
     if parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
         || parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_some()
     {
@@ -10072,8 +10635,53 @@ fn measure_flow_run(
     )
 }
 
+fn inline_image_cluster_width(
+    segments: &[FlowRun],
+    start: usize,
+    first_width: f32,
+    current_line_width: f32,
+    paragraph_style: &ParagraphStyle,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
+    let Some(first) = segments.get(start) else {
+        return first_width;
+    };
+    if first.text.chars().last().is_some_and(char::is_whitespace) {
+        return first_width;
+    }
+
+    let mut width = first_width;
+    let mut contains_inline_image = inline_image_marker_index(&first.text).is_some();
+    for segment in segments.iter().skip(start + 1) {
+        if segment.text.chars().next().is_some_and(char::is_whitespace) {
+            break;
+        }
+        contains_inline_image |= inline_image_marker_index(&segment.text).is_some();
+        width += measure_flow_run(
+            segment,
+            current_line_width + width,
+            paragraph_style,
+            document,
+            font_provider,
+        );
+        if segment.text.chars().last().is_some_and(char::is_whitespace) {
+            break;
+        }
+    }
+    if contains_inline_image {
+        width
+    } else {
+        first_width
+    }
+}
+
 fn is_passive_advance_marker(text: &str) -> bool {
     text == PASSIVE_ADVANCE_MARKER
+}
+
+fn inline_image_for_marker<'a>(document: &'a Document, text: &str) -> Option<&'a StaticImage> {
+    document.inline_images.get(inline_image_marker_index(text)?)
 }
 
 fn passive_advance_width_points(style: &CharacterStyle) -> f32 {
@@ -10228,6 +10836,7 @@ fn push_line(
     top_y: f32,
     document: &Document,
     word_spacing: f32,
+    character_spacing: f32,
 ) {
     push_line_with_rotation(
         pages,
@@ -10236,6 +10845,7 @@ fn push_line(
         top_y,
         document,
         word_spacing,
+        character_spacing,
         TextRotation::None,
     );
 }
@@ -10247,26 +10857,79 @@ fn push_line_with_rotation(
     top_y: f32,
     document: &Document,
     word_spacing: f32,
+    character_spacing: f32,
     rotation: TextRotation,
 ) {
-    let baseline_y = top_y - line.height + (line.height * 0.25);
-    let mut cursor_x = x;
+    // Word treats positive `\slN\slmult1` as baseline-to-baseline advance:
+    // the extra leading follows the glyphs instead of pushing the first line
+    // down inside the enlarged line box. Exact/at-least spacing retains the
+    // historical box-relative baseline behavior.
+    let baseline_box_height = if line.height > line.natural_height {
+        line.natural_height
+    } else {
+        line.height
+    };
+    let has_inline_image = line
+        .runs
+        .iter()
+        .any(|run| inline_image_marker_index(&run.text).is_some());
+    let baseline_y = if has_inline_image {
+        top_y - line.height
+    } else {
+        top_y - baseline_box_height + (baseline_box_height * 0.25)
+    };
+    let mut cursor_advance = 0.0;
     let mut cursor_baseline_delta = 0.0;
     let page = pages.last_mut().expect("layout always has a page");
 
-    for run in &line.runs {
+    let last_spaced_run_index = line.runs.iter().rposition(|run| {
+        !is_passive_advance_marker(&run.text) && run.text != "\t" && !run.text.is_empty()
+    });
+    for (run_index, run) in line.runs.iter().enumerate() {
+        if run.text.is_empty() {
+            cursor_advance += run.width;
+            continue;
+        }
         if is_passive_advance_marker(&run.text) {
-            cursor_x += run.width;
+            cursor_advance += run.width;
             cursor_baseline_delta += passive_advance_baseline_delta_points(&run.style);
             continue;
         }
+        if let Some(image) = inline_image_for_marker(document, &run.text) {
+            let (width, height) = image_display_size(image, f32::MAX);
+            let (run_x, run_baseline_y) = rotated_line_run_origin(
+                x,
+                baseline_y,
+                cursor_advance,
+                cursor_baseline_delta,
+                rotation,
+            );
+            page.items.push(LayoutItem::Image(ImageFragment {
+                image: image.clone(),
+                x: run_x,
+                y: run_baseline_y,
+                width,
+                height,
+                z_order: 0,
+                below_text: false,
+            }));
+            cursor_advance += width;
+            continue;
+        }
+        let (run_x, run_baseline_y) = rotated_line_run_origin(
+            x,
+            baseline_y,
+            cursor_advance,
+            cursor_baseline_delta,
+            rotation,
+        );
         if parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
             || parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_some()
         {
             page.items.push(LayoutItem::Text(TextFragment {
                 text: run.text.clone(),
-                x: cursor_x,
-                baseline_y: baseline_y + cursor_baseline_delta,
+                x: run_x,
+                baseline_y: run_baseline_y,
                 rotation,
                 color: style_color(document, &run.style),
                 font_family: font_family_for_style(document, &run.style),
@@ -10276,23 +10939,39 @@ fn push_line_with_rotation(
             continue;
         }
         let extra_word_spacing = word_spacing * regular_space_count(&run.text) as f32;
-        let width = run.width + extra_word_spacing;
+        let character_count = run.text.chars().filter(|ch| *ch != '\n').count();
+        let internal_character_gaps = character_count.saturating_sub(1);
+        let extra_character_spacing = character_spacing * internal_character_gaps as f32;
+        let width = run.width + extra_word_spacing + extra_character_spacing;
         if run.text == "\t" {
-            push_tab_leader(page, cursor_x, baseline_y, width, run, document);
-            cursor_x += width;
+            push_tab_leader(page, run_x, run_baseline_y, width, run, document);
+            cursor_advance += width;
             continue;
         }
-        let style = passive_pdf_style_for_run(document, &run.style);
+        let mut style = passive_pdf_style_for_run(document, &run.style);
+        if character_spacing > 0.0 {
+            let added_twips = (character_spacing * 20.0)
+                .round()
+                .clamp(0.0, i32::MAX as f32) as i32;
+            style.character_spacing_twips =
+                style.character_spacing_twips.saturating_add(added_twips);
+        }
         let text = display_text(&run.text, &style);
         let font_family = font_family_for_run_text(document, &style, &text);
-        let run_baseline_y = baseline_y + cursor_baseline_delta + style.baseline_shift_points();
+        let (run_x, run_baseline_y) = rotated_line_run_origin(
+            x,
+            baseline_y,
+            cursor_advance,
+            cursor_baseline_delta + style.baseline_shift_points(),
+            rotation,
+        );
         let color = style_color(document, &style);
         if let Some(highlight_index) = style.highlight_index
             && highlight_index > 0
         {
             let font_size = style.font_size_points();
             page.items.push(LayoutItem::Highlight {
-                x: cursor_x,
+                x: run_x,
                 y: run_baseline_y - (font_size * 0.28),
                 width,
                 height: font_size * 1.12,
@@ -10302,7 +10981,7 @@ fn push_line_with_rotation(
         if style.form_field_shading {
             let font_size = style.font_size_points();
             let (shade_x, shade_width) =
-                passive_form_field_shading_horizontal_bounds(cursor_x, width, font_size);
+                passive_form_field_shading_horizontal_bounds(run_x, width, font_size);
             page.items.push(LayoutItem::Highlight {
                 x: shade_x,
                 y: run_baseline_y - (font_size * 0.32),
@@ -10312,19 +10991,11 @@ fn push_line_with_rotation(
             });
         }
         if style.border.visible {
-            push_character_border(
-                page,
-                cursor_x,
-                run_baseline_y,
-                width,
-                &style,
-                color,
-                document,
-            );
+            push_character_border(page, run_x, run_baseline_y, width, &style, color, document);
         }
         page.items.push(LayoutItem::Text(TextFragment {
             text: text.clone(),
-            x: cursor_x,
+            x: run_x,
             baseline_y: run_baseline_y,
             rotation,
             color,
@@ -10336,9 +11007,9 @@ fn push_line_with_rotation(
         if style.overline {
             let y = run_baseline_y + (style.font_size_points() * 0.78);
             page.items.push(LayoutItem::Line {
-                x1: cursor_x,
+                x1: run_x,
                 y1: y,
-                x2: cursor_x + width,
+                x2: run_x + width,
                 y2: y,
                 width: 0.5,
                 color,
@@ -10354,7 +11025,7 @@ fn push_line_with_rotation(
                 .unwrap_or(color);
             push_underline_items(
                 page,
-                cursor_x,
+                run_x,
                 run_baseline_y - 2.0,
                 width,
                 &text,
@@ -10370,18 +11041,18 @@ fn push_line_with_rotation(
             if style.double_strike {
                 let gap = (style.font_size_points() * 0.1).clamp(1.0, 3.0);
                 page.items.push(LayoutItem::Line {
-                    x1: cursor_x,
+                    x1: run_x,
                     y1: y + gap,
-                    x2: cursor_x + width,
+                    x2: run_x + width,
                     y2: y + gap,
                     width: 0.5,
                     color,
                     style: LineStyle::Solid,
                 });
                 page.items.push(LayoutItem::Line {
-                    x1: cursor_x,
+                    x1: run_x,
                     y1: y - gap,
-                    x2: cursor_x + width,
+                    x2: run_x + width,
                     y2: y - gap,
                     width: 0.5,
                     color,
@@ -10389,9 +11060,9 @@ fn push_line_with_rotation(
                 });
             } else {
                 page.items.push(LayoutItem::Line {
-                    x1: cursor_x,
+                    x1: run_x,
                     y1: y,
-                    x2: cursor_x + width,
+                    x2: run_x + width,
                     y2: y,
                     width: 0.5,
                     color,
@@ -10400,7 +11071,27 @@ fn push_line_with_rotation(
             }
         }
 
-        cursor_x += width;
+        cursor_advance += width;
+        if character_spacing > 0.0
+            && character_count > 0
+            && last_spaced_run_index.is_some_and(|last| run_index < last)
+        {
+            cursor_advance += character_spacing;
+        }
+    }
+}
+
+fn rotated_line_run_origin(
+    x: f32,
+    baseline_y: f32,
+    advance: f32,
+    baseline_delta: f32,
+    rotation: TextRotation,
+) -> (f32, f32) {
+    match rotation {
+        TextRotation::None => (x + advance, baseline_y + baseline_delta),
+        TextRotation::Clockwise90 => (x + baseline_delta, baseline_y - advance),
+        TextRotation::CounterClockwise90 => (x - baseline_delta, baseline_y + advance),
     }
 }
 
@@ -10656,7 +11347,12 @@ fn justified_word_spacing(
     available_width: f32,
     is_last_line: bool,
 ) -> f32 {
-    if style.alignment != Alignment::Justified || is_last_line || line.width <= 0.0 {
+    if !matches!(
+        style.alignment,
+        Alignment::Justified | Alignment::Distributed
+    ) || is_last_line
+        || line.width <= 0.0
+    {
         return 0.0;
     }
     let space_count = line
@@ -10668,6 +11364,28 @@ fn justified_word_spacing(
         return 0.0;
     }
     ((available_width - line.width) / space_count as f32).max(0.0)
+}
+
+fn distributed_character_spacing(
+    line: &Line,
+    style: &ParagraphStyle,
+    available_width: f32,
+    is_last_line: bool,
+) -> f32 {
+    if style.alignment != Alignment::Distributed || !is_last_line || line.width <= 0.0 {
+        return 0.0;
+    }
+    let character_count = line
+        .runs
+        .iter()
+        .filter(|run| !is_passive_advance_marker(&run.text) && run.text != "\t")
+        .map(|run| run.text.chars().filter(|ch| *ch != '\n').count())
+        .sum::<usize>();
+    let gap_count = character_count.saturating_sub(1);
+    if gap_count == 0 {
+        return 0.0;
+    }
+    ((available_width - line.width) / gap_count as f32).max(0.0)
 }
 
 fn regular_space_count(text: &str) -> usize {
@@ -11504,7 +12222,7 @@ fn aligned_x(
     let left = left + twips_to_points(line_left_indent);
     let available = paragraph_line_width(content_width, style, is_first_line);
     match style.alignment {
-        Alignment::Left | Alignment::Justified => left,
+        Alignment::Left | Alignment::Justified | Alignment::Distributed => left,
         Alignment::Center => left + ((available - line_width).max(0.0) / 2.0),
         Alignment::Right => left + (available - line_width).max(0.0),
     }
@@ -12244,6 +12962,25 @@ mod tests {
 
         assert!((image.width - 18.0).abs() < 0.01);
         assert!((image.height - 144.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn applies_picture_crop_before_goal_scaling() {
+        let parsed = parse_rtf(include_str!("../fixtures/picture-scaling-passive.rtf"))
+            .expect("picture scaling fixture should parse");
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        let image = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .expect("cropped scaled image");
+
+        assert!((image.width - 30.0).abs() < 0.01);
+        assert!((image.height - 60.0).abs() < 0.01);
     }
 
     #[test]
@@ -14222,6 +14959,50 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_anchored_static_shape_does_not_advance_body_flow() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\ansi\deff0{\fonttbl{\f0 Arial;}}\fs24 Before.\par{\do\dpline\dpx360\dpy480\dpxsize1440\dpysize720}After.\par}",
+        )
+        .unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let text = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let before = text
+            .iter()
+            .find(|fragment| fragment.text.contains("Before."))
+            .expect("before text");
+        let after = text
+            .iter()
+            .find(|fragment| fragment.text.contains("After."))
+            .expect("after text");
+        let line = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Line { x1, y1, x2, y2, .. } => Some((*x1, *y1, *x2, *y2)),
+                _ => None,
+            })
+            .expect("shape line");
+
+        assert!(
+            (before.baseline_y - after.baseline_y - 15.0).abs() < 0.05,
+            "before={}, after={}",
+            before.baseline_y,
+            after.baseline_y
+        );
+        assert!((line.0 - 90.0).abs() < 0.01);
+        assert!((line.1 - 696.0).abs() < 0.01);
+        assert!((line.2 - 162.0).abs() < 0.01);
+        assert!((line.3 - 660.0).abs() < 0.01);
+    }
+
+    #[test]
     fn lays_out_legacy_static_drawing_polygons_as_passive_closed_paths() {
         let mut document = Document::default();
         document.blocks = vec![Block::Shape(StaticShape {
@@ -15099,6 +15880,30 @@ mod tests {
                     && (*width - 4.0).abs() < 0.01
                     && *color == PdfColor { red: 1.0, green: 0.0, blue: 0.0 }
         )));
+    }
+
+    #[test]
+    fn authored_table_border_without_color_defaults_to_word_black() {
+        let parsed =
+            crate::rtf::parse_rtf(r"{\rtf1\trowd\clbrdrt\brdrs\brdrw20\cellx1440 Border\cell\row}")
+                .unwrap();
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        let authored_lines = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Line { color, .. } => Some(*color),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(!authored_lines.is_empty());
+        assert!(
+            authored_lines
+                .iter()
+                .all(|color| *color == PdfColor::default())
+        );
     }
 
     #[test]
@@ -16159,7 +16964,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_mixed_vertical_fixture_runs_together_before_rotation() {
+    fn wraps_vertical_fixture_text_against_the_authored_row_extent() {
         let parsed = parse_rtf(include_str!(
             "../fixtures/table-cell-text-direction-passive.rtf"
         ))
@@ -16183,21 +16988,39 @@ mod tests {
         );
         let layout = LayoutEngine::layout(&parsed.document);
 
-        assert_eq!(prepared.cell_lines[2].len(), 1);
-        assert!(
-            layout
-                .pages
+        assert_eq!(prepared.cell_lines[0].len(), 1);
+        assert_eq!(prepared.cell_lines[1].len(), 1);
+        assert_eq!(prepared.cell_lines[2].len(), 2);
+        assert!((prepared.row_height - 72.0).abs() < 0.01);
+        let fragments = layout
+            .pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let fragment = |needle: &str| {
+            fragments
                 .iter()
-                .flat_map(|page| page.items.iter())
-                .any(|item| {
-                    matches!(
-                        item,
-                        LayoutItem::Text(fragment)
-                            if fragment.text.contains("Bottom")
-                                && fragment.rotation != TextRotation::None
-                    )
-                })
-        );
+                .copied()
+                .find(|fragment| fragment.text.trim() == needle)
+                .unwrap_or_else(|| panic!("missing `{needle}` fragment"))
+        };
+        let vertical = fragment("Vertical");
+        let abc = fragment("ABC");
+        let bottom = fragment("Bottom");
+        let top = fragment("top");
+        let xy = fragment("XY");
+
+        assert_eq!(vertical.rotation, TextRotation::Clockwise90);
+        assert!((vertical.x - abc.x).abs() < 0.01);
+        assert!(abc.baseline_y < vertical.baseline_y);
+        assert_eq!(bottom.rotation, TextRotation::CounterClockwise90);
+        assert!((bottom.x - top.x).abs() < 0.01);
+        assert!(top.baseline_y > bottom.baseline_y);
+        assert!(xy.x > bottom.x);
     }
 
     #[test]
@@ -17159,6 +17982,30 @@ mod tests {
     }
 
     #[test]
+    fn final_table_cell_gap_controls_following_paragraph_flow() {
+        let following_y = |cell_gap: &str| {
+            let source =
+                format!(r"{{\rtf1\trowd{cell_gap}\cellx2000 Cell\cell\row\pard After\par}}");
+            let parsed = crate::rtf::parse_rtf(&source).unwrap();
+            let layout = LayoutEngine::layout(&parsed.document);
+            layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.trim() == "After" => {
+                        Some(fragment.baseline_y)
+                    }
+                    _ => None,
+                })
+                .expect("following paragraph")
+        };
+
+        let without_gap = following_y("");
+        let with_gap = following_y(r"\trgaph108");
+        assert!((without_gap - with_gap - 2.7).abs() < 0.01);
+    }
+
+    #[test]
     fn lays_out_row_default_table_padding_from_normalized_cells() {
         let parsed = crate::rtf::parse_rtf(
             r"{\rtf1\trowd\trpaddl360\trpaddr120\cellx1440 A\cell\cellx2880 B\cell\row}",
@@ -17214,6 +18061,45 @@ mod tests {
         assert!(
             word_spacings.iter().any(|spacing| *spacing == 0.0),
             "expected final justified line to remain unstretched: {word_spacings:?}"
+        );
+    }
+
+    #[test]
+    fn distributes_final_paragraph_line_with_passive_character_spacing() {
+        let mut document = Document::default();
+        document.page.width_twips = 5_000;
+        document.page.margin_left_twips = 720;
+        document.page.margin_right_twips = 720;
+        let mut style = ParagraphStyle::default();
+        style.alignment = Alignment::Distributed;
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style,
+            runs: vec![Run {
+                text: "one two three four five six seven eight nine ten".to_string(),
+                style: Default::default(),
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(fragments.len() >= 2);
+        assert!(
+            fragments[..fragments.len() - 1]
+                .iter()
+                .any(|fragment| fragment.word_spacing > 0.0)
+        );
+        assert!(
+            fragments
+                .last()
+                .is_some_and(|fragment| fragment.style.character_spacing_twips > 0)
         );
     }
 
@@ -18283,6 +19169,7 @@ mod tests {
             line: Line {
                 runs: Vec::new(),
                 width: 0.0,
+                natural_height: height,
                 height,
             },
             style,
@@ -18339,6 +19226,7 @@ mod tests {
             line: Line {
                 runs: Vec::new(),
                 width: 0.0,
+                natural_height: 10.0,
                 height: 10.0,
             },
             style,
@@ -19181,7 +20069,7 @@ mod tests {
     }
 
     #[test]
-    fn no_wrap_paragraph_suppresses_soft_line_breaks() {
+    fn no_wrap_paragraph_uses_emergency_character_boundaries() {
         let document = Document::default();
         let style = CharacterStyle::default();
         let mut paragraph = Paragraph {
@@ -19198,9 +20086,14 @@ mod tests {
         assert_eq!(wrapped.len(), 2);
 
         paragraph.style.no_wrap = true;
-        let unwrapped = wrap_paragraph(&paragraph, narrow_width, &markers, &document);
-        assert_eq!(unwrapped.len(), 1);
-        assert_eq!(line_text(&unwrapped[0]), "Alpha Beta");
+        let emergency_wrapped = wrap_paragraph(&paragraph, narrow_width, &markers, &document);
+        assert_eq!(emergency_wrapped.len(), 2);
+        assert_eq!(line_text(&emergency_wrapped[0]), "Alpha");
+        assert_eq!(line_text(&emergency_wrapped[1]), " Beta");
+        assert_eq!(
+            emergency_wrapped.iter().map(line_text).collect::<String>(),
+            "Alpha Beta"
+        );
     }
 
     #[test]
@@ -19494,6 +20387,62 @@ mod tests {
     }
 
     #[test]
+    fn fit_text_width_scales_contiguous_runs_as_one_word_region() {
+        let target_twips = 720;
+        let target_width = twips_to_points(target_twips);
+        let mut first_style = CharacterStyle::default();
+        first_style.fit_text_width_twips = Some(target_twips);
+        first_style.character_scaling_percent = 125;
+        let mut second_style = CharacterStyle::default();
+        second_style.fit_text_width_twips = Some(target_twips);
+
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![
+                Run {
+                    text: "Visible styled typography".to_string(),
+                    style: first_style,
+                },
+                Run {
+                    text: "After typography.".to_string(),
+                    style: second_style,
+                },
+            ],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let rendered_width = fragments
+            .iter()
+            .map(|fragment| measure_text(&fragment.text, &fragment.style))
+            .sum::<f32>();
+
+        assert_eq!(fragments.len(), 5);
+        assert!((rendered_width - target_width).abs() < 0.75);
+        let first_scale = fragments[0].style.character_scaling_percent;
+        let second_scale = fragments[3].style.character_scaling_percent;
+        assert!(
+            fragments[..3]
+                .iter()
+                .all(|fragment| fragment.style.character_scaling_percent == first_scale)
+        );
+        assert!(
+            fragments[3..]
+                .iter()
+                .all(|fragment| fragment.style.character_scaling_percent == second_scale)
+        );
+        assert!((first_scale as f32 / second_scale as f32 - 1.25).abs() < 0.05);
+    }
+
+    #[test]
     fn applies_page_geometry_to_layout() {
         let mut document = Document::default();
         document.page.width_twips = 14_400;
@@ -19570,6 +20519,29 @@ mod tests {
 
         assert!((text.x - 72.0).abs() < 0.01);
         assert!((layout.pages[0].geometry.content_width - 180.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn applies_parallel_page_gutter_as_top_binding_space() {
+        let mut document = Document::default();
+        document.page.margin_left_twips = 720;
+        document.page.margin_top_twips = 720;
+        document.page.gutter_twips = 720;
+        document.page.gutter_at_top = true;
+        document.blocks = vec![paragraph_with_text("TopGutter")];
+
+        let layout = LayoutEngine::layout(&document);
+        let text = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "TopGutter" => Some(fragment),
+                _ => None,
+            })
+            .expect("top gutter text");
+
+        assert_eq!(text.x, 36.0);
+        assert!((layout.pages[0].geometry.margin_top - 72.0).abs() < 0.01);
     }
 
     #[test]
@@ -20028,7 +21000,7 @@ mod tests {
             "bottom footnote baseline should stay near page bottom, got {note_y}"
         );
         assert!(
-            (separator_y - 92.0).abs() < 0.01,
+            (separator_y - 90.5).abs() < 0.01,
             "separator should sit above bottom footnote band, got {separator_y}"
         );
     }
@@ -20412,16 +21384,16 @@ mod tests {
         assert!(page.items.iter().any(|item| matches!(
             item,
             LayoutItem::Line { x1, x2, width, color, .. }
-                if (*x1 - 72.0).abs() < 0.01
-                    && (*x2 - 540.0).abs() < 0.01
+                if (*x1 - 70.5).abs() < 0.01
+                    && (*x2 - 541.5).abs() < 0.01
                     && (*width - 4.0).abs() < 0.01
                     && *color == PdfColor { red: 30.0 / 255.0, green: 60.0 / 255.0, blue: 90.0 / 255.0 }
         )));
         assert!(page.items.iter().any(|item| matches!(
             item,
             LayoutItem::Line { x1, x2, width, .. }
-                if (*x1 - 72.0).abs() < 0.01
-                    && (*x2 - 72.0).abs() < 0.01
+                if (*x1 - 69.5).abs() < 0.01
+                    && (*x2 - 69.5).abs() < 0.01
                     && (*width - 2.0).abs() < 0.01
         )));
     }
@@ -20750,6 +21722,29 @@ mod tests {
             (normal_gap - contextual_gap - 30.0).abs() < 0.01,
             "contextual spacing should suppress 18pt after + 12pt before, normal={normal_gap}, contextual={contextual_gap}"
         );
+    }
+
+    #[test]
+    fn contextual_spacing_collapses_a_boundary_when_either_paragraph_opts_in() {
+        let mut first_style = ParagraphStyle::default();
+        first_style.space_after_twips = 360;
+        let mut second_style = ParagraphStyle::default();
+        second_style.space_before_twips = 240;
+        let normal_gap = paragraph_baseline_gap(first_style.clone(), second_style.clone());
+
+        first_style.contextual_spacing = true;
+        let previous_opt_in_gap = paragraph_baseline_gap(first_style, second_style.clone());
+        second_style.contextual_spacing = true;
+        let next_opt_in_gap = paragraph_baseline_gap(
+            ParagraphStyle {
+                space_after_twips: 360,
+                ..ParagraphStyle::default()
+            },
+            second_style,
+        );
+
+        assert!((normal_gap - previous_opt_in_gap - 30.0).abs() < 0.01);
+        assert!((normal_gap - next_opt_in_gap - 30.0).abs() < 0.01);
     }
 
     fn paragraph_baseline_gap(first_style: ParagraphStyle, second_style: ParagraphStyle) -> f32 {
@@ -22060,6 +23055,43 @@ mod tests {
     }
 
     #[test]
+    fn multiple_line_spacing_adds_leading_after_the_first_baseline() {
+        let layout_with_style = |style: ParagraphStyle| {
+            let mut document = Document::default();
+            document.blocks = vec![
+                Block::Paragraph(Paragraph {
+                    style: ParagraphStyle::default(),
+                    runs: vec![Run {
+                        text: "Before".to_string(),
+                        style: Default::default(),
+                    }],
+                }),
+                Block::Paragraph(Paragraph {
+                    style,
+                    runs: vec![Run {
+                        text: "First\nSecond".to_string(),
+                        style: Default::default(),
+                    }],
+                }),
+            ];
+            LayoutEngine::layout(&document)
+        };
+
+        let automatic = layout_with_style(ParagraphStyle::default());
+        let mut multiple_style = ParagraphStyle::default();
+        multiple_style.line_spacing_twips = Some(480);
+        multiple_style.line_spacing_multiple = true;
+        let multiple = layout_with_style(multiple_style);
+        let automatic_baselines = text_baselines(&automatic.pages[0]);
+        let multiple_baselines = text_baselines(&multiple.pages[0]);
+
+        assert_eq!(automatic_baselines.len(), 3);
+        assert_eq!(multiple_baselines.len(), 3);
+        assert!((automatic_baselines[1] - multiple_baselines[1]).abs() < 0.01);
+        assert!((multiple_baselines[1] - multiple_baselines[2] - 30.0).abs() < 0.01);
+    }
+
+    #[test]
     fn applies_section_line_grid_to_flowed_paragraph_lines() {
         let mut document = Document::default();
         document.page.text_line_grid_twips = Some(720);
@@ -22227,6 +23259,35 @@ mod tests {
     }
 
     #[test]
+    fn passive_line_numbers_use_word_default_size_color_and_body_baseline() {
+        let mut document = Document::default();
+        document.page.line_numbering.enabled = true;
+        document.blocks = vec![paragraph_with_text("Body")];
+
+        let layout = LayoutEngine::layout(&document);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let number = fragments
+            .iter()
+            .find(|fragment| fragment.text == "1")
+            .expect("passive line number");
+        let body = fragments
+            .iter()
+            .find(|fragment| fragment.text == "Body")
+            .expect("body text");
+
+        assert_eq!(number.style.font_size_half_points, 24);
+        assert_eq!(number.color, PdfColor::default());
+        assert!((number.baseline_y - body.baseline_y).abs() < 0.01);
+    }
+
+    #[test]
     fn continuous_line_numbering_survives_later_section_settings() {
         let mut document = Document::default();
         document.page.line_numbering.enabled = true;
@@ -22293,8 +23354,14 @@ mod tests {
 
         let even_layout = LayoutEngine::layout(&even_document);
 
-        assert_eq!(even_layout.pages.len(), 2);
-        assert_eq!(layout_text(&even_layout.pages[1]), "Even start");
+        assert_eq!(even_layout.pages.len(), 3);
+        assert!(even_layout.pages[1].items.is_empty());
+        assert_eq!(layout_text(&even_layout.pages[2]), "Even start");
+
+        even_document.page.facing_pages = true;
+        let facing_even_layout = LayoutEngine::layout(&even_document);
+        assert_eq!(facing_even_layout.pages.len(), 2);
+        assert_eq!(layout_text(&facing_even_layout.pages[1]), "Even start");
     }
 
     #[test]
@@ -22669,6 +23736,39 @@ mod tests {
         assert!(!layout_text(&layout.pages[0]).contains("Keep next"));
         assert!(layout_text(&layout.pages[1]).contains("Keep next"));
         assert!(layout_text(&layout.pages[1]).contains("Follower"));
+    }
+
+    #[test]
+    fn keep_with_next_preflights_the_complete_paragraph_chain() {
+        let mut document = small_test_page_document();
+        let mut keep_next_style = ParagraphStyle::default();
+        keep_next_style.keep_with_next = true;
+        let kept = |text: &str| {
+            Block::Paragraph(Paragraph {
+                style: keep_next_style.clone(),
+                runs: vec![Run {
+                    text: text.to_string(),
+                    style: Default::default(),
+                }],
+            })
+        };
+        document.blocks = (0..7)
+            .map(|_| paragraph_with_text("Filler"))
+            .chain([
+                kept("Keep chain one"),
+                kept("Keep chain two"),
+                paragraph_with_text("Keep chain three"),
+            ])
+            .collect();
+
+        let layout = LayoutEngine::layout(&document);
+
+        assert_eq!(layout.pages.len(), 2);
+        assert!(!layout_text(&layout.pages[0]).contains("Keep chain"));
+        assert_eq!(
+            layout_text(&layout.pages[1]),
+            "Keep chain oneKeep chain twoKeep chain three"
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@ pub const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
 pub const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
 pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
 pub const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
+pub const INLINE_IMAGE_MARKER_BASE: u32 = 0xF1000;
 pub const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
 pub const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
 pub const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
@@ -58,6 +59,8 @@ pub struct Document {
     pub endnotes: Vec<Paragraph>,
     pub endnote_section_indices: Vec<usize>,
     pub endnote_placements: Vec<EndnotePlacement>,
+    pub inline_images: Vec<StaticImage>,
+    pub inline_image_block_indices: Vec<usize>,
     pub blocks: Vec<Block>,
 }
 
@@ -113,9 +116,25 @@ impl Default for Document {
             endnotes: Vec::new(),
             endnote_section_indices: Vec::new(),
             endnote_placements: Vec::new(),
+            inline_images: Vec::new(),
+            inline_image_block_indices: Vec::new(),
             blocks: vec![Block::Paragraph(Paragraph::default())],
         }
     }
+}
+
+pub fn inline_image_marker(index: usize) -> Option<char> {
+    let codepoint = INLINE_IMAGE_MARKER_BASE.checked_add(u32::try_from(index).ok()?)?;
+    char::from_u32(codepoint).filter(|ch| *ch <= '\u{ffffd}')
+}
+
+pub fn inline_image_marker_index(text: &str) -> Option<usize> {
+    let mut chars = text.chars();
+    let codepoint = chars.next()? as u32;
+    if chars.next().is_some() || codepoint < INLINE_IMAGE_MARKER_BASE {
+        return None;
+    }
+    usize::try_from(codepoint - INLINE_IMAGE_MARKER_BASE).ok()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,6 +149,7 @@ pub struct PageSettings {
     pub facing_pages: bool,
     pub mirror_margins: bool,
     pub gutter_on_right: bool,
+    pub gutter_at_top: bool,
     pub header_distance_twips: i32,
     pub footer_distance_twips: i32,
     pub landscape: bool,
@@ -186,6 +206,7 @@ impl Default for PageSettings {
             facing_pages: false,
             mirror_margins: false,
             gutter_on_right: false,
+            gutter_at_top: false,
             header_distance_twips: 720,
             footer_distance_twips: 720,
             landscape: false,
@@ -947,6 +968,7 @@ pub enum Alignment {
     Center,
     Right,
     Justified,
+    Distributed,
 }
 
 #[derive(Debug, Clone, PartialEq)]

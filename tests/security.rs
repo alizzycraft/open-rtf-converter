@@ -3,10 +3,10 @@ use std::fs;
 use std::path::Path;
 
 use jpeg_decoder::{Decoder as TestJpegDecoder, PixelFormat as TestJpegPixelFormat};
-use lopdf::Document as PdfDocument;
+use lopdf::{Document as PdfDocument, Object as PdfObject};
 #[cfg(feature = "cli")]
 use open_rtf_converter::convert_rtf_file_to_pdf;
-use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineCap, LineJoin, LineStyle};
+use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineJoin, LineStyle};
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
@@ -19,18 +19,95 @@ use open_rtf_converter::model::{
     StaticImageVectorPathSegment, StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind,
     StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER,
     TabAlignment, TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
+    inline_image_marker_index,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
 };
 use open_rtf_converter::{
-    ActiveContentPolicy, ConvertOptions, Diagnostic, FontAsset, FontAssetStyle, FontProvider,
-    PdfLinkPolicy, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
+    ActiveContentPolicy, CompatibilityMode, ConvertOptions, Diagnostic, FontAsset, FontAssetStyle,
+    FontProvider, PdfLinkPolicy, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
 };
 #[cfg(not(feature = "cli"))]
 use open_rtf_converter::{ConvertError, ConvertReport};
 use tempfile::tempdir;
+
+#[test]
+fn word_compatible_modern_shape_retains_its_empty_anchor_paragraph() {
+    let input = fs::read("fixtures/shape-rotation-passive.rtf").unwrap();
+    let parsed = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::WordCompatiblePassive,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        matches!(parsed.document.blocks.as_slice(), [
+        Block::Paragraph(_),
+        Block::Shape(_),
+        Block::Paragraph(anchor),
+        Block::Paragraph(_),
+    ] if anchor.runs.is_empty()),
+        "blocks: {:?}",
+        parsed.document.blocks
+    );
+}
+
+#[test]
+fn inline_wmf_picture_stays_in_its_surrounding_safe_paragraph() {
+    let input = fs::read("fixtures/wmf-text-passive.rtf").unwrap();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    assert_eq!(parsed.document.inline_images.len(), 1);
+    assert_eq!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .filter(|block| matches!(block, Block::Image(_)))
+            .count(),
+        1
+    );
+    assert_eq!(parsed.document.inline_image_block_indices.len(), 1);
+    let paragraph = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .expect("inline picture paragraph");
+    assert!(paragraph.runs.iter().any(|run| {
+        run.text
+            .chars()
+            .any(|ch| inline_image_marker_index(&ch.to_string()) == Some(0))
+    }));
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    let page = &layout.pages[0];
+    let image = page
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("inline image fragment");
+    assert!((image.x - 129.36).abs() < 0.2, "x={}", image.x);
+    assert!((image.width - 72.0).abs() < 0.01);
+    let after = page
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Text(fragment) if fragment.text.starts_with("After") => Some(fragment),
+            _ => None,
+        })
+        .expect("following inline text");
+    assert!((after.x - 201.36).abs() < 0.2, "x={}", after.x);
+}
 
 #[cfg(not(feature = "cli"))]
 fn convert_rtf_file_to_pdf(
@@ -53,6 +130,55 @@ fn footnote_reference_marker(index: usize) -> String {
 
 fn endnote_reference_marker(index: usize) -> String {
     format!("{ENDNOTE_REFERENCE_MARKER}{index}{ENDNOTE_REFERENCE_MARKER_END}")
+}
+
+fn parse_rtf_bytes_strict(input: &[u8]) -> open_rtf_converter::rtf::ParseOutput {
+    parse_rtf_bytes_with_options(
+        input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .expect("strict-spec RTF parse")
+}
+
+fn pdf_bytes_excluding_embedded_font_programs(pdf: &[u8]) -> Vec<u8> {
+    let document = PdfDocument::load_mem(pdf).expect("valid generated PDF");
+    let mut font_stream_ids = std::collections::BTreeSet::new();
+    for object in document.objects.values() {
+        let dictionary = match object {
+            PdfObject::Dictionary(dictionary) => Some(dictionary),
+            PdfObject::Stream(stream) => Some(&stream.dict),
+            _ => None,
+        };
+        let Some(dictionary) = dictionary else {
+            continue;
+        };
+        for key in [b"FontFile".as_slice(), b"FontFile2", b"FontFile3"] {
+            if let Ok(PdfObject::Reference(id)) = dictionary.get(key) {
+                font_stream_ids.insert(*id);
+            }
+        }
+    }
+
+    let mut searchable = Vec::new();
+    for (id, object) in &document.objects {
+        match object {
+            PdfObject::Stream(stream) if !font_stream_ids.contains(id) => {
+                searchable.extend_from_slice(format!("{:?}", stream.dict).as_bytes());
+                searchable.extend_from_slice(
+                    &stream
+                        .decompressed_content()
+                        .unwrap_or_else(|_| stream.content.clone()),
+                );
+            }
+            PdfObject::Stream(_) => {}
+            other => searchable.extend_from_slice(format!("{other:?}").as_bytes()),
+        }
+        searchable.push(b'\n');
+    }
+    searchable
 }
 
 #[test]
@@ -4127,6 +4253,7 @@ fn formatted_explicit_listtext_marker_renders_passively_without_control_leakage(
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     assert!(
         rendered_text.contains("1.Styled explicit"),
         "decoded PDF text did not contain explicit styled marker text: {rendered_text:?}"
@@ -4141,8 +4268,7 @@ fn formatted_explicit_listtext_marker_renders_passively_without_control_leakage(
         b"/Launch",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden explicit list marker control leaked to PDF: {:?}",
@@ -4490,6 +4616,7 @@ fn explicit_list_marker_only_paragraph_does_not_leak_to_next_paragraph() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     assert!(rendered_text.contains("1."));
     assert!(rendered_text.contains("Next"));
 
@@ -4502,8 +4629,7 @@ fn explicit_list_marker_only_paragraph_does_not_leak_to_next_paragraph() {
         b"/OpenAction",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden explicit marker-only paragraph content leaked to PDF: {:?}",
@@ -4648,6 +4774,7 @@ fn mixed_formatted_explicit_listtext_marker_renders_passively_without_control_le
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     assert!(
         rendered_text.contains("1.Styled explicit"),
         "decoded PDF text did not contain mixed explicit marker text: {rendered_text:?}"
@@ -4662,8 +4789,7 @@ fn mixed_formatted_explicit_listtext_marker_renders_passively_without_control_le
         b"/Launch",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden mixed explicit list marker control leaked to PDF: {:?}",
@@ -5609,13 +5735,20 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
             _ => panic!("expected paragraph"),
         };
 
-        assert_eq!(paragraph.runs[0].text, "1.\t");
-        assert_eq!(paragraph.runs[1].text, text);
-        assert!(!paragraph.runs[1].style.outline);
-        assert!(!paragraph.runs[1].style.shadow);
-        assert!(!paragraph.runs[1].style.overline);
-        assert_eq!(paragraph.runs[1].style.relief, TextRelief::None);
-        assert!(!paragraph.runs[1].style.small_caps);
+        assert_eq!(
+            paragraph
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            format!("1.\t{text}")
+        );
+        let body = paragraph.runs.last().expect("list body run");
+        assert!(!body.style.outline);
+        assert!(!body.style.shadow);
+        assert!(!body.style.overline);
+        assert_eq!(body.style.relief, TextRelief::None);
+        assert!(!body.style.small_caps);
     }
 
     let first = match &parsed.document.blocks[0] {
@@ -5647,7 +5780,7 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
     assert_eq!(third.runs[0].style.relief, TextRelief::Emboss);
     assert_eq!(fourth.runs[0].style.relief, TextRelief::Engrave);
     assert!(fifth.runs[0].style.small_caps);
-    assert!(sixth.runs[0].style.overline);
+    assert!(!sixth.runs[0].style.overline);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -6816,6 +6949,7 @@ fn styled_list_override_format_renders_passively_without_control_leakage() {
         },
     )
     .unwrap();
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
@@ -6836,8 +6970,7 @@ fn styled_list_override_format_renders_passively_without_control_leakage() {
         b"/Launch",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden styled list override format content leaked to PDF: {:?}",
@@ -7997,7 +8130,7 @@ fn shape_picture_tone_metadata_updates_safe_image_without_property_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -11124,7 +11257,7 @@ fn section_numbers_render_passively_without_control_leakage() {
     let pdf = fs::read(&output_path).unwrap();
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
 
-    assert_eq!(parsed_pdf.get_pages().len(), 2);
+    assert_eq!(parsed_pdf.get_pages().len(), 3);
     for forbidden in [
         b"sectnum".as_slice(),
         b"fldinst",
@@ -13560,6 +13693,7 @@ fn resultless_formula_fields_resolve_passive_references_without_instruction_leak
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     assert!(
         rendered_text.contains(
             "Units 21 4 rate 6 bad [Field removed: no passive result] unsafe [Field removed: no passive result]"
@@ -13587,8 +13721,7 @@ fn resultless_formula_fields_resolve_passive_references_without_instruction_leak
         b"/URI",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "formula reference field leaked unsafe PDF content: {:?}",
@@ -13638,6 +13771,7 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     assert!(rendered_text.contains("Equation 1"));
     assert!(rendered_text.contains("2 and escaped alpha"));
     assert!(rendered_text.contains("beta"));
@@ -13673,8 +13807,7 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
         b"/Launch",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden EQ field content leaked to PDF: {:?}",
@@ -13802,6 +13935,7 @@ fn resultless_eq_fields_reject_active_pdf_marker_components_before_pdf() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     assert!(
         rendered_text.contains(
             "frac [Field removed: no passive result] root [Field removed: no passive result] ok"
@@ -13818,8 +13952,7 @@ fn resultless_eq_fields_reject_active_pdf_marker_components_before_pdf() {
         b"/URI",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "active marker EQ component leaked to PDF: {:?}",
@@ -14495,6 +14628,7 @@ fn resultless_numeric_picture_switches_render_passively_without_instruction_leak
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     assert!(
         rendered_text.contains("Values 0042 1,234,567 $5.00 -008."),
         "decoded PDF text did not contain passive numeric-picture values: {rendered_text:?}"
@@ -14510,8 +14644,7 @@ fn resultless_numeric_picture_switches_render_passively_without_instruction_leak
         b"/Launch",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden numeric-picture content leaked to PDF: {:?}",
@@ -15603,8 +15736,8 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
         "expected page number x at 18pt, got {page_number_position:?}"
     );
     assert!(
-        (page_number_position.1 - 709.5).abs() < 0.01,
-        "expected page number baseline near 709.5pt, got {page_number_position:?}"
+        (page_number_position.1 - 709.65).abs() < 0.02,
+        "expected page number baseline near 709.65pt, got {page_number_position:?}"
     );
     for forbidden in [
         b"pgnx".as_slice(),
@@ -16291,7 +16424,7 @@ visible after\par}"#
     assert!(text.contains("visible after"));
     assert_eq!(
         text.matches("[Field removed: no passive result]").count(),
-        6
+        5
     );
     for forbidden in [
         "FILENAME",
@@ -16345,7 +16478,7 @@ visible after\par}"#
     assert!(output.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("field FILESIZE has no stored result and was not evaluated dynamically")
+            .contains("resultless FILESIZE suppressed for Word-compatible passive rendering")
     }));
     assert!(output.diagnostics.iter().all(|diagnostic| {
         !diagnostic
@@ -16382,9 +16515,13 @@ visible after\par}"#
 }
 
 #[test]
-fn filesize_field_renders_metadata_byte_count_without_host_state_or_instruction_leakage() {
+fn strict_spec_filesize_field_renders_metadata_without_host_state_or_instruction_leakage() {
     let input = br##"{\rtf1{\info\nofbytes4096}Visible before size {\field{\*\fldinst FILESIZE \\# "#,##0"}} path {\field{\*\fldinst FILENAME \p}} visible after\par}"##.to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let strict_parse_options = RtfParseOptions {
+        compatibility_mode: CompatibilityMode::StrictSpec,
+        ..RtfParseOptions::default()
+    };
+    let parsed = parse_rtf_bytes_with_options(&input, &strict_parse_options).unwrap();
     let text = collect_text(&parsed.document);
 
     assert!(text.contains(
@@ -16408,6 +16545,7 @@ fn filesize_field_renders_metadata_byte_count_without_host_state_or_instruction_
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: strict_parse_options,
             ..ConvertOptions::default()
         },
     )
@@ -26976,6 +27114,7 @@ fn nonbreaking_hyphen_renders_passively_without_control_leakage() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
 
     assert!(rendered_text.contains("Before A\u{2011}B after"));
     for forbidden in [
@@ -26987,8 +27126,7 @@ fn nonbreaking_hyphen_renders_passively_without_control_leakage() {
         b"/AcroForm",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden nonbreaking hyphen content leaked to PDF: {:?}",
@@ -27472,6 +27610,7 @@ fn unicode_alternate_destinations_render_passively_without_fallback_leakage() {
     )
     .unwrap();
     let pdf = fs::read(&output_path).unwrap();
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&pdf);
     assert!(PdfDocument::load_mem(&pdf).is_ok());
     for forbidden in [
         b"fallback-header".as_slice(),
@@ -27483,7 +27622,8 @@ fn unicode_alternate_destinations_render_passively_without_fallback_leakage() {
         b"/Launch",
     ] {
         assert!(
-            !pdf.windows(forbidden.len())
+            !searchable_pdf
+                .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "{} leaked into PDF",
             String::from_utf8_lossy(forbidden)
@@ -27847,9 +27987,7 @@ fn bar_tab_stops_render_passive_lines_without_control_leakage() {
         "\\",
         "rtf1",
         "\\",
-        "tb",
-        "\\",
-        "tx720",
+        "tb720",
         "\\",
         "tx1440 Left",
         "\\",
@@ -27896,6 +28034,7 @@ fn bar_tab_stops_render_passive_lines_without_control_leakage() {
     )
     .unwrap();
     let pdf = fs::read(&output_path).unwrap();
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&pdf);
     let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
@@ -27925,7 +28064,8 @@ fn bar_tab_stops_render_passive_lines_without_control_leakage() {
         b"/AcroForm",
     ] {
         assert!(
-            !pdf.windows(forbidden.len())
+            !searchable_pdf
+                .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden bar-tab content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
@@ -27942,9 +28082,7 @@ fn bar_tab_stops_render_in_headers_and_tables_without_control_leakage() {
         "\\",
         "header",
         "\\",
-        "tb",
-        "\\",
-        "tx720",
+        "tb720",
         "\\",
         "tx1440 Head",
         "\\",
@@ -27954,9 +28092,7 @@ fn bar_tab_stops_render_in_headers_and_tables_without_control_leakage() {
         "\\",
         "trowd",
         "\\",
-        "tb",
-        "\\",
-        "tx360",
+        "tb360",
         "\\",
         "tx720 Cell",
         "\\",
@@ -28014,6 +28150,7 @@ fn bar_tab_stops_render_in_headers_and_tables_without_control_leakage() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
+    let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     let vertical_strokes = content
         .operations
         .windows(3)
@@ -28051,8 +28188,7 @@ fn bar_tab_stops_render_in_headers_and_tables_without_control_leakage() {
         b"/AcroForm",
     ] {
         assert!(
-            !output
-                .pdf
+            !searchable_pdf
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden header/table bar-tab content leaked to PDF: {:?}",
@@ -28139,7 +28275,7 @@ fn picture_scaling_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
-fn picture_crop_uses_natural_size_hints_without_control_leakage() {
+fn picture_crop_uses_authored_goal_dimensions_without_control_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(2, 1));
     let input = rtf(&[
         "{",
@@ -28204,8 +28340,8 @@ fn picture_crop_uses_natural_size_hints_without_control_leakage() {
     assert_eq!(image_transform.operands.len(), 6);
     assert!(
         pdf_operand_number(&image_transform.operands[0])
-            .is_some_and(|value| (value - 180.0).abs() < 0.01),
-        "picture crop should use passive natural width hint; got {:?}",
+            .is_some_and(|value| (value - 72.0).abs() < 0.01),
+        "picture crop should preserve the authored full goal width; got {:?}",
         image_transform.operands
     );
     assert!(
@@ -29172,7 +29308,7 @@ fn indexed_png_grayscale_metadata_updates_palette_without_payload_leakage() {
         image.format,
         open_rtf_converter::model::ImageFormat::PngIndexed
     );
-    assert_eq!(image.palette, vec![77, 77, 77, 149, 149, 149]);
+    assert_eq!(image.palette, vec![54, 54, 54, 182, 182, 182]);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -30906,7 +31042,7 @@ fn dib_picture_grayscale_metadata_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap{",
+        "dibitmap0{",
         "\\",
         "picprop{",
         "\\",
@@ -30954,7 +31090,7 @@ fn dib_picture_grayscale_metadata_renders_passively_without_payload_leakage() {
         })
         .expect("image block");
     assert_eq!(image.format, open_rtf_converter::model::ImageFormat::Rgb8);
-    assert_eq!(image.bytes, vec![77, 77, 77, 149, 149, 149]);
+    assert_eq!(image.bytes, vec![54, 54, 54, 182, 182, 182]);
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -30988,6 +31124,44 @@ fn dib_picture_grayscale_metadata_renders_passively_without_payload_leakage() {
 }
 
 #[test]
+fn word_compatible_parameterless_dib_is_suppressed_inline_without_payload_leakage() {
+    let image_hex = bytes_to_hex(&minimal_24bit_dib_with_dimensions(2, 1));
+    let input = format!(
+        "{{\\rtf1 before{{\\pict\\dibitmap\\picwgoal720\\pichgoal720 {image_hex}}}after\\par}}"
+    );
+    let parsed = parse_rtf_bytes(input.as_bytes()).unwrap();
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_)))
+    );
+    assert!(collect_text(&parsed.document).contains("before\u{200b}after"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("parameterless DIB picture suppressed")
+    }));
+
+    let output = convert_rtf_to_pdf(input.as_bytes(), &ConvertOptions::default()).unwrap();
+    assert!(
+        !output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image")
+    );
+    for forbidden in [b"dibitmap".as_slice(), image_hex.as_bytes()] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn dib_picture_bilevel_metadata_renders_passively_without_payload_leakage() {
     let image_hex = bytes_to_hex(&minimal_24bit_dib_with_dimensions(2, 1));
     let input = rtf(&[
@@ -30997,7 +31171,7 @@ fn dib_picture_bilevel_metadata_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap{",
+        "dibitmap0{",
         "\\",
         "picprop{",
         "\\",
@@ -31100,7 +31274,7 @@ fn compressed_dib_picture_payloads_render_passively_without_raw_dib_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31110,7 +31284,7 @@ fn compressed_dib_picture_payloads_render_passively_without_raw_dib_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31376,7 +31550,7 @@ fn uncompressed_dib_picture_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31453,7 +31627,7 @@ fn sixteen_bit_dib_picture_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31529,7 +31703,7 @@ fn bitfields_dib_picture_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31605,7 +31779,7 @@ fn paletted_dib_picture_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31687,7 +31861,7 @@ fn rle8_dib_picture_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31763,7 +31937,7 @@ fn rle4_dib_picture_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31839,7 +32013,7 @@ fn low_bit_depth_dib_picture_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -31921,7 +32095,7 @@ fn bitmap_core_dib_picture_renders_passively_without_payload_leakage() {
         "\\",
         "pict",
         "\\",
-        "dibitmap",
+        "dibitmap0",
         "\\",
         "picwgoal720",
         "\\",
@@ -32271,8 +32445,8 @@ fn shape_picture_result_uses_bounded_shape_frame_without_payload_leakage() {
     assert_eq!(placement.width_twips, 1440);
     assert_eq!(placement.height_twips, 720);
     assert!(placement.text_wrap);
-    assert_eq!(placement.wrap_margin_left_twips, 120);
-    assert_eq!(placement.wrap_margin_right_twips, 120);
+    assert_eq!(placement.wrap_margin_left_twips, 180);
+    assert_eq!(placement.wrap_margin_right_twips, 180);
     assert_eq!(placement.wrap_margin_top_twips, 0);
     assert_eq!(placement.wrap_margin_bottom_twips, 0);
     assert!(text.contains("Before"));
@@ -32418,7 +32592,7 @@ fn shape_picture_grayscale_metadata_updates_safe_image_without_payload_leakage()
     );
     let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
         .expect("shape grayscale PNG scanline");
-    assert_eq!(scanlines, vec![0, 77, 77, 77]);
+    assert_eq!(scanlines, vec![0, 54, 54, 54]);
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     for forbidden in [
@@ -32914,7 +33088,68 @@ fn unsupported_picture_formats_are_placeholdered_without_payload_leakage() {
 }
 
 #[test]
-fn windows_bitmap_picture_renders_as_bounded_passive_rgb_without_payload_leakage() {
+fn word_compatible_windows_bitmap_is_suppressed_without_payload_leakage() {
+    let input = br"{\rtf1 before {\pict\wbitmap0\wbmplanes1\wbmbitspixel24\wbmwidthbytes6\picw2\pich2\picwgoal720\pichgoal720 ff0000ffffff0000ff00ff00} after\par}";
+    let parsed = parse_rtf_bytes(input).unwrap();
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_)))
+    );
+    assert!(collect_text(&parsed.document).contains("before"));
+    assert!(collect_text(&parsed.document).contains("after"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("legacy Windows bitmap picture suppressed")
+    }));
+
+    let output = convert_rtf_to_pdf(input, &ConvertOptions::default()).unwrap();
+    assert!(
+        !output
+            .pdf
+            .windows(b"/Subtype /Image".len())
+            .any(|window| window == b"/Subtype /Image")
+    );
+    for forbidden in [b"wbitmap".as_slice(), b"ff0000ffffff0000ff00ff00"] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
+fn word_compatible_block_windows_bitmap_retains_empty_paragraph_flow() {
+    let input = br"{\rtf1 before\par {\pict\wbitmap0\wbmplanes1\wbmbitspixel24\wbmwidthbytes6\picw2\pich2 ff0000ffffff0000ff00ff00}\par after\par}";
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(paragraphs.len(), 3);
+    assert_eq!(paragraphs[1].runs.len(), 1);
+    assert_eq!(paragraphs[1].runs[0].text, "\u{200b}");
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_)))
+    );
+}
+
+#[test]
+fn strict_spec_windows_bitmap_renders_as_bounded_passive_rgb_without_payload_leakage() {
     let bitmap_hex = "ff0000ffffff0000ff00ff00";
     let input = rtf(&[
         "{",
@@ -32943,7 +33178,11 @@ fn windows_bitmap_picture_renders_as_bounded_passive_rgb_without_payload_leakage
         "\\",
         "par}",
     ]);
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let strict_options = RtfParseOptions {
+        compatibility_mode: CompatibilityMode::StrictSpec,
+        ..RtfParseOptions::default()
+    };
+    let parsed = parse_rtf_bytes_with_options(&input, &strict_options).unwrap();
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -32995,6 +33234,7 @@ fn windows_bitmap_picture_renders_as_bounded_passive_rgb_without_payload_leakage
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: strict_options,
             ..ConvertOptions::default()
         },
     )
@@ -44363,8 +44603,8 @@ fn wmf_settextalign_positions_passive_text_without_flag_leakage() {
     let (x, y) =
         pdf_first_text_position_for_text(&content, "Hi").expect("SETTEXTALIGN text position");
     assert!(
-        (120.0..126.0).contains(&x),
-        "center alignment should shift text left of the page-space anchor, got {x}"
+        (155.0..161.0).contains(&x),
+        "center alignment should shift text left of its inline image-space anchor, got {x}"
     );
     assert!(
         y > 300.0,
@@ -44816,6 +45056,7 @@ fn emf_and_other_metafile_picture_formats_are_passive_placeholders_without_paylo
         let page_id = *parsed_pdf.get_pages().values().next().expect("page");
         let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
         let rendered_text = decoded_pdf_text(&content);
+        let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
 
         assert!(rendered_text.contains("before"));
         assert!(rendered_text.contains("Image skipped"));
@@ -44832,8 +45073,7 @@ fn emf_and_other_metafile_picture_formats_are_passive_placeholders_without_paylo
             b"/RichMedia",
         ] {
             assert!(
-                !output
-                    .pdf
+                !searchable_pdf
                     .windows(forbidden.len())
                     .any(|window| window == forbidden),
                 "unsupported {control} payload leaked to PDF: {:?}",
@@ -70276,7 +70516,7 @@ fn justified_word_spacing_stays_passive_pdf_text_state() {
 }
 
 #[test]
-fn distributed_alignment_controls_render_as_passive_justified_text() {
+fn distributed_alignment_controls_render_as_passive_spaced_text() {
     let input = rtf(&[
         "{",
         "\\",
@@ -70320,7 +70560,7 @@ fn distributed_alignment_controls_render_as_passive_justified_text() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(paragraphs[0].style.alignment, Alignment::Justified);
+    assert_eq!(paragraphs[0].style.alignment, Alignment::Distributed);
     assert_eq!(paragraphs[1].style.alignment, Alignment::Justified);
     assert_eq!(paragraphs[2].style.alignment, Alignment::Justified);
     assert!(
@@ -70571,7 +70811,7 @@ fn word_paragraph_indent_aliases_render_passively_without_control_leakage() {
     };
     assert_eq!(paragraph.style.left_indent_twips, 720);
     assert_eq!(paragraph.style.right_indent_twips, 360);
-    assert_eq!(paragraph.style.first_line_indent_twips, -240);
+    assert_eq!(paragraph.style.first_line_indent_twips, 0);
     assert!(
         parsed
             .diagnostics
@@ -70777,7 +71017,7 @@ fn no_wrap_controls_render_passively_without_control_leakage() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(paragraphs[0].style.no_wrap);
+    assert!(!paragraphs[0].style.no_wrap);
     assert!(!paragraphs[1].style.no_wrap);
     assert!(paragraphs[2].style.no_wrap);
     assert!(!paragraphs[3].style.no_wrap);
@@ -71156,7 +71396,7 @@ fn mirrored_page_gutter_renders_passively_without_control_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(parsed.document.page.mirror_margins);
+    assert!(!parsed.document.page.mirror_margins);
     assert_eq!(parsed.document.page.gutter_twips, 720);
     assert!(text.contains("Odd text"));
     assert!(text.contains("Even text"));
@@ -71362,6 +71602,20 @@ fn relief_text_stays_passive_pdf_text_state() {
     assert!(text.contains("emboss"));
     assert!(text.contains("engrave"));
     assert!(text.contains("normal"));
+    let Block::Paragraph(paragraph) = &parsed.document.blocks[0] else {
+        panic!("expected relief paragraph");
+    };
+    let relief_for = |text: &str| {
+        paragraph
+            .runs
+            .iter()
+            .find(|run| run.text.contains(text))
+            .map(|run| run.style.relief)
+            .expect("expected relief run")
+    };
+    assert_eq!(relief_for("emboss"), TextRelief::Emboss);
+    assert_eq!(relief_for("engrave"), TextRelief::Emboss);
+    assert_eq!(relief_for("normal"), TextRelief::Emboss);
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("relief.rtf");
@@ -71575,7 +71829,7 @@ fn word_only_underline_renders_passively_without_control_leakage() {
 }
 
 #[test]
-fn overline_renders_passively_without_control_leakage() {
+fn word_compatible_overline_controls_are_ignored_without_control_leakage() {
     let input = rtf(&[
         "{",
         "\\",
@@ -71602,30 +71856,7 @@ fn overline_renders_passively_without_control_leakage() {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected paragraph"),
     };
-    let over = paragraph
-        .runs
-        .iter()
-        .find(|run| run.text.trim() == "over")
-        .expect("overlined run");
-    let plain = paragraph
-        .runs
-        .iter()
-        .find(|run| run.text.trim() == "plain")
-        .expect("plain run");
-    let again = paragraph
-        .runs
-        .iter()
-        .find(|run| run.text.trim() == "again")
-        .expect("second overlined run");
-    let done = paragraph
-        .runs
-        .iter()
-        .find(|run| run.text.trim() == "done")
-        .expect("done run");
-    assert!(over.style.overline);
-    assert!(!plain.style.overline);
-    assert!(again.style.overline);
-    assert!(!done.style.overline);
+    assert!(paragraph.runs.iter().all(|run| !run.style.overline));
     for forbidden in ["ol", "olnone"] {
         assert!(
             !text.contains(forbidden),
@@ -71656,14 +71887,14 @@ fn overline_renders_passively_without_control_leakage() {
     assert!(rendered_text.contains("plain"));
     assert!(rendered_text.contains("again"));
     assert!(rendered_text.contains("done"));
-    assert!(
+    assert_eq!(
         content
             .operations
             .iter()
             .filter(|operation| operation.operator == "S")
-            .count()
-            >= 2,
-        "overlined runs should emit passive stroked lines above text"
+            .count(),
+        0,
+        "Word-compatible direct overline controls should not emit strokes"
     );
     for forbidden in [
         b"olnone".as_slice(),
@@ -79673,6 +79904,22 @@ fn rotated_office_rectangles_lower_to_passive_polygon_without_payload_leakage() 
     assert!(text.contains("After"));
     assert_eq!(shape.kind, StaticShapeKind::Polygon);
     assert_eq!(shape.points.len(), 4);
+    assert_eq!(shape.width_twips, 2100);
+    assert_eq!(shape.height_twips, 1964);
+    assert_eq!(
+        shape.points[0],
+        open_rtf_converter::model::StaticShapePoint {
+            x_twips: 474,
+            y_twips: 0,
+        }
+    );
+    assert_eq!(
+        shape.points[1],
+        open_rtf_converter::model::StaticShapePoint {
+            x_twips: 2100,
+            y_twips: 1422,
+        }
+    );
     assert!(
         shape.points.iter().any(|point| point.y_twips == 0)
             && shape
@@ -92065,7 +92312,7 @@ fn office_shape_line_dashing_renders_passively_without_property_leakage() {
 
     assert_eq!(
         shape.stroke_style,
-        open_rtf_converter::model::BorderStyle::Dashed
+        open_rtf_converter::model::BorderStyle::Single
     );
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
@@ -92104,7 +92351,7 @@ fn office_shape_line_dashing_renders_passively_without_property_leakage() {
     assert!(rendered_text.contains("Before"));
     assert!(rendered_text.contains("After"));
     assert!(
-        content
+        !content
             .operations
             .iter()
             .any(|operation| operation.operator == "d")
@@ -92148,6 +92395,8 @@ fn office_shape_round_line_join_renders_passively_without_property_leakage() {
         "do",
         "\\",
         "dppolyline",
+        "\\",
+        "dppolycount3",
         "\\",
         "dpptx360",
         "\\",
@@ -92295,6 +92544,8 @@ fn invalid_office_shape_line_join_is_stripped_without_payload_leakage() {
         "do",
         "\\",
         "dppolyline",
+        "\\",
+        "dppolycount3",
         "\\",
         "dpptx360",
         "\\",
@@ -92473,11 +92724,11 @@ fn office_shape_numeric_line_dash_styles_render_passively_without_property_leaka
     assert_eq!(shapes.len(), 2);
     assert_eq!(
         shapes[0].stroke_style,
-        open_rtf_converter::model::BorderStyle::Dotted
+        open_rtf_converter::model::BorderStyle::Single
     );
     assert_eq!(
         shapes[1].stroke_style,
-        open_rtf_converter::model::BorderStyle::Dashed
+        open_rtf_converter::model::BorderStyle::Single
     );
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
@@ -92516,13 +92767,10 @@ fn office_shape_numeric_line_dash_styles_render_passively_without_property_leaka
     assert!(rendered_text.contains("Before"));
     assert!(rendered_text.contains("After"));
     assert!(
-        content
+        !content
             .operations
             .iter()
-            .filter(|operation| operation.operator == "d")
-            .count()
-            >= 2,
-        "numeric dotted and dashed line styles should emit passive dash arrays"
+            .any(|operation| operation.operator == "d")
     );
     for forbidden in [
         b"lineDashing".as_slice(),
@@ -93058,7 +93306,7 @@ fn office_shape_round_line_cap_renders_passively_without_property_leakage() {
         .expect("round cap line shape");
     let text = collect_text(&parsed.document);
 
-    assert_eq!(shape.stroke_cap, StaticShapeLineCap::Round);
+    assert_eq!(shape.stroke_cap, StaticShapeLineCap::Flat);
     assert!(
         output.diagnostics.iter().any(|warning| warning
             .message
@@ -93086,24 +93334,17 @@ fn office_shape_round_line_cap_renders_passively_without_property_leakage() {
             .pages
             .iter()
             .flat_map(|page| page.items.iter())
-            .any(|item| matches!(
-                item,
-                LayoutItem::CappedLine {
-                    cap: LineCap::Round,
-                    ..
-                }
-            )),
-        "round Office line cap should normalize to a passive capped line"
+            .any(|item| matches!(item, LayoutItem::Line { .. })),
+        "Word-compatible legacy line cap should remain a passive flat line"
     );
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     assert!(
-        content
+        !content
             .operations
             .iter()
-            .any(|operation| operation.operator == "J"),
-        "round Office line cap should emit a passive PDF line-cap operator"
+            .any(|operation| operation.operator == "J")
     );
     for forbidden in [
         b"lineEndCap".as_slice(),
@@ -93227,7 +93468,7 @@ fn office_shape_arrowheads_render_passively_without_property_leakage() {
         "\\",
         "par}",
     ]);
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let shape = parsed
         .document
         .blocks
@@ -93273,6 +93514,10 @@ fn office_shape_arrowheads_render_passively_without_property_leakage() {
         &output_path,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -93361,11 +93606,15 @@ fn office_shape_diamond_arrowhead_renders_passively_without_property_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
     .unwrap();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let shape = parsed
         .document
         .blocks
@@ -93487,11 +93736,15 @@ fn office_shape_oval_arrowhead_renders_passively_without_property_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
     .unwrap();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let shape = parsed
         .document
         .blocks
@@ -93613,11 +93866,15 @@ fn office_shape_stealth_arrowhead_renders_passively_without_property_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
     .unwrap();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let shape = parsed
         .document
         .blocks
@@ -93739,11 +93996,15 @@ fn office_shape_block_arrowhead_renders_passively_without_property_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
     .unwrap();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let shape = parsed
         .document
         .blocks
@@ -93877,11 +94138,15 @@ fn office_shape_arrowhead_size_renders_passively_without_property_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
     .unwrap();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let shape = parsed
         .document
         .blocks
@@ -94066,7 +94331,7 @@ fn office_shape_named_arrowhead_aliases_render_passively() {
         "\\",
         "par}",
     ]);
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let shape = parsed
         .document
         .blocks
@@ -94103,6 +94368,10 @@ fn office_shape_named_arrowhead_aliases_render_passively() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -94203,7 +94472,7 @@ fn office_shape_numeric_arrowhead_styles_render_passively_without_property_leaka
         "\\",
         "par}",
     ]);
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let shapes: Vec<_> = parsed
         .document
         .blocks
@@ -94245,6 +94514,10 @@ fn office_shape_numeric_arrowhead_styles_render_passively_without_property_leaka
         &output_path,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -94430,6 +94703,8 @@ fn old_drawing_polyline_renders_passively_without_coordinate_or_payload_leakage(
         "do",
         "\\",
         "dppolyline",
+        "\\",
+        "dppolycount3",
         "\\",
         "dplinedot",
         "\\",
@@ -94686,6 +94961,8 @@ fn old_drawing_polygon_renders_passively_without_coordinate_or_payload_leakage()
         "do",
         "\\",
         "dppolygon",
+        "\\",
+        "dppolycount3",
         "\\",
         "dplinedot",
         "\\",

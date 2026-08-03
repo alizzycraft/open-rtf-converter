@@ -6,8 +6,8 @@
       "id": "simple-basic-visual",
       "input": "fixtures/simple.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/simple.pdf",
       "word_reference_pages": [],
       "expected_pages": 2,
       "must_preserve_text": [
@@ -25,15 +25,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported PDF and page PNG references still need to be captured for visual diffing."
+        "The registered Word 16.0 reference matches page count, page geometry, visible horizontal placement, inline styles, color, underline, Unicode fallback, centering, and the explicit page break. Bundled Arial-compatible glyph boxes sit about 0.8 points above Word's Arial boxes; Word's PDF also retains a non-painted trailing paragraph space in extracted spans."
       ]
     },
     {
       "id": "table-basic-visual",
       "input": "fixtures/table-ish.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-ish.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -53,15 +53,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Table geometry should be compared against a Word-exported reference once available."
+        "The registered Word 16.0 reference confirms the two borderless rows, authored 100-point cell boundaries, and zero post-table flow gap when `\\trgaph` is omitted. Corrected text origins differ by at most 0.02 points horizontally and 0.68 points vertically; bundled Times-compatible glyph widths remain up to about 3.0 points shorter than Word's Times New Roman."
       ]
     },
     {
       "id": "unknown-destination-security",
       "input": "fixtures/weird.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/weird.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -81,16 +81,16 @@
         "/EmbeddedFile"
       ],
       "expected_pdf_markers": [],
-      "known_gaps": [
-        "Word-exported reference should document whether Word surfaces any recoverable unknown-control text differently."
-      ]
+    "known_gaps": [
+      "The registered Word 16.0 reference confirms that the ignorable unknown destination is omitted wholesale, the unsupported in-flow `\\madeup123` control itself is consumed, following visible text survives, and escaped braces plus CP1252 hex escapes render normally. Corrected text origins differ by at most 0.02 points horizontally and 0.68 points vertically under bundled Times-compatible metrics."
+    ]
     },
     {
       "id": "object-result-security",
       "input": "fixtures/object-result.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/object-result.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -115,16 +115,16 @@
         "/OpenAction"
       ],
       "expected_pdf_markers": [],
-      "known_gaps": [
-        "Word-exported reference should confirm the fallback result's exact visual position once available."
-      ]
+    "known_gaps": [
+      "The registered Word 16.0 reference confirms that the safe `\\result` fallback occupies one ordinary paragraph between the surrounding paragraphs. Default Placeholder and explicit Strip policies produce the same passive visible output because a safe result exists; text origins differ from Word by at most 0.02 points horizontally and 0.68 points vertically under bundled Times-compatible metrics."
+    ]
     },
     {
       "id": "png-alpha-passive-smask",
       "input": "fixtures/png-alpha.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/png-alpha.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -145,15 +145,15 @@
         "/SMask"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact alpha compositing against non-white page content once available."
+        "The registered Word 16.0 reference matches the 2-by-1 alpha mask exactly (`[0, 255]`), paints the same opaque blue sample, and uses the same 72-by-36-point frame. Fully transparent base RGB differs internally but is mathematically inert on every page background; following flow differs by at most 0.48 points."
       ]
     },
     {
       "id": "png-trns-passive-smask",
       "input": "fixtures/png-trns.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/png-trns.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -176,15 +176,15 @@
         "/SMask"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact indexed transparency compositing against non-white page content once available."
+        "The registered Word 16.0 reference matches the indexed `tRNS` alpha mask exactly (`[0, 255]`), paints the same opaque blue palette sample, and uses the same 72-by-36-point frame. Fully transparent palette RGB is mathematically inert on every page background; following flow differs by at most 0.48 points."
       ]
     },
     {
       "id": "windows-bitmap-passive-rgb",
       "input": "fixtures/windows-bitmap.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/windows-bitmap.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -193,7 +193,7 @@
       ],
       "intentional_security_differences": [],
       "expected_diagnostics": [
-        "Windows bitmap picture rendered as bounded passive RGB image"
+        "legacy Windows bitmap picture suppressed for Word-compatible passive rendering"
       ],
       "forbidden_pdf_markers": [
         "wbitmap",
@@ -204,19 +204,17 @@
         "/JavaScript",
         "/EmbeddedFile"
       ],
-      "expected_pdf_markers": [
-        "/Subtype /Image"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact bitmap placement and color orientation once available."
+        "The registered Word 16.0 reference confirms that this legacy `\\wbitmap0` DDB payload is not painted and contributes only its containing empty paragraph to flow. Word-compatible passive mode now suppresses it identically; StrictSpec retains bounded 2-by-2 BGR-to-RGB decoding for standards-oriented callers."
       ]
     },
     {
       "id": "dib-grayscale-passive-image-pixels",
       "input": "fixtures/dib-grayscale-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/dib-grayscale-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -224,10 +222,12 @@
         "After DIB grayscale."
       ],
       "intentional_security_differences": [
-        "DIB grayscale picture metadata is applied to bounded passive image pixels before PDF rendering.",
-        "Raw DIB bytes, picture property controls, and hidden fragment metadata are stripped before the PDF layer."
+        "Raw DIB bytes, picture property controls, and hidden fragment metadata are stripped before the PDF layer.",
+        "Parameterized DIB controls retain bounded passive decoding and grayscale conversion; this malformed parameterless spelling follows Word's suppression behavior."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "parameterless DIB picture suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "dibitmap",
         "picprop",
@@ -243,19 +243,17 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        "/Subtype /Image"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact DIB grayscale conversion and placement once available."
+        "The registered Word 16.0 reference confirms that parameterless `\\dibitmap` is not recognized as a paintable picture type: its payload is omitted and surrounding inline text remains contiguous. Word-compatible passive mode preserves only a zero-width flow anchor; parameterized `\\dibitmap0` retains bounded safe decoding and color-mode support."
       ]
     },
     {
       "id": "wmf-vector-passive-paths",
       "input": "fixtures/wmf-vector-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-vector-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -289,7 +287,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF rectangle and ellipse geometry once available.",
+        "The bounded inline-image model now matches Word's paragraph flow: `Before WMF` remains on line one, the no-whitespace `vector.` + image + `After` cluster stays together on line two, and the final `vector.` wraps to line three with text origins within 0.16 points. Remaining WMF-specific geometry differs: Word paints rectangle `(82.77,53.78)-(157.77,74.59)` and ellipse `(125.20,57.70)-(163.78,78.02)` with 1.88-point stock-pen strokes, while the converter paints rectangle `(82.81,53.40)-(169.21,78.60)` and ellipse `(126.01,57.00)-(174.61,82.20)` with thinner strokes. Exact WMF map-mode and stock-pen calibration remains pending.",
         "The converter intentionally supports only a hardened passive WMF subset; unsupported WMF/EMF behavior remains placeholder or stripped."
       ]
     },
@@ -297,13 +295,17 @@
       "id": "wmf-text-passive-output",
       "input": "fixtures/wmf-text-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-text-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
         "Before WMF text.",
         "Hi",
+        "After WMF text."
+      ],
+      "word_must_preserve_text": [
+        "Before WMF text.",
         "After WMF text."
       ],
       "intentional_security_differences": [
@@ -330,7 +332,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF text baseline, alignment, and font metrics once available.",
+        "The bounded inline-image model now matches Word's 72-by-36-point in-paragraph image slot and line flow. Converter origins for `Before WMF text.`, `After WMF `, and the wrapped final `text.` are within 0.23 points horizontally and 0.02 points vertically of Word. The remaining WMF-specific text gap is isolated: Word paints a clipped 6.52-point bold `H` at `(147.58,44.55)`, while the converter paints both `Hi` characters in 4-point Helvetica at `(147.35,44.70)`. Exact metafile font selection and clipping remains pending.",
         "The converter intentionally supports only a hardened passive WMF text subset; unsupported WMF text options remain placeholder or stripped."
       ]
     },
@@ -338,8 +340,8 @@
       "id": "wmf-cliprect-passive-paths",
       "input": "fixtures/wmf-cliprect-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-cliprect-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -375,7 +377,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF clipping geometry and clipped paint extents once available.",
+        "Registered Word reference still needs a focused audit of exact WMF clipping geometry and clipped paint extents.",
         "The converter intentionally supports only a hardened passive WMF clipping subset; unsupported clip operations remain placeholder or stripped."
       ]
     },
@@ -383,8 +385,8 @@
       "id": "wmf-hatch-brush-passive-lines",
       "input": "fixtures/wmf-hatch-brush-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-hatch-brush-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -421,7 +423,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF hatch density, phase, clipping, and color once available.",
+        "Registered Word reference still needs a focused audit of exact WMF hatch density, phase, clipping, and color.",
         "The converter intentionally supports only a hardened passive WMF brush subset; unsupported brush records remain inert, placeholder, or stripped."
       ]
     },
@@ -429,8 +431,8 @@
       "id": "wmf-dashed-pen-passive-stroke",
       "input": "fixtures/wmf-dashed-pen-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-dashed-pen-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -467,7 +469,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF dash length, phase, stroke width, and endpoint behavior once available.",
+        "Registered Word reference still needs a focused audit of exact WMF dash length, phase, stroke width, and endpoint behavior.",
         "The converter intentionally supports only a hardened passive WMF pen subset; unsupported pen records remain inert, placeholder, or stripped."
       ]
     },
@@ -475,8 +477,8 @@
       "id": "wmf-arc-family-passive-paths",
       "input": "fixtures/wmf-arc-family-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-arc-family-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -514,7 +516,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF arc flattening tolerance, chord/pie closure, and fill behavior once available.",
+        "Registered Word reference still needs a focused audit of exact WMF arc flattening tolerance, chord/pie closure, and fill behavior.",
         "The converter intentionally supports only a hardened passive WMF arc subset; unsupported arc behavior remains placeholder or stripped."
       ]
     },
@@ -522,8 +524,8 @@
       "id": "wmf-polybezier-passive-curves",
       "input": "fixtures/wmf-polybezier-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-polybezier-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -559,7 +561,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF PolyBezier curve placement and pen styling once available.",
+        "Registered Word reference still needs a focused audit of exact WMF PolyBezier curve placement and pen styling.",
         "The converter intentionally supports only complete bounded passive Bezier runs; malformed or partial WMF Bezier records remain no-ops, placeholders, or stripped."
       ]
     },
@@ -567,8 +569,8 @@
       "id": "wmf-polybezierto-passive-current-point",
       "input": "fixtures/wmf-polybezierto-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-polybezierto-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -606,7 +608,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF PolyBezierTo current-position and following LineTo placement once available.",
+        "Registered Word reference still needs a focused audit of exact WMF PolyBezierTo current-position and following LineTo placement.",
         "The converter intentionally supports only complete bounded passive BezierTo runs; malformed or partial WMF BezierTo records remain no-ops, placeholders, or stripped."
       ]
     },
@@ -614,8 +616,8 @@
       "id": "wmf-polypolygon-passive-compound-path",
       "input": "fixtures/wmf-polypolygon-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-polypolygon-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -654,7 +656,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF POLYPOLYGON winding fill placement once available.",
+        "Registered Word reference still needs a focused audit of exact WMF POLYPOLYGON winding fill placement.",
         "The converter intentionally supports only bounded passive compound path geometry; malformed or excessive WMF POLYPOLYGON records remain placeholdered or stripped."
       ]
     },
@@ -662,8 +664,8 @@
       "id": "wmf-setpixel-passive-rectangle",
       "input": "fixtures/wmf-setpixel-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-setpixel-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -699,7 +701,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF SETPIXEL scaling and color placement once available.",
+        "Registered Word reference still needs a focused audit of exact WMF SETPIXEL scaling and color placement.",
         "The converter intentionally supports only bounded passive pixel fills; malformed SETPIXEL records remain placeholdered or stripped."
       ]
     },
@@ -707,8 +709,8 @@
       "id": "wmf-roundrect-passive-curves",
       "input": "fixtures/wmf-roundrect-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-roundrect-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -745,7 +747,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF ROUNDRECT corner radius scaling and fill/stroke placement once available.",
+        "Registered Word reference still needs a focused audit of exact WMF ROUNDRECT corner radius scaling and fill/stroke placement.",
         "The converter intentionally supports only bounded passive rounded-rectangle geometry; malformed ROUNDRECT records remain placeholdered or stripped."
       ]
     },
@@ -753,8 +755,8 @@
       "id": "wmf-line-poly-paths-passive",
       "input": "fixtures/wmf-line-poly-paths-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-line-poly-paths-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -794,7 +796,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF line, polyline, and polygon placement and closure behavior once available.",
+        "Registered Word reference still needs a focused audit of exact WMF line, polyline, and polygon placement and closure behavior.",
         "The converter intentionally supports only bounded passive path geometry; malformed or excessive WMF point-list records remain placeholdered or stripped."
       ]
     },
@@ -802,8 +804,8 @@
       "id": "wmf-patblt-passive-rectangle",
       "input": "fixtures/wmf-patblt-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-patblt-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -841,7 +843,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF PATBLT rectangle placement and brush color once available.",
+        "Registered Word reference still needs a focused audit of exact WMF PATBLT rectangle placement and brush color.",
         "The converter intentionally supports only safe source-independent raster operations; unsupported raster operations remain placeholdered or stripped."
       ]
     },
@@ -849,8 +851,8 @@
       "id": "wmf-stretchblt-patcopy-passive-rectangle",
       "input": "fixtures/wmf-stretchblt-patcopy-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-stretchblt-patcopy-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -887,7 +889,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF STRETCHBLT PATCOPY rectangle placement and brush color once available.",
+        "Registered Word reference still needs a focused audit of exact WMF STRETCHBLT PATCOPY rectangle placement and brush color.",
         "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
       ]
     },
@@ -895,8 +897,8 @@
       "id": "wmf-bitblt-patcopy-passive-rectangle",
       "input": "fixtures/wmf-bitblt-patcopy-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-bitblt-patcopy-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -935,7 +937,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF BITBLT PATCOPY rectangle placement and brush color once available.",
+        "Registered Word reference still needs a focused audit of exact WMF BITBLT PATCOPY rectangle placement and brush color.",
         "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
       ]
     },
@@ -943,8 +945,8 @@
       "id": "wmf-dibbitblt-patcopy-passive-rectangle",
       "input": "fixtures/wmf-dibbitblt-patcopy-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-dibbitblt-patcopy-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -983,7 +985,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF DIBBITBLT PATCOPY rectangle placement and brush color once available.",
+        "Registered Word reference still needs a focused audit of exact WMF DIBBITBLT PATCOPY rectangle placement and brush color.",
         "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
       ]
     },
@@ -991,8 +993,8 @@
       "id": "wmf-dibstretchblt-patcopy-passive-rectangle",
       "input": "fixtures/wmf-dibstretchblt-patcopy-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-dibstretchblt-patcopy-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1029,7 +1031,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF DIBSTRETCHBLT PATCOPY rectangle placement and brush color once available.",
+        "Registered Word reference still needs a focused audit of exact WMF DIBSTRETCHBLT PATCOPY rectangle placement and brush color.",
         "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
       ]
     },
@@ -1037,8 +1039,8 @@
       "id": "wmf-stretchdib-patcopy-passive-rectangle",
       "input": "fixtures/wmf-stretchdib-patcopy-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-stretchdib-patcopy-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1075,7 +1077,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF STRETCHDIB PATCOPY rectangle placement and brush color once available.",
+        "Registered Word reference still needs a focused audit of exact WMF STRETCHDIB PATCOPY rectangle placement and brush color.",
         "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
       ]
     },
@@ -1083,8 +1085,8 @@
       "id": "wmf-srccopy-stretchdib-passive-image",
       "input": "fixtures/wmf-srccopy-stretchdib-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-srccopy-stretchdib-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1118,7 +1120,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF STRETCHDIB SRCCOPY image placement and pixel orientation once available.",
+        "Registered Word reference still needs a focused audit of exact WMF STRETCHDIB SRCCOPY image placement and pixel orientation.",
         "The converter preserves only normalized passive pixels; source DIB headers and raw metafile transfer records remain outside the PDF layer."
       ]
     },
@@ -1126,8 +1128,8 @@
       "id": "wmf-setdib-to-dev-passive-image",
       "input": "fixtures/wmf-setdib-to-dev-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-setdib-to-dev-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1161,7 +1163,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF SETDIBTODEV image placement, scan handling, and pixel orientation once available.",
+        "Registered Word reference still needs a focused audit of exact WMF SETDIBTODEV image placement, scan handling, and pixel orientation.",
         "The converter preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },
@@ -1169,8 +1171,8 @@
       "id": "wmf-srccopy-dib-blits-passive-image",
       "input": "fixtures/wmf-srccopy-dib-blits-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-srccopy-dib-blits-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1206,7 +1208,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF DIBBITBLT and DIBSTRETCHBLT SRCCOPY image placement and scaling once available.",
+        "Registered Word reference still needs a focused audit of exact WMF DIBBITBLT and DIBSTRETCHBLT SRCCOPY image placement and scaling.",
         "The converter preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },
@@ -1214,8 +1216,8 @@
       "id": "wmf-srccopy-cropped-dib-passive-image",
       "input": "fixtures/wmf-srccopy-cropped-dib-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wmf-srccopy-cropped-dib-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1252,7 +1254,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF cropped SRCCOPY source-window placement, scaling, and pixel orientation once available.",
+        "Registered Word reference still needs a focused audit of exact WMF cropped SRCCOPY source-window placement, scaling, and pixel orientation.",
         "The converter preserves only cropped normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },
@@ -1297,7 +1299,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact WMF cropped JPEG-in-DIB placement, scaling, clipping, and pixel orientation once available.",
+        "Registered Word reference still needs a focused audit of exact WMF cropped JPEG-in-DIB placement, scaling, clipping, and pixel orientation.",
         "The converter preserves only bounded passive JPEG image draws; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },
@@ -1305,8 +1307,8 @@
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-vector-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1342,7 +1344,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF rectangle and ellipse geometry once available.",
+        "Registered Word reference still needs a focused audit of exact EMF rectangle and ellipse geometry.",
         "The converter intentionally supports only a hardened passive EMF subset; unsupported EMF behavior remains placeholder or stripped."
       ]
     },
@@ -1350,13 +1352,17 @@
       "id": "emf-text-passive-output",
       "input": "fixtures/emf-text-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-text-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
         "Before EMF text.",
         "Hi",
+        "After EMF text."
+      ],
+      "word_must_preserve_text": [
+        "Before EMF text.",
         "After EMF text."
       ],
       "intentional_security_differences": [
@@ -1385,7 +1391,7 @@
         " rg"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF text baseline, alignment, color, and font metrics once available.",
+        "Registered Word reference still needs a focused audit of exact EMF text baseline, alignment, color, and font metrics.",
         "The converter intentionally supports only a hardened passive EMF text subset; unsupported EMF text options remain placeholder or stripped."
       ]
     },
@@ -1393,8 +1399,8 @@
       "id": "emf-cliprect-passive-paths",
       "input": "fixtures/emf-cliprect-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-cliprect-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1429,7 +1435,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF clipping geometry and clipped paint extents once available.",
+        "Registered Word reference still needs a focused audit of exact EMF clipping geometry and clipped paint extents.",
         "The converter intentionally supports only a hardened passive EMF clipping subset; unsupported clip operations remain placeholder or stripped."
       ]
     },
@@ -1437,8 +1443,8 @@
       "id": "emf-hatch-brush-passive-lines",
       "input": "fixtures/emf-hatch-brush-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-hatch-brush-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1476,7 +1482,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF hatch density, Bezier clipping, phase, and color once available.",
+        "Registered Word reference still needs a focused audit of exact EMF hatch density, Bezier clipping, phase, and color.",
         "The converter intentionally supports only a hardened passive EMF brush/path subset; unsupported brush and path records remain inert, placeholder, or stripped."
       ]
     },
@@ -1484,8 +1490,8 @@
       "id": "emf-arc-family-passive-paths",
       "input": "fixtures/emf-arc-family-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-arc-family-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1523,7 +1529,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF arc flattening tolerance, chord/pie closure, ArcTo direction, and fill behavior once available.",
+        "Registered Word reference still needs a focused audit of exact EMF arc flattening tolerance, chord/pie closure, ArcTo direction, and fill behavior.",
         "The converter intentionally supports only a hardened passive EMF arc subset; unsupported arc behavior remains placeholder or stripped."
       ]
     },
@@ -1531,8 +1537,8 @@
       "id": "emf-roundrect-passive-curves",
       "input": "fixtures/emf-roundrect-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-roundrect-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1567,7 +1573,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF rounded-corner radius clamping and stroke geometry once available.",
+        "Registered Word reference still needs a focused audit of exact EMF rounded-corner radius clamping and stroke geometry.",
         "The converter intentionally supports only a hardened passive EMF shape subset; unsupported rounded-rectangle behavior remains placeholder or stripped."
       ]
     },
@@ -1575,8 +1581,8 @@
       "id": "emf-setpixelv-passive-rectangles",
       "input": "fixtures/emf-setpixelv-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-setpixelv-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1612,7 +1618,7 @@
         " f"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF one-pixel rectangle scaling once available.",
+        "Registered Word reference still needs a focused audit of exact EMF one-pixel rectangle scaling.",
         "The converter intentionally supports only bounded passive pixel fills; malformed or unsupported pixel records remain placeholdered or stripped."
       ]
     },
@@ -1620,8 +1626,8 @@
       "id": "emf-polyline-polygon-passive-paths",
       "input": "fixtures/emf-polyline-polygon-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-polyline-polygon-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1659,7 +1665,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF polyline and polygon edge placement once available.",
+        "Registered Word reference still needs a focused audit of exact EMF polyline and polygon edge placement.",
         "The converter intentionally supports only bounded passive path geometry; malformed or excessive poly records remain placeholdered or stripped."
       ]
     },
@@ -1667,8 +1673,8 @@
       "id": "emf-polypolygon-passive-compound-path",
       "input": "fixtures/emf-polypolygon-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-polypolygon-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1707,7 +1713,7 @@
         "\nB\n"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF POLYPOLYGON fill/stroke placement and winding behavior once available.",
+        "Registered Word reference still needs a focused audit of exact EMF POLYPOLYGON fill/stroke placement and winding behavior.",
         "The converter intentionally supports only bounded passive compound path geometry; malformed or excessive compound poly records remain placeholdered or stripped."
       ]
     },
@@ -1715,8 +1721,8 @@
       "id": "emf-bezier-passive-curves",
       "input": "fixtures/emf-bezier-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-bezier-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1754,7 +1760,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF Bezier curve placement and current-position behavior once available.",
+        "Registered Word reference still needs a focused audit of exact EMF Bezier curve placement and current-position behavior.",
         "The converter intentionally supports only complete bounded passive Bezier runs; malformed or partial Bezier records remain no-ops, placeholders, or stripped."
       ]
     },
@@ -1762,8 +1768,8 @@
       "id": "emf-polydraw-passive-mixed-paths",
       "input": "fixtures/emf-polydraw-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-polydraw-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1802,7 +1808,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF POLYDRAW close-subpath and mixed line/Bezier placement once available.",
+        "Registered Word reference still needs a focused audit of exact EMF POLYDRAW close-subpath and mixed line/Bezier placement.",
         "The converter intentionally supports only complete bounded passive POLYDRAW paths; malformed or partial Bezier runs remain no-ops, placeholders, or stripped."
       ]
     },
@@ -1810,8 +1816,8 @@
       "id": "emf-anglearc-passive-polyline",
       "input": "fixtures/emf-anglearc-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-anglearc-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1850,7 +1856,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF ANGLEARC sampling tolerance and current-position behavior once available.",
+        "Registered Word reference still needs a focused audit of exact EMF ANGLEARC sampling tolerance and current-position behavior.",
         "The converter intentionally samples ANGLEARC into bounded passive line segments; malformed records remain no-ops, placeholders, or stripped."
       ]
     },
@@ -1858,8 +1864,8 @@
       "id": "emf-savedc-restoredc-passive-state",
       "input": "fixtures/emf-savedc-restoredc-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/emf-savedc-restoredc-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1899,7 +1905,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact EMF saved-state interaction with all pen and brush attributes once available.",
+        "Registered Word reference still needs a focused audit of exact EMF saved-state interaction with all pen and brush attributes.",
         "The converter intentionally scopes only passive drawing state; malformed or out-of-range restore records remain no-ops, placeholders, or stripped."
       ]
     },
@@ -1907,8 +1913,8 @@
       "id": "static-shape-wrap-passive-flow",
       "input": "fixtures/static-shape-wrap.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/static-shape-wrap.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1936,15 +1942,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact wrapped text line positions beside the passive static shape frame once available."
+        "Registered Word reference still needs a focused audit of exact wrapped text line positions beside the passive static shape frame."
       ]
     },
     {
       "id": "shape-wrap-distance-passive-flow",
       "input": "fixtures/shape-wrap-distance-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-wrap-distance-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -1984,15 +1990,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact wrap-distance conversion and line reflow around the passive shape once available."
+        "Registered Word reference still needs a focused audit of exact wrap-distance conversion and line reflow around the passive shape."
       ]
     },
     {
       "id": "floating-table-passive-positioning",
       "input": "fixtures/floating-table-positioning.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/floating-table-positioning.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2026,15 +2032,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact floating table anchor offsets, wrap distance, and no-overlap placement once available."
+        "Registered Word reference still needs a focused audit of exact floating table anchor offsets, wrap distance, and no-overlap placement."
       ]
     },
     {
       "id": "office-math-passive-text",
       "input": "fixtures/office-math-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/office-math-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2042,6 +2048,10 @@
         "E=mc2",
         "x+1",
         "y",
+        "after math."
+      ],
+      "word_must_preserve_text": [
+        "Before math.",
         "after math."
       ],
       "intentional_security_differences": [
@@ -2068,15 +2078,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact superscript baseline and fraction visual layout once available."
+        "Registered Word reference still needs a focused audit of exact superscript baseline and fraction visual layout."
       ]
     },
     {
       "id": "office-math-structures-passive-layout",
       "input": "fixtures/office-math-structures-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/office-math-structures-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2084,6 +2094,10 @@
         "root-x",
         "over-z",
         "p+q",
+        "after math structures."
+      ],
+      "word_must_preserve_text": [
+        "Before math structures.",
         "after math structures."
       ],
       "intentional_security_differences": [
@@ -2122,15 +2136,15 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact radical bar, overbar, delimiter spacing, and stroke placement once available."
+        "Registered Word reference still needs a focused audit of exact radical bar, overbar, delimiter spacing, and stroke placement."
       ]
     },
     {
       "id": "office-math-flow-passive-layout",
       "input": "fixtures/office-math-flow-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/office-math-flow-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2138,6 +2152,10 @@
         "FirstSecond",
         "x+1",
         "sin x",
+        "after math flow."
+      ],
+      "word_must_preserve_text": [
+        "Before math flow.",
         "after math flow."
       ],
       "intentional_security_differences": [
@@ -2180,15 +2198,15 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact manual-break baseline, group-character stroke placement, function spacing, and phantom spacing once available."
+        "Registered Word reference still needs a focused audit of exact manual-break baseline, group-character stroke placement, function spacing, and phantom spacing."
       ]
     },
     {
       "id": "office-math-limits-arrays-passive-layout",
       "input": "fixtures/office-math-limits-arrays-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/office-math-limits-arrays-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2198,6 +2216,10 @@
         "limx=0maxn",
         "i",
         "VisiblePhantom",
+        "after math arrays."
+      ],
+      "word_must_preserve_text": [
+        "Before math arrays.",
         "after math arrays."
       ],
       "intentional_security_differences": [
@@ -2247,15 +2269,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact equation-array row placement, lower/upper limit baselines, n-ary glyph placement, and visible/hidden phantom spacing once available."
+        "Registered Word reference still needs a focused audit of exact equation-array row placement, lower/upper limit baselines, n-ary glyph placement, and visible/hidden phantom spacing."
       ]
     },
     {
       "id": "field-hyperlink-passive-result",
       "input": "fixtures/field-hyperlink-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/field-hyperlink-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2263,6 +2285,12 @@
         "Visible safe link text",
         "after link.",
         "[Field removed: no passive result]",
+        "after external field."
+      ],
+      "word_must_preserve_text": [
+        "Before field.",
+        "Visible safe link text",
+        "after link.",
         "after external field."
       ],
       "intentional_security_differences": [
@@ -2289,7 +2317,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact stored field-result spacing once available."
+        "The registered Word 16.0 reference confirms that the stored HYPERLINK result is concatenated with surrounding text without synthetic spaces; Strip mode matches both Word lines within 0.07 points horizontally and 0.8 points vertically while deliberately emitting no URI action. Default Placeholder adds one explicit `[Field removed: no passive result]` line for resultless INCLUDEPICTURE, an intentional active-content-policy difference from Word's silent omission."
       ]
     },
     {
@@ -2340,15 +2368,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm placeholder placement and line flow around generated reference fields once available."
+        "Registered Word reference still needs a focused audit of placeholder placement and line flow around generated reference fields."
       ]
     },
     {
       "id": "mail-merge-prompt-fields-passive-placeholders",
       "input": "fixtures/mail-merge-prompt-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/mail-merge-prompt-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2417,15 +2445,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm placeholder placement, MERGEFIELD display glyphs, and default/fallback text spacing once available."
+        "Registered Word reference still needs a focused audit of placeholder placement, MERGEFIELD display glyphs, and default/fallback text spacing."
       ]
     },
     {
       "id": "template-barcode-embed-fields-passive-placeholders",
       "input": "fixtures/template-barcode-embed-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/template-barcode-embed-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2486,44 +2514,44 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact EQ fraction layout, placeholder line flow, and GOTOBUTTON display text spacing once available."
+        "Registered Word reference still needs a focused audit of exact EQ fraction layout, placeholder line flow, and GOTOBUTTON display text spacing."
       ]
     },
     {
       "id": "environment-layout-clock-fields-passive-placeholders",
       "input": "fixtures/environment-layout-clock-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/environment-layout-clock-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
         "Visible before environment fields.",
-        "Size 4096",
+        "Size ",
         "Path [Field removed: no passive result]",
         "Template [Field removed: no passive result]",
         "User [Field removed: no passive result]",
         "Initials [Field removed: no passive result]",
         "Address [Field removed: no passive result]",
-        "Advance after advance.",
+        "Advance 240 120after advance.",
         "Date [Field removed: no passive result]",
         "Time [Field removed: no passive result]",
         "Visible after environment fields."
       ],
       "intentional_security_differences": [
         "Host-environment fields render bounded passive placeholders instead of exposing converter file paths, user names, template paths, or address data.",
-        "FILESIZE may render from passive document metadata without preserving the field instruction or host state.",
-        "ADVANCE is stripped without applying hidden text movement.",
+        "Resultless FILESIZE is suppressed in Word-compatible mode; StrictSpec may render bounded passive document byte metadata.",
+        "Malformed ADVANCE arguments are recovered as Word-visible literal text without applying hidden cursor movement.",
         "DATE and TIME render bounded passive placeholders instead of reading the converter clock."
       ],
       "expected_diagnostics": [
-        "rendering passive field FILESIZE without executing field instruction",
+        "resultless FILESIZE suppressed for Word-compatible passive rendering",
         "environment field FILENAME rendered as passive placeholder without exposing converter host state",
         "environment field TEMPLATE rendered as passive placeholder without exposing converter host state",
         "environment field USERNAME rendered as passive placeholder without exposing converter host state",
         "environment field USERINITIALS rendered as passive placeholder without exposing converter host state",
         "environment field USERADDRESS rendered as passive placeholder without exposing converter host state",
-        "layout field ADVANCE normalized with no visible passive cursor movement",
+        "malformed ADVANCE arguments recovered as Word-compatible passive literal text",
         "dynamic field DATE rendered as passive placeholder without reading converter clock",
         "dynamic field TIME rendered as passive placeholder without reading converter clock"
       ],
@@ -2553,15 +2581,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm FILESIZE numeric formatting; current passive output preserves the metadata value without the requested thousands separator."
+        "The registered Word 16.0 reference confirms that resultless FILESIZE remains blank despite `\\nofbytes4096`, and malformed RTF-level `\\r`/`\\d` controls leave ADVANCE's numeric arguments as visible literal `240 120` text without cursor movement. Strip mode now matches those lines; DATE/TIME values and host-environment values remain intentionally omitted to avoid reading converter host state or clock."
       ]
     },
     {
       "id": "nonvisible-storage-fields-passive-stripping",
       "input": "fixtures/nonvisible-storage-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/nonvisible-storage-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2615,15 +2643,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact whitespace after stripped non-visible fields once available."
+        "The registered Word 16.0 reference confirms exact whitespace recovery: stripping ADDIN, PRIVATE, PRINT, RD, XE, TC, and TA retains both authored surrounding spaces on every line and leaks no payload or link. Horizontal origins agree within 0.02 points; bundled Arial-compatible line pitch accumulates to a 0.77-point vertical difference by the ninth line."
       ]
     },
     {
       "id": "document-property-fields-passive-metadata",
       "input": "fixtures/document-property-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/document-property-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2685,15 +2713,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact metadata field formatting and spacing once available."
+        "Registered Word reference still needs a focused audit of exact metadata field formatting and spacing."
       ]
     },
     {
       "id": "info-custom-docvariable-fields-passive-metadata",
       "input": "fixtures/info-custom-docvariable-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/info-custom-docvariable-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2764,15 +2792,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact INFO/custom-property/DOCVARIABLE spacing and metadata field formatting once available."
+        "Registered Word reference still needs a focused audit of exact INFO/custom-property/DOCVARIABLE spacing and metadata field formatting."
       ]
     },
     {
       "id": "generated-counter-fields-passive-numbering",
       "input": "fixtures/generated-counter-fields-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/generated-counter-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2815,15 +2843,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact AUTONUM/AUTONUMLGL/AUTONUMOUT and LISTNUM numbering semantics once available."
+        "Registered Word reference still needs a focused audit of exact AUTONUM/AUTONUMLGL/AUTONUMOUT and LISTNUM numbering semantics."
       ]
     },
     {
       "id": "cross-reference-fields-passive-resolution",
       "input": "fixtures/cross-reference-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/cross-reference-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2882,15 +2910,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact REF, PAGEREF, NOTEREF, and STYLEREF spacing, footnote marker formatting, and page-reference behavior once available."
+        "Registered Word reference still needs a focused audit of exact REF, PAGEREF, NOTEREF, and STYLEREF spacing, footnote marker formatting, and page-reference behavior."
       ]
     },
     {
       "id": "styleref-resultless-passive-fields",
       "input": "fixtures/styleref-resultless-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/styleref-resultless-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2934,15 +2962,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact STYLEREF result selection when multiple style matches precede the field and when list-number switches are combined with styled paragraphs."
+        "Registered Word reference still needs a focused audit of exact STYLEREF result selection when multiple style matches precede the field and when list-number switches are combined with styled paragraphs."
       ]
     },
     {
       "id": "literal-control-drawing-fields-passive-resolution",
       "input": "fixtures/literal-control-drawing-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/literal-control-drawing-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2994,15 +3022,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact QUOTE/IF/COMPARE/MACROBUTTON spacing, case switch behavior, and SHAPE stored-result placement once available."
+        "Registered Word reference still needs a focused audit of exact QUOTE/IF/COMPARE/MACROBUTTON spacing, case switch behavior, and SHAPE stored-result placement."
       ]
     },
     {
       "id": "timestamp-stat-fields-passive-metadata",
       "input": "fixtures/timestamp-stat-fields-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/timestamp-stat-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3061,15 +3089,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact date/time picture formatting, missing timestamp fallback behavior, and metadata-derived edit/revision formatting once available."
+        "Registered Word reference still needs a focused audit of exact date/time picture formatting, missing timestamp fallback behavior, and metadata-derived edit/revision formatting."
       ]
     },
     {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/line-numbering-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3094,15 +3122,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact line-number margin offset and restart behavior once available."
+        "The registered Word baseline confirms 12-point black margin numbers aligned to the body baseline and right-aligned at the authored 18-point margin distance; multi-page restart-mode parity still needs a focused Word audit."
       ]
     },
     {
       "id": "page-border-art-passive-fallback",
       "input": "fixtures/page-border-art-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/page-border-art-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3127,15 +3155,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact page-border inset and visual fallback thickness once available."
+        "Registered Word reference still needs a focused audit of exact page-border inset and visual fallback thickness."
       ]
     },
     {
       "id": "page-border-scope-passive-layout",
       "input": "fixtures/page-border-scope-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/page-border-scope-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3165,15 +3193,15 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact page border scope relative to header/footer and page edge once available."
+        "Registered Word reference still needs a focused audit of exact page border scope relative to header/footer and page edge."
       ]
     },
     {
       "id": "character-typography-passive-controls",
       "input": "fixtures/character-typography-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/character-typography-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3203,15 +3231,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact kerning threshold and fit-text width once available."
+        "The Word baseline confirms that contiguous authored runs under one fit-text width form a single fitted region; Strip mode now ends that region within 0.17 points of Word (172.75 versus 172.92). Placeholder mode intentionally inserts a separate visible security notice for the resultless object and therefore cannot preserve Word's object-suppressed one-line appearance. Exact kerning-threshold behavior still needs a focused Word probe."
       ]
     },
     {
       "id": "section-grid-page-number-passive-layout",
       "input": "fixtures/section-grid-page-number-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/section-grid-page-number-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3244,7 +3272,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact page-number baseline and section grid line pitch once available."
+        "Registered Word reference still needs a focused audit of exact page-number baseline and section grid line pitch."
       ]
     },
     {
@@ -3365,8 +3393,8 @@
       "id": "table-padding-passive-insets",
       "input": "fixtures/table-padding-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-padding-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3412,15 +3440,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact row-default versus cell-specific padding precedence and text inset placement once available."
+        "Word places both cell baselines together and positions the second cell at x=168.05 even though its `\\clpad*` controls appear after the first cell's text has begun. The converter applies those late controls literally, placing the second cell at x=159 and 3 points lower. Exact malformed-row recovery and row-default/cell-specific precedence require focused Word probes before changing the bounded model."
       ]
     },
     {
       "id": "table-row-height-passive-geometry",
       "input": "fixtures/table-row-height-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-row-height-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3459,15 +3487,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact minimum-height expansion, exact-height clipping, and border/shading extents once available."
+        "The registered Word 16.0 reference confirms the 36-point minimum row, 18-point exact row, exact-height clipping after the first visible line, first-cell-only shading/borders, and immediate post-table flow. The converter now matches those visible behaviors; remaining corrected text/border positions differ by no more than about 0.3 points vertically."
       ]
     },
     {
       "id": "table-cell-text-direction-passive-rotation",
       "input": "fixtures/table-cell-text-direction-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-cell-text-direction-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3507,15 +3535,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact clockwise/counter-clockwise baseline, clipping, and cell alignment once available."
+        "Bundled Arial-compatible font metrics make the two clockwise labels about 3.3 points shorter than Word while preserving their authored row extent, rotation, and cell alignment."
       ]
     },
     {
       "id": "table-cell-vertical-align-passive-positioning",
       "input": "fixtures/table-cell-vertical-align-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-cell-vertical-align-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -3553,15 +3581,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact top/center/bottom baselines and interaction with row height once available."
+        "The registered Word baseline confirms the same top/center/bottom anchoring and following-paragraph position. Current cell x origins differ by at most 0.07 points and the following paragraph by 0.03 points; bundled-font/row-edge interactions place cell text 1.56-1.96 points above Word and remain a bounded row-height approximation. Unspecified authored border colors now match Word black."
       ]
     },
     {
       "id": "table-header-repeat-passive-pagination",
       "input": "fixtures/table-header-repeat-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-header-repeat-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 5,
       "must_preserve_text": [
@@ -3594,15 +3622,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact repeated-header placement and page-break row distribution once available."
+        "Registered Word reference still needs a focused audit of exact repeated-header placement and page-break row distribution."
       ]
     },
     {
       "id": "tall-table-row-split-passive-pagination",
       "input": "fixtures/tall-table-row-split-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/tall-table-row-split-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 4,
       "must_preserve_text": [
@@ -3641,15 +3669,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact split-row fragment heights, repeated-header placement, and object-result spacing once available."
+        "Registered Word reference still needs a focused audit of exact split-row fragment heights, repeated-header placement, and object-result spacing."
       ]
     },
     {
       "id": "table-row-keep-together-passive-pagination",
       "input": "fixtures/table-row-keep-together-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-row-keep-together-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 2,
       "must_preserve_text": [
@@ -3682,15 +3710,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact kept-row page break behavior once available."
+        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, the 72-point kept row begins page two with both lines intact, and the normal row plus post-table paragraph follow at the same 36-point cadence. Origins differ by at most about 1.0 point vertically from bundled Arial-compatible metrics."
       ]
     },
     {
       "id": "table-row-keep-follow-passive-pagination",
       "input": "fixtures/table-row-keep-follow-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-row-keep-follow-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 2,
       "must_preserve_text": [
@@ -3722,15 +3750,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact kept-row pair page break behavior once available."
+        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, and the keep-follow row plus its follower move together to page two before the post-table paragraph. Horizontal origins differ by 0.02 points and vertical origins by at most about 0.98 points from bundled Arial-compatible metrics."
       ]
     },
     {
       "id": "paragraph-keep-pagination-passive-flow",
       "input": "fixtures/paragraph-keep-pagination-passive.rtf",
-      "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-keep-pagination-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 3,
       "must_preserve_text": [
@@ -3744,7 +3772,7 @@
         "Plain tail"
       ],
       "intentional_security_differences": [
-        "Paragraph keep-together and keep-with-next controls are normalized into bounded passive pagination hints.",
+        "Paragraph keep-together and complete bounded keep-with-next chains are normalized into passive pagination hints.",
         "Raw paragraph pagination controls are stripped before PDF rendering."
       ],
       "expected_diagnostics": [],
@@ -3762,15 +3790,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact paragraph keep-together and keep-with-next page break behavior once available."
+        "Bundled Arial-compatible 24-point line metrics place line tops about 2.5 points above Word while preserving the same page grouping and horizontal geometry."
       ]
     },
     {
       "id": "widow-control-passive-pagination",
       "input": "fixtures/widow-control-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/widow-control-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 4,
       "must_preserve_text": [
@@ -3805,17 +3833,18 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact widow-control page break behavior once available."
+        "The registered Word 16.0 reference and converter have identical four-page grouping: the first page ends after `Filler two`, the second after `Filler six`, the third after `Restored tail`, and `Alias plain tail` starts page four. Horizontal origins match exactly; bundled Arial-compatible glyph boxes differ from Word's Arial boxes without changing pagination."
       ]
     },
     {
       "id": "no-wrap-passive-line-breaking",
       "input": "fixtures/no-wrap-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/no-wrap-passive.pdf",
       "word_reference_pages": [],
-      "expected_pages": 1,
+      "expected_pages": 2,
+      "word_expected_pages": 1,
       "must_preserve_text": [
         "Alias Alpha Beta",
         "Alias wrapped paragraph",
@@ -3847,15 +3876,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact no-wrap overflow and table-cell wrapping behavior once available."
+        "Word starts the final fixed-height table row in the remaining page area and clips it at the page boundary; the converter currently moves the bounded row to page 2."
       ]
     },
     {
       "id": "page-break-before-passive-pagination",
       "input": "fixtures/page-break-before-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/page-break-before-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 2,
       "must_preserve_text": [
@@ -3881,17 +3910,17 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact page-break-before placement once available."
+        "The converter matches Word's exact two-page grouping: page one contains only `First page text`, and both following paragraphs start at the top of page two. Text origins differ by 0.02 points horizontally and at most 0.80 points vertically from bundled Arial-compatible metrics."
       ]
     },
     {
       "id": "section-break-kinds-passive-pagination",
       "input": "fixtures/section-break-kinds-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/section-break-kinds-passive.pdf",
       "word_reference_pages": [],
-      "expected_pages": 2,
+      "expected_pages": 3,
       "must_preserve_text": [
         "Alpha flow.",
         "Beta flow.",
@@ -3916,15 +3945,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact continuous-section same-page flow and page-section break placement once available."
+        "The registered Word 16.0 reference confirms that legacy `\\sbknone` recovers as a page section break in Word-compatible mode: Alpha, Beta, and Gamma each begin on their own 306-by-396-point page. StrictSpec retains the formal continuous interpretation. Converter page grouping, media boxes, and visible origins now match Word."
       ]
     },
     {
       "id": "odd-section-break-passive-pagination",
       "input": "fixtures/odd-section-break-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/odd-section-break-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 3,
       "must_preserve_text": [
@@ -3949,23 +3978,23 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact blank parity page behavior and following-section text placement once available."
+        "The registered Word 16.0 reference confirms a blank physical page two and the odd-start section on page three when facing pages are disabled. Converter page count, blank-page placement, media boxes, and following-section origin match Word."
       ]
     },
     {
       "id": "even-section-break-passive-pagination",
       "input": "fixtures/even-section-break-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/even-section-break-passive.pdf",
       "word_reference_pages": [],
-      "expected_pages": 2,
+      "expected_pages": 3,
       "must_preserve_text": [
         "First parity section.",
         "Even-start section."
       ],
       "intentional_security_differences": [
-        "Even-page section breaks are normalized into bounded passive pagination and only insert blank parity pages when required by the physical page number.",
+        "Even-page section breaks are normalized into bounded passive pagination; without facing pages Word starts the following section on a right-hand odd page, while authored facing-page documents retain true even parity.",
         "Raw section-break controls are stripped before PDF rendering and cannot carry active section metadata into the PDF layer."
       ],
       "expected_diagnostics": [],
@@ -3982,15 +4011,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact even-page section-start placement and blank-page insertion behavior for documents where parity requires one."
+        "The registered Word 16.0 reference confirms that a non-facing document treats this even-page section start as a right-hand odd-page start: physical page two is blank and the section begins on page three. Converter page count, blank page, media boxes, and visible page-three origin now match Word; facing-page documents retain true even-page starts."
       ]
     },
     {
       "id": "page-vertical-alignment-passive-layout",
       "input": "fixtures/page-vertical-alignment-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/page-vertical-alignment-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4016,15 +4045,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact page vertical alignment offsets once available."
+        "Word applies the final vertical-alignment setting retroactively to the whole section. The converter now does the same: the final `\\vertalt` places both paragraphs at the top, with origins differing by 0.02 points horizontally and at most 0.80 points vertically from bundled Arial-compatible metrics."
       ]
     },
     {
       "id": "page-gutter-passive-binding-space",
       "input": "fixtures/page-gutter-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/page-gutter-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 3,
       "must_preserve_text": [
@@ -4056,15 +4085,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact gutter-side offsets for normal, mirrored, and right-to-left page geometry once available."
+        "Word treats `\\gutterprl` as a document-wide top gutter for horizontal text and ignores the fixture's nonstandard `\\margmirsxn` alias. The converter now matches all three pages at x=36 within 0.02 points and y=72 within 0.80 points; standard `\\margmirror` and bounded `\\rtlgutter` side geometry remain separately supported."
       ]
     },
     {
       "id": "landscape-zero-geometry-passive-page",
       "input": "fixtures/landscape-zero-geometry-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/landscape-zero-geometry-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 3,
       "must_preserve_text": [
@@ -4097,15 +4126,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact portrait page media box and section page-size behavior once available."
+        "Word and converter both produce three exact 612-by-792-point portrait media boxes. Each paragraph starts at the same 72-point margins; origins differ by 0.02 points horizontally and 0.85 points vertically from bundled Times-compatible metrics."
       ]
     },
     {
       "id": "alignment-direction-passive-layout",
       "input": "fixtures/alignment-direction-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/alignment-direction-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4118,7 +4147,7 @@
         "LTR text"
       ],
       "intentional_security_differences": [
-        "Distributed and Thai alignment controls are normalized into bounded passive justified paragraph layout.",
+        "Distributed alignment is normalized into bounded passive word spacing on non-final lines and character spacing on the final line; Thai distributed/justified controls retain bounded passive word justification.",
         "Paragraph direction controls are rendered as passive paragraph alignment metadata without preserving raw controls.",
         "Character direction controls are bounded to passive visual text order and do not create active PDF features."
       ],
@@ -4144,15 +4173,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact distributed alignment spacing and bidirectional visual ordering once available."
+        "Exact-family font assets now outrank wildcard fallbacks, restoring Word's implicit Times-family line breaks. Distributed final-line character spacing ends 3.13 points before Word from Tinos metrics; paragraph origins differ by at most 0.92 points vertically, right alignment by 0.17 points horizontally, and passive Hebrew/LTR visual ordering matches."
       ]
     },
     {
       "id": "paragraph-indent-aliases-passive-layout",
       "input": "fixtures/paragraph-indent-aliases-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-indent-aliases-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4160,7 +4189,7 @@
         "Normal following paragraph"
       ],
       "intentional_security_differences": [
-        "Word paragraph indent aliases are normalized into bounded passive paragraph geometry.",
+        "Word directional paragraph indents `\\linN` and `\\rinN` are normalized into bounded passive geometry; the nonstandard `\\finN` spelling is consumed without changing first-line indentation, matching Word.",
         "Raw indent alias controls are stripped before PDF rendering and cannot create active PDF features."
       ],
       "expected_diagnostics": [],
@@ -4179,15 +4208,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact first-line, left, and right indent offsets once available."
+        "Bundled Times-compatible font metrics differ slightly from Word's Times New Roman metrics; observed baselines differ by at most about 0.7 points."
       ]
     },
     {
       "id": "paragraph-spacing-passive-flow",
       "input": "fixtures/paragraph-spacing-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-spacing-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4219,15 +4248,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact auto-spacing and contextual spacing offsets once available."
+        "The Word baseline confirms that parameterless automatic spacing does not synthesize a gap and contextual spacing suppresses the boundary when either adjacent same-style paragraph opts in. All five converter baselines now follow Word's unspaced cadence; bundled Arial-compatible line metrics produce diminishing vertical residuals of 0.80, 0.60, 0.40, 0.20, and 0.00 points."
       ]
     },
     {
       "id": "line-spacing-passive-flow",
       "input": "fixtures/line-spacing-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/line-spacing-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4262,15 +4291,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word baseline confirms one-page flow and automatic recovery for the extreme value; exact multiple-line and exact-line internal offsets remain a bounded passive-layout approximation."
+        "The Word baseline confirms one-page flow and automatic recovery for the extreme value. Multiple spacing now preserves the natural first-line glyph baseline while expanding bounded line advance: the second double-spaced line differs by 0.20 points vertically, exact-line two by 0.05 points, and subsequent lines by at most 0.39 points. The first double-spaced line remains 2.64 points high because bundled Arial-compatible leading differs from Word's font metrics."
       ]
     },
     {
       "id": "soft-breaks-passive-flow",
       "input": "fixtures/soft-breaks-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/soft-breaks-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4296,7 +4325,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm whether soft break hints have any visible wrapping impact in edge cases once available."
+        "Registered Word reference still needs a focused audit of whether soft break hints have any visible wrapping impact in edge cases."
       ]
     },
     {
@@ -4338,8 +4367,8 @@
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/text-effects-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4377,15 +4406,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact outline stroke, shadow offset, relief effect, and small-caps sizing once available."
+        "The registered Word 16.0 reference proves emboss and imprint are independent character states, with emboss taking visual precedence while both are active and `\\impr0` leaving still-active emboss unchanged for `level` and the following caps/small-caps paragraph. Parser and list-level normalization match that persistence. PDF relief paint now matches Word's measured three-layer 12pt treatment: a 60%-gray highlight at the nominal origin, a dark copy at (-1.92,+1.92) points, and the source color at (-0.96,+0.96), scaled by font size with passive bounds. Outline placement and transformed text casing align visually."
       ]
     },
     {
       "id": "text-decoration-passive-strokes",
       "input": "fixtures/text-decoration-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/text-decoration-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4424,15 +4453,15 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact underline word gaps, underline color fallback, and overline offset once available."
+        "The registered Word baseline confirms word-only gaps, red underline color, and automatic black fallback with horizontal endpoints within 0.14 points; ordinary underline thickness is now calibrated from 0.5 to Word's approximately 0.84 points. Word ignores direct overline controls entirely, so Word-compatible mode now does likewise while StrictSpec retains passive overline strokes."
       ]
     },
     {
       "id": "character-highlight-border-passive-drawing",
       "input": "fixtures/character-highlight-border-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/character-highlight-border-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4471,7 +4500,7 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact highlight bounds, character shading tint, border spacing, and clamped border width once available."
+        "Registered Word reference still needs a focused audit of exact highlight bounds, character shading tint, border spacing, and clamped border width."
       ]
     },
     {
@@ -4523,8 +4552,8 @@
       "id": "form-field-shading-passive-fill",
       "input": "fixtures/form-field-shading-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/form-field-shading-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4559,15 +4588,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact passive form shading bounds and color once available."
+        "Registered Word reference still needs a focused audit of exact passive form shading bounds and color."
       ]
     },
     {
       "id": "note-placement-passive-layout",
       "input": "fixtures/note-placement-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/note-placement-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 2,
       "must_preserve_text": [
@@ -4610,8 +4639,8 @@
       "id": "note-restart-numbering-passive-layout",
       "input": "fixtures/note-restart-numbering-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/note-restart-numbering-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4654,8 +4683,8 @@
       "id": "shape-rotation-passive-static-geometry",
       "input": "fixtures/shape-rotation-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-rotation-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4688,15 +4717,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact rotated rectangle path geometry and fill/stroke placement once available."
+        "Registered Word reference still needs a focused audit of exact rotated rectangle path geometry and fill/stroke placement."
       ]
     },
     {
       "id": "section-columns-passive-layout",
       "input": "fixtures/section-columns-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/section-columns-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4723,15 +4752,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact column widths, gap, separator rule position, and column-break flow once available."
+        "Registered Word reference still needs a focused audit of exact column widths, gap, separator rule position, and column-break flow."
       ]
     },
     {
       "id": "column-section-break-passive-layout",
       "input": "fixtures/column-section-break-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/column-section-break-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4755,15 +4784,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact same-page column break placement for section-break-as-column-flow once available."
+        "Registered Word reference still needs a focused audit of exact same-page column break placement for section-break-as-column-flow."
       ]
     },
     {
       "id": "tab-alignment-passive-layout",
       "input": "fixtures/tab-alignment-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/tab-alignment-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4803,15 +4832,15 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact right, decimal, center, default-width, leader, and bar-tab positioning once available."
+        "The registered Word baseline confirms right, decimal, center, default-width, and later-stop placement within 0.05 points. Word ignores the malformed parameterless bar-tab control and draws no bar; Word-compatible recovery now does the same while valid parameterized bar tabs remain supported. Dot-leader glyph count/spacing still differs slightly under bundled Arial metrics."
       ]
     },
     {
       "id": "legacy-textbox-passive-shape",
       "input": "fixtures/legacy-textbox-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/legacy-textbox-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4853,15 +4882,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact legacy drawing text-box frame position, z-order, and text inset once available."
+        "Registered Word reference still needs a focused audit of exact legacy drawing text-box frame position, z-order, and text inset."
       ]
     },
     {
       "id": "shading-patterns-passive-fill",
       "input": "fixtures/shading-patterns-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shading-patterns-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4901,15 +4930,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact paragraph/table shading color, density, and pattern line placement once available."
+        "Registered Word reference still needs a focused audit of exact paragraph/table shading color, density, and pattern line placement."
       ]
     },
     {
       "id": "paragraph-borders-passive-lines",
       "input": "fixtures/paragraph-borders-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-borders-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4947,15 +4976,15 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact paragraph border offsets, between-border placement, side selection, and dash metrics once available."
+        "The registered Word baseline confirms box/bar side selection, outward border flow, between-border placement, and a 3:1 dash cadence. Corrected stroke coordinates differ from Word by at most 0.14 points and text baselines by at most 0.64 points under bundled Arial metrics."
       ]
     },
     {
       "id": "table-borders-passive-lines",
       "input": "fixtures/table-borders-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-borders-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -4996,7 +5025,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact row, inner, cell, and diagonal border stroke placement, styles, widths, and colors once available."
+        "Registered Word reference still needs a focused audit of exact row, inner, cell, and diagonal border stroke placement, styles, widths, and colors."
       ]
     },
     {
@@ -5046,15 +5075,15 @@
         " S"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact carried-row border reuse, cell widths, and row spacing once available."
+        "Registered Word reference still needs a focused audit of exact carried-row border reuse, cell widths, and row spacing."
       ]
     },
     {
       "id": "intbl-zero-body-flow-passive-layout",
       "input": "fixtures/intbl-zero-body-flow-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/intbl-zero-body-flow-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5084,15 +5113,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact paragraph spacing and body-flow placement after intbl0 table-state reset once available."
+        "The registered Word 16.0 reference confirms that `\\intbl0` exits table state without adding body-flow spacing. Corrected converter lines use Word's 13.80-point Arial pitch across body-to-table and table-to-body boundaries; substitute glyph boxes remain 0.95 points above Word with a 0.02-point horizontal difference."
       ]
     },
     {
       "id": "table-merged-cells-passive-geometry",
       "input": "fixtures/table-merged-cells-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/table-merged-cells-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5138,15 +5167,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact merged-cell border suppression, shading extents, and cell text placement once available."
+        "Registered Word reference still needs a focused audit of exact merged-cell border suppression, shading extents, and cell text placement."
       ]
     },
     {
       "id": "nested-table-flatten-passive-layout",
       "input": "fixtures/nested-table-flatten-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/nested-table-flatten-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5195,15 +5224,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact nested-table flattening order, spacing, and approximation versus true nested table geometry once available."
+        "Registered Word reference still needs a focused audit of exact nested-table flattening order, spacing, and approximation versus true nested table geometry."
       ]
     },
     {
       "id": "old-style-list-passive-markers",
       "input": "fixtures/old-style-list-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/old-style-list-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5233,17 +5262,17 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact old-style list marker indentation, hanging offset, tab spacing, and numbering continuation once available."
+        "Registered Word reference still needs a focused audit of exact old-style list marker indentation, hanging offset, tab spacing, and numbering continuation."
       ]
     },
     {
       "id": "section-number-passive-fields",
       "input": "fixtures/section-number-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/section-number-passive.pdf",
       "word_reference_pages": [],
-      "expected_pages": 2,
+      "expected_pages": 3,
       "must_preserve_text": [
         "Part 1",
         "Part 2",
@@ -5267,15 +5296,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact section-number pagination and restart/continue behavior once available."
+        "The registered Word 16.0 reference confirms three one-paragraph sections numbered 1, 2, and 3 on separate 306-by-396-point pages. Word-compatible `\\sbknone` recovery now preserves that pagination while generated passive SECTION text increments correctly; StrictSpec retains continuous-section semantics."
       ]
     },
     {
       "id": "picture-scaling-passive-image-geometry",
       "input": "fixtures/picture-scaling-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/picture-scaling-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5313,15 +5342,15 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact scaled/cropped image transform and clipping geometry once available."
+        "Word fully clips the two-pixel source because the positive crop exceeds its natural bitmap extent while retaining a 30-by-60-point flow frame; the converter matches that visible behavior but keeps the sanitized, undrawn image XObject in page resources. Bundled Times-compatible text metrics remain wider than Word's Times New Roman."
       ]
     },
     {
       "id": "picture-adjustments-passive-image-pixels",
       "input": "fixtures/picture-adjustments-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/picture-adjustments-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5364,15 +5393,15 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact grayscale, bilevel, brightness, and contrast pixel transforms once available."
+        "Grayscale and bilevel pixels now match Word exactly after alpha-to-black flattening and Rec. 709 luminance conversion; the combined brightness/contrast transform remains gated on the dedicated Word tone probe."
       ]
     },
     {
       "id": "jpeg-trailing-payload-passive-image",
       "input": "fixtures/jpeg-trailing-payload-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/jpeg-trailing-payload-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5399,15 +5428,15 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word-exported reference should confirm exact JPEG placement and raster appearance once available."
+        "Registered Word reference still needs a focused audit of exact JPEG placement and raster appearance."
       ]
     },
     {
       "id": "associated-character-passive-controls",
       "input": "fixtures/associated-character-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/associated-character-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5443,15 +5472,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact associated-control bold/italic/color/underline/spacing/baseline rendering once available."
+        "Registered Word reference still needs a focused audit of exact associated-control bold/italic/color/underline/spacing/baseline rendering."
       ]
     },
     {
       "id": "font-family-hints-passive-substitution",
       "input": "fixtures/font-family-hints-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/font-family-hints-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5485,15 +5514,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact family/theme font substitution metrics once bundled or caller-provided fonts are available."
+        "Registered Word reference still needs a focused audit of exact family/theme font substitution metrics once bundled or caller-provided fonts are available."
       ]
     },
     {
       "id": "font-charset-greek-passive-decoding",
       "input": "fixtures/font-charset-greek-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/font-charset-greek-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5521,15 +5550,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Greek charset glyph mapping, font fallback metrics, and Symbol-compatible text encoding once available."
+        "Registered Word reference still needs a focused audit of exact Greek charset glyph mapping, font fallback metrics, and Symbol-compatible text encoding."
       ]
     },
     {
       "id": "font-charset-cyrillic-passive-decoding",
       "input": "fixtures/font-charset-cyrillic-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/font-charset-cyrillic-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5557,15 +5586,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Cyrillic charset glyph mapping, bundled-font metrics, and PDF text extraction behavior once available."
+        "Registered Word reference still needs a focused audit of exact Cyrillic charset glyph mapping, bundled-font metrics, and PDF text extraction behavior."
       ]
     },
     {
       "id": "font-charset-central-european-passive-decoding",
       "input": "fixtures/font-charset-central-european-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/font-charset-central-european-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5593,15 +5622,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Central European charset glyph mapping, bundled-font metrics, and PDF text extraction behavior once available."
+        "Registered Word reference still needs a focused audit of exact Central European charset glyph mapping, bundled-font metrics, and PDF text extraction behavior."
       ]
     },
     {
       "id": "font-charset-turkish-passive-decoding",
       "input": "fixtures/font-charset-turkish-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/font-charset-turkish-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5629,15 +5658,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Turkish charset glyph mapping, bundled-font metrics, and PDF text extraction behavior once available."
+        "Registered Word reference still needs a focused audit of exact Turkish charset glyph mapping, bundled-font metrics, and PDF text extraction behavior."
       ]
     },
     {
       "id": "font-charset-baltic-passive-decoding",
       "input": "fixtures/font-charset-baltic-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/font-charset-baltic-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5665,15 +5694,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Baltic charset glyph mapping, bundled-font metrics, and PDF text extraction behavior once available."
+        "Registered Word reference still needs a focused audit of exact Baltic charset glyph mapping, bundled-font metrics, and PDF text extraction behavior."
       ]
     },
     {
       "id": "font-code-page-passive-decoding",
       "input": "fixtures/font-code-page-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/font-code-page-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5704,15 +5733,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact IBM437 and MacRoman glyph mapping, font fallback metrics, and PDF text extraction behavior once available."
+        "Registered Word reference still needs a focused audit of exact IBM437 and MacRoman glyph mapping, font fallback metrics, and PDF text extraction behavior."
       ]
     },
     {
       "id": "font-charset-legacy-code-page-passive-decoding",
       "input": "fixtures/font-charset-legacy-code-page-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/font-charset-legacy-code-page-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5743,15 +5772,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact MacRoman and OEM glyph mapping, font fallback metrics, and PDF text extraction behavior once available."
+        "Registered Word reference still needs a focused audit of exact MacRoman and OEM glyph mapping, font fallback metrics, and PDF text extraction behavior."
       ]
     },
     {
       "id": "zero-width-formatting-passive-controls",
       "input": "fixtures/zero-width-formatting-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/zero-width-formatting-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5789,15 +5818,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact copy/paste text extraction behavior for zero-width formatting marks once available."
+        "Registered Word reference still needs a focused audit of exact copy/paste text extraction behavior for zero-width formatting marks."
       ]
     },
     {
       "id": "symbol-font-passive-glyph-decoding",
       "input": "fixtures/symbol-font-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/symbol-font-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5829,15 +5858,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Symbol glyph mapping, font metrics, and PDF text extraction behavior once available."
+        "Registered Word reference still needs a focused audit of exact Symbol glyph mapping, font metrics, and PDF text extraction behavior."
       ]
     },
     {
       "id": "symbol-field-passive-resultless-rendering",
       "input": "fixtures/symbol-field-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/symbol-field-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5866,15 +5895,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact resultless SYMBOL field glyph mapping and field fallback behavior once available."
+        "Registered Word reference still needs a focused audit of exact resultless SYMBOL field glyph mapping and field fallback behavior."
       ]
     },
     {
       "id": "pntext-symbol-list-passive-markers",
       "input": "fixtures/pntext-symbol-list-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/pntext-symbol-list-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5909,15 +5938,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact explicit pntext bullet and Roman marker spacing once available."
+        "Registered Word reference still needs a focused audit of exact explicit pntext bullet and Roman marker spacing."
       ]
     },
     {
       "id": "wingdings-checkbox-passive-vectors",
       "input": "fixtures/wingdings-checkbox-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wingdings-checkbox-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5954,15 +5983,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Wingdings checkbox glyph mapping, checkbox vector geometry, and field fallback spacing once available."
+        "Registered Word reference still needs a focused audit of exact Wingdings checkbox glyph mapping, checkbox vector geometry, and field fallback spacing."
       ]
     },
     {
       "id": "wingdings2-checkbox-passive-vectors",
       "input": "fixtures/wingdings2-checkbox-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wingdings2-checkbox-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -5994,15 +6023,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Wingdings 2 checkbox glyph mapping, checkbox vector geometry, and field fallback spacing once available."
+        "Registered Word reference still needs a focused audit of exact Wingdings 2 checkbox glyph mapping, checkbox vector geometry, and field fallback spacing."
       ]
     },
     {
       "id": "wingdings3-arrows-passive-symbol-encoding",
       "input": "fixtures/wingdings3-arrows-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/wingdings3-arrows-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6033,15 +6062,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Wingdings 3 arrow glyph mapping, Symbol-encoded PDF output, and field fallback spacing once available."
+        "Registered Word reference still needs a focused audit of exact Wingdings 3 arrow glyph mapping, Symbol-encoded PDF output, and field fallback spacing."
       ]
     },
     {
       "id": "webdings-checkbox-passive-vectors",
       "input": "fixtures/webdings-checkbox-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/webdings-checkbox-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6076,15 +6105,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Webdings checkbox glyph mapping, checkbox vector geometry, and field fallback spacing once available."
+        "Registered Word reference still needs a focused audit of exact Webdings checkbox glyph mapping, checkbox vector geometry, and field fallback spacing."
       ]
     },
     {
       "id": "segoe-ui-symbol-checkbox-passive-vectors",
       "input": "fixtures/segoe-ui-symbol-checkbox-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/segoe-ui-symbol-checkbox-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6118,15 +6147,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Segoe UI Symbol checkbox glyph mapping, checkbox vector geometry, and label spacing once available."
+        "Registered Word reference still needs a focused audit of exact Segoe UI Symbol checkbox glyph mapping, checkbox vector geometry, and label spacing."
       ]
     },
     {
       "id": "form-checkbox-passive-vectors",
       "input": "fixtures/form-checkbox-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/form-checkbox-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6171,15 +6200,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact checked and unchecked form checkbox vector geometry and label spacing once available."
+        "Registered Word reference still needs a focused audit of exact checked and unchecked form checkbox vector geometry and label spacing."
       ]
     },
     {
       "id": "form-text-dropdown-passive-values",
       "input": "fixtures/form-text-dropdown-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/form-text-dropdown-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6238,7 +6267,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact FORMTEXT default spacing, Unicode form value glyph rendering, and FORMDROPDOWN selected-entry spacing once available."
+        "Registered Word reference still needs a focused audit of exact FORMTEXT default spacing, Unicode form value glyph rendering, and FORMDROPDOWN selected-entry spacing."
       ]
     },
     {
@@ -6306,8 +6335,8 @@
       "id": "document-protection-passive-stripping",
       "input": "fixtures/document-protection-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/document-protection-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6345,7 +6374,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact body spacing around stripped document-protection metadata once available."
+        "Registered Word reference still needs a focused audit of exact body spacing around stripped document-protection metadata."
       ]
     },
     {
@@ -6408,15 +6437,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact body spacing around stripped mail-merge and object metadata once available."
+        "Registered Word reference still needs a focused audit of exact body spacing around stripped mail-merge and object metadata."
       ]
     },
     {
       "id": "private-metadata-passive-stripping",
       "input": "fixtures/private-metadata-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/private-metadata-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6466,15 +6495,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact body spacing around stripped private metadata once available."
+        "Registered Word reference still needs a focused audit of exact body spacing around stripped private metadata."
       ]
     },
     {
       "id": "review-bookmark-metadata-passive-stripping",
       "input": "fixtures/review-bookmark-metadata-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/review-bookmark-metadata-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6525,15 +6554,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact body spacing around stripped review, bookmark, and deleted-text metadata once available."
+        "Registered Word reference still needs a focused audit of exact body spacing around stripped review, bookmark, and deleted-text metadata."
       ]
     },
     {
       "id": "hidden-animation-passive-stripping",
       "input": "fixtures/hidden-animation-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/hidden-animation-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6573,7 +6602,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact spacing around stripped hidden text and static animation rendering once available."
+        "Registered Word reference still needs a focused audit of exact spacing around stripped hidden text and static animation rendering."
       ]
     },
     {
@@ -6627,15 +6656,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact font fallback/substitution and body spacing around stripped font/template metadata once available."
+        "Registered Word reference still needs a focused audit of exact font fallback/substitution and body spacing around stripped font/template metadata."
       ]
     },
     {
       "id": "macro-script-metadata-passive-stripping",
       "input": "fixtures/macro-script-metadata-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/macro-script-metadata-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6679,15 +6708,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact body spacing around stripped macro/script metadata once available."
+        "Registered Word reference still needs a focused audit of exact body spacing around stripped macro/script metadata."
       ]
     },
     {
       "id": "html-xml-metadata-passive-stripping",
       "input": "fixtures/html-xml-metadata-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/html-xml-metadata-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6736,15 +6765,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact visible text spacing around stripped encapsulated HTML and custom XML markup once available."
+        "Registered Word reference still needs a focused audit of exact visible text spacing around stripped encapsulated HTML and custom XML markup."
       ]
     },
     {
       "id": "word-metadata-session-passive-classification",
       "input": "fixtures/word-metadata-session-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/word-metadata-session-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6824,15 +6853,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact spacing and line layout impact of these Word metadata/session controls once available."
+        "Registered Word reference still needs a focused audit of exact spacing and line layout impact of these Word metadata/session controls."
       ]
     },
     {
       "id": "stylesheet-metadata-passive-classification",
       "input": "fixtures/stylesheet-metadata-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/stylesheet-metadata-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6878,15 +6907,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact visual impact of paragraph and linked character style metadata once available."
+        "Registered Word reference still needs a focused audit of exact visual impact of paragraph and linked character style metadata."
       ]
     },
     {
       "id": "structural-metadata-passive-stripping",
       "input": "fixtures/structural-metadata-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/structural-metadata-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6939,15 +6968,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact text spacing around stripped structural metadata and hidden metadata REF placeholders once available."
+        "Registered Word reference still needs a focused audit of exact text spacing around stripped structural metadata and hidden metadata REF placeholders."
       ]
     },
     {
       "id": "word-grid-outline-metadata-passive-classification",
       "input": "fixtures/word-grid-outline-metadata-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/word-grid-outline-metadata-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -6976,7 +7005,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm whether outline/grid metadata has any visible pagination or spacing impact for this fixture."
+        "Registered Word reference still needs a focused audit of whether outline/grid metadata has any visible pagination or spacing impact for this fixture."
       ]
     },
     {
@@ -7030,8 +7059,8 @@
       "id": "word-layout-compatibility-passive-classification",
       "input": "fixtures/word-layout-compatibility-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/word-layout-compatibility-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7103,15 +7132,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm which compatibility controls change visible spacing or line layout and which are inert for this fixture."
+        "Registered Word reference still needs a focused audit of which compatibility controls change visible spacing or line layout and which are inert for this fixture."
       ]
     },
     {
       "id": "section-pages-passive-field",
       "input": "fixtures/section-pages-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/section-pages-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 3,
       "must_preserve_text": [
@@ -7136,7 +7165,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact late SECTIONPAGES replacement, wrapping, and per-section page-count behavior once available."
+        "Registered Word reference still needs a focused audit of exact late SECTIONPAGES replacement, wrapping, and per-section page-count behavior."
       ]
     },
     {
@@ -7192,8 +7221,8 @@
       "id": "header-footer-distance-passive-layout",
       "input": "fixtures/header-footer-distance-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/header-footer-distance-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7221,15 +7250,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact header and footer vertical offsets once available."
+        "The registered Word 16.0 reference confirms the authored header and footer distances and 72-point horizontal origin. Converter text boxes sit 0.66 points above Word for the header and body and 0.95 points above for the footer, consistent with the bounded bundled Times-compatible metric-box approximation."
       ]
     },
     {
       "id": "background-shape-passive-page-layer",
       "input": "fixtures/background-shape-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/background-shape-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7259,15 +7288,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact background shape page-layer position, fill color, and paint order once available."
+        "Registered Word reference still needs a focused audit of exact background shape page-layer position, fill color, and paint order."
       ]
     },
     {
       "id": "shape-z-order-text-passive-drawing-order",
       "input": "fixtures/shape-z-order-text-passive.rtf",
       "category": "acceptable_approximation",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-z-order-text-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7299,15 +7328,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact z-order paint order and shape-text frame positioning once available."
+        "Registered Word reference still needs a focused audit of exact z-order paint order and shape-text frame positioning."
       ]
     },
     {
       "id": "shape-arrowheads-passive-line-decoration",
       "input": "fixtures/shape-arrowheads-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-arrowheads-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7315,7 +7344,7 @@
         "After arrow line."
       ],
       "intentional_security_differences": [
-        "Office drawing arrowhead properties are normalized into bounded passive line geometry and never preserved as editable shape metadata.",
+        "Word-compatible mode follows Word by ignoring Office arrowhead and arrow-size properties inside legacy `\\do` drawings; StrictSpec and modern shapes retain bounded passive arrow geometry.",
         "Unsupported or active drawing payload properties adjacent to the arrowhead metadata are stripped before PDF rendering."
       ],
       "expected_diagnostics": [],
@@ -7341,15 +7370,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact start/end arrowhead shape, stroke joins, and endpoint alignment once available."
+        "Word and converter now emit one plain butt-capped solid line at `(90,96)-(162,132)` with no arrowhead paths; converter stroke width rounds to 0.15 points versus Word's 0.14 points, and bundled Arial-compatible text remains about 0.96 points above Word vertically."
       ]
     },
     {
       "id": "shape-line-dashing-passive-stroke",
       "input": "fixtures/shape-line-dashing-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-line-dashing-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7357,7 +7386,7 @@
         "After dashed line."
       ],
       "intentional_security_differences": [
-        "Office drawing dash metadata is normalized into bounded passive PDF stroke geometry and never preserved as editable shape metadata.",
+        "Word-compatible mode follows Word by ignoring Office dash properties inside legacy `\\do` drawings; StrictSpec can normalize them into bounded passive stroke geometry.",
         "Unsupported or active drawing payload properties adjacent to line dashing are stripped before PDF rendering."
       ],
       "expected_diagnostics": [],
@@ -7382,15 +7411,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact dash-dot pattern length, phase, and stroke endpoint behavior once available."
+        "The registered Word 16.0 reference proves `lineDashing=dashDot` is ignored inside this legacy `\\do`: Word emits one plain butt-capped solid line at `(90,96)-(162,132)` with a 0.14-point hairline. Word-compatible output now matches geometry, flow, cap, dash state, and endpoints, with only 0.01 point of PDF stroke-width rounding."
       ]
     },
     {
       "id": "shape-line-cap-passive-stroke",
       "input": "fixtures/shape-line-cap-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-line-cap-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7398,7 +7427,7 @@
         "After capped line."
       ],
       "intentional_security_differences": [
-        "Office drawing line cap metadata is normalized into bounded passive PDF stroke geometry and never preserved as editable shape metadata.",
+        "Word-compatible mode follows Word by ignoring Office line-cap properties inside legacy `\\do` drawings; StrictSpec can normalize them into bounded passive stroke geometry.",
         "Unsupported or active drawing payload properties adjacent to line caps are stripped before PDF rendering."
       ],
       "expected_diagnostics": [
@@ -7425,15 +7454,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact round cap radius and endpoint extension once available."
+        "The registered Word 16.0 reference proves `lineEndCap=round` is ignored inside this legacy `\\do`: Word emits one butt-capped solid line at `(90,96)-(162,132)` with a 0.14-point hairline. Word-compatible output now matches geometry, out-of-flow paragraph anchoring, cap, and endpoints, with only 0.01 point of PDF stroke-width rounding."
       ]
     },
     {
       "id": "shape-line-join-passive-stroke",
       "input": "fixtures/shape-line-join-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-line-join-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7441,11 +7470,10 @@
         "After joined line."
       ],
       "intentional_security_differences": [
-        "Office drawing line join metadata is normalized into bounded passive PDF stroke geometry and never preserved as editable shape metadata.",
-        "Unsupported or active drawing payload properties adjacent to line joins are stripped before PDF rendering."
+        "Malformed legacy drawing properties and their payload text are consumed as inert metadata and never preserved in PDF output."
       ],
       "expected_diagnostics": [
-        "rendering bounded passive static drawing shape and stripping unsupported/active drawing properties"
+        "malformed legacy polyline vertex count suppressed for Word-compatible passive rendering"
       ],
       "forbidden_pdf_markers": [
         "dppolyline",
@@ -7469,15 +7497,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact round join radius, miter fallback behavior, and polyline stroke geometry once available."
+        "Word and converter both suppress the malformed count-less polyline and retain the same two-line text flow; bundled Arial-compatible text remains about 0.96 points above Word vertically."
       ]
     },
     {
       "id": "shape-pattern-fill-passive-hatching",
       "input": "fixtures/shape-pattern-fill-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-pattern-fill-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7510,15 +7538,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact pattern density, hatch angle, clipping, and fill color once available."
+        "Registered Word reference still needs a focused audit of exact pattern density, hatch angle, clipping, and fill color."
       ]
     },
     {
       "id": "shape-gradient-fill-passive-shading",
       "input": "fixtures/shape-gradient-fill-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-gradient-fill-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7549,15 +7577,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact gradient direction, color interpolation, and clipping once available."
+        "Registered Word reference still needs a focused audit of exact gradient direction, color interpolation, and clipping."
       ]
     },
     {
       "id": "shape-shadow-opacity-passive-graphics-state",
       "input": "fixtures/shape-shadow-opacity-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-shadow-opacity-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7592,15 +7620,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact shadow opacity, offset, color, and paint order once available."
+        "Registered Word reference still needs a focused audit of exact shadow opacity, offset, color, and paint order."
       ]
     },
     {
       "id": "shape-fill-fore-color-passive-fill",
       "input": "fixtures/shape-fill-fore-color-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-fill-fore-color-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7631,15 +7659,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Office fill color interpretation, shape bounds, and fill paint order once available."
+        "Registered Word reference still needs a focused audit of exact Office fill color interpretation, shape bounds, and fill paint order."
       ]
     },
     {
       "id": "shape-line-fore-color-passive-stroke",
       "input": "fixtures/shape-line-fore-color-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-line-fore-color-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7670,15 +7698,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Office stroke color interpretation, outline width, and paint order once available."
+        "Registered Word reference still needs a focused audit of exact Office stroke color interpretation, outline width, and paint order."
       ]
     },
     {
       "id": "shape-fill-back-color-passive-fill",
       "input": "fixtures/shape-fill-back-color-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-fill-back-color-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7709,15 +7737,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Office background fill color fallback interpretation and fill paint order once available."
+        "Registered Word reference still needs a focused audit of exact Office background fill color fallback interpretation and fill paint order."
       ]
     },
     {
       "id": "shape-line-back-color-passive-stroke",
       "input": "fixtures/shape-line-back-color-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-line-back-color-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7748,15 +7776,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm exact Office background stroke color fallback interpretation and outline paint order once available."
+        "Registered Word reference still needs a focused audit of exact Office background stroke color fallback interpretation and outline paint order."
       ]
     },
     {
       "id": "shape-fill-flag-passive-last-state",
       "input": "fixtures/shape-fill-flag-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-fill-flag-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7788,15 +7816,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm final-state fill flag precedence and passive fill color rendering once available."
+        "Registered Word reference still needs a focused audit of final-state fill flag precedence and passive fill color rendering."
       ]
     },
     {
       "id": "shape-line-flag-passive-last-state",
       "input": "fixtures/shape-line-flag-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-line-flag-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7827,15 +7855,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm final-state line flag precedence and passive outline rendering once available."
+        "Registered Word reference still needs a focused audit of final-state line flag precedence and passive outline rendering."
       ]
     },
     {
       "id": "shape-disabled-fill-passive-hidden-state",
       "input": "fixtures/shape-disabled-fill-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-disabled-fill-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7867,15 +7895,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm disabled-fill precedence and no-fill paint output once available."
+        "Registered Word reference still needs a focused audit of disabled-fill precedence and no-fill paint output."
       ]
     },
     {
       "id": "shape-disabled-line-passive-hidden-state",
       "input": "fixtures/shape-disabled-line-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-disabled-line-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7907,15 +7935,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm disabled-line precedence and no-outline paint output once available."
+        "Registered Word reference still needs a focused audit of disabled-line precedence and no-outline paint output."
       ]
     },
     {
       "id": "shape-hidden-passive-nonvisual-state",
       "input": "fixtures/shape-hidden-passive.rtf",
       "category": "intentional_security_difference",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-hidden-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7949,15 +7977,15 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm hidden Office drawing output and shape text suppression once available."
+        "Registered Word reference still needs a focused audit of hidden Office drawing output and shape text suppression."
       ]
     },
     {
       "id": "shape-flip-passive-mirrored-line",
       "input": "fixtures/shape-flip-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/shape-flip-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -7991,7 +8019,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-exported reference should confirm flipped-line endpoint parity and mirrored passive stroke output once available."
+        "Registered Word reference still needs a focused audit of flipped-line endpoint parity and mirrored passive stroke output."
       ]
     },
     {
