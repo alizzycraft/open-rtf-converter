@@ -4119,10 +4119,11 @@ impl Parser {
             "footnote" if destination_allows_visible_content(&self.state) => {
                 self.start_note_destination(self.legacy_footnote_destination(), offset)?
             }
-            "endnote" | "aendnote" | "ftnalt"
-                if destination_allows_visible_content(&self.state) =>
-            {
+            "endnote" | "aendnote" if destination_allows_visible_content(&self.state) => {
                 self.start_note_destination(Destination::Endnote, offset)?
+            }
+            "ftnalt" if destination_allows_visible_content(&self.state) => {
+                self.start_standard_endnote_destination(offset)?
             }
             "shppict"
                 if destination_allows_shape_picture_destination_start(&self.state, &self.stack) =>
@@ -7371,6 +7372,85 @@ impl Parser {
         Ok(())
     }
 
+    fn start_standard_endnote_destination(&mut self, offset: usize) -> Result<(), ParseError> {
+        if self.state.destination == Destination::Endnote {
+            return Ok(());
+        }
+        if self.state.destination != Destination::Footnote
+            || !self.current_footnote_paragraph.runs.is_empty()
+        {
+            return self.start_note_destination(Destination::Endnote, offset);
+        }
+
+        let footnote_marker = footnote_reference_marker(self.document.footnotes.len());
+        let replacement = PENDING_NOTE_REFERENCE_MARKER;
+        let replaced = if let Some(row) = self.current_table_row.as_mut()
+            && replace_last_note_marker_in_paragraph(
+                &mut row.current_cell_paragraph,
+                &footnote_marker,
+                replacement,
+            ) {
+            true
+        } else {
+            replace_last_note_marker_in_paragraph(
+                &mut self.current_paragraph,
+                &footnote_marker,
+                replacement,
+            ) || replace_last_note_marker_in_paragraph(
+                &mut self.current_header_paragraph,
+                &footnote_marker,
+                replacement,
+            ) || replace_last_note_marker_in_paragraph(
+                &mut self.current_first_page_header_paragraph,
+                &footnote_marker,
+                replacement,
+            ) || replace_last_note_marker_in_paragraph(
+                &mut self.current_even_page_header_paragraph,
+                &footnote_marker,
+                replacement,
+            ) || replace_last_note_marker_in_paragraph(
+                &mut self.current_footer_paragraph,
+                &footnote_marker,
+                replacement,
+            ) || replace_last_note_marker_in_paragraph(
+                &mut self.current_first_page_footer_paragraph,
+                &footnote_marker,
+                replacement,
+            ) || replace_last_note_marker_in_paragraph(
+                &mut self.current_even_page_footer_paragraph,
+                &footnote_marker,
+                replacement,
+            )
+        };
+
+        if replaced {
+            let marker_chars = footnote_marker.chars().count();
+            let replacement_chars = replacement.chars().count();
+            self.output_text_chars = self
+                .output_text_chars
+                .saturating_sub(marker_chars.saturating_sub(replacement_chars));
+            self.replace_last_note_marker_in_bookmarks(&footnote_marker, replacement);
+        }
+
+        self.rollback_last_footnote_reference_sequence();
+        self.start_note_destination(Destination::Endnote, offset)
+    }
+
+    fn rollback_last_footnote_reference_sequence(&mut self) {
+        self.footnote_reference_count = self.footnote_reference_count.saturating_sub(1);
+        match self.document.footnote_number_restart {
+            NoteNumberRestart::Continuous => {}
+            NoteNumberRestart::EachSection => {
+                self.footnote_section_reference_count =
+                    self.footnote_section_reference_count.saturating_sub(1);
+            }
+            NoteNumberRestart::EachPage => {
+                self.footnote_page_reference_count =
+                    self.footnote_page_reference_count.saturating_sub(1);
+            }
+        }
+    }
+
     fn current_reference_block_index(&self) -> usize {
         self.document.blocks.len()
     }
@@ -9119,10 +9199,13 @@ impl Parser {
     }
 
     fn replace_last_pending_note_marker_in_bookmarks(&mut self, replacement: &str) {
+        self.replace_last_note_marker_in_bookmarks(PENDING_NOTE_REFERENCE_MARKER, replacement);
+    }
+
+    fn replace_last_note_marker_in_bookmarks(&mut self, marker: &str, replacement: &str) {
         for bookmark in self.bookmark_captures.iter_mut().rev() {
-            if bookmark.text.contains(PENDING_NOTE_REFERENCE_MARKER) {
-                bookmark.text =
-                    replace_last_marker(&bookmark.text, PENDING_NOTE_REFERENCE_MARKER, replacement);
+            if bookmark.text.contains(marker) {
+                bookmark.text = replace_last_marker(&bookmark.text, marker, replacement);
                 return;
             }
         }
@@ -29767,9 +29850,17 @@ fn replace_last_pending_note_marker_in_paragraph(
     paragraph: &mut Paragraph,
     replacement: &str,
 ) -> bool {
+    replace_last_note_marker_in_paragraph(paragraph, PENDING_NOTE_REFERENCE_MARKER, replacement)
+}
+
+fn replace_last_note_marker_in_paragraph(
+    paragraph: &mut Paragraph,
+    marker: &str,
+    replacement: &str,
+) -> bool {
     for run in paragraph.runs.iter_mut().rev() {
-        if run.text.contains(PENDING_NOTE_REFERENCE_MARKER) {
-            run.text = replace_last_marker(&run.text, PENDING_NOTE_REFERENCE_MARKER, replacement);
+        if run.text.contains(marker) {
+            run.text = replace_last_marker(&run.text, marker, replacement);
             return true;
         }
     }
@@ -46627,7 +46718,7 @@ mod tests {
     #[test]
     fn normalizes_note_numbering_controls_as_safe_metadata() {
         let output = parse_rtf(
-            r"{\rtf1\ftnstart4\ftnnruc\aftnstart2\aftnnalc Body\chftn{\footnote \chftn Footnote text\par} End\chftn{\endnote \chftn Endnote text\par}\par}",
+            r"{\rtf1\fet2\ftnstart4\ftnnruc\aftnstart2\aftnnalc Body\chftn{\footnote \chftn Footnote text\par} End\chftn{\footnote\ftnalt \chftn Endnote text\par}\par}",
         )
         .unwrap();
         let body = match &output.document.blocks[0] {
@@ -46654,6 +46745,51 @@ mod tests {
         );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
+    }
+
+    #[test]
+    fn standard_ftnalt_endnote_does_not_create_a_ghost_footnote() {
+        let output = parse_rtf(
+            r"{\rtf1\fet2\ftnstart4\ftnnruc\aftnstart2\aftnnalc Body\chftn{\footnote\ftnalt \chftn Endnote text\par}\par}",
+        )
+        .unwrap();
+        let body = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected body paragraph"),
+        };
+
+        assert!(output.document.footnotes.is_empty());
+        assert_eq!(output.document.endnotes.len(), 1);
+        assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
+        assert_eq!(
+            body.runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "Bodyb"
+        );
+    }
+
+    #[test]
+    fn standard_ftnalt_does_not_advance_an_endnote_only_document_twice() {
+        let output = parse_rtf(
+            r"{\rtf1\fet1\aftnstart2\aftnnalc Body\chftn{\footnote\ftnalt \chftn Endnote text\par}\par}",
+        )
+        .unwrap();
+        let body = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected body paragraph"),
+        };
+
+        assert!(output.document.footnotes.is_empty());
+        assert_eq!(output.document.endnotes.len(), 1);
+        assert_eq!(
+            body.runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "Bodyb"
+        );
     }
 
     #[test]
