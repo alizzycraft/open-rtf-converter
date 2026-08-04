@@ -10360,13 +10360,14 @@ fn date_fields_use_stored_results_and_never_update_or_leak_instructions() {
     .unwrap();
     let resultless_text = collect_text(&resultless.document);
     assert!(resultless_text.contains("Before"));
-    assert!(resultless_text.contains("[Field removed: no passive result]"));
+    assert!(resultless_text.contains("Before  After"));
+    assert!(!resultless_text.contains("[Field removed: no passive result]"));
     assert!(resultless_text.contains("After"));
     assert!(!resultless_text.contains("DATE"));
     assert!(!resultless_text.contains("current-date-sentinel"));
     assert!(resultless.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains(
-            "dynamic field DATE rendered as passive placeholder without reading converter clock",
+            "resultless field DATE omitted for Word-compatible passive rendering without dynamic evaluation",
         )
     }));
     assert!(resultless.diagnostics.iter().all(|diagnostic| {
@@ -10471,7 +10472,17 @@ fn metadata_timestamp_fields_render_passively_without_instruction_or_metadata_le
         "\\",
         "par}",
     ]);
-    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
     let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
@@ -16638,8 +16649,9 @@ visible after\par}"#
 
     assert!(text.contains("Visible before"));
     assert!(text.contains("after advance"));
-    assert!(text.contains("date [Field removed: no passive result]"));
-    assert!(text.contains("time [Field removed: no passive result]"));
+    assert!(text.contains("date "));
+    assert!(text.contains("time "));
+    assert!(!text.contains("[Field removed: no passive result]"));
     assert!(text.contains("visible after"));
     for forbidden in [
         "ADVANCE",
@@ -16686,8 +16698,9 @@ visible after\par}"#
 
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("after advance"));
-    assert!(rendered_text.contains("date [Field removed: no passive result]"));
-    assert!(rendered_text.contains("time [Field removed: no passive result]"));
+    assert!(rendered_text.contains("date "));
+    assert!(rendered_text.contains("time "));
+    assert!(!rendered_text.contains("[Field removed: no passive result]"));
     assert!(rendered_text.contains("visible after"));
     assert!(output.diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains(
@@ -16708,7 +16721,7 @@ visible after\par}"#
         assert!(
             output.diagnostics.iter().any(|diagnostic| {
                 diagnostic.message.contains(&format!(
-                    "dynamic field {name} rendered as passive placeholder without reading converter clock"
+                    "resultless field {name} omitted for Word-compatible passive rendering without dynamic evaluation"
                 ))
             }),
             "missing dynamic clock diagnostic for {name}"
@@ -17122,7 +17135,7 @@ visible after\par}"#
 #[test]
 fn edit_time_field_uses_passive_metadata_without_pdf_leakage() {
     let input = br#"{\rtf1{\info{\edmins42}{\title Hidden title {\field{\*\fldinst HYPERLINK "https://example.com"}{\fldrslt Hidden link}}}}Edit {\field{\*\fldinst EDITTIME \\# "0000"}} dynamic {\field{\*\fldinst TIME}}\par}"#.to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("Edit 0042"));
@@ -17151,6 +17164,10 @@ fn edit_time_field_uses_passive_metadata_without_pdf_leakage() {
         &input_path,
         &output_path,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::default()
         },
@@ -17192,7 +17209,7 @@ fn edit_time_field_uses_passive_metadata_without_pdf_leakage() {
 #[test]
 fn revision_number_field_uses_passive_metadata_without_pdf_leakage() {
     let input = br#"{\rtf1{\info{\version12}{\subject Hidden subject {\field{\*\fldinst HYPERLINK "https://example.com/revision"}{\fldrslt Hidden link}}}}Revision {\field{\*\fldinst REVNUM \\# "0000"}} dynamic {\field{\*\fldinst DATE}}\par}"#.to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("Revision 0012"));
@@ -17221,6 +17238,10 @@ fn revision_number_field_uses_passive_metadata_without_pdf_leakage() {
         &input_path,
         &output_path,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::default()
         },
@@ -19691,7 +19712,7 @@ fn wingdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings;}}\f1 \'a3 \'fe \'fc \'fb \'fd \u61693?\par {\field{\*\fldinst SYMBOL 254 \\f "Wingdings"}} {\field{\*\fldinst SYMBOL 253 \\f "Wingdings"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("\u{2610} \u{2611} \u{2713} \u{2717} \u{2612} \u{2612}"));
+    assert!(text.contains("\u{25c9} \u{2611} \u{2713} \u{2717} \u{2612} \u{2612}"));
     assert!(text.contains("\u{2611}"));
     assert!(text.contains("\u{2612}"));
     for forbidden in ["fonttbl", "Wingdings", "fldinst", "SYMBOL"] {
@@ -19745,7 +19766,7 @@ fn associated_font_checkbox_glyphs_render_passively_without_font_payload_leakage
             .to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("\u{2610} \u{2611} \u{2713} \u{2717}"));
+    assert!(text.contains("\u{25c9} \u{2611} \u{2713} \u{2717}"));
     let paragraph = parsed
         .document
         .blocks
@@ -20269,8 +20290,8 @@ fn webdings_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Webdings;}}\f1 \'3f \'61 \'63\par {\field{\*\fldinst SYMBOL 63 \\f "Webdings"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("\u{2612} \u{2714} \u{25a1}"));
-    assert!(text.contains("\u{2612}"));
+    assert!(text.contains("\u{1f4e5} \u{2714} \u{25a1}"));
+    assert!(text.contains("\u{1f4e5}"));
     for forbidden in ["fonttbl", "Webdings", "fldinst", "SYMBOL"] {
         assert!(
             !text.contains(forbidden),
@@ -36931,12 +36952,12 @@ fn unsupported_wmf_pen_and_brush_styles_are_inert_without_payload_leakage() {
                 green: 0,
                 blue: 0
             }),
-            stroke_width: 1.0,
+            stroke_width,
             stroke_style: BorderStyle::Single,
             fill_color: None,
             fill_pattern: ShadingPattern::None,
             ..
-        }
+        } if (stroke_width - 4.172_978).abs() < f32::EPSILON
     ));
     assert!(matches!(
         image.vector_commands[1],
@@ -36946,10 +36967,10 @@ fn unsupported_wmf_pen_and_brush_styles_are_inert_without_payload_leakage() {
                 green: 0,
                 blue: 0
             }),
-            stroke_width: 1.0,
+            stroke_width,
             stroke_style: BorderStyle::Single,
             ..
-        }
+        } if (stroke_width - 4.172_978).abs() < f32::EPSILON
     ));
     for forbidden in [
         "wmetafile",
@@ -38135,7 +38156,7 @@ fn wmf_polybezier_records_render_passively_without_payload_leakage() {
         StaticImageVectorCommand::Bezier {
             points,
             stroke_color: Some(Color { red: 60, green: 40, blue: 20 }),
-            stroke_width: 2.0,
+            stroke_width: 2.086_489,
             ..
         } if points == &vec![(10.0, 10.0), (30.0, 5.0), (70.0, 50.0), (80.0, 20.0)]
     ));
@@ -38238,7 +38259,7 @@ fn wmf_polybezierto_records_update_current_point_without_payload_leakage() {
         StaticImageVectorCommand::Bezier {
             points,
             stroke_color: Some(Color { red: 60, green: 40, blue: 20 }),
-            stroke_width: 2.0,
+            stroke_width: 2.086_489,
             ..
         } if points == &vec![(10.0, 10.0), (30.0, 5.0), (70.0, 50.0), (80.0, 20.0)]
     ));
@@ -40308,7 +40329,7 @@ fn wmf_pen_width_renders_passive_stroke_width_without_record_leakage() {
             } if color.red == 255
                 && color.green == 0
                 && color.blue == 0
-                && (*stroke_width - 12.0).abs() < 0.01
+                && (*stroke_width - 12.518_934).abs() < 0.01
         )
     }));
     assert_no_wmf_preview_warning(&parsed.diagnostics);
@@ -40402,7 +40423,7 @@ fn wmf_pen_dash_style_renders_passive_dash_pattern_without_record_leakage() {
             } if color.red == 255
                 && color.green == 0
                 && color.blue == 0
-                && (*stroke_width - 4.0).abs() < 0.01
+                && (*stroke_width - 4.172_978).abs() < 0.01
         )
     }));
     assert_no_wmf_preview_warning(&parsed.diagnostics);
@@ -77884,8 +77905,13 @@ fn invalid_office_shape_fill_color_is_stripped_without_becoming_visible_black() 
     assert!(text.contains("After"));
     assert_eq!(shape.kind, StaticShapeKind::Rectangle);
     assert_eq!(
-        shape.fill_color, None,
-        "invalid Office fillColor should not clamp into a visible fill"
+        shape.fill_color,
+        Some(Color {
+            red: 255,
+            green: 255,
+            blue: 255
+        }),
+        "invalid Office fillColor should recover to Word's safe white default"
     );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -77926,8 +77952,8 @@ fn invalid_office_shape_fill_color_is_stripped_without_becoming_visible_black() 
     assert!(rendered_text.contains("Before"));
     assert!(rendered_text.contains("After"));
     assert_eq!(
-        fill_count, 0,
-        "invalid Office fillColor should not emit a passive fill"
+        fill_count, 1,
+        "invalid Office fillColor should retain only Word's safe white default fill"
     );
     for forbidden in [
         b"shapeType".as_slice(),
@@ -78055,8 +78081,13 @@ fn invalid_office_shape_fill_fore_color_is_stripped_without_becoming_visible_bla
     assert!(text.contains("After"));
     assert_eq!(shape.kind, StaticShapeKind::Rectangle);
     assert_eq!(
-        shape.fill_color, None,
-        "invalid Office fillForeColor should not clamp into a visible fill"
+        shape.fill_color,
+        Some(Color {
+            red: 255,
+            green: 255,
+            blue: 255
+        }),
+        "invalid Office fillForeColor should recover to Word's safe white default"
     );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -78094,8 +78125,8 @@ fn invalid_office_shape_fill_fore_color_is_stripped_without_becoming_visible_bla
         .count();
 
     assert_eq!(
-        fill_count, 0,
-        "invalid Office fillForeColor should not emit a passive fill"
+        fill_count, 1,
+        "invalid Office fillForeColor should retain only Word's safe white default fill"
     );
     for forbidden in [
         b"shapeType".as_slice(),
@@ -78256,8 +78287,13 @@ fn invalid_office_shape_fill_back_color_is_stripped_without_becoming_visible_bla
         .expect("passive shape with invalid fillBackColor");
 
     assert_eq!(
-        shape.fill_color, None,
-        "invalid Office fillBackColor should not clamp into a visible fill"
+        shape.fill_color,
+        Some(Color {
+            red: 255,
+            green: 255,
+            blue: 255
+        }),
+        "invalid Office fillBackColor should recover to Word's safe white default"
     );
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -78293,8 +78329,8 @@ fn invalid_office_shape_fill_back_color_is_stripped_without_becoming_visible_bla
         .count();
 
     assert_eq!(
-        fill_count, 0,
-        "invalid Office fillBackColor should not emit a passive fill"
+        fill_count, 1,
+        "invalid Office fillBackColor should retain only Word's safe white default fill"
     );
     for forbidden in [
         b"fillBackColor".as_slice(),
@@ -78358,7 +78394,7 @@ fn office_shape_solid_fill_type_is_consumed_without_unsupported_property_warning
 
 #[test]
 fn office_shape_pattern_fill_type_renders_passively_without_property_leakage() {
-    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv msoFillPattern}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-pattern-fill-type-payload}}}}After\par}"#.to_vec();
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv 1}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-pattern-fill-type-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     let shape = parsed
@@ -78454,7 +78490,7 @@ fn office_shape_pattern_fill_type_renders_passively_without_property_leakage() {
 
 #[test]
 fn non_rectangular_office_shape_pattern_fills_are_clipped_without_property_leakage() {
-    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 4}}{\sp{\sn fillType}{\sv pattern}}{\sp{\sn fillColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-pattern-diamond-payload}}}}{\shp{\*\shpinst\shpleft720\shptop1800\shpright2880\shpbottom2520{\sp{\sn shapeType}{\sv 9}}{\sp{\sn fillType}{\sv msoFillPattern}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-pattern-ellipse-payload}}}}After\par}"#.to_vec();
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 4}}{\sp{\sn fillType}{\sv 1}}{\sp{\sn fillColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-pattern-diamond-payload}}}}{\shp{\*\shpinst\shpleft720\shptop1800\shpright2880\shpbottom2520{\sp{\sn shapeType}{\sv 9}}{\sp{\sn fillType}{\sv 1}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-pattern-ellipse-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     let shapes: Vec<_> = parsed
@@ -78582,7 +78618,7 @@ fn non_rectangular_office_shape_pattern_fills_are_clipped_without_property_leaka
 
 #[test]
 fn office_shape_gradient_fill_type_renders_passively_without_property_leakage() {
-    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-gradient-fill-type-payload}}}}After\par}"#.to_vec();
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv 4}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn pFragments}{\sv hidden-gradient-fill-type-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     let shape = parsed
@@ -78653,7 +78689,7 @@ fn office_shape_gradient_fill_type_renders_passively_without_property_leakage() 
 
 #[test]
 fn office_shape_gradient_fill_uses_back_color_without_property_leakage() {
-    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 255}}{\sp{\sn fillBackColor}{\sv 16711680}}}}After\par}"#.to_vec();
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv 4}}{\sp{\sn fillColor}{\sv 255}}{\sp{\sn fillBackColor}{\sv 16711680}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     let shape = parsed
@@ -78732,7 +78768,7 @@ fn office_shape_gradient_fill_uses_back_color_without_property_leakage() {
 
 #[test]
 fn non_rectangular_office_shape_gradient_fills_are_clipped_without_property_leakage() {
-    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 4}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 255}}{\sp{\sn fillBackColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-gradient-diamond-payload}}}}{\shp{\*\shpinst\shpleft720\shptop1800\shpright2880\shpbottom2520{\sp{\sn shapeType}{\sv 9}}{\sp{\sn fillType}{\sv msofillShade}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn fillBackColor}{\sv 16776960}}{\sp{\sn pFragments}{\sv hidden-gradient-ellipse-payload}}}}After\par}"#.to_vec();
+    let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 4}}{\sp{\sn fillType}{\sv 4}}{\sp{\sn fillColor}{\sv 255}}{\sp{\sn fillBackColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-gradient-diamond-payload}}}}{\shp{\*\shpinst\shpleft720\shptop1800\shpright2880\shpbottom2520{\sp{\sn shapeType}{\sv 9}}{\sp{\sn fillType}{\sv 4}}{\sp{\sn fillColor}{\sv 65280}}{\sp{\sn fillBackColor}{\sv 16776960}}{\sp{\sn pFragments}{\sv hidden-gradient-ellipse-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     let shapes = parsed
@@ -78859,11 +78895,7 @@ fn non_rectangular_office_shape_gradient_fills_are_clipped_without_property_leak
 
 #[test]
 fn office_shape_shade_fill_variants_are_bounded_passive_gradients_without_property_leakage() {
-    for fill_type in [
-        "msofillShadeCenter",
-        "msofillShadeShape",
-        "msofillShadeScale",
-    ] {
+    for fill_type in ["5", "6", "7"] {
         let input = format!(
             r#"{{\rtf1 Before\par{{\shp{{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{{\sp{{\sn shapeType}}{{\sv 1}}}}{{\sp{{\sn fillType}}{{\sv {fill_type}}}}}{{\sp{{\sn fillColor}}{{\sv 65280}}}}}}}}After\par}}"#
         )
@@ -78890,7 +78922,7 @@ fn office_shape_shade_fill_variants_are_bounded_passive_gradients_without_proper
             "shade fill variants should be consumed as passive metadata: {:?}",
             parsed.diagnostics
         );
-        for forbidden in ["fillType", fill_type] {
+        for forbidden in ["fillType"] {
             assert!(
                 !text.contains(forbidden),
                 "shade fill variant metadata leaked to normalized text: {forbidden}"
@@ -78908,7 +78940,6 @@ fn office_shape_shade_fill_variants_are_bounded_passive_gradients_without_proper
         audit_passive_pdf_bytes(&output.pdf).unwrap();
         for forbidden in [
             b"fillType".as_slice(),
-            fill_type.as_bytes(),
             b"/JavaScript",
             b"/EmbeddedFile",
             b"/Launch",

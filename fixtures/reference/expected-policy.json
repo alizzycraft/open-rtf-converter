@@ -287,7 +287,7 @@
         " S"
       ],
       "known_gaps": [
-        "The bounded inline-image model now matches Word's paragraph flow: `Before WMF` remains on line one, the no-whitespace `vector.` + image + `After` cluster stays together on line two, and the final `vector.` wraps to line three with text origins within 0.16 points. Remaining WMF-specific geometry differs: Word paints rectangle `(82.77,53.78)-(157.77,74.59)` and ellipse `(125.20,57.70)-(163.78,78.02)` with 1.88-point stock-pen strokes, while the converter paints rectangle `(82.81,53.40)-(169.21,78.60)` and ellipse `(126.01,57.00)-(174.61,82.20)` with thinner strokes. Exact WMF map-mode and stock-pen calibration remains pending.",
+        "The bounded inline-image model now matches Word's paragraph flow: `Before WMF` remains on line one, the no-whitespace `vector.` + image + `After` cluster stays together on line two, and the final `vector.` wraps to line three with text origins within 0.16 points. The fresh GDI stock pen now matches Word's measured 1.878-point PDF stroke exactly. Remaining WMF map/playback geometry differs: Word paints rectangle `(82.77,53.78)-(157.77,74.59)` and ellipse `(125.20,57.70)-(163.78,78.02)`, while the converter paints rectangle `(82.81,53.40)-(169.21,78.60)` and ellipse `(126.01,57.00)-(174.61,82.20)`.",
         "The converter intentionally supports only a hardened passive WMF subset; unsupported WMF/EMF behavior remains placeholder or stripped."
       ]
     },
@@ -440,7 +440,7 @@
         "After WMF dashed pen."
       ],
       "intentional_security_differences": [
-        "Supported WMF pen dash style and width are converted into bounded passive PDF stroke state.",
+        "Supported WMF pen dash style and width are converted into bounded passive PDF stroke state; the authored four-unit pen reproduces Word's 1.87784-point stroke and exact 3:1 dash cadence.",
         "Raw WMF bytes, pen object records, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
       "expected_diagnostics": [],
@@ -796,7 +796,7 @@
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF line, polyline, and polygon placement and closure behavior.",
+        "The focused Word audit confirms matching 1.878-point stock-pen strokes and correct line/polyline/polygon closure. Word's path group starts about 4.43 points farther right and 3.27 points lower while ending about 3.32 points farther right and 5.01 points lower, so exact WMF playback mapping remains pending.",
         "The converter intentionally supports only bounded passive path geometry; malformed or excessive WMF point-list records remain placeholdered or stripped."
       ]
     },
@@ -1942,7 +1942,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact wrapped text line positions beside the passive static shape frame."
+        "Focused Word audit is complete: paragraph-relative shape top/bottom and all six wrapped text lines now match Word. Converter glyph boxes retain the established bundled Arial-compatible vertical residual of about 0.95 points."
       ]
     },
     {
@@ -1990,7 +1990,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact wrap-distance conversion and line reflow around the passive shape."
+        "Focused Word audit is complete: 9/36/0/18-point left/right/top/bottom wrap distances, the paragraph-relative shape frame, and all eight text lines now match Word. Converter glyph boxes retain the established bundled Arial-compatible vertical residual of about 0.95 points."
       ]
     },
     {
@@ -2534,15 +2534,15 @@
         "Initials [Field removed: no passive result]",
         "Address [Field removed: no passive result]",
         "Advance 240 120after advance.",
-        "Date [Field removed: no passive result]",
-        "Time [Field removed: no passive result]",
+        "Date ",
+        "Time ",
         "Visible after environment fields."
       ],
       "intentional_security_differences": [
         "Host-environment fields render bounded passive placeholders instead of exposing converter file paths, user names, template paths, or address data.",
         "Resultless FILESIZE is suppressed in Word-compatible mode; StrictSpec may render bounded passive document byte metadata.",
         "Malformed ADVANCE arguments are recovered as Word-visible literal text without applying hidden cursor movement.",
-        "DATE and TIME render bounded passive placeholders instead of reading the converter clock."
+        "DATE and TIME are left blank instead of reading the converter clock; StrictSpec retains bounded placeholders."
       ],
       "expected_diagnostics": [
         "resultless FILESIZE suppressed for Word-compatible passive rendering",
@@ -2552,8 +2552,8 @@
         "environment field USERINITIALS rendered as passive placeholder without exposing converter host state",
         "environment field USERADDRESS rendered as passive placeholder without exposing converter host state",
         "malformed ADVANCE arguments recovered as Word-compatible passive literal text",
-        "dynamic field DATE rendered as passive placeholder without reading converter clock",
-        "dynamic field TIME rendered as passive placeholder without reading converter clock"
+        "resultless field DATE omitted for Word-compatible passive rendering without dynamic evaluation",
+        "resultless field TIME omitted for Word-compatible passive rendering without dynamic evaluation"
       ],
       "forbidden_pdf_markers": [
         "fldinst",
@@ -3035,28 +3035,27 @@
       "expected_pages": 1,
       "must_preserve_text": [
         "Visible before timestamp stats.",
-        "Created Friday, July 5, 2024 at 2:30 P saved Thu 2025-01-02 9:04 a printed 12/31/26 bad saved [Field removed: no passive result]",
-        "Edit XLII edit raw 0042 missing edit 42",
-        "Revision XII revision raw 0012 missing revision 12",
-        "Dynamic date [Field removed: no passive result] time [Field removed: no passive result]",
+        "Created  saved  printed  bad saved",
+        "Edit  edit raw  missing edit",
+        "Revision  revision raw  missing revision",
+        "Dynamic date  time",
         "Visible after timestamp stats."
       ],
       "intentional_security_differences": [
-        "CREATEDATE, SAVEDATE, PRINTDATE, EDITTIME, and REVNUM render only from bounded passive document metadata.",
-        "Unsupported timestamp picture tokens render bounded placeholders instead of preserving raw field instructions.",
-        "Dynamic DATE and TIME fields render bounded placeholders instead of reading the converter host clock.",
+        "Word dynamically evaluates SAVEDATE, PRINTDATE, DATE, and TIME from host or filesystem state; the deterministic passive renderer leaves those resultless positions blank.",
+        "Word also leaves resultless CREATEDATE, EDITTIME, and REVNUM blank for this document despite corresponding RTF info metadata; Word-compatible passive mode matches that visible behavior.",
+        "StrictSpec retains bounded metadata-derived timestamp/stat rendering and placeholders for callers that explicitly request the prior recovery behavior.",
         "Nested active content inside metadata is stripped before the safe model reaches PDF rendering."
       ],
       "expected_diagnostics": [
         "active content removed: field instruction in metadata before safe model normalization",
-        "rendering passive field CREATEDATE without executing field instruction",
-        "rendering passive field SAVEDATE without executing field instruction",
-        "rendering passive field PRINTDATE without executing field instruction",
-        "field SAVEDATE has no stored result and was not evaluated dynamically",
-        "rendering passive field EDITTIME without executing field instruction",
-        "rendering passive field REVNUM without executing field instruction",
-        "dynamic field DATE rendered as passive placeholder without reading converter clock",
-        "dynamic field TIME rendered as passive placeholder without reading converter clock"
+        "resultless field CREATEDATE omitted for Word-compatible passive rendering without dynamic evaluation",
+        "resultless field SAVEDATE omitted for Word-compatible passive rendering without dynamic evaluation",
+        "resultless field PRINTDATE omitted for Word-compatible passive rendering without dynamic evaluation",
+        "resultless field EDITTIME omitted for Word-compatible passive rendering without dynamic evaluation",
+        "resultless field REVNUM omitted for Word-compatible passive rendering without dynamic evaluation",
+        "resultless field DATE omitted for Word-compatible passive rendering without dynamic evaluation",
+        "resultless field TIME omitted for Word-compatible passive rendering without dynamic evaluation"
       ],
       "forbidden_pdf_markers": [
         "fldinst",
@@ -3089,7 +3088,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact date/time picture formatting, missing timestamp fallback behavior, and metadata-derived edit/revision formatting."
+        "The registered Word reference confirms six-line flow and blank resultless CREATEDATE, EDITTIME, and REVNUM positions. Word's SAVEDATE, PRINTDATE, DATE, TIME, and malformed picture output depends on host time, filesystem state, or Word's dynamic token expansion; those values are intentionally omitted to keep conversion deterministic and offline."
       ]
     },
     {
@@ -4750,7 +4749,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact column widths, gap, separator rule position, and column-break flow."
+        "The registered Word reference confirms the explicit 90-point columns, 18-point gap, column-break flow, and text origins within 0.13 points. Word limits the black 0.72-point separator to the occupied 13.8-point section content band; the converter now matches that relative geometry instead of extending a gray rule through the full page body. The remaining roughly 0.95-point absolute vertical offset is the shared bundled Arial-compatible metric residual."
       ]
     },
     {
@@ -5981,7 +5980,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Wingdings space glyph advances by a full 12-point em; the converter now preserves that measured spacing around bounded vectors. Remaining gaps are glyph geometry (notably source 0xA3 is Word's bullseye rather than an empty box) and the vector-expanded line height."
+        "Word's Wingdings space glyph advances by a full 12-point em; the converter preserves that measured spacing around bounded vectors. Source 0xA3 is normalized to a semantic bullseye and rendered as a bounded even-odd ring matching Word. Passive checkbox lines now retain Word's 13.8-point baseline interval independently of installed font metrics. The remaining gap is fine check/X vector geometry."
       ]
     },
     {
@@ -6021,7 +6020,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Wingdings 2 spaces advance by a full 12-point em and its mapped checkbox advances are now preserved around bounded vectors. Remaining gaps are exact checkbox/check/X geometry and the vector-expanded line height."
+        "Word's Wingdings 2 spaces advance by a full 12-point em and its mapped checkbox advances are preserved around bounded vectors. Passive vector lines now retain Word's 13.8-point baseline interval independently of installed font metrics. The remaining gap is exact checkbox/check/X geometry."
       ]
     },
     {
@@ -6103,7 +6102,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Webdings spaces advance by a measured half em and its checkbox-like glyphs by a full em; the converter now preserves those advances around bounded vectors. Remaining gaps are exact Webdings glyph geometry and the vector-expanded line height."
+        "Word's Webdings spaces advance by a measured half em and its icon glyphs by a full em; the converter preserves those advances and Word's 13.8-point baseline interval around bounded vectors. Source 0x3F is normalized to semantic U+1F4E5 rather than the incorrect ballot-box-with-X mapping and renders as a passive inbox tray with outlined incoming paper geometry matching Word's visible meaning. Minor icon contour differences remain."
       ]
     },
     {
@@ -7536,7 +7535,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact pattern density, hatch angle, clipping, and fill color."
+        "The registered Word reference confirms that the textual `msoFillPattern` alias is inert in Word print output: the authored green foreground is painted as a plain solid fill at the exact 108-by-36-point frame. Word-compatible mode now matches that recovery; numeric fill type 1 and StrictSpec textual aliases retain bounded passive hatch support."
       ]
     },
     {
@@ -7575,7 +7574,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact gradient direction, color interpolation, and clipping."
+        "The registered Word reference confirms that the textual `msofillShade` alias is inert in Word print output: the authored red foreground is painted as a plain solid fill and the blue back color does not become a gradient. Word-compatible mode now matches that exact 108-by-36-point result; numeric fill types 4-7 and StrictSpec textual aliases retain bounded passive gradient support."
       ]
     },
     {
@@ -7618,7 +7617,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact shadow opacity, offset, color, and paint order."
+        "The registered Word reference confirms a two-point default shadow offset, 50% gray/opacity, and shadow-before-shape paint order. Converter shadow and 108-by-36-point shape bounds now match Word exactly; PDF opacity differs only by rounding 32768/65535 to 50%."
       ]
     },
     {
@@ -7814,7 +7813,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of final-state fill flag precedence and passive fill color rendering."
+        "The registered Word reference confirms last-value fFilled precedence: the final enabled state paints the authored yellow fill with the default black outline at the exact 108-by-36-point margin-relative frame."
       ]
     },
     {
@@ -7853,7 +7852,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of final-state line flag precedence and passive outline rendering."
+        "The registered Word reference confirms last-value fLine precedence: the final enabled state paints the default black 0.75-point outline and default white fill at the exact 108-by-36-point margin-relative frame."
       ]
     },
     {
@@ -7893,7 +7892,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of disabled-fill precedence and no-fill paint output."
+        "The registered Word reference confirms fFilled=0 suppresses only fill while retaining the default black 0.75-point outline at the exact 108-by-36-point margin-relative frame; converter output matches."
       ]
     },
     {
@@ -7933,7 +7932,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of disabled-line precedence and no-outline paint output."
+        "The registered Word reference confirms fLine=0 suppresses only the outline while retaining Word's default white fill at the exact 108-by-36-point margin-relative frame; converter output matches."
       ]
     },
     {

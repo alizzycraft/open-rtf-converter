@@ -5127,6 +5127,7 @@ fn is_passive_vector_only_dingbat_char(ch: char) -> bool {
     matches!(
         ch,
         '\u{25a1}'
+            | '\u{25c9}'
             | '\u{2610}'
             | '\u{2611}'
             | '\u{2612}'
@@ -5135,6 +5136,7 @@ fn is_passive_vector_only_dingbat_char(ch: char) -> bool {
             | '\u{2714}'
             | '\u{2717}'
             | '\u{2751}'
+            | '\u{1f4e5}'
     )
 }
 
@@ -5156,6 +5158,7 @@ fn draw_passive_vector_only_dingbat_text(content: &mut Content, fragment: &TextF
     content.set_line_width((font_size * 0.075).clamp(0.5, 1.25));
     for ch in fragment.text.chars() {
         match ch {
+            '\u{25c9}' => draw_passive_bullseye(content, cursor, fragment.baseline_y, font_size),
             '\u{25a1}' | '\u{2610}' | '\u{2751}' => {
                 draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size)
             }
@@ -5172,6 +5175,13 @@ fn draw_passive_vector_only_dingbat_text(content: &mut Content, fragment: &TextF
             }
             '\u{2717}' => draw_passive_checkbox_x(content, cursor, fragment.baseline_y, font_size),
             '\u{263a}' => draw_passive_smiley(content, cursor, fragment.baseline_y, font_size),
+            '\u{1f4e5}' => draw_passive_inbox_tray(
+                content,
+                cursor,
+                fragment.baseline_y,
+                font_size,
+                fragment.color,
+            ),
             _ => {}
         }
         if !is_zero_width_pdf_char(ch) {
@@ -5350,6 +5360,60 @@ fn draw_passive_checkbox_x(content: &mut Content, glyph_x: f32, baseline_y: f32,
     content.move_to(left + box_size * 0.76, bottom + box_size * 0.24);
     content.line_to(left + box_size * 0.24, bottom + box_size * 0.76);
     content.stroke();
+}
+
+fn draw_passive_bullseye(content: &mut Content, glyph_x: f32, baseline_y: f32, font_size: f32) {
+    let center_x = glyph_x + font_size * 0.445;
+    let center_y = baseline_y + font_size * 0.35;
+    add_passive_circle_path(content, center_x, center_y, font_size * 0.445);
+    add_passive_circle_path(content, center_x, center_y, font_size * 0.17);
+    content.fill_even_odd();
+}
+
+fn draw_passive_inbox_tray(
+    content: &mut Content,
+    glyph_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+    color: PdfColor,
+) {
+    let left = glyph_x + font_size * 0.05;
+    let bottom = baseline_y;
+    let width = font_size * 0.8;
+    let tray_top = bottom + font_size * 0.28;
+
+    content.move_to(left, tray_top);
+    content.line_to(left + width * 0.5, tray_top - font_size * 0.13);
+    content.line_to(left + width, tray_top);
+    content.line_to(left + width * 0.92, bottom);
+    content.line_to(left + width * 0.5, bottom - font_size * 0.1);
+    content.line_to(left + width * 0.08, bottom);
+    content.close_path();
+    content.fill_nonzero();
+
+    let center_x = left + width * 0.5;
+    let paper_top = bottom + font_size * 0.9;
+    let paper_left = left + width * 0.14;
+    let paper_right = left + width * 0.86;
+    let paper_mid_y = bottom + font_size * 0.54;
+    let paper_bottom = bottom + font_size * 0.35;
+    content.save_state();
+    set_fill_color(content, color);
+    set_stroke_color(content, color);
+    content.set_line_width((font_size * 0.035).clamp(0.3, 0.65));
+    content.move_to(center_x, paper_top);
+    content.line_to(paper_right, paper_mid_y);
+    content.line_to(center_x, paper_bottom);
+    content.line_to(paper_left, paper_mid_y);
+    content.close_path();
+    content.stroke();
+    content.move_to(paper_left, paper_mid_y);
+    content.line_to(center_x, paper_mid_y + font_size * 0.08);
+    content.line_to(paper_right, paper_mid_y);
+    content.move_to(center_x, paper_top);
+    content.line_to(center_x, paper_bottom);
+    content.stroke();
+    content.restore_state();
 }
 
 fn draw_passive_dingbat_overlays(content: &mut Content, fragment: &TextFragment) {
@@ -5865,7 +5929,8 @@ fn encode_symbol_char(ch: char) -> u8 {
 
 fn encode_zapf_dingbats_char(ch: char) -> u8 {
     match ch {
-        '\u{25a1}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{2751}' => b'q',
+        '\u{25a1}' | '\u{25c9}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{2751}'
+        | '\u{1f4e5}' => b'q',
         '\u{263a}' => b'J',
         '\u{2713}' | '\u{2714}' => b'3',
         '\u{2717}' => b'7',

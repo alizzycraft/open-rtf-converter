@@ -1454,7 +1454,7 @@ impl Default for ShapeBuilder {
             hidden: false,
             below_text: false,
             horizontal_anchor: StaticShapeHorizontalAnchor::Column,
-            vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
+            vertical_anchor: StaticShapeVerticalAnchor::Margin,
             flip_horizontal: false,
             flip_vertical: false,
             rotation_units: 0,
@@ -1489,8 +1489,8 @@ impl Default for ShapeBuilder {
                 blue: 128,
             },
             shadow_opacity_percent: 100,
-            shadow_offset_x_twips: 60,
-            shadow_offset_y_twips: 60,
+            shadow_offset_x_twips: 40,
+            shadow_offset_y_twips: 40,
             text_wrap: false,
             wrap_side: StaticImageWrapSide::Both,
             wrap_margin_left_twips: DEFAULT_SHAPE_WRAP_MARGIN_TWIPS,
@@ -2621,6 +2621,17 @@ impl Parser {
                             Some(offset),
                         ));
                     } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && self.options.compatibility_mode
+                            == CompatibilityMode::WordCompatiblePassive
+                        && is_word_suppressed_resultless_timestamp_stat_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "resultless field {name} omitted for Word-compatible passive rendering without dynamic evaluation"
+                            ),
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
                         && is_layout_positioning_resultless_field(name)
                     {
                         self.handle_resultless_layout_field(
@@ -2872,6 +2883,17 @@ impl Parser {
                     {
                         self.diagnostics.push(Diagnostic::warning(
                             "resultless FILESIZE suppressed for Word-compatible passive rendering",
+                            Some(offset),
+                        ));
+                    } else if let Some(name) = field_instruction_name(&field_instruction)
+                        && self.options.compatibility_mode
+                            == CompatibilityMode::WordCompatiblePassive
+                        && is_word_suppressed_resultless_timestamp_stat_field(name)
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "resultless field {name} omitted for Word-compatible passive rendering without dynamic evaluation"
+                            ),
                             Some(offset),
                         ));
                     } else if let Some(name) = field_instruction_name(&field_instruction)
@@ -4295,6 +4317,16 @@ impl Parser {
                         120
                     },
                     stroke_width_twips: if legacy_word_hairline { 3 } else { 15 },
+                    vertical_anchor: if legacy_drawing {
+                        StaticShapeVerticalAnchor::Paragraph
+                    } else {
+                        StaticShapeVerticalAnchor::Margin
+                    },
+                    fill_color: (!legacy_drawing).then_some(Color {
+                        red: 255,
+                        green: 255,
+                        blue: 255,
+                    }),
                     ..ShapeBuilder::default()
                 });
             }
@@ -15298,7 +15330,9 @@ impl Parser {
             None
         };
         let fill_gradient_color = fill_color
-            .filter(|_| shape.fill_enabled)
+            .filter(|_| {
+                shape.fill_enabled && shape.fill_pattern == ShadingPattern::VerticalGradient
+            })
             .and(shape.fill_gradient_color);
         self.push_static_shape(
             shape.owner_destination,
@@ -15994,6 +16028,15 @@ impl Parser {
                 }
             }
             "fillType" => {
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && value.trim().parse::<i32>().is_err()
+                {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "textual Office shape fill type ignored to match Word print behavior",
+                        None,
+                    ));
+                    return;
+                }
                 if let Some(fill_type) = parse_shape_fill_type_property(value) {
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.fill_pattern = match fill_type {
@@ -27617,6 +27660,11 @@ fn is_dynamic_clock_resultless_field(name: &str) -> bool {
     matches!(name, "DATE" | "TIME")
 }
 
+fn is_word_suppressed_resultless_timestamp_stat_field(name: &str) -> bool {
+    document_timestamp_field_name(name).is_some()
+        || matches!(name, "EDITTIME" | "REVNUM" | "DATE" | "TIME")
+}
+
 fn is_prompt_resultless_field(name: &str) -> bool {
     matches!(name, "FILLIN")
 }
@@ -30712,7 +30760,7 @@ fn map_wingdings_codepoint(codepoint: u32) -> Option<char> {
 
     match code {
         0x4a => Some('\u{263a}'),
-        0xa3 => Some('\u{2610}'),
+        0xa3 => Some('\u{25c9}'),
         0xfb => Some('\u{2717}'),
         0xfc => Some('\u{2713}'),
         0xfd => Some('\u{2612}'),
@@ -30779,7 +30827,7 @@ fn map_webdings_codepoint(codepoint: u32) -> Option<char> {
     };
 
     match code {
-        0x3f => Some('\u{2612}'),
+        0x3f => Some('\u{1f4e5}'),
         0x61 => Some('\u{2714}'),
         0x63 => Some('\u{25a1}'),
         _ => None,
@@ -38656,7 +38704,11 @@ impl Default for WmfDrawingState {
     fn default() -> Self {
         Self {
             stroke_color: Some(Color::default()),
-            stroke_width: 1.0,
+            // Word's PDF playback expands the fresh GDI BLACK_PEN to about
+            // 1.878 points in the common 200x100 -> 108x36 point WMF frame.
+            // Preserve that measured stock-pen width in logical coordinates;
+            // an explicitly selected CREATEPEN object replaces it below.
+            stroke_width: WMF_WORD_STOCK_PEN_LOGICAL_WIDTH,
             stroke_style: BorderStyle::Single,
             fill_rule: StaticImageVectorFillRule::Alternate,
             fill_color: None,
@@ -38704,6 +38756,8 @@ const MAX_PASSIVE_WMF_ARC_SEGMENTS: usize = 64;
 const MAX_PASSIVE_WMF_TEXT_BYTES: usize = 512;
 const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
 const MAX_PASSIVE_WMF_SAVED_STATES: usize = 32;
+const WMF_WORD_STOCK_PEN_LOGICAL_WIDTH: f32 = 4.172_978;
+const WMF_WORD_AUTHORED_PEN_SCALE: f32 = WMF_WORD_STOCK_PEN_LOGICAL_WIDTH / 4.0;
 const MAX_PASSIVE_VECTOR_RASTER_PIXELS: usize = 1_000_000;
 const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
@@ -43115,7 +43169,8 @@ fn normalized_wmf_text_height(font_height: Option<i32>, window_height: i32) -> f
 }
 
 fn normalized_wmf_stroke_width(width: i32, window_width: i32) -> f32 {
-    width.clamp(1, window_width.max(1)) as f32
+    (width.clamp(1, window_width.max(1)) as f32 * WMF_WORD_AUTHORED_PEN_SCALE)
+        .min(window_width.max(1) as f32)
 }
 
 fn normalized_wmf_text_character_extra(
@@ -45189,7 +45244,7 @@ mod tests {
 
         assert_eq!(
             paragraph.runs[0].text,
-            "\u{2610} \u{2611} \u{2713} \u{2717} \u{2612} \u{2612}"
+            "\u{25c9} \u{2611} \u{2713} \u{2717} \u{2612} \u{2612}"
         );
         assert_eq!(paragraph.runs[0].style.font_index, 1);
     }
@@ -45237,7 +45292,7 @@ mod tests {
             _ => panic!("expected paragraph"),
         };
 
-        assert_eq!(paragraph.runs[0].text, "\u{2612} \u{2714} \u{25a1}");
+        assert_eq!(paragraph.runs[0].text, "\u{1f4e5} \u{2714} \u{25a1}");
         assert_eq!(paragraph.runs[0].style.font_index, 1);
     }
 
@@ -48505,7 +48560,8 @@ After\par}"#;
         let output = parse_rtf(input).unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Before [Field removed: no passive result] time [Field removed: no passive result] After"), "text was {text:?}");
+        assert!(text.contains("Before  time  After"), "text was {text:?}");
+        assert!(!text.contains("[Field removed: no passive result]"));
         for forbidden in [
             "DATE",
             "TIME",
@@ -48522,7 +48578,7 @@ After\par}"#;
         for name in ["DATE", "TIME"] {
             assert!(output.diagnostics.iter().any(|diagnostic| {
                 diagnostic.message.contains(&format!(
-                    "dynamic field {name} rendered as passive placeholder without reading converter clock"
+                    "resultless field {name} omitted for Word-compatible passive rendering without dynamic evaluation"
                 ))
             }));
         }
@@ -48548,7 +48604,11 @@ After\par}"#;
             stripped
                 .diagnostics
                 .iter()
-                .any(|diagnostic| { diagnostic.message.contains("dynamic field DATE stripped") })
+                .any(|diagnostic| {
+                    diagnostic.message.contains(
+                        "resultless field DATE omitted for Word-compatible passive rendering without dynamic evaluation",
+                    )
+                })
         );
     }
 
@@ -50244,22 +50304,37 @@ After\par}"#;
             parse_rtf(r#"{\rtf1 Before {\field{\*\fldinst DATE \\@ "yyyy"}} After\par}"#).unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Before"));
-        assert!(text.contains("[Field removed: no passive result]"));
-        assert!(text.contains("After"));
+        assert!(text.contains("Before  After"));
+        assert!(!text.contains("[Field removed: no passive result]"));
         assert!(!text.contains("DATE"));
         assert!(!text.contains("yyyy"));
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("dynamic field DATE rendered as passive placeholder without reading converter clock")
+                .contains("resultless field DATE omitted for Word-compatible passive rendering without dynamic evaluation")
         }));
+
+        let strict_options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let strict = parse_rtf_bytes_with_options(
+            br#"{\rtf1 Before {\field{\*\fldinst DATE \\@ "yyyy"}} After\par}"#,
+            &strict_options,
+        )
+        .unwrap();
+        assert!(document_text(&strict.document).contains("[Field removed: no passive result]"));
     }
 
     #[test]
     fn resultless_document_timestamp_fields_render_from_metadata_only() {
-        let output = parse_rtf(
-            r#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30\sec9}{\revtim\yr2025\mo1\dy2\hr9\min4\sec5}{\printim\yr2026\mo12\dy31}}Created {\field{\*\fldinst CREATEDATE \\@ "dddd, MMMM d, yyyy 'at' h:mm A/P"}} saved {\field{\*\fldinst SAVEDATE \\@ "ddd yyyy-MM-dd h:mm a/p"}} printed {\field{\*\fldinst PRINTDATE \\@ "M/d/yy"}} missing {\field{\*\fldinst SAVEDATE \\@ "unknown-token"}} dynamic {\field{\*\fldinst DATE \\@ "yyyy"}}\par}"#,
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br#"{\rtf1{\info{\creatim\yr2024\mo7\dy5\hr14\min30\sec9}{\revtim\yr2025\mo1\dy2\hr9\min4\sec5}{\printim\yr2026\mo12\dy31}}Created {\field{\*\fldinst CREATEDATE \\@ "dddd, MMMM d, yyyy 'at' h:mm A/P"}} saved {\field{\*\fldinst SAVEDATE \\@ "ddd yyyy-MM-dd h:mm a/p"}} printed {\field{\*\fldinst PRINTDATE \\@ "M/d/yy"}} missing {\field{\*\fldinst SAVEDATE \\@ "unknown-token"}} dynamic {\field{\*\fldinst DATE \\@ "yyyy"}}\par}"#,
+            &options,
         )
         .unwrap();
         let text = document_text(&output.document);
@@ -50293,8 +50368,13 @@ After\par}"#;
 
     #[test]
     fn resultless_edit_time_fields_render_from_metadata_only() {
-        let output = parse_rtf(
-            r#"{\rtf1{\info{\edmins42}}Edit {\field{\*\fldinst EDITTIME \\* ROMAN}} raw {\field{\*\fldinst EDITTIME \\# "0000"}}\par}"#,
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br#"{\rtf1{\info{\edmins42}}Edit {\field{\*\fldinst EDITTIME \\* ROMAN}} raw {\field{\*\fldinst EDITTIME \\# "0000"}}\par}"#,
+            &options,
         )
         .unwrap();
         let text = document_text(&output.document);
@@ -50307,7 +50387,11 @@ After\par}"#;
             );
         }
 
-        let missing = parse_rtf(r"{\rtf1 Missing {\field{\*\fldinst EDITTIME}}\par}").unwrap();
+        let missing = parse_rtf_bytes_with_options(
+            br"{\rtf1 Missing {\field{\*\fldinst EDITTIME}}\par}",
+            &options,
+        )
+        .unwrap();
         let missing_text = document_text(&missing.document);
         assert!(missing_text.contains("Missing [Field removed: no passive result]"));
         assert!(!missing_text.contains("EDITTIME"));
@@ -50332,8 +50416,13 @@ After\par}"#;
 
     #[test]
     fn resultless_revision_number_fields_render_from_metadata_only() {
-        let output = parse_rtf(
-            r#"{\rtf1{\info{\version12}}Rev {\field{\*\fldinst REVNUM \\* ROMAN}} raw {\field{\*\fldinst REVNUM \\# "0000"}}\par}"#,
+        let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br#"{\rtf1{\info{\version12}}Rev {\field{\*\fldinst REVNUM \\* ROMAN}} raw {\field{\*\fldinst REVNUM \\# "0000"}}\par}"#,
+            &options,
         )
         .unwrap();
         let text = document_text(&output.document);
@@ -50346,7 +50435,11 @@ After\par}"#;
             );
         }
 
-        let missing = parse_rtf(r"{\rtf1 Missing {\field{\*\fldinst REVNUM}}\par}").unwrap();
+        let missing = parse_rtf_bytes_with_options(
+            br"{\rtf1 Missing {\field{\*\fldinst REVNUM}}\par}",
+            &options,
+        )
+        .unwrap();
         let missing_text = document_text(&missing.document);
         assert!(missing_text.contains("Missing [Field removed: no passive result]"));
         assert!(!missing_text.contains("REVNUM"));
@@ -69387,6 +69480,37 @@ After\par}"#;
                 if image.format == ImageFormat::WmfVector
                     && image.bytes.is_empty()
                     && image.vector_commands.is_empty()
+        ));
+    }
+
+    #[test]
+    fn wmf_stock_black_pen_uses_word_pdf_playback_width() {
+        let wmf_hex = concat!(
+            "0100090000032a0000000100070000000000",
+            "050000000c026400c800",
+            "07000000fc020000dcdcdc000000",
+            "040000002d010000",
+            "070000001b045000b4000a001400",
+            "0700000018045a00be0014006400",
+            "030000000000",
+        );
+        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+
+        assert_eq!(image.format, ImageFormat::WmfVector);
+        assert!(matches!(
+            image.vector_commands.as_slice(),
+            [
+                StaticImageVectorCommand::Rectangle { stroke_width, .. },
+                StaticImageVectorCommand::Ellipse {
+                    stroke_width: ellipse_width,
+                    ..
+                }
+            ] if (*stroke_width - WMF_WORD_STOCK_PEN_LOGICAL_WIDTH).abs() < f32::EPSILON
+                && (*ellipse_width - WMF_WORD_STOCK_PEN_LOGICAL_WIDTH).abs() < f32::EPSILON
         ));
     }
 

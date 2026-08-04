@@ -32,6 +32,7 @@ const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
 const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
 const LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER: &str = "888";
 const MAX_VERTICAL_TABLE_TEXT_WRAP_POINTS: f32 = 720.0;
+const WORD_INLINE_IMAGE_BODY_EDGE_TOLERANCE_POINTS: f32 = 1.0;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -1185,9 +1186,6 @@ impl LayoutEngine {
                             pages.len(),
                         );
                     }
-                    let paragraph_anchor_y = cursor_y;
-                    let paragraph_anchor_page = pages.len();
-                    let paragraph_anchor_column = current_column;
                     layout_paragraph_with_auto_footnotes(
                         &mut pages,
                         &mut cursor_y,
@@ -1212,11 +1210,7 @@ impl LayoutEngine {
                         }),
                         None,
                     );
-                    last_paragraph_anchor = Some((
-                        paragraph_anchor_page,
-                        paragraph_anchor_column,
-                        paragraph_anchor_y,
-                    ));
+                    last_paragraph_anchor = Some((pages.len(), current_column, cursor_y));
                     let reaches_note_boundary = document
                         .blocks
                         .get(block_idx.saturating_add(1))
@@ -3957,6 +3951,9 @@ fn layout_column_separators(pages: &mut [LayoutPage]) {
         if !geometry.line_between_columns {
             continue;
         }
+        let Some(bounds) = column_separator_content_bounds(&page.items) else {
+            continue;
+        };
         for column_idx in 1..geometry.column_count {
             let previous = column_idx - 1;
             let x = geometry.body_left(previous)
@@ -3964,19 +3961,38 @@ fn layout_column_separators(pages: &mut [LayoutPage]) {
                 + (geometry.column_gaps[previous] / 2.0);
             page.items.push(LayoutItem::Line {
                 x1: x,
-                y1: geometry.margin_bottom,
+                y1: bounds.bottom,
                 x2: x,
-                y2: geometry.height - geometry.margin_top,
-                width: 0.5,
+                y2: bounds.top,
+                width: 0.72,
                 color: PdfColor {
-                    red: 0.65,
-                    green: 0.65,
-                    blue: 0.65,
+                    red: 0.0,
+                    green: 0.0,
+                    blue: 0.0,
                 },
                 style: LineStyle::Solid,
             });
         }
     }
+}
+
+fn column_separator_content_bounds(items: &[LayoutItem]) -> Option<VerticalBounds> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            LayoutItem::Text(fragment) => {
+                let font_size = fragment.style.font_size_points();
+                Some(VerticalBounds {
+                    top: fragment.baseline_y + (font_size * 0.94),
+                    bottom: fragment.baseline_y - (font_size * 0.21),
+                })
+            }
+            item => layout_item_vertical_bounds(item),
+        })
+        .reduce(|acc, bounds| VerticalBounds {
+            top: acc.top.max(bounds.top),
+            bottom: acc.bottom.min(bounds.bottom),
+        })
 }
 
 fn layout_page_borders(pages: &mut [LayoutPage], document: &Document) {
@@ -7814,7 +7830,18 @@ fn wrapped_image_text_intervals_for_line(
     Some(
         free_intervals
             .into_iter()
-            .map(|(left, right)| (left, (right - left).max(0.0)))
+            .map(|(left, mut right)| {
+                // Word allows the final glyph box beside a floating object to
+                // overhang the nominal body edge by roughly 2.8 points. Keep
+                // that tolerance bounded to the right-side interval ending at
+                // the content edge; ordinary lines and interior gaps retain
+                // their exact authored bounds.
+                if left > margin_left + f32::EPSILON && (right - content_right).abs() < f32::EPSILON
+                {
+                    right += 3.0;
+                }
+                (left, (right - left).max(0.0))
+            })
             .filter(|(_, width)| *width >= 12.0)
             .collect(),
     )
@@ -8208,7 +8235,20 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                     fit_width = width;
                 }
             }
-            if current.width > 0.0 && current.width + fit_width > line_width {
+            let inline_image_body_edge_tolerance = if !supports_segmented_flow
+                && (line_width - content_width).abs() < 0.01
+                && current
+                    .runs
+                    .iter()
+                    .any(|run| inline_image_marker_index(&run.text).is_some())
+            {
+                WORD_INLINE_IMAGE_BODY_EDGE_TOLERANCE_POINTS
+            } else {
+                0.0
+            };
+            if current.width > 0.0
+                && current.width + fit_width > line_width + inline_image_body_edge_tolerance
+            {
                 let carried_whitespace = if paragraph.style.no_wrap {
                     take_trailing_whitespace(&mut current, document, font_provider)
                 } else {
@@ -8608,6 +8648,25 @@ fn natural_line_height_for_runs(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
+    let has_passive_checkbox = runs
+        .iter()
+        .any(|run| run.text.chars().any(is_passive_checkbox_char));
+    if has_passive_checkbox {
+        return runs
+            .iter()
+            .filter(|run| {
+                inline_image_marker_index(&run.text).is_none()
+                    && !is_passive_advance_marker(&run.text)
+            })
+            .map(|run| {
+                (run.line_height_points * 1.15)
+                    + run.style.baseline_shift_points().abs()
+                    + (character_border_inset(&run.style) * 2.0)
+            })
+            .filter(|height| *height > 0.0)
+            .reduce(f32::max)
+            .unwrap_or(14.0);
+    }
     runs.iter()
         .map(|run| flow_run_line_height(run, document, font_provider))
         .filter(|height| *height > 0.0)
@@ -10755,6 +10814,11 @@ fn flow_run_line_height(
         return 0.0;
     }
     let border_extra = character_border_inset(&run.style) * 2.0;
+    if run.text.chars().any(is_passive_checkbox_char) {
+        return (run.line_height_points * 1.15)
+            + run.style.baseline_shift_points().abs()
+            + border_extra;
+    }
     let fallback = fallback_flow_run_line_height(run) + border_extra;
     let passive_base14_fallback =
         || passive_base14_fallback_flow_run_line_height(run, document) + border_extra;
@@ -11812,6 +11876,7 @@ fn is_passive_checkbox_text(text: &str) -> bool {
         if matches!(
             ch,
             '\u{25a1}'
+                | '\u{25c9}'
                 | '\u{2610}'
                 | '\u{2611}'
                 | '\u{2612}'
@@ -11820,6 +11885,7 @@ fn is_passive_checkbox_text(text: &str) -> bool {
                 | '\u{2714}'
                 | '\u{2717}'
                 | '\u{2751}'
+                | '\u{1f4e5}'
         ) {
             has_checkbox = true;
         } else {
@@ -11864,6 +11930,7 @@ fn is_passive_checkbox_char(ch: char) -> bool {
     matches!(
         ch,
         '\u{25a1}'
+            | '\u{25c9}'
             | '\u{2610}'
             | '\u{2611}'
             | '\u{2612}'
@@ -11872,6 +11939,7 @@ fn is_passive_checkbox_char(ch: char) -> bool {
             | '\u{2714}'
             | '\u{2717}'
             | '\u{2751}'
+            | '\u{1f4e5}'
     )
 }
 
@@ -12597,7 +12665,7 @@ fn source_dingbat_advance_points(font: Option<&FontDef>, ch: char, size: f32) ->
         match ch {
             '\u{2717}' => 0.645,
             '\u{2713}' | '\u{2714}' => 0.766,
-            '\u{2610}' | '\u{2611}' | '\u{2612}' => 0.892,
+            '\u{25c9}' | '\u{2610}' | '\u{2611}' | '\u{2612}' => 0.892,
             ch if ch.is_whitespace() => 1.0,
             _ => return None,
         }
@@ -12611,7 +12679,8 @@ fn source_dingbat_advance_points(font: Option<&FontDef>, ch: char, size: f32) ->
         }
     } else if name.contains("webdings") {
         match ch {
-            '\u{25a1}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{2713}' | '\u{2714}' => 1.0,
+            '\u{25a1}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{2713}' | '\u{2714}'
+            | '\u{1f4e5}' => 1.0,
             ch if ch.is_whitespace() => 0.5,
             _ => return None,
         }
@@ -14022,6 +14091,208 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_anchored_shape_starts_after_prior_paragraph_and_uses_word_edge_tolerance() {
+        let parsed = parse_rtf(include_str!("../fixtures/static-shape-wrap.rtf")).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let page = &layout.pages[0];
+        let shape = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Highlight {
+                    y, height, color, ..
+                } if color.green > 0.9 && color.blue > 0.9 => Some((*y, *height)),
+                _ => None,
+            })
+            .expect("wrapped cyan shape");
+        let wrapped = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.starts_with("Wrapped") => Some(text),
+                _ => None,
+            })
+            .expect("Word-compatible first wrapped line");
+
+        assert!(
+            (shape.0 + shape.1 - 345.0).abs() < 0.01,
+            "shape top was {}",
+            shape.0 + shape.1
+        );
+        assert!((wrapped.x - 153.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn modern_shape_defaults_to_word_margin_anchor_and_white_fill() {
+        let parsed =
+            parse_rtf(include_str!("../fixtures/shape-disabled-line-passive.rtf")).unwrap();
+        let shape = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("modern rectangle shape");
+        assert_eq!(shape.vertical_anchor, StaticShapeVerticalAnchor::Margin);
+        assert_eq!(
+            shape.fill_color,
+            Some(Color {
+                red: 255,
+                green: 255,
+                blue: 255
+            })
+        );
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        let fill = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Highlight {
+                    x,
+                    y,
+                    width,
+                    height,
+                    color,
+                    ..
+                } => Some((*x, *y, *width, *height, *color)),
+                _ => None,
+            })
+            .expect("Word default white fill");
+
+        assert_eq!(
+            fill.4,
+            PdfColor {
+                red: 1.0,
+                green: 1.0,
+                blue: 1.0
+            }
+        );
+        assert!((fill.0 - 108.0).abs() < 0.01);
+        assert!((fill.1 - 648.0).abs() < 0.01);
+        assert!((fill.2 - 108.0).abs() < 0.01);
+        assert!((fill.3 - 36.0).abs() < 0.01);
+        assert!(
+            !layout.pages[0]
+                .items
+                .iter()
+                .any(|item| matches!(item, LayoutItem::Line { .. }))
+        );
+    }
+
+    #[test]
+    fn modern_shape_shadow_uses_word_two_point_default_offset() {
+        let parsed =
+            parse_rtf(include_str!("../fixtures/shape-shadow-opacity-passive.rtf")).unwrap();
+        let shape = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("modern shadowed rectangle");
+
+        assert_eq!(shape.shadow_offset_x_twips, 40);
+        assert_eq!(shape.shadow_offset_y_twips, 40);
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        let fills = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| {
+                let mut leaf = item;
+                loop {
+                    leaf = match leaf {
+                        LayoutItem::Drawing(drawing) => drawing.item.as_ref(),
+                        LayoutItem::Opacity { item, .. } => item.as_ref(),
+                        _ => break,
+                    };
+                }
+                match leaf {
+                    LayoutItem::Highlight {
+                        x,
+                        y,
+                        width,
+                        height,
+                        ..
+                    } => Some((*x, *y, *width, *height)),
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(fills.iter().any(|fill| {
+            (fill.0 - 110.0).abs() < 0.01
+                && (fill.1 - 646.0).abs() < 0.01
+                && (fill.2 - 108.0).abs() < 0.01
+                && (fill.3 - 36.0).abs() < 0.01
+        }));
+        assert!(fills.iter().any(|fill| {
+            (fill.0 - 108.0).abs() < 0.01
+                && (fill.1 - 648.0).abs() < 0.01
+                && (fill.2 - 108.0).abs() < 0.01
+                && (fill.3 - 36.0).abs() < 0.01
+        }));
+    }
+
+    #[test]
+    fn word_ignores_textual_office_shape_fill_type_aliases() {
+        for fixture in [
+            include_str!("../fixtures/shape-pattern-fill-passive.rtf"),
+            include_str!("../fixtures/shape-gradient-fill-passive.rtf"),
+        ] {
+            let parsed = parse_rtf(fixture).unwrap();
+            let shape = parsed
+                .document
+                .blocks
+                .iter()
+                .find_map(|block| match block {
+                    Block::Shape(shape) => Some(shape),
+                    _ => None,
+                })
+                .expect("modern filled rectangle");
+
+            assert_eq!(shape.fill_pattern, ShadingPattern::None);
+            assert_eq!(shape.fill_gradient_color, None);
+        }
+    }
+
+    #[test]
+    fn inline_image_line_uses_bounded_word_body_edge_tolerance() {
+        let parsed = parse_rtf(include_str!("../fixtures/wmf-dashed-pen-passive.rtf")).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let page = &layout.pages[0];
+        let after = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.starts_with("After") => Some(text),
+                _ => None,
+            })
+            .expect("text after inline image");
+        let dashed = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.starts_with("dashed") && text.x > after.x => {
+                    Some(text)
+                }
+                _ => None,
+            })
+            .expect("trailing text near body edge");
+
+        assert!(
+            (after.baseline_y - dashed.baseline_y).abs() < 0.01,
+            "Word keeps trailing text on the inline-image line: after={}, dashed={}",
+            after.baseline_y,
+            dashed.baseline_y
+        );
+    }
+
+    #[test]
     fn passive_drawing_slots_are_sorted_by_normalized_z_order() {
         let mut document = Document::default();
         document.blocks = vec![
@@ -15337,9 +15608,9 @@ mod tests {
             after.baseline_y
         );
         assert!((line.0 - 90.0).abs() < 0.01);
-        assert!((line.1 - 696.0).abs() < 0.01);
+        assert!((line.1 - 681.0).abs() < 0.01);
         assert!((line.2 - 162.0).abs() < 0.01);
-        assert!((line.3 - 660.0).abs() < 0.01);
+        assert!((line.3 - 645.0).abs() < 0.01);
     }
 
     #[test]
@@ -22900,6 +23171,38 @@ mod tests {
     }
 
     #[test]
+    fn passive_checkbox_paragraph_keeps_word_baseline_interval_with_default_provider() {
+        let parsed = parse_rtf(include_str!("../fixtures/wingdings-checkbox-passive.rtf")).unwrap();
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        let page = &layout.pages[0];
+        let fragment_starting_with = |prefix: &str| {
+            page.items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.starts_with(prefix) => {
+                        Some(fragment)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing text fragment starting with {prefix}"))
+        };
+        let before = fragment_starting_with("Before");
+        let box_label = fragment_starting_with("Box");
+        let field_label = fragment_starting_with("Field");
+        let after = fragment_starting_with("After");
+
+        assert!((before.baseline_y - box_label.baseline_y - 13.8).abs() < 0.01);
+        assert!(
+            (box_label.baseline_y - field_label.baseline_y - 13.8).abs() < 0.01,
+            "box={}, field={}",
+            box_label.baseline_y,
+            field_label.baseline_y
+        );
+        assert!((field_label.baseline_y - after.baseline_y - 13.8).abs() < 0.01);
+    }
+
+    #[test]
     fn measures_legacy_dingbat_glyphs_with_word_source_font_advances() {
         let font = |name: &str| FontDef {
             index: 1,
@@ -23905,6 +24208,34 @@ mod tests {
         let layout = LayoutEngine::layout(&document);
 
         assert!(has_vertical_line_at(&layout.pages[0], 306.0));
+    }
+
+    #[test]
+    fn word_column_separator_spans_only_the_occupied_section_content() {
+        let parsed = parse_rtf(include_str!("../fixtures/section-columns-passive.rtf")).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let separator = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Line {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    width,
+                    color,
+                    ..
+                } if (*x1 - 135.0).abs() < 0.01 && (*x2 - 135.0).abs() < 0.01 => {
+                    Some((*y1, *y2, *width, *color))
+                }
+                _ => None,
+            })
+            .expect("column separator");
+
+        assert!((separator.1 - separator.0 - 13.8).abs() < 0.01);
+        assert!((separator.2 - 0.72).abs() < 0.01);
+        assert_eq!(separator.3, PdfColor::default());
     }
 
     #[test]
