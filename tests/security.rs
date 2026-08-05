@@ -42441,7 +42441,7 @@ fn wmf_blackness_and_whiteness_transfers_render_passively_without_payload_leakag
 }
 
 #[test]
-fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
+fn wmf_setpixel_renders_word_sized_passive_stroke_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003180000000000070000000000",
         "050000000c026400c800",
@@ -42472,18 +42472,19 @@ fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
     assert!(image.vector_commands.iter().any(|command| {
         matches!(
             command,
-            StaticImageVectorCommand::Rectangle {
-                left,
-                top,
-                right,
-                bottom,
-                stroke_color: None,
-                fill_color: Some(color),
+            StaticImageVectorCommand::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                stroke_color: Some(color),
+                stroke_width,
                 ..
-            } if (*left - 64.0).abs() < 0.01
-                && (*top - 32.0).abs() < 0.01
-                && (*right - 65.0).abs() < 0.01
-                && (*bottom - 33.0).abs() < 0.01
+            } if (*x1 - 64.0).abs() < 0.01
+                && (*y1 - 32.0).abs() < 0.01
+                && (*x2 - 65.5883).abs() < 0.01
+                && (*y2 - 32.0).abs() < 0.01
+                && (*stroke_width - 4.172978).abs() < 0.0001
                 && color.red == 255
                 && color.green == 0
                 && color.blue == 0
@@ -42512,15 +42513,15 @@ fn wmf_setpixel_renders_passive_filled_pixel_without_payload_leakage() {
         content
             .operations
             .iter()
-            .any(|operation| operation.operator == "re"),
-        "WMF SETPIXEL should render as a passive PDF rectangle path"
+            .any(|operation| operation.operator == "l"),
+        "WMF SETPIXEL should render as a passive PDF line segment"
     );
     assert!(
         content
             .operations
             .iter()
-            .any(|operation| operation.operator == "f"),
-        "WMF SETPIXEL should render as a passive PDF fill"
+            .any(|operation| operation.operator == "S"),
+        "WMF SETPIXEL should render as a passive PDF stroke"
     );
     for forbidden in [
         b"/Subtype /Image".as_slice(),

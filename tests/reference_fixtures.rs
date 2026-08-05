@@ -896,7 +896,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/AcroForm",
                 b"/Annots",
             ],
-            must_contain_pdf: &[b" re", b" f"],
+            must_contain_pdf: &[b" m", b" l", b" S"],
             must_emit_diagnostics: &[],
         },
         ReferenceFixture {

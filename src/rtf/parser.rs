@@ -38908,6 +38908,11 @@ const MAX_PASSIVE_WMF_OBJECTS: usize = 256;
 const MAX_PASSIVE_WMF_SAVED_STATES: usize = 32;
 const WMF_WORD_STOCK_PEN_LOGICAL_WIDTH: f32 = 4.172_978;
 const WMF_WORD_AUTHORED_PEN_SCALE: f32 = WMF_WORD_STOCK_PEN_LOGICAL_WIDTH / 4.0;
+// Word exports a WMF SETPIXEL as a one-device-pixel horizontal stroke. In the
+// common 200-unit WMF window that stroke spans 0.8577 points inside a 108-point
+// picture, or 1.5883 normalized logical units. Keep the primitive bounded and
+// independent from the selected GDI pen state.
+const WMF_WORD_SETPIXEL_LOGICAL_LENGTH: f32 = 1.588_3;
 const MAX_PASSIVE_VECTOR_RASTER_PIXELS: usize = 1_000_000;
 const WMF_ETO_OPAQUE: u16 = 0x0002;
 const WMF_ETO_CLIPPED: u16 = 0x0004;
@@ -41338,20 +41343,17 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some((left, top, right, bottom, color)) =
-                    parse_wmf_setpixel_rect(data, coordinates)
-                    && bounds_is_visible((left, top, right, bottom))
+                if let Some((x1, y1, x2, y2, color)) = parse_wmf_setpixel_line(data, coordinates)
+                    && x2 > x1
                 {
-                    commands.push(StaticImageVectorCommand::Rectangle {
-                        left,
-                        top,
-                        right,
-                        bottom,
-                        stroke_color: None,
-                        stroke_width: 0.0,
+                    commands.push(StaticImageVectorCommand::Line {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        stroke_color: Some(color),
+                        stroke_width: WMF_WORD_STOCK_PEN_LOGICAL_WIDTH,
                         stroke_style: BorderStyle::Single,
-                        fill_pattern: ShadingPattern::None,
-                        fill_color: Some(color),
                     });
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -43081,7 +43083,7 @@ fn white_color() -> Color {
     }
 }
 
-fn parse_wmf_setpixel_rect(
+fn parse_wmf_setpixel_line(
     data: &[u8],
     coordinates: WmfCoordinateMap,
 ) -> Option<(f32, f32, f32, f32, Color)> {
@@ -43094,13 +43096,15 @@ fn parse_wmf_setpixel_rect(
     let (x, y) = coordinates.normalized_point(x, y);
     let max_x = coordinates.image_width.max(1) as f32;
     let max_y = coordinates.image_height.max(1) as f32;
-    Some((
-        pixel_rect_start(x, max_x),
-        pixel_rect_start(y, max_y),
-        pixel_rect_end(x, max_x),
-        pixel_rect_end(y, max_y),
-        color,
-    ))
+    let x1 = x.clamp(0.0, max_x);
+    let y = y.clamp(0.0, max_y);
+    let x2 = (x1 + WMF_WORD_SETPIXEL_LOGICAL_LENGTH).min(max_x);
+    let (x1, x2) = if x2 > x1 {
+        (x1, x2)
+    } else {
+        ((x1 - WMF_WORD_SETPIXEL_LOGICAL_LENGTH).max(0.0), x1)
+    };
+    Some((x1, y, x2, y, color))
 }
 
 fn parse_wmf_arc_record(

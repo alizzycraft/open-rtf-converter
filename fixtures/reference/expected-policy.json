@@ -673,7 +673,7 @@
         "After WMF setpixel."
       ],
       "intentional_security_differences": [
-        "Supported WMF SETPIXEL records are converted into bounded passive one-pixel PDF rectangle fills.",
+        "Supported WMF SETPIXEL records are converted into bounded passive Word-sized PDF strokes without retaining mutable device pixels.",
         "Raw WMF bytes, SETPIXEL record payloads, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
       "expected_diagnostics": [],
@@ -697,12 +697,13 @@
         "/Annots"
       ],
       "expected_pdf_markers": [
-        " re",
-        " f"
+        " m",
+        " l",
+        " S"
       ],
       "known_gaps": [
-        "Focused Word comparison measured the red SETPIXEL mark as a 1.87784-point stroked segment at approximately (118.47, 64.68), while the converter emits a bounded 0.54-by-0.36-point fill at approximately (114.58, 61.32). The shared legacy WMF playback/map transform must be corrected generally before exact placement and scale can match.",
-        "The converter intentionally supports only bounded passive pixel fills; malformed SETPIXEL records remain placeholdered or stripped."
+        "The converter now matches Word's red 1.87784-point stroke width and 0.8577-point segment length exactly. Its command point remains displaced about 3.89 points left and 3.36 points up because Word applies a SETPIXEL-specific legacy device mapping that needs additional multi-point reference evidence.",
+        "The converter intentionally supports only bounded passive pixel strokes; malformed SETPIXEL records remain placeholdered or stripped."
       ]
     },
     {
