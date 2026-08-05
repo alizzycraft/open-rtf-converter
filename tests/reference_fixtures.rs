@@ -1377,8 +1377,10 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/AcroForm",
                 b"/Annots",
             ],
-            must_contain_pdf: &[b" n", b" c", b" m", b" l", b" S"],
-            must_emit_diagnostics: &[],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "hatch-fill-only EMF picture suppressed for Word-compatible passive rendering",
+            ],
         },
         ReferenceFixture {
             input: "fixtures/emf-arc-family-passive.rtf",

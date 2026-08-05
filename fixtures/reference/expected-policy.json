@@ -1442,7 +1442,7 @@
     {
       "id": "emf-hatch-brush-passive-lines",
       "input": "fixtures/emf-hatch-brush-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-hatch-brush-passive.pdf",
       "word_reference_pages": [],
@@ -1452,10 +1452,12 @@
         "After EMF hatch."
       ],
       "intentional_security_differences": [
-        "Supported EMF hatch brush fills are converted into bounded passive line drawing clipped to the filled path.",
+        "Word-compatible mode reproduces Word's omission of a hatch-fill-only EMF without retaining its raw payload; StrictSpec retains bounded passive hatch lines clipped to the decoded path.",
         "Raw EMF bytes, brush/path records, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "hatch-fill-only EMF picture suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1474,16 +1476,10 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " n",
-        " c",
-        " m",
-        " l",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF hatch density, Bezier clipping, phase, and color.",
-        "The converter intentionally supports only a hardened passive EMF brush/path subset; unsupported brush and path records remain inert, placeholder, or stripped."
+        "Visible output now matches Word's hatch-fill-only EMF suppression; remaining text-box differences are limited to the established bundled Arial-compatible metric residual.",
+        "Mixed-content EMFs retain the hardened passive brush/path subset; unsupported records remain inert, placeholder, or stripped."
       ]
     },
     {

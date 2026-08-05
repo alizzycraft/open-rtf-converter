@@ -14669,9 +14669,19 @@ impl Parser {
                         == CompatibilityMode::WordCompatiblePassive
                         && emf.setpixel_command_count > 0
                         && emf.commands.len() == emf.setpixel_command_count;
-                    if word_suppresses_pixel_only_emf {
+                    let word_suppresses_hatch_fill_only_emf = self.options.compatibility_mode
+                        == CompatibilityMode::WordCompatiblePassive
+                        && emf_commands_are_hatch_fill_only(&emf.commands);
+                    if word_suppresses_pixel_only_emf || word_suppresses_hatch_fill_only_emf {
+                        let reason = if word_suppresses_pixel_only_emf {
+                            "pixel-only"
+                        } else {
+                            "hatch-fill-only"
+                        };
                         self.diagnostics.push(Diagnostic::warning(
-                            "pixel-only EMF picture suppressed for Word-compatible passive rendering",
+                            format!(
+                                "{reason} EMF picture suppressed for Word-compatible passive rendering"
+                            ),
                             Some(offset),
                         ));
                         if picture.flushed_inline_body_paragraph
@@ -31185,6 +31195,45 @@ struct ParsedEmfVector {
     skipped_record_count: usize,
     setpixel_command_count: usize,
     commands: Vec<StaticImageVectorCommand>,
+}
+
+fn emf_commands_are_hatch_fill_only(commands: &[StaticImageVectorCommand]) -> bool {
+    !commands.is_empty()
+        && commands.iter().all(|command| {
+            matches!(
+                command,
+                StaticImageVectorCommand::Path {
+                    stroke_color: None,
+                    fill_pattern,
+                    fill_color: Some(_),
+                    ..
+                }
+                    | StaticImageVectorCommand::Polygon {
+                        stroke_color: None,
+                        fill_pattern,
+                        fill_color: Some(_),
+                        ..
+                    }
+                    | StaticImageVectorCommand::Rectangle {
+                        stroke_color: None,
+                        fill_pattern,
+                        fill_color: Some(_),
+                        ..
+                    }
+                    | StaticImageVectorCommand::RoundedRectangle {
+                        stroke_color: None,
+                        fill_pattern,
+                        fill_color: Some(_),
+                        ..
+                    }
+                    | StaticImageVectorCommand::Ellipse {
+                        stroke_color: None,
+                        fill_pattern,
+                        fill_color: Some(_),
+                        ..
+                    } if *fill_pattern != ShadingPattern::None
+            )
+        })
 }
 
 #[derive(Debug, Clone)]
@@ -60817,7 +60866,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_hatched_bezier_fillpath_becomes_passive_path_command() {
+    fn strict_spec_emf_hatched_bezier_fillpath_becomes_passive_path_command() {
         let records = [
             emf_create_brush_record(
                 3,
@@ -60840,7 +60889,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\emfblip {}}}}}",
             bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -60866,6 +60922,46 @@ After\par}"#;
                 }]
             )
         ));
+    }
+
+    #[test]
+    fn word_compatible_hatch_fill_only_emf_is_suppressed() {
+        let records = [
+            emf_create_brush_record(
+                3,
+                2,
+                Color {
+                    red: 20,
+                    green: 90,
+                    blue: 180,
+                },
+                5,
+            ),
+            emf_select_object_record(3),
+            emf_unknown_record(59),
+            emf_point_record(27, 20, 20),
+            emf_poly_record(5, &[(30, 5), (60, 55), (80, 20)]),
+            emf_unknown_record(60),
+            emf_unknown_record(62),
+        ];
+        let input = format!(
+            r"{{\rtf1 Before{{\pict\emfblip {}}}After}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(
+            !output
+                .document
+                .blocks
+                .iter()
+                .any(|block| matches!(block, Block::Image(_)))
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("hatch-fill-only EMF picture suppressed")
+        }));
     }
 
     #[test]

@@ -47052,7 +47052,7 @@ fn emf_filled_bezier_paths_render_passively_without_payload_leakage() {
 }
 
 #[test]
-fn emf_hatched_bezier_paths_render_passively_without_payload_leakage() {
+fn word_suppresses_hatch_only_emf_while_strict_spec_renders_passive_fallback() {
     let records = [
         emf_create_brush_record(
             3,
@@ -47074,7 +47074,28 @@ fn emf_hatched_bezier_paths_render_passively_without_payload_leakage() {
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
     let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let word_parsed = parse_rtf_bytes(&input).unwrap();
+    assert!(
+        !word_parsed
+            .document
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Image(_)))
+    );
+    assert!(word_parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("hatch-fill-only EMF picture suppressed")
+    }));
+
+    let parsed = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -47112,6 +47133,10 @@ fn emf_hatched_bezier_paths_render_passively_without_payload_leakage() {
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::browser_safe_defaults()
         },
