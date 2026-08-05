@@ -1037,6 +1037,10 @@ fn table_row_padding_renders_passively_without_control_leakage() {
         &output_path,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -3199,6 +3203,10 @@ fn hex_color_table_separators_render_passively_without_control_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -33741,7 +33749,7 @@ fn wmf_mm_text_setmapmode_is_passive_state_without_payload_leakage() {
 }
 
 #[test]
-fn anisotropic_wmf_setmapmode_is_passive_state_without_payload_leakage() {
+fn strict_spec_anisotropic_wmf_setmapmode_is_passive_state_without_payload_leakage() {
     let mut mode = wmf_u16_record(0x0103, 8);
     mode.extend_from_slice(b"WMF-SETMAPMODE-ANISOTROPIC /JavaScript /EmbeddedFile /Launch");
     mode.resize(mode.len().next_multiple_of(2), 0);
@@ -33754,7 +33762,14 @@ fn anisotropic_wmf_setmapmode_is_passive_state_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -34222,7 +34237,7 @@ fn nonzero_wmf_setviewportorg_maps_passive_coordinates_without_payload_leakage()
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -34435,7 +34450,7 @@ fn nonzero_wmf_offsetviewportorg_maps_passive_coordinates_without_payload_leakag
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -34746,7 +34761,7 @@ fn malformed_wmf_setviewportext_becomes_passive_placeholder() {
 }
 
 #[test]
-fn wmf_offsetwindoworg_maps_passive_coordinates_without_payload_leakage() {
+fn strict_spec_wmf_offsetwindoworg_maps_passive_coordinates_without_payload_leakage() {
     let mut offset = wmf_yx_record(0x020f, 5, 10);
     offset.extend_from_slice(b"WMF-OFFSETWINDOWORG /JavaScript /EmbeddedFile /Launch");
     offset.resize(offset.len().next_multiple_of(2), 0);
@@ -34759,7 +34774,7 @@ fn wmf_offsetwindoworg_maps_passive_coordinates_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -35690,7 +35705,7 @@ fn nonidentity_wmf_scalewindowext_scales_passive_coordinates_without_payload_lea
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal1600\\pichgoal800 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -37994,7 +38009,7 @@ fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
 }
 
 #[test]
-fn wmf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
+fn word_and_strict_wmf_arc_family_render_passively_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000033d0000000100070000000000",
         "050000000c026400c800",
@@ -38009,7 +38024,26 @@ fn wmf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let word_parsed = parse_rtf_bytes(&input).unwrap();
+    let word_image = word_parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("Word-compatible WMF arc vector preview image");
+    assert_eq!(word_image.vector_commands.len(), 3);
+    assert!(matches!(
+        &word_image.vector_commands[0],
+        StaticImageVectorCommand::Polyline { points, .. }
+            if points.len() > 40
+                && points.first().is_some_and(|(x, y)| *x > 88.0 && *y > 40.0)
+                && points.last().is_some_and(|(x, y)| *x > 58.0 && *x < 60.0 && *y > 63.0)
+    ));
+
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -38074,6 +38108,10 @@ fn wmf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -38121,7 +38159,7 @@ fn wmf_arc_chord_and_pie_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
-fn wmf_polybezier_records_render_passively_without_payload_leakage() {
+fn word_ignores_wmf_polybezier_while_strict_spec_renders_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000032900000001000c0000000000",
         "050000000c026400c800",
@@ -38134,7 +38172,26 @@ fn wmf_polybezier_records_render_passively_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let word_parsed = parse_rtf_bytes(&input).unwrap();
+    let word_image = word_parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("blank Word-compatible WMF PolyBezier image");
+    assert!(word_image.vector_commands.is_empty());
+
+    let parsed = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -38178,6 +38235,10 @@ fn wmf_polybezier_records_render_passively_without_payload_leakage() {
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::default()
         },
@@ -38222,7 +38283,7 @@ fn wmf_polybezier_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
-fn wmf_polybezierto_records_update_current_point_without_payload_leakage() {
+fn strict_spec_wmf_polybezierto_records_update_current_point_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000033100000001000a0000000000",
         "050000000c026400c800",
@@ -38237,7 +38298,29 @@ fn wmf_polybezierto_records_update_current_point_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let word_parsed = parse_rtf_bytes(&input).unwrap();
+    let word_image = word_parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("Word-compatible WMF polybezierto vector preview image");
+    assert!(matches!(
+        word_image.vector_commands.as_slice(),
+        [StaticImageVectorCommand::Line {
+            x1: 10.0,
+            y1: 10.0,
+            x2: 90.0,
+            y2: 60.0,
+            stroke_width,
+            ..
+        }] if (*stroke_width - 4.172_978).abs() < f32::EPSILON
+    ));
+
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -38292,6 +38375,10 @@ fn wmf_polybezierto_records_update_current_point_without_payload_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -38659,7 +38746,7 @@ fn zero_count_wmf_poly_records_are_noops_without_payload_leakage() {
 }
 
 #[test]
-fn wmf_polypolygon_records_render_compound_path_without_payload_leakage() {
+fn strict_spec_wmf_polypolygon_records_render_compound_path_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003360000000100160000000000",
         "050000000c026400c800",
@@ -38675,7 +38762,7 @@ fn wmf_polypolygon_records_render_compound_path_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -38783,7 +38870,7 @@ fn wmf_cliprect_records_render_passively_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -38881,7 +38968,7 @@ fn wmf_empty_intersectcliprect_renders_empty_clip_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw160\\pich80\\picwgoal2160\\pichgoal1080 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -38990,7 +39077,7 @@ fn wmf_offsetcliprgn_offsets_unpainted_clip_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -39184,7 +39271,7 @@ fn wmf_offsetcliprgn_offsets_saved_painted_clip_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -39308,7 +39395,7 @@ fn wmf_offsetcliprgn_offsets_unscoped_painted_clip_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -39451,7 +39538,7 @@ fn wmf_offsetcliprgn_offsets_mutated_painted_clip_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -39559,7 +39646,7 @@ fn wmf_excludecliprect_records_render_passively_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -39745,7 +39832,7 @@ fn wmf_excludecliprect_after_unpainted_clip_rect_renders_passively_without_paylo
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex} 2f4a617661536372697074 2f456d62656464656446696c65}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -40152,7 +40239,7 @@ fn wmf_window_origin_offsets_are_normalized_before_passive_vector_rendering() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let image = parsed
         .document
         .blocks
@@ -40567,7 +40654,7 @@ fn wmf_polyfill_alternate_renders_even_odd_fill_without_record_leakage() {
 }
 
 #[test]
-fn wmf_polypolygon_renders_compound_passive_path_without_payload_leakage() {
+fn strict_spec_wmf_polypolygon_renders_compound_passive_path_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003300000000100140000000000",
         "050000000c026400c800",
@@ -40581,7 +40668,7 @@ fn wmf_polypolygon_renders_compound_passive_path_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -40840,7 +40927,7 @@ fn wmf_patblt_patcopy_renders_passive_brush_rectangle_without_payload_leakage() 
 }
 
 #[test]
-fn wmf_patcopy_stretchblt_renders_passive_brush_rectangle_without_payload_leakage() {
+fn strict_spec_wmf_patcopy_stretchblt_renders_passive_brush_rectangle() {
     let wmf_hex = concat!(
         "010009000003400000000200170000000000",
         "050000000c026400c800",
@@ -40854,7 +40941,7 @@ fn wmf_patcopy_stretchblt_renders_passive_brush_rectangle_without_payload_leakag
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -40904,6 +40991,10 @@ fn wmf_patcopy_stretchblt_renders_passive_brush_rectangle_without_payload_leakag
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::default()
         },
@@ -40947,7 +41038,7 @@ fn wmf_patcopy_stretchblt_renders_passive_brush_rectangle_without_payload_leakag
 }
 
 #[test]
-fn wmf_patcopy_bitblt_renders_passive_brush_rectangle_without_payload_leakage() {
+fn strict_spec_wmf_patcopy_bitblt_renders_passive_brush_rectangle() {
     let wmf_hex = concat!(
         "0100090000033c0000000200150000000000",
         "050000000c026400c800",
@@ -40961,7 +41052,7 @@ fn wmf_patcopy_bitblt_renders_passive_brush_rectangle_without_payload_leakage() 
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -41015,6 +41106,10 @@ fn wmf_patcopy_bitblt_renders_passive_brush_rectangle_without_payload_leakage() 
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::default()
         },
@@ -41169,7 +41264,7 @@ fn wmf_patcopy_dibbitblt_renders_passive_brush_rectangle_without_payload_leakage
 }
 
 #[test]
-fn wmf_patcopy_dibstretchblt_renders_passive_brush_rectangle_without_payload_leakage() {
+fn strict_spec_wmf_patcopy_dibstretchblt_renders_passive_brush_rectangle() {
     let wmf_hex = concat!(
         "010009000003420000000200190000000000",
         "050000000c026400c800",
@@ -41183,7 +41278,7 @@ fn wmf_patcopy_dibstretchblt_renders_passive_brush_rectangle_without_payload_lea
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -41233,6 +41328,10 @@ fn wmf_patcopy_dibstretchblt_renders_passive_brush_rectangle_without_payload_lea
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::default()
         },
@@ -41276,7 +41375,7 @@ fn wmf_patcopy_dibstretchblt_renders_passive_brush_rectangle_without_payload_lea
 }
 
 #[test]
-fn wmf_patcopy_stretchdib_renders_passive_brush_rectangle_without_payload_leakage() {
+fn strict_spec_wmf_patcopy_stretchdib_renders_passive_brush_rectangle() {
     let wmf_hex = concat!(
         "010009000003430000000200190000000000",
         "050000000c026400c800",
@@ -41290,7 +41389,7 @@ fn wmf_patcopy_stretchdib_renders_passive_brush_rectangle_without_payload_leakag
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -41340,6 +41439,10 @@ fn wmf_patcopy_stretchdib_renders_passive_brush_rectangle_without_payload_leakag
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::default()
         },
@@ -41475,7 +41578,7 @@ fn wmf_srccopy_stretchdib_renders_passive_image_without_payload_leakage() {
 }
 
 #[test]
-fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
+fn strict_spec_wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
     let mut dib = minimal_24bit_dib_with_dimensions(2, 1);
     dib.extend_from_slice(b"TRAILING-WMF-SETDIBTODEV /JavaScript");
     let mut partial_dib = minimal_24bit_dib_with_rgb_pixels(
@@ -41521,7 +41624,7 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -41618,6 +41721,10 @@ fn wmf_setdib_to_dev_renders_passive_image_without_payload_leakage() {
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::default()
         },
@@ -42802,7 +42909,7 @@ fn wmf_saved_dc_restores_passive_clip_scope_without_record_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -44821,7 +44928,7 @@ fn malformed_wmf_settextalign_keeps_later_safe_text() {
 }
 
 #[test]
-fn wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
+fn strict_spec_wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003250000000100070000000000",
         "050000000c026400c800",
@@ -44834,7 +44941,7 @@ fn wmf_roundrect_renders_passive_rounded_rectangle_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -47053,7 +47160,7 @@ fn emf_filled_bezier_paths_render_passively_without_payload_leakage() {
 }
 
 #[test]
-fn word_suppresses_hatch_only_emf_while_strict_spec_renders_passive_fallback() {
+fn word_suppresses_emf_without_device_metrics_while_strict_spec_renders_fallback() {
     let records = [
         emf_create_brush_record(
             3,
@@ -47072,7 +47179,10 @@ fn word_suppresses_hatch_only_emf_while_strict_spec_renders_passive_fallback() {
         emf_unknown_record(60),
         emf_unknown_record(62),
     ];
-    let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    let mut emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+    for offset in [72, 76, 80, 84] {
+        write_test_le_i32(&mut emf, offset, 0);
+    }
     let emf_hex = bytes_to_hex(&emf);
     let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
     let word_parsed = parse_rtf_bytes(&input).unwrap();
@@ -47086,7 +47196,7 @@ fn word_suppresses_hatch_only_emf_while_strict_spec_renders_passive_fallback() {
     assert!(word_parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("hatch-fill-only EMF picture suppressed")
+            .contains("EMF picture with missing reference-device metrics suppressed")
     }));
 
     let parsed = parse_rtf_bytes_with_options(
@@ -56406,8 +56516,8 @@ fn strict_spec_emf_setpixelv_records_render_passively_without_payload_leakage() 
 }
 
 #[test]
-fn word_compatible_pixel_only_emf_is_omitted_without_payload_leakage() {
-    let emf = minimal_emf_with_records(
+fn word_compatible_emf_without_device_metrics_is_omitted_without_payload_leakage() {
+    let mut emf = minimal_emf_with_records(
         160,
         80,
         2540,
@@ -56422,6 +56532,9 @@ fn word_compatible_pixel_only_emf_is_omitted_without_payload_leakage() {
             },
         )],
     );
+    for offset in [72, 76, 80, 84] {
+        write_test_le_i32(&mut emf, offset, 0);
+    }
     let input = format!(
         "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
         bytes_to_hex(&emf)
@@ -56441,7 +56554,7 @@ fn word_compatible_pixel_only_emf_is_omitted_without_payload_leakage() {
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("pixel-only EMF picture suppressed")
+            .contains("EMF picture with missing reference-device metrics suppressed")
     }));
 
     let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
@@ -56449,7 +56562,7 @@ fn word_compatible_pixel_only_emf_is_omitted_without_payload_leakage() {
     for forbidden in ["emfblip", "20454d46", "/Subtype /Image", "/EmbeddedFile"] {
         assert!(
             !pdf.contains(forbidden),
-            "pixel-only EMF payload leaked: {forbidden}"
+            "malformed EMF payload leaked: {forbidden}"
         );
     }
 }
@@ -96186,6 +96299,10 @@ fn minimal_emf_with_records(
     write_test_le_i32(&mut emf, 36, frame_height_hundredth_mm);
     write_test_le_u32(&mut emf, 40, 0x464d_4520);
     write_test_le_u32(&mut emf, 44, 0x0001_0000);
+    write_test_le_i32(&mut emf, 72, 1920);
+    write_test_le_i32(&mut emf, 76, 1080);
+    write_test_le_i32(&mut emf, 80, 508);
+    write_test_le_i32(&mut emf, 84, 286);
     for record in records {
         emf.extend_from_slice(record);
     }

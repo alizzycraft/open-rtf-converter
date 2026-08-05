@@ -14292,16 +14292,25 @@ impl Parser {
         }
 
         if picture.pending_hex.is_some() {
-            self.diagnostics.push(Diagnostic::warning(
-                "malformed picture hex data replaced with bounded passive geometry placeholder",
-                Some(offset),
-            ));
-            self.push_passive_picture_geometry_placeholder(
-                picture,
-                "[Image skipped: malformed picture data]",
-                offset,
-            )?;
-            return Ok(());
+            if picture.kind == PictureKind::Wmf
+                && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+            {
+                self.diagnostics.push(Diagnostic::warning(
+                    "odd trailing WMF hex nibble ignored for Word-compatible passive recovery",
+                    Some(offset),
+                ));
+            } else {
+                self.diagnostics.push(Diagnostic::warning(
+                    "malformed picture hex data replaced with bounded passive geometry placeholder",
+                    Some(offset),
+                ));
+                self.push_passive_picture_geometry_placeholder(
+                    picture,
+                    "[Image skipped: malformed picture data]",
+                    offset,
+                )?;
+                return Ok(());
+            }
         }
 
         if picture.bytes.is_empty() {
@@ -14612,7 +14621,10 @@ impl Parser {
                 )?;
             }
             PictureKind::Wmf => {
-                if let Some(wmf) = parse_wmf_vector_image_data(&picture.bytes) {
+                if let Some(wmf) = parse_wmf_vector_image_data(
+                    &picture.bytes,
+                    self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive,
+                ) {
                     self.ensure_image_pixels(wmf.width_px, wmf.height_px, offset)?;
                     let natural_width_px_hint =
                         self.normalized_picture_natural_size_hint(&picture, true, offset);
@@ -14665,23 +14677,20 @@ impl Parser {
             }
             PictureKind::Emf => {
                 if let Some(emf) = parse_emf_vector_image_data(&picture.bytes) {
-                    let word_suppresses_pixel_only_emf = self.options.compatibility_mode
+                    let word_suppresses_invalid_device_emf = self.options.compatibility_mode
                         == CompatibilityMode::WordCompatiblePassive
-                        && emf.setpixel_command_count > 0
-                        && emf.commands.len() == emf.setpixel_command_count;
+                        && !emf.has_valid_reference_device;
                     let word_suppresses_hatch_fill_only_emf = self.options.compatibility_mode
                         == CompatibilityMode::WordCompatiblePassive
                         && emf_commands_are_hatch_fill_only(&emf.commands);
-                    if word_suppresses_pixel_only_emf || word_suppresses_hatch_fill_only_emf {
-                        let reason = if word_suppresses_pixel_only_emf {
-                            "pixel-only"
+                    if word_suppresses_invalid_device_emf || word_suppresses_hatch_fill_only_emf {
+                        let reason = if word_suppresses_invalid_device_emf {
+                            "EMF picture with missing reference-device metrics"
                         } else {
-                            "hatch-fill-only"
+                            "hatch-fill-only EMF picture"
                         };
                         self.diagnostics.push(Diagnostic::warning(
-                            format!(
-                                "{reason} EMF picture suppressed for Word-compatible passive rendering"
-                            ),
+                            format!("{reason} suppressed for Word-compatible passive rendering"),
                             Some(offset),
                         ));
                         if picture.flushed_inline_body_paragraph
@@ -31184,6 +31193,7 @@ struct ParsedEmfHeader {
     declared_record_count: Option<usize>,
     frame_width_twips: Option<i32>,
     frame_height_twips: Option<i32>,
+    has_valid_reference_device: bool,
 }
 
 #[derive(Debug)]
@@ -31193,7 +31203,7 @@ struct ParsedEmfVector {
     frame_width_twips: Option<i32>,
     frame_height_twips: Option<i32>,
     skipped_record_count: usize,
-    setpixel_command_count: usize,
+    has_valid_reference_device: bool,
     commands: Vec<StaticImageVectorCommand>,
 }
 
@@ -32036,6 +32046,10 @@ fn parse_emf_header_dimensions(bytes: &[u8]) -> Option<ParsedEmfHeader> {
 
     let frame_width_twips = hundredth_mm_to_twips(frame_width_hundredth_mm);
     let frame_height_twips = hundredth_mm_to_twips(frame_height_hundredth_mm);
+    let has_valid_reference_device = read_le_i32(bytes, 72)? > 0
+        && read_le_i32(bytes, 76)? > 0
+        && read_le_i32(bytes, 80)? > 0
+        && read_le_i32(bytes, 84)? > 0;
     let width_px = bounds_width.or_else(|| hundredth_mm_to_96dpi_px(frame_width_hundredth_mm))?;
     let height_px =
         bounds_height.or_else(|| hundredth_mm_to_96dpi_px(frame_height_hundredth_mm))?;
@@ -32050,6 +32064,7 @@ fn parse_emf_header_dimensions(bytes: &[u8]) -> Option<ParsedEmfHeader> {
         declared_record_count,
         frame_width_twips,
         frame_height_twips,
+        has_valid_reference_device,
     })
 }
 
@@ -32159,7 +32174,6 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     let mut record_count = 1usize;
     let mut commands = Vec::new();
     let mut skipped_record_count = 0usize;
-    let mut setpixel_command_count = 0usize;
     let mut reached_eof = false;
     let mut coordinates = EmfCoordinateState::from_header(&header);
     let mut current_position = (0i32, 0i32);
@@ -33323,7 +33337,6 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         fill_pattern: ShadingPattern::None,
                         fill_color: Some(color),
                     });
-                    setpixel_command_count = setpixel_command_count.checked_add(1)?;
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -34122,7 +34135,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
         frame_width_twips: header.frame_width_twips,
         frame_height_twips: header.frame_height_twips,
         skipped_record_count,
-        setpixel_command_count,
+        has_valid_reference_device: header.has_valid_reference_device,
         commands,
     })
 }
@@ -38812,6 +38825,7 @@ struct WmfDrawingState {
     stroke_color: Option<Color>,
     stroke_width: f32,
     stroke_style: BorderStyle,
+    stock_pen_selected: bool,
     fill_rule: StaticImageVectorFillRule,
     fill_color: Option<Color>,
     fill_pattern: ShadingPattern,
@@ -38860,6 +38874,7 @@ impl Default for WmfDrawingState {
             // an explicitly selected CREATEPEN object replaces it below.
             stroke_width: WMF_WORD_STOCK_PEN_LOGICAL_WIDTH,
             stroke_style: BorderStyle::Single,
+            stock_pen_selected: true,
             fill_rule: StaticImageVectorFillRule::Alternate,
             fill_color: None,
             fill_pattern: ShadingPattern::None,
@@ -40327,7 +40342,10 @@ fn read_le_f32(bytes: &[u8], offset: usize) -> Option<f32> {
     Some(f32::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
 }
 
-fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
+fn parse_wmf_vector_image_data(
+    bytes: &[u8],
+    word_compatible_passive: bool,
+) -> Option<ParsedWmfVector> {
     let header = parse_wmf_header_info(bytes)?;
     let header_size_words = read_le_u16(bytes, header.header_start + 2)?;
     let mut pos = header
@@ -40350,6 +40368,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
     let mut saved_states: Vec<WmfSavedDrawingState> = Vec::new();
     let mut commands = Vec::new();
     let mut skipped_record_count = 0usize;
+    let mut word_ignored_patcopy_family = false;
     let mut current_point = (0.0f32, 0.0f32);
     let mut replaceable_clip_command_start: Option<usize> = None;
     let mut clip_scope_command_start: Option<usize> = None;
@@ -40620,9 +40639,16 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                                 style,
                             } => {
                                 state.stroke_color = color;
-                                state.stroke_width =
-                                    normalized_wmf_stroke_width(width, window_width);
+                                state.stroke_width = normalized_wmf_stroke_width(
+                                    if word_compatible_passive {
+                                        width.max(4)
+                                    } else {
+                                        width
+                                    },
+                                    window_width,
+                                );
                                 state.stroke_style = style;
+                                state.stock_pen_selected = false;
                             }
                             WmfObject::Brush { color, pattern } => {
                                 state.fill_color = color;
@@ -40740,11 +40766,25 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0214 => match parse_wmf_yx_point(data, 0, coordinates) {
-                Some(point) => current_point = point,
+                Some(mut point) => {
+                    if word_compatible_passive
+                        && state.stock_pen_selected
+                        && !viewport_extent_explicit
+                    {
+                        point = word_compatible_wmf_path_point(point, coordinates);
+                    }
+                    current_point = point;
+                }
                 None => skipped_record_count = skipped_record_count.checked_add(1)?,
             },
             0x0213 => match parse_wmf_yx_point(data, 0, coordinates) {
-                Some(end) => {
+                Some(mut end) => {
+                    if word_compatible_passive
+                        && state.stock_pen_selected
+                        && !viewport_extent_explicit
+                    {
+                        end = word_compatible_wmf_path_point(end, coordinates);
+                    }
                     if segment_is_visible(current_point, end) {
                         if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                             return None;
@@ -40767,11 +40807,16 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                let Some((left, top, right, bottom)) = parse_wmf_bounds(data, coordinates) else {
+                let Some(mut bounds) = parse_wmf_bounds(data, coordinates) else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                     pos = record_end;
                     continue;
                 };
+                if word_compatible_passive && state.stock_pen_selected && !viewport_extent_explicit
+                {
+                    bounds = word_compatible_wmf_box_bounds(bounds, coordinates);
+                }
+                let (left, top, right, bottom) = bounds;
                 if function != 0x0416 && !bounds_is_visible((left, top, right, bottom)) {
                     if function == 0x0415 {
                         pos = record_end;
@@ -40872,11 +40917,17 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0324 | 0x0325 => {
-                let Some(points) = parse_wmf_point_list(data, coordinates) else {
+                let Some(mut points) = parse_wmf_point_list(data, coordinates) else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                     pos = record_end;
                     continue;
                 };
+                if word_compatible_passive && state.stock_pen_selected && !viewport_extent_explicit
+                {
+                    for point in &mut points {
+                        *point = word_compatible_wmf_path_point(*point, coordinates);
+                    }
+                }
                 if function == 0x0324 {
                     if points.len() >= 3 && point_bounds_are_visible(&points) {
                         if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -40908,11 +40959,18 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0538 => {
-                let Some(polygons) = parse_wmf_polypolygon_list(data, coordinates) else {
+                let Some(mut polygons) = parse_wmf_polypolygon_list(data, coordinates) else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                     pos = record_end;
                     continue;
                 };
+                if word_compatible_passive && !viewport_extent_explicit {
+                    for polygon in &mut polygons {
+                        for point in polygon {
+                            *point = word_compatible_wmf_path_point(*point, coordinates);
+                        }
+                    }
+                }
                 if let Some(command) = wmf_polypolygon_command(
                     polygons,
                     state.passive_stroke_color(),
@@ -40935,6 +40993,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     continue;
                 };
                 if !polybezier_point_count_is_valid(points.len()) {
+                    pos = record_end;
+                    continue;
+                }
+                if word_compatible_passive {
                     pos = record_end;
                     continue;
                 }
@@ -40963,6 +41025,10 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     pos = record_end;
                     continue;
                 }
+                if word_compatible_passive {
+                    pos = record_end;
+                    continue;
+                }
                 let new_current_point = *control_points.last()?;
                 let mut points = Vec::with_capacity(control_points.len().checked_add(1)?);
                 points.push(current_point);
@@ -40984,7 +41050,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 current_point = new_current_point;
             }
             0x041b | 0x0418 | 0x061c => {
-                let Some(bounds) = (if function == 0x061c {
+                let Some(mut bounds) = (if function == 0x061c {
                     parse_wmf_bounds_at(data, 4, coordinates)
                 } else {
                     parse_wmf_bounds(data, coordinates)
@@ -40993,6 +41059,13 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                     pos = record_end;
                     continue;
                 };
+                if word_compatible_passive && !viewport_extent_explicit {
+                    bounds = if function == 0x0418 {
+                        word_compatible_wmf_ellipse_bounds(bounds, coordinates)
+                    } else {
+                        word_compatible_wmf_box_bounds(bounds, coordinates)
+                    };
+                }
                 if bounds_is_visible(bounds) {
                     let (left, top, right, bottom) = bounds;
                     let command = if function == 0x041b {
@@ -41020,7 +41093,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             fill_color: state.fill_color,
                         }
                     } else {
-                        let (Some(corner_width), Some(corner_height)) = (
+                        let (Some(mut corner_width), Some(mut corner_height)) = (
                             normalized_wmf_size(data, 2, window_width),
                             normalized_wmf_size(data, 0, window_height),
                         ) else {
@@ -41028,6 +41101,16 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                             pos = record_end;
                             continue;
                         };
+                        if word_compatible_passive && !viewport_extent_explicit {
+                            corner_width = corner_width * WMF_WORD_BOX_X_SCALE
+                                + 2.0
+                                    * coordinates.image_width.max(1) as f32
+                                    * WMF_WORD_BOX_X_OFFSET_RATIO;
+                            corner_height = corner_height * WMF_WORD_BOX_Y_SCALE
+                                + 2.0
+                                    * coordinates.image_height.max(1) as f32
+                                    * WMF_WORD_BOX_Y_OFFSET_RATIO;
+                        }
                         StaticImageVectorCommand::RoundedRectangle {
                             left,
                             top,
@@ -41049,7 +41132,12 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 }
             }
             0x0817 | 0x081a | 0x0830 => {
-                let Some((points, center)) = parse_wmf_arc_record(data, coordinates) else {
+                let Some((points, center)) = parse_wmf_arc_record(
+                    data,
+                    coordinates,
+                    word_compatible_passive && !viewport_extent_explicit,
+                    function != 0x0817,
+                ) else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                     pos = record_end;
                     continue;
@@ -41260,7 +41348,7 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if is_passive_noop_wmf_setdibits_to_device(data) {
+                if word_compatible_passive || is_passive_noop_wmf_setdibits_to_device(data) {
                 } else if let Some(command) = parse_wmf_setdibits_to_device(data, coordinates) {
                     commands.push(command);
                 } else {
@@ -41279,6 +41367,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
                 };
                 let blank_destination = emf_commands_are_unpainted_clip_scope(&commands);
                 if is_passive_invisible_wmf_blt(data, destination_offset) {
+                } else if word_compatible_passive
+                    && matches!(function, 0x0922 | 0x0b23 | 0x0b41 | 0x0f43)
+                    && read_le_u32(data, 0)? == WMF_PATCOPY_RASTER_OP
+                {
+                    word_ignored_patcopy_family = true;
                 } else if let Some(command) = match function {
                     0x0940 => parse_wmf_dibbitblt_srcopy(
                         data,
@@ -41377,8 +41470,11 @@ fn parse_wmf_vector_image_data(bytes: &[u8]) -> Option<ParsedWmfVector> {
         }
     }
 
-    if commands.is_empty() && skipped_record_count > 0 {
+    if commands.is_empty() && skipped_record_count > 0 && !word_ignored_patcopy_family {
         return None;
+    }
+    if commands.is_empty() && word_ignored_patcopy_family {
+        skipped_record_count = 0;
     }
 
     Some(ParsedWmfVector {
@@ -41730,6 +41826,62 @@ fn wmf_text_vertical_align(mode: u16) -> StaticImageTextVerticalAlign {
 
 fn parse_wmf_bounds(data: &[u8], coordinates: WmfCoordinateMap) -> Option<(f32, f32, f32, f32)> {
     parse_wmf_bounds_at(data, 0, coordinates)
+}
+
+const WMF_WORD_BOX_X_SCALE: f32 = 0.868_055_2;
+const WMF_WORD_BOX_Y_SCALE: f32 = 0.826_064_7;
+const WMF_WORD_BOX_X_OFFSET_RATIO: f32 = 0.012_400_32;
+const WMF_WORD_BOX_Y_OFFSET_RATIO: f32 = 0.026_223_445;
+const WMF_WORD_ELLIPSE_X_SCALE: f32 = 0.793_703;
+const WMF_WORD_ELLIPSE_Y_SCALE: f32 = 0.806_6;
+const WMF_WORD_ELLIPSE_X_OFFSET_RATIO: f32 = 0.095_215;
+const WMF_WORD_ELLIPSE_Y_OFFSET_RATIO: f32 = 0.056_37;
+const WMF_WORD_PATH_X_SCALE: f32 = 0.986_110_45;
+const WMF_WORD_PATH_Y_SCALE: f32 = 1.068_494_8;
+const WMF_WORD_PATH_X_OFFSET_RATIO: f32 = 0.042_261_876;
+const WMF_WORD_PATH_Y_OFFSET_RATIO: f32 = 0.073_890_485;
+const WMF_WORD_ARC_X_SCALE: f32 = 0.763_906;
+const WMF_WORD_ARC_Y_SCALE: f32 = 0.770_984_35;
+const WMF_WORD_OPEN_ARC_X_OFFSET_RATIO: f32 = 0.064_482_32;
+const WMF_WORD_OPEN_ARC_Y_OFFSET_RATIO: f32 = 0.103_166_096;
+const WMF_WORD_CLOSED_ARC_X_OFFSET_RATIO: f32 = 0.022_817_705;
+const WMF_WORD_CLOSED_ARC_Y_OFFSET_RATIO: f32 = 0.031_731_483;
+
+fn word_compatible_wmf_box_bounds(
+    (left, top, right, bottom): (f32, f32, f32, f32),
+    coordinates: WmfCoordinateMap,
+) -> (f32, f32, f32, f32) {
+    let x_offset = coordinates.image_width.max(1) as f32 * WMF_WORD_BOX_X_OFFSET_RATIO;
+    let y_offset = coordinates.image_height.max(1) as f32 * WMF_WORD_BOX_Y_OFFSET_RATIO;
+    (
+        left * WMF_WORD_BOX_X_SCALE + x_offset,
+        top * WMF_WORD_BOX_Y_SCALE + y_offset,
+        right * WMF_WORD_BOX_X_SCALE + x_offset,
+        bottom * WMF_WORD_BOX_Y_SCALE + y_offset,
+    )
+}
+
+fn word_compatible_wmf_ellipse_bounds(
+    (left, top, right, bottom): (f32, f32, f32, f32),
+    coordinates: WmfCoordinateMap,
+) -> (f32, f32, f32, f32) {
+    let x_offset = coordinates.image_width.max(1) as f32 * WMF_WORD_ELLIPSE_X_OFFSET_RATIO;
+    let y_offset = coordinates.image_height.max(1) as f32 * WMF_WORD_ELLIPSE_Y_OFFSET_RATIO;
+    (
+        left * WMF_WORD_ELLIPSE_X_SCALE + x_offset,
+        top * WMF_WORD_ELLIPSE_Y_SCALE + y_offset,
+        right * WMF_WORD_ELLIPSE_X_SCALE + x_offset,
+        bottom * WMF_WORD_ELLIPSE_Y_SCALE + y_offset,
+    )
+}
+
+fn word_compatible_wmf_path_point((x, y): (f32, f32), coordinates: WmfCoordinateMap) -> (f32, f32) {
+    (
+        x * WMF_WORD_PATH_X_SCALE
+            + coordinates.image_width.max(1) as f32 * WMF_WORD_PATH_X_OFFSET_RATIO,
+        y * WMF_WORD_PATH_Y_SCALE
+            + coordinates.image_height.max(1) as f32 * WMF_WORD_PATH_Y_OFFSET_RATIO,
+    )
 }
 
 fn parse_wmf_bounds_at(
@@ -43110,6 +43262,8 @@ fn parse_wmf_setpixel_line(
 fn parse_wmf_arc_record(
     data: &[u8],
     coordinates: WmfCoordinateMap,
+    word_compatible_passive: bool,
+    closed: bool,
 ) -> Option<(Vec<(f32, f32)>, (f32, f32))> {
     if data.len() < 16 {
         return None;
@@ -43129,17 +43283,47 @@ fn parse_wmf_arc_record(
         bottom,
         (start_x, start_y),
         (end_x, end_y),
-        false,
+        word_compatible_passive,
     )?;
     let mut points = Vec::with_capacity(raw_points.len());
     for (x, y) in raw_points {
-        points.push(coordinates.normalized_point(x, y));
+        let point = coordinates.normalized_point(x, y);
+        points.push(if word_compatible_passive {
+            word_compatible_wmf_arc_point(point, coordinates, closed)
+        } else {
+            point
+        });
     }
-    let center = coordinates.normalized_point(
+    let mut center = coordinates.normalized_point(
         left.saturating_add(right) / 2,
         top.saturating_add(bottom) / 2,
     );
+    if word_compatible_passive {
+        center = word_compatible_wmf_arc_point(center, coordinates, closed);
+    }
     Some((points, center))
+}
+
+fn word_compatible_wmf_arc_point(
+    (x, y): (f32, f32),
+    coordinates: WmfCoordinateMap,
+    closed: bool,
+) -> (f32, f32) {
+    let (x_offset_ratio, y_offset_ratio) = if closed {
+        (
+            WMF_WORD_CLOSED_ARC_X_OFFSET_RATIO,
+            WMF_WORD_CLOSED_ARC_Y_OFFSET_RATIO,
+        )
+    } else {
+        (
+            WMF_WORD_OPEN_ARC_X_OFFSET_RATIO,
+            WMF_WORD_OPEN_ARC_Y_OFFSET_RATIO,
+        )
+    };
+    (
+        x * WMF_WORD_ARC_X_SCALE + coordinates.image_width.max(1) as f32 * x_offset_ratio,
+        y * WMF_WORD_ARC_Y_SCALE + coordinates.image_height.max(1) as f32 * y_offset_ratio,
+    )
 }
 
 fn wmf_escape_is_non_visual_comment(data: &[u8]) -> bool {
@@ -44341,6 +44525,16 @@ mod tests {
             .collect::<String>()
     }
 
+    fn parse_rtf_strict(input: &str) -> Result<ParseOutput, ParseError> {
+        parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+    }
+
     #[test]
     fn extracts_unicode_and_skips_fallback() {
         let output = parse_rtf(r"{\rtf1\ansi\uc1 Hello \u8212- world\par}").unwrap();
@@ -44449,7 +44643,7 @@ mod tests {
             .map(|run| run.text.as_str())
             .collect::<String>();
 
-        assert_eq!(text.trim(), "öt árvíztűrő");
+        assert_eq!(text.trim(), "\u{f6}t \u{e1}rv\u{ed}zt\u{171}r\u{151}");
     }
 
     #[test]
@@ -54946,7 +55140,7 @@ After\par}"#;
         .unwrap();
         let text = document_text(&output.document);
 
-        assert_eq!(text, "Normal שלום LTR text");
+        assert_eq!(text, "Normal \u{5e9}\u{5dc}\u{5d5}\u{5dd} LTR text");
         assert!(!text.contains("rtlch"));
         assert!(!text.contains("ltrch"));
         let paragraph = match &output.document.blocks[0] {
@@ -54956,7 +55150,7 @@ After\par}"#;
         let rtl_run = paragraph
             .runs
             .iter()
-            .find(|run| run.text.contains("שלום"))
+            .find(|run| run.text.contains("\u{5e9}\u{5dc}\u{5d5}\u{5dd}"))
             .expect("RTL run");
         let ltr_run = paragraph
             .runs
@@ -60929,7 +61123,7 @@ After\par}"#;
     }
 
     #[test]
-    fn word_compatible_hatch_fill_only_emf_is_suppressed() {
+    fn word_compatible_emf_without_reference_device_metrics_is_suppressed() {
         let records = [
             emf_create_brush_record(
                 3,
@@ -60948,9 +61142,13 @@ After\par}"#;
             emf_unknown_record(60),
             emf_unknown_record(62),
         ];
+        let mut emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
+        for offset in [72, 76, 80, 84] {
+            write_test_le_i32(&mut emf, offset, 0);
+        }
         let input = format!(
             r"{{\rtf1 Before{{\pict\emfblip {}}}After}}",
-            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+            bytes_to_hex(&emf)
         );
         let output = parse_rtf(&input).unwrap();
 
@@ -60964,7 +61162,7 @@ After\par}"#;
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("hatch-fill-only EMF picture suppressed")
+                .contains("EMF picture with missing reference-device metrics suppressed")
         }));
     }
 
@@ -61858,7 +62056,7 @@ After\par}"#;
     }
 
     #[test]
-    fn word_compatible_pixel_only_emf_is_suppressed() {
+    fn word_compatible_valid_pixel_only_emf_is_rendered() {
         let records = [emf_setpixelv_record(
             10,
             20,
@@ -61875,16 +62073,16 @@ After\par}"#;
         let output = parse_rtf(&input).unwrap();
 
         assert!(
-            !output
+            output
                 .document
                 .blocks
                 .iter()
                 .any(|block| matches!(block, Block::Image(_)))
         );
-        assert!(output.diagnostics.iter().any(|diagnostic| {
+        assert!(!output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("pixel-only EMF picture suppressed")
+                .contains("missing reference-device metrics")
         }));
     }
 
@@ -65782,7 +65980,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_polypolygon_preserves_compound_fill_rule_as_passive_path() {
+    fn strict_spec_wmf_polypolygon_preserves_compound_fill_rule_as_passive_path() {
         let wmf_hex = concat!(
             "010009000003360000000100160000000000",
             "050000000c026400c800",
@@ -65794,7 +65992,8 @@ After\par}"#;
             "32001900640019006400370032003700",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let output =
+            parse_rtf_strict(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -65819,7 +66018,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_patcopy_stretchblt_records_become_passive_filled_rectangles() {
+    fn strict_spec_wmf_patcopy_stretchblt_records_become_passive_filled_rectangles() {
         let wmf_hex = concat!(
             "0100090000032900000001000d0000000000",
             "050000000c026400c800",
@@ -65828,7 +66027,15 @@ After\par}"#;
             "0d000000230b2100f00000000000000000002800500019000f00",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let input = format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}");
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -65857,7 +66064,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_patcopy_bitblt_records_become_passive_filled_rectangles() {
+    fn strict_spec_wmf_patcopy_bitblt_records_become_passive_filled_rectangles() {
         let wmf_hex = concat!(
             "0100090000032700000001000b0000000000",
             "050000000c026400c800",
@@ -65866,7 +66073,15 @@ After\par}"#;
             "0b00000022092100f000000000003c00460014000a00",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let input = format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}");
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -65933,7 +66148,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_patcopy_dibstretchblt_records_become_passive_filled_rectangles() {
+    fn strict_spec_wmf_patcopy_dibstretchblt_records_become_passive_filled_rectangles() {
         let wmf_hex = concat!(
             "0100090000032900000001000d0000000000",
             "050000000c026400c800",
@@ -65942,7 +66157,15 @@ After\par}"#;
             "0d000000410b2100f00000000000000000002800500019000f00",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let input = format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}");
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -68161,7 +68384,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_patcopy_stretchdib_records_become_passive_filled_rectangles() {
+    fn strict_spec_wmf_patcopy_stretchdib_records_become_passive_filled_rectangles() {
         let wmf_hex = concat!(
             "0100090000032a00000001000e0000000000",
             "050000000c026400c800",
@@ -68170,7 +68393,15 @@ After\par}"#;
             "0e000000430f2100f000000000000000000000002800500019000f00",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let input = format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}");
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -68801,7 +69032,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_setdib_to_dev_record_becomes_passive_raster_image() {
+    fn strict_spec_wmf_setdib_to_dev_record_becomes_passive_raster_image() {
         let rows = [
             [10, 20, 30],
             [40, 50, 60],
@@ -68853,7 +69084,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -69158,6 +69396,89 @@ After\par}"#;
     }
 
     #[test]
+    fn word_compatible_wmf_rectangle_and_ellipse_use_record_specific_recovery_bounds() {
+        let records = [
+            wmf_bounds_record(0x041b, 20, 10, 180, 80),
+            wmf_bounds_record(0x0418, 100, 20, 190, 90),
+        ];
+        let output = parse_rtf(&format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        ))
+        .unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.vector_commands.len(), 2);
+        let StaticImageVectorCommand::Rectangle {
+            left,
+            top,
+            right,
+            bottom,
+            ..
+        } = image.vector_commands[0]
+        else {
+            panic!("expected recovered rectangle");
+        };
+        assert!((left - 19.841_167).abs() < 0.001);
+        assert!((top - 10.882_992).abs() < 0.001);
+        assert!((right - 158.729_89).abs() < 0.001);
+        assert!((bottom - 68.707_52).abs() < 0.001);
+        let StaticImageVectorCommand::Ellipse {
+            left,
+            top,
+            right,
+            bottom,
+            ..
+        } = image.vector_commands[1]
+        else {
+            panic!("expected recovered ellipse");
+        };
+        assert!((left - 98.413_3).abs() < 0.001);
+        assert!((top - 21.769).abs() < 0.001);
+        assert!((right - 169.846_57).abs() < 0.001);
+        assert!((bottom - 78.231).abs() < 0.001);
+    }
+
+    #[test]
+    fn word_compatible_wmf_line_and_polygon_use_path_recovery_map() {
+        let records = [
+            wmf_yx_record(0x0214, 20, 20),
+            wmf_yx_record(0x0213, 20, 180),
+            wmf_point_list_record(0x0324, &[(40, 20), (40, 180), (90, 100)]),
+        ];
+        let output = parse_rtf(&format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        ))
+        .unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.vector_commands.len(), 2);
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::Line { x1, y1, x2, y2, .. }
+                if (x1 - 28.174_584).abs() < 0.001
+                    && (y1 - 28.758_945).abs() < 0.001
+                    && (x2 - 185.952_26).abs() < 0.001
+                    && (y2 - 28.758_945).abs() < 0.001
+        ));
+        assert!(matches!(
+            &image.vector_commands[1],
+            StaticImageVectorCommand::Polygon { points, .. }
+                if (points[0].0 - 28.174_584).abs() < 0.001
+                    && (points[0].1 - 50.128_84).abs() < 0.001
+                    && (points[2].0 - 107.063_42).abs() < 0.001
+                    && (points[2].1 - 103.553_58).abs() < 0.001
+        ));
+    }
+
+    #[test]
     fn wmf_offsetcliprgn_offsets_unpainted_clip_rect() {
         let wmf_hex = concat!(
             "0100090000032f0000000100070000000000",
@@ -69169,7 +69490,8 @@ After\par}"#;
             "070000001b045000b4000a001400",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let output =
+            parse_rtf_strict(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -69206,7 +69528,7 @@ After\par}"#;
             offset,
             wmf_bounds_record(0x041b, 40, 10, 80, 40),
         ];
-        let output = parse_rtf(&format!(
+        let output = parse_rtf_strict(&format!(
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         ))
@@ -69249,7 +69571,7 @@ After\par}"#;
             wmf_bounds_record(0x0415, 40, 20, 80, 50),
             wmf_bounds_record(0x041b, 0, 0, 160, 80),
         ];
-        let output = parse_rtf(&format!(
+        let output = parse_rtf_strict(&format!(
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         ))
@@ -69319,7 +69641,7 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8\picw160\pich80\picwgoal2160\pichgoal1080 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(160, 80, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_strict(&input).unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -69375,7 +69697,7 @@ After\par}"#;
             wmf_bounds_record(0x0415, 130, 20, 150, 50),
             wmf_bounds_record(0x041b, 0, 0, 160, 80),
         ];
-        let output = parse_rtf(&format!(
+        let output = parse_rtf_strict(&format!(
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         ))
@@ -69417,7 +69739,8 @@ After\par}"#;
             "070000001b045000b4000a001400",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let output =
+            parse_rtf_strict(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -69481,7 +69804,8 @@ After\par}"#;
             "070000001b045000b4000a001400",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let output =
+            parse_rtf_strict(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -69562,7 +69886,8 @@ After\par}"#;
             "070000001b045000b4000a001400",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let output =
+            parse_rtf_strict(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -69631,7 +69956,8 @@ After\par}"#;
             "070000001b045000b4000a001400",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let output =
+            parse_rtf_strict(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -70715,6 +71041,10 @@ fn minimal_emf_with_records(
     write_test_le_i32(&mut emf, 36, frame_height_hundredth_mm);
     write_test_le_u32(&mut emf, 40, 0x464d_4520);
     write_test_le_u32(&mut emf, 44, 0x0001_0000);
+    write_test_le_i32(&mut emf, 72, 1920);
+    write_test_le_i32(&mut emf, 76, 1080);
+    write_test_le_i32(&mut emf, 80, 508);
+    write_test_le_i32(&mut emf, 84, 286);
     for record in records {
         emf.extend_from_slice(record);
     }

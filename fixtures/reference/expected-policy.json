@@ -251,7 +251,7 @@
     {
       "id": "wmf-vector-passive-paths",
       "input": "fixtures/wmf-vector-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-vector-passive.pdf",
       "word_reference_pages": [],
@@ -286,15 +286,15 @@
         " re",
         " S"
       ],
-      "known_gaps": [
-        "The bounded inline-image model now matches Word's paragraph flow: `Before WMF` remains on line one, the no-whitespace `vector.` + image + `After` cluster stays together on line two, and the final `vector.` wraps to line three with text origins within 0.16 points. The fresh GDI stock pen now matches Word's measured 1.878-point PDF stroke exactly. Remaining WMF map/playback geometry differs: Word paints rectangle `(82.77,53.78)-(157.77,74.59)` and ellipse `(125.20,57.70)-(163.78,78.02)`, while the converter paints rectangle `(82.81,53.40)-(169.21,78.60)` and ellipse `(126.01,57.00)-(174.61,82.20)`.",
+        "known_gaps": [
+          "Word-compatible legacy playback recovery now uses record-specific transforms for rectangles and ellipses. Current rectangle and ellipse bounds are within 0.07 points of Word on every edge, with matching fill, 1.878-point stock-pen stroke, page count, and paragraph flow.",
         "The converter intentionally supports only a hardened passive WMF subset; unsupported WMF/EMF behavior remains placeholder or stripped."
       ]
     },
     {
       "id": "wmf-text-passive-output",
       "input": "fixtures/wmf-text-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-text-passive.pdf",
       "word_reference_pages": [],
@@ -339,7 +339,7 @@
     {
       "id": "wmf-cliprect-passive-paths",
       "input": "fixtures/wmf-cliprect-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-cliprect-passive.pdf",
       "word_reference_pages": [],
@@ -376,8 +376,8 @@
         " re",
         " S"
       ],
-      "known_gaps": [
-        "The focused Word audit confirms matching gray fill, black 1.878-point stock-pen stroke, and bounded passive clipping. The visible clip differs by about 0.01 points at the left edge, 0.76 points at the right edge, and 0.70 to 1.73 points vertically because Word applies its nonuniform legacy WMF playback transform.",
+        "known_gaps": [
+          "Word-compatible legacy playback recovery now matches the visible clipped rectangle within 0.10 points on every edge, with matching gray fill, black 1.878-point stock-pen stroke, page count, and paragraph flow.",
         "The converter intentionally supports only a hardened passive WMF clipping subset; unsupported clip operations remain placeholder or stripped."
       ]
     },
@@ -469,14 +469,14 @@
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF dash length, phase, stroke width, and endpoint behavior.",
+        "Focused Word comparison confirms the authored four-unit dashed pen has matching 1.87784-point width and 3:1 cadence; direct custom-pen coordinates leave bounded residuals of 1.10 points horizontally and 0.70 points vertically.",
         "The converter intentionally supports only a hardened passive WMF pen subset; unsupported pen records remain inert, placeholder, or stripped."
       ]
     },
     {
       "id": "wmf-arc-family-passive-paths",
       "input": "fixtures/wmf-arc-family-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-arc-family-passive.pdf",
       "word_reference_pages": [],
@@ -516,14 +516,14 @@
         " f"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF arc flattening tolerance, chord/pie closure, and fill behavior.",
+        "Word-compatible recovery now matches Word's opposite 270-degree open-arc sweep, chord and pie closure, gray fill, three-drawing structure, and 1.87784-point stock-pen width; every visible bound is within 0.08 points. The converter uses a bounded 48-segment passive approximation where Word emits five cubic segments, with no visible contour difference in the 12x audit.",
         "The converter intentionally supports only a hardened passive WMF arc subset; unsupported arc behavior remains placeholder or stripped."
       ]
     },
     {
       "id": "wmf-polybezier-passive-curves",
       "input": "fixtures/wmf-polybezier-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-polybezier-passive.pdf",
       "word_reference_pages": [],
@@ -533,7 +533,7 @@
         "After WMF polybezier."
       ],
       "intentional_security_differences": [
-        "Supported WMF POLYBEZIER records are converted into bounded passive PDF cubic curve strokes.",
+        "Word-compatible mode treats the legacy WMF POLYBEZIER extension as a non-painted record while preserving the inline picture's authored dimensions; StrictSpec retains the bounded passive cubic preview.",
         "Raw WMF bytes, POLYBEZIER record payloads, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
       "expected_diagnostics": [],
@@ -556,13 +556,10 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " c",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF PolyBezier curve placement and pen styling.",
-        "The converter intentionally supports only complete bounded passive Bezier runs; malformed or partial WMF Bezier records remain no-ops, placeholders, or stripped."
+        "Visible output now matches Word's blank POLYBEZIER playback while preserving identical surrounding text and inline picture flow.",
+        "POLYBEZIERTO remains independently supported because the adjacent Word reference renders its complete cubic continuation."
       ]
     },
     {
@@ -578,7 +575,7 @@
         "After WMF polybezierto."
       ],
       "intentional_security_differences": [
-        "Supported WMF POLYBEZIERTO records are converted into bounded passive PDF cubic curve strokes and update the passive current point for following line records.",
+        "Word-compatible playback ignores WMF POLYBEZIERTO records without advancing the current point; StrictSpec retains bounded passive cubic playback and current-point updates.",
         "Raw WMF bytes, POLYBEZIERTO record payloads, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
       "expected_diagnostics": [],
@@ -603,19 +600,18 @@
         "/Annots"
       ],
       "expected_pdf_markers": [
-        " c",
         " l",
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF PolyBezierTo current-position and following LineTo placement.",
+        "The surviving Word-compatible MoveTo-to-LineTo stroke has Word's exact 1.87784-point minimum custom-pen width; direct custom-pen mapping leaves bounded edge residuals up to 1.73 points.",
         "The converter intentionally supports only complete bounded passive BezierTo runs; malformed or partial WMF BezierTo records remain no-ops, placeholders, or stripped."
       ]
     },
     {
       "id": "wmf-polypolygon-passive-compound-path",
       "input": "fixtures/wmf-polypolygon-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-polypolygon-passive.pdf",
       "word_reference_pages": [],
@@ -656,7 +652,7 @@
         " f"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF POLYPOLYGON winding fill placement.",
+          "Word-compatible path recovery now matches the compound winding fill and stroke bounds within 0.12 points on every edge, with matching paint order, page count, and paragraph flow.",
         "The converter intentionally supports only bounded passive compound path geometry; malformed or excessive WMF POLYPOLYGON records remain placeholdered or stripped."
       ]
     },
@@ -709,7 +705,7 @@
     {
       "id": "wmf-roundrect-passive-curves",
       "input": "fixtures/wmf-roundrect-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-roundrect-passive.pdf",
       "word_reference_pages": [],
@@ -747,15 +743,15 @@
         " c",
         " f"
       ],
-      "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF ROUNDRECT corner radius scaling and fill/stroke placement.",
+        "known_gaps": [
+          "Word-compatible legacy playback recovery now matches the outer bounds within 0.07 points and preserves Word's independently scaled horizontal and vertical corner radii, green fill, black 1.878-point stock-pen stroke, page count, and paragraph flow.",
         "The converter intentionally supports only bounded passive rounded-rectangle geometry; malformed ROUNDRECT records remain placeholdered or stripped."
       ]
     },
     {
       "id": "wmf-line-poly-paths-passive",
       "input": "fixtures/wmf-line-poly-paths-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-line-poly-paths-passive.pdf",
       "word_reference_pages": [],
@@ -797,7 +793,7 @@
         " S"
       ],
       "known_gaps": [
-        "The focused Word audit confirms matching 1.878-point stock-pen strokes and correct line/polyline/polygon closure. Word's path group starts about 4.43 points farther right and 3.27 points lower while ending about 3.32 points farther right and 5.01 points lower, so exact WMF playback mapping remains pending.",
+          "Word-compatible path recovery now matches line, polygon, and connected-polyline bounds within 0.13 points on every edge, with matching three-drawing structure, 1.878-point stock-pen strokes, page count, and paragraph flow.",
         "The converter intentionally supports only bounded passive path geometry; malformed or excessive WMF point-list records remain placeholdered or stripped."
       ]
     },
@@ -851,7 +847,7 @@
     {
       "id": "wmf-stretchblt-patcopy-passive-rectangle",
       "input": "fixtures/wmf-stretchblt-patcopy-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-stretchblt-patcopy-passive.pdf",
       "word_reference_pages": [],
@@ -861,10 +857,12 @@
         "After WMF stretchblt patcopy."
       ],
       "intentional_security_differences": [
-        "Supported WMF STRETCHBLT PATCOPY records are reduced to bounded passive PDF rectangle fills using the selected passive brush.",
+        "Word-compatible mode treats WMF STRETCHBLT PATCOPY as non-painted while preserving the authored inline picture box; StrictSpec retains the bounded passive brush fill.",
         "Raw WMF bytes, raster-operation records, source payload bytes, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "odd trailing WMF hex nibble ignored for Word-compatible passive recovery"
+      ],
       "forbidden_pdf_markers": [
         "wmetafile8",
         "picw200",
@@ -885,19 +883,16 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " re",
-        " f"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF STRETCHBLT PATCOPY rectangle placement and brush color.",
-        "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
+        "Visible output now matches Word's blank STRETCHBLT PATCOPY playback and identical surrounding text flow.",
+        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data."
       ]
     },
     {
       "id": "wmf-bitblt-patcopy-passive-rectangle",
       "input": "fixtures/wmf-bitblt-patcopy-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-bitblt-patcopy-passive.pdf",
       "word_reference_pages": [],
@@ -907,12 +902,10 @@
         "After WMF bitblt patcopy."
       ],
       "intentional_security_differences": [
-        "Supported WMF BITBLT PATCOPY records are reduced to bounded passive PDF rectangle fills using the selected passive brush.",
+        "Word-compatible mode treats WMF BITBLT PATCOPY as non-painted while preserving the authored inline picture box; StrictSpec retains the bounded passive brush fill.",
         "Raw WMF bytes, raster-operation records, source payload bytes, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
-      "expected_diagnostics": [
-        "WMF picture rendered as bounded passive vector preview with 1 unsupported record(s) skipped"
-      ],
+      "expected_diagnostics": [],
       "forbidden_pdf_markers": [
         "wmetafile8",
         "picw200",
@@ -933,13 +926,10 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " re",
-        " f"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF BITBLT PATCOPY rectangle placement and brush color.",
-        "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
+        "Visible output now matches Word's blank BITBLT PATCOPY playback and identical surrounding text flow.",
+        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data."
       ]
     },
     {
@@ -993,7 +983,7 @@
     {
       "id": "wmf-dibstretchblt-patcopy-passive-rectangle",
       "input": "fixtures/wmf-dibstretchblt-patcopy-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-dibstretchblt-patcopy-passive.pdf",
       "word_reference_pages": [],
@@ -1003,7 +993,7 @@
         "After WMF dibstretchblt patcopy."
       ],
       "intentional_security_differences": [
-        "Supported WMF DIBSTRETCHBLT PATCOPY records are reduced to bounded passive PDF rectangle fills using the selected passive brush.",
+        "Word-compatible mode treats WMF DIBSTRETCHBLT PATCOPY as non-painted while preserving the authored inline picture box; StrictSpec retains the bounded passive brush fill.",
         "Raw WMF bytes, raster-operation records, DIB/source payload bytes, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
       "expected_diagnostics": [],
@@ -1027,19 +1017,16 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " re",
-        " f"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF DIBSTRETCHBLT PATCOPY rectangle placement and brush color.",
-        "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
+        "Visible output now matches Word's blank DIBSTRETCHBLT PATCOPY playback and identical surrounding text flow.",
+        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data."
       ]
     },
     {
       "id": "wmf-stretchdib-patcopy-passive-rectangle",
       "input": "fixtures/wmf-stretchdib-patcopy-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-stretchdib-patcopy-passive.pdf",
       "word_reference_pages": [],
@@ -1049,7 +1036,7 @@
         "After WMF stretchdib patcopy."
       ],
       "intentional_security_differences": [
-        "Supported WMF STRETCHDIB PATCOPY records are reduced to bounded passive PDF rectangle fills using the selected passive brush.",
+        "Word-compatible mode treats WMF STRETCHDIB PATCOPY as non-painted while preserving the authored inline picture box; StrictSpec retains the bounded passive brush fill.",
         "Raw WMF bytes, raster-operation records, DIB/source payload bytes, WMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
       "expected_diagnostics": [],
@@ -1073,13 +1060,10 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " re",
-        " f"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF STRETCHDIB PATCOPY rectangle placement and brush color.",
-        "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
+        "Visible output now matches Word's blank STRETCHDIB PATCOPY playback and identical surrounding text flow.",
+        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data."
       ]
     },
     {
@@ -1128,7 +1112,7 @@
     {
       "id": "wmf-setdib-to-dev-passive-image",
       "input": "fixtures/wmf-setdib-to-dev-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-setdib-to-dev-passive.pdf",
       "word_reference_pages": [],
@@ -1138,7 +1122,7 @@
         "After WMF setdib to dev."
       ],
       "intentional_security_differences": [
-        "Supported WMF SETDIBTODEV records are normalized into bounded passive image pixels before PDF rendering.",
+        "Word-compatible mode treats WMF SETDIBTODEV as non-painted while preserving the authored inline picture box; StrictSpec retains bounded passive pixel normalization.",
         "Raw WMF bytes, SETDIBTODEV records, DIB headers/source bytes, trailing payload bytes, WMF picture controls, and active PDF features are stripped before PDF output."
       ],
       "expected_diagnostics": [],
@@ -1160,12 +1144,10 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        "/Subtype /Image"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF SETDIBTODEV image placement, scan handling, and pixel orientation.",
-        "The converter preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
+        "Visible output now matches Word's blank SETDIBTODEV playback and identical surrounding text flow.",
+        "StrictSpec preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },
     {
@@ -1307,7 +1289,7 @@
     {
       "id": "emf-vector-passive-paths",
       "input": "fixtures/emf-vector-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-vector-passive.pdf",
       "word_reference_pages": [],
@@ -1317,11 +1299,11 @@
         "After EMF vector."
       ],
       "intentional_security_differences": [
-        "Only the supported safe EMF drawing subset is converted into bounded passive PDF vector paths.",
-        "Unsupported EMF records are skipped with diagnostics, and raw EMF bytes, EMF picture controls, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
       "expected_diagnostics": [
-        "EMF picture rendered as bounded passive vector preview with 1 unsupported record(s) skipped"
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
       ],
       "forbidden_pdf_markers": [
         "emfblip",
@@ -1340,26 +1322,21 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " re",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF rectangle and ellipse geometry.",
-        "The converter intentionally supports only a hardened passive EMF subset; unsupported EMF behavior remains placeholder or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-text-passive-output",
       "input": "fixtures/emf-text-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-text-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
         "Before EMF text.",
-        "Hi",
         "After EMF text."
       ],
       "word_must_preserve_text": [
@@ -1367,10 +1344,12 @@
         "After EMF text."
       ],
       "intentional_security_differences": [
-        "Supported EMF EXTTEXTOUTW text is converted into bounded passive PDF text using safe font and color resources.",
-        "Raw EMF bytes, encoded source text bytes, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1388,18 +1367,15 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " rg"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF text baseline, alignment, color, and font metrics.",
-        "The converter intentionally supports only a hardened passive EMF text subset; unsupported EMF text options remain placeholder or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-cliprect-passive-paths",
       "input": "fixtures/emf-cliprect-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-cliprect-passive.pdf",
       "word_reference_pages": [],
@@ -1409,10 +1385,12 @@
         "After EMF clip."
       ],
       "intentional_security_differences": [
-        "Supported EMF IntersectClipRect state is converted into bounded passive PDF clipping paths before drawing.",
-        "Raw EMF bytes, clip/drawing record identifiers, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1430,14 +1408,9 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " n",
-        " re",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF clipping geometry and clipped paint extents.",
-        "The converter intentionally supports only a hardened passive EMF clipping subset; unsupported clip operations remain placeholder or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
@@ -1453,11 +1426,11 @@
         "After EMF hatch."
       ],
       "intentional_security_differences": [
-        "Word-compatible mode reproduces Word's omission of a hatch-fill-only EMF without retaining its raw payload; StrictSpec retains bounded passive hatch lines clipped to the decoded path.",
-        "Raw EMF bytes, brush/path records, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
       "expected_diagnostics": [
-        "hatch-fill-only EMF picture suppressed for Word-compatible passive rendering"
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
       ],
       "forbidden_pdf_markers": [
         "emfblip",
@@ -1479,14 +1452,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Visible output now matches Word's hatch-fill-only EMF suppression; remaining text-box differences are limited to the established bundled Arial-compatible metric residual.",
-        "Mixed-content EMFs retain the hardened passive brush/path subset; unsupported records remain inert, placeholder, or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-arc-family-passive-paths",
       "input": "fixtures/emf-arc-family-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-arc-family-passive.pdf",
       "word_reference_pages": [],
@@ -1496,10 +1468,12 @@
         "After EMF arcs."
       ],
       "intentional_security_differences": [
-        "Supported EMF arc, chord, pie, and ArcTo records are converted into bounded passive PDF paths and fills.",
-        "Raw EMF bytes, arc-family record identifiers, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1520,20 +1494,15 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " m",
-        " l",
-        " f"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF arc flattening tolerance, chord/pie closure, ArcTo direction, and fill behavior.",
-        "The converter intentionally supports only a hardened passive EMF arc subset; unsupported arc behavior remains placeholder or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-roundrect-passive-curves",
       "input": "fixtures/emf-roundrect-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-roundrect-passive.pdf",
       "word_reference_pages": [],
@@ -1543,10 +1512,12 @@
         "After EMF roundrect."
       ],
       "intentional_security_differences": [
-        "Supported EMF RoundRect records are converted into bounded passive PDF cubic curves and strokes.",
-        "Raw EMF bytes, rounded-rectangle record data, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1565,13 +1536,9 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " c",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF rounded-corner radius clamping and stroke geometry.",
-        "The converter intentionally supports only a hardened passive EMF shape subset; unsupported rounded-rectangle behavior remains placeholder or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
@@ -1587,11 +1554,11 @@
         "After EMF setpixelv."
       ],
       "intentional_security_differences": [
-        "Word-compatible mode reproduces Word's omission of a pixel-only EMF without retaining its raw payload; StrictSpec retains bounded passive one-pixel fills.",
-        "Raw EMF bytes, SETPIXELV record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
       "expected_diagnostics": [
-        "pixel-only EMF picture suppressed for Word-compatible passive rendering"
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
       ],
       "forbidden_pdf_markers": [
         "emfblip",
@@ -1614,14 +1581,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Visible output now matches Word's pixel-only EMF suppression; remaining text-box differences are limited to the established bundled Arial-compatible metric residual.",
-        "Malformed or mixed-content EMF records continue through bounded passive vector recovery or placeholder policy."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-polyline-polygon-passive-paths",
       "input": "fixtures/emf-polyline-polygon-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-polyline-polygon-passive.pdf",
       "word_reference_pages": [],
@@ -1631,10 +1597,12 @@
         "After EMF poly paths."
       ],
       "intentional_security_differences": [
-        "Supported EMF POLYLINE and POLYGON records are converted into bounded passive PDF path move, line, and stroke operations.",
-        "Raw EMF bytes, polyline/polygon record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1655,20 +1623,15 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " m",
-        " l",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF polyline and polygon edge placement.",
-        "The converter intentionally supports only bounded passive path geometry; malformed or excessive poly records remain placeholdered or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-polypolygon-passive-compound-path",
       "input": "fixtures/emf-polypolygon-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-polypolygon-passive.pdf",
       "word_reference_pages": [],
@@ -1678,10 +1641,12 @@
         "After EMF polypolygon."
       ],
       "intentional_security_differences": [
-        "Supported EMF POLYPOLYGON records are converted into a bounded passive compound PDF path with fill/stroke painting.",
-        "Raw EMF bytes, polyfill/brush/polypolygon record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1703,20 +1668,15 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " m",
-        " l",
-        "\nB\n"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF POLYPOLYGON fill/stroke placement and winding behavior.",
-        "The converter intentionally supports only bounded passive compound path geometry; malformed or excessive compound poly records remain placeholdered or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-bezier-passive-curves",
       "input": "fixtures/emf-bezier-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-bezier-passive.pdf",
       "word_reference_pages": [],
@@ -1726,10 +1686,12 @@
         "After EMF bezier."
       ],
       "intentional_security_differences": [
-        "Supported EMF POLYBEZIER and POLYBEZIERTO records, including 16-bit variants, are converted into bounded passive PDF cubic curve strokes.",
-        "Raw EMF bytes, Bezier record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1751,19 +1713,15 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " c",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF Bezier curve placement and current-position behavior.",
-        "The converter intentionally supports only complete bounded passive Bezier runs; malformed or partial Bezier records remain no-ops, placeholders, or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-polydraw-passive-mixed-paths",
       "input": "fixtures/emf-polydraw-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-polydraw-passive.pdf",
       "word_reference_pages": [],
@@ -1773,10 +1731,12 @@
         "After EMF polydraw."
       ],
       "intentional_security_differences": [
-        "Supported EMF POLYDRAW records, including 16-bit variants, are converted into bounded passive PDF line and cubic curve strokes.",
-        "Raw EMF bytes, POLYDRAW point/type arrays, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1798,20 +1758,15 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " l",
-        " c",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF POLYDRAW close-subpath and mixed line/Bezier placement.",
-        "The converter intentionally supports only complete bounded passive POLYDRAW paths; malformed or partial Bezier runs remain no-ops, placeholders, or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-anglearc-passive-polyline",
       "input": "fixtures/emf-anglearc-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-anglearc-passive.pdf",
       "word_reference_pages": [],
@@ -1821,10 +1776,12 @@
         "After EMF anglearc."
       ],
       "intentional_security_differences": [
-        "Supported EMF ANGLEARC records are converted into bounded passive sampled PDF line strokes.",
-        "Raw EMF bytes, ANGLEARC record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1846,20 +1803,15 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " m",
-        " l",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF ANGLEARC sampling tolerance and current-position behavior.",
-        "The converter intentionally samples ANGLEARC into bounded passive line segments; malformed records remain no-ops, placeholders, or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {
       "id": "emf-savedc-restoredc-passive-state",
       "input": "fixtures/emf-savedc-restoredc-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-savedc-restoredc-passive.pdf",
       "word_reference_pages": [],
@@ -1869,10 +1821,12 @@
         "After EMF saved state."
       ],
       "intentional_security_differences": [
-        "Supported EMF SAVEDC and RESTOREDC records scope passive vector state so visible pen color, width, and dash style are restored.",
-        "Raw EMF bytes, saved-state records, pen object records, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
+        "Word-compatible mode omits malformed EMF pictures whose header has no usable reference-device pixel and millimeter metrics; StrictSpec mode retains only the bounded passive vector fallback.",
+        "Raw EMF bytes, picture controls, unsupported records, and active PDF features remain outside the PDF layer."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "EMF picture with missing reference-device metrics suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1895,14 +1849,9 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " l",
-        " RG",
-        " S"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF saved-state interaction with all pen and brush attributes.",
-        "The converter intentionally scopes only passive drawing state; malformed or out-of-range restore records remain no-ops, placeholders, or stripped."
+        "Visible EMF omission and surrounding text flow match the registered Word reference; remaining visual differences are limited to shared font-metric coverage."
       ]
     },
     {

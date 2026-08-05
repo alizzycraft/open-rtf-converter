@@ -2662,16 +2662,20 @@ fn draw_passive_vector_polyline(
     if points.len() < 2 {
         return;
     }
-    for pair in points.windows(2) {
-        draw_passive_vector_line(
-            content,
-            pair[0],
-            pair[1],
-            stroke_color,
-            stroke_width,
-            stroke_style,
-        );
+    let Some(color) = stroke_color else {
+        return;
+    };
+    if stroke_width <= 0.0 {
+        return;
     }
+    set_stroke_color(content, pdf_color_from_model(color));
+    content.set_line_width(stroke_width.max(0.25));
+    set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    content.move_to(points[0].x, points[0].y);
+    for point in &points[1..] {
+        content.line_to(point.x, point.y);
+    }
+    content.stroke();
 }
 
 fn draw_passive_vector_bezier(
@@ -3365,14 +3369,16 @@ fn draw_passive_vector_rounded_rectangle(
     fill_pattern: ShadingPattern,
     fill_color: Option<crate::model::Color>,
 ) {
-    let radius = (corner_width.min(corner_height) * 0.5).max(0.1);
+    let radius_x = (corner_width * 0.5).max(0.1);
+    let radius_y = (corner_height * 0.5).max(0.1);
+    let fallback_radius = radius_x.min(radius_y);
     if fill_pattern != ShadingPattern::None
         && let Some(fill_color) = fill_color
     {
         draw_passive_hatch_rounded_rectangle(
             content,
             rect,
-            radius,
+            fallback_radius,
             fill_pattern,
             pdf_color_from_model(fill_color),
         );
@@ -3385,7 +3391,7 @@ fn draw_passive_vector_rounded_rectangle(
             rect.y,
             rect.width,
             rect.height,
-            radius,
+            fallback_radius,
             stroke_width,
             stroke_color.map(pdf_color_from_model).unwrap_or(PdfColor {
                 red: 0.0,
@@ -3399,13 +3405,11 @@ fn draw_passive_vector_rounded_rectangle(
         );
         return;
     }
-    draw_passive_rounded_rectangle(
+    draw_passive_vector_elliptical_rounded_rectangle(
         content,
-        rect.x,
-        rect.y,
-        rect.width,
-        rect.height,
-        radius,
+        rect,
+        radius_x,
+        radius_y,
         stroke_color.map(|_| stroke_width).unwrap_or(0.0),
         stroke_color.map(pdf_color_from_model).unwrap_or(PdfColor {
             red: 0.0,
@@ -3414,9 +3418,49 @@ fn draw_passive_vector_rounded_rectangle(
         }),
         stroke_style,
         fill_color.map(pdf_color_from_model),
-        None,
-        ShadingPattern::None,
     );
+}
+
+fn draw_passive_vector_elliptical_rounded_rectangle(
+    content: &mut Content,
+    rect: VectorDrawRect,
+    radius_x: f32,
+    radius_y: f32,
+    stroke_width: f32,
+    stroke_color: PdfColor,
+    stroke_style: LineStyle,
+    fill_color: Option<PdfColor>,
+) {
+    if stroke_width <= 0.0 && fill_color.is_none() {
+        return;
+    }
+    let has_stroke = stroke_width > 0.0;
+    content.save_state();
+    if has_stroke {
+        content.set_line_width(stroke_width.max(0.25));
+        set_stroke_color(content, stroke_color);
+        set_passive_path_stroke_style(content, stroke_width, stroke_style);
+    }
+    if let Some(fill_color) = fill_color {
+        set_fill_color(content, fill_color);
+    }
+    append_passive_elliptical_rounded_rectangle_path(
+        content,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        radius_x,
+        radius_y,
+    );
+    if fill_color.is_some() && has_stroke {
+        content.fill_nonzero_and_stroke();
+    } else if fill_color.is_some() {
+        content.fill_nonzero();
+    } else {
+        content.stroke();
+    }
+    content.restore_state();
 }
 
 fn draw_passive_vector_ellipse(
@@ -4728,50 +4772,64 @@ fn append_passive_rounded_rectangle_path(
     height: f32,
     radius: f32,
 ) {
+    append_passive_elliptical_rounded_rectangle_path(content, x, y, width, height, radius, radius);
+}
+
+fn append_passive_elliptical_rounded_rectangle_path(
+    content: &mut Content,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    radius_x: f32,
+    radius_y: f32,
+) {
     const KAPPA: f32 = 0.552_284_8;
 
     let width = width.max(0.1);
     let height = height.max(0.1);
-    let radius = radius.clamp(0.1, width.min(height) / 2.0);
-    let control = radius * KAPPA;
+    let radius_x = radius_x.clamp(0.1, width / 2.0);
+    let radius_y = radius_y.clamp(0.1, height / 2.0);
+    let control_x = radius_x * KAPPA;
+    let control_y = radius_y * KAPPA;
     let right = x + width;
     let top = y + height;
 
-    content.move_to(x + radius, y);
-    content.line_to(right - radius, y);
+    content.move_to(x + radius_x, y);
+    content.line_to(right - radius_x, y);
     content.cubic_to(
-        right - radius + control,
+        right - radius_x + control_x,
         y,
         right,
-        y + radius - control,
+        y + radius_y - control_y,
         right,
-        y + radius,
+        y + radius_y,
     );
-    content.line_to(right, top - radius);
+    content.line_to(right, top - radius_y);
     content.cubic_to(
         right,
-        top - radius + control,
-        right - radius + control,
+        top - radius_y + control_y,
+        right - radius_x + control_x,
         top,
-        right - radius,
+        right - radius_x,
         top,
     );
-    content.line_to(x + radius, top);
+    content.line_to(x + radius_x, top);
     content.cubic_to(
-        x + radius - control,
+        x + radius_x - control_x,
         top,
         x,
-        top - radius + control,
+        top - radius_y + control_y,
         x,
-        top - radius,
+        top - radius_y,
     );
-    content.line_to(x, y + radius);
+    content.line_to(x, y + radius_y);
     content.cubic_to(
         x,
-        y + radius - control,
-        x + radius - control,
+        y + radius_y - control_y,
+        x + radius_x - control_x,
         y,
-        x + radius,
+        x + radius_x,
         y,
     );
     content.close_path();
