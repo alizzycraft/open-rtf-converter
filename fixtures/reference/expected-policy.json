@@ -377,7 +377,7 @@
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF clipping geometry and clipped paint extents.",
+        "The focused Word audit confirms matching gray fill, black 1.878-point stock-pen stroke, and bounded passive clipping. The visible clip differs by about 0.01 points at the left edge, 0.76 points at the right edge, and 0.70 to 1.73 points vertically because Word applies its nonuniform legacy WMF playback transform.",
         "The converter intentionally supports only a hardened passive WMF clipping subset; unsupported clip operations remain placeholder or stripped."
       ]
     },
@@ -423,7 +423,7 @@
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF hatch density, phase, clipping, and color.",
+        "The focused Word audit confirms the red horizontal hatch color and black 1.878-point stock-pen outline, but Word's scaled legacy bitmap hatch becomes one roughly 5.21-point red band while the converter emits bounded 0.35-point vector lines at 4-point spacing. Exact legacy hatch tile scaling/phase remains open.",
         "The converter intentionally supports only a hardened passive WMF brush subset; unsupported brush records remain inert, placeholder, or stripped."
       ]
     },
@@ -701,7 +701,7 @@
         " f"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF SETPIXEL scaling and color placement.",
+        "Focused Word comparison measured the red SETPIXEL mark as a 1.87784-point stroked segment at approximately (118.47, 64.68), while the converter emits a bounded 0.54-by-0.36-point fill at approximately (114.58, 61.32). The shared legacy WMF playback/map transform must be corrected generally before exact placement and scale can match.",
         "The converter intentionally supports only bounded passive pixel fills; malformed SETPIXEL records remain placeholdered or stripped."
       ]
     },
@@ -1580,7 +1580,7 @@
     {
       "id": "emf-setpixelv-passive-rectangles",
       "input": "fixtures/emf-setpixelv-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/emf-setpixelv-passive.pdf",
       "word_reference_pages": [],
@@ -1590,10 +1590,12 @@
         "After EMF setpixelv."
       ],
       "intentional_security_differences": [
-        "Supported EMF SETPIXELV records are converted into bounded passive one-pixel PDF rectangle fills.",
+        "Word-compatible mode reproduces Word's omission of a pixel-only EMF without retaining its raw payload; StrictSpec retains bounded passive one-pixel fills.",
         "Raw EMF bytes, SETPIXELV record payloads, EMF picture controls, raster fallback, and active PDF features are stripped before PDF output."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "pixel-only EMF picture suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "emfblip",
         "picw160",
@@ -1613,13 +1615,10 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        " re",
-        " f"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EMF one-pixel rectangle scaling.",
-        "The converter intentionally supports only bounded passive pixel fills; malformed or unsupported pixel records remain placeholdered or stripped."
+        "Visible output now matches Word's pixel-only EMF suppression; remaining text-box differences are limited to the established bundled Arial-compatible metric residual.",
+        "Malformed or mixed-content EMF records continue through bounded passive vector recovery or placeholder policy."
       ]
     },
     {
@@ -3160,7 +3159,7 @@
     {
       "id": "page-border-scope-passive-layout",
       "input": "fixtures/page-border-scope-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/page-border-scope-passive.pdf",
       "word_reference_pages": [],
@@ -3192,7 +3191,7 @@
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact page border scope relative to header/footer and page edge."
+        "The registered Word reference confirms that parameterless `pgbrdropt` measures from the text margins, not the page edge, and that `pgbrdrhead`/`pgbrdrfoot` do not expand into empty header/footer regions. Converter top/bottom/left borders now use the exact 36/270/360-point margin bounds and Word's 0.72-point default page-border width. Word emits filled strips offset by at most 0.48 points around those nominal axes while the converter emits equivalent centered passive strokes."
       ]
     },
     {
@@ -4847,7 +4846,8 @@
       ],
       "intentional_security_differences": [
         "Legacy drawing text boxes are normalized into bounded passive static shape/text content.",
-        "Active objects nested inside the text box are stripped before normalized model and PDF rendering."
+        "Active objects nested inside the text box are stripped before normalized model and PDF rendering.",
+        "Word misparses this malformed legacy drawing, exposes the hidden coordinate payload as body text, drops the intended textbox text, and consumes the first character of the following paragraph. The converter intentionally preserves the authored textbox/following text while stripping the hidden payload."
       ],
       "expected_diagnostics": [
         "active content removed: OLE object before safe model normalization"
@@ -4879,7 +4879,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact legacy drawing text-box frame position, z-order, and text inset."
+        "The registered Word reference contains only a zero-area 0.14-point legacy stroke at `(36,49.8)` because Word does not recover this malformed textbox structure. Converter frame/text geometry is therefore an intentional bounded recovery rather than a match target."
       ]
     },
     {
@@ -4992,9 +4992,11 @@
         "After table borders."
       ],
       "intentional_security_differences": [
-        "Table row, inner, cell, and diagonal border controls are normalized into bounded passive line drawing commands."
+        "Word-compatible recovery ignores conflicting row-level borders on a row with explicit diagonal cell borders; explicit cell and diagonal borders are normalized into bounded passive line drawing commands."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "row-level table borders ignored to match Word print behavior"
+      ],
       "forbidden_pdf_markers": [
         "colortbl",
         "red255",
@@ -5021,9 +5023,7 @@
         "/Annots"
       ],
       "expected_pdf_markers": [],
-      "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact row, inner, cell, and diagonal border stroke placement, styles, widths, and colors."
-      ]
+      "known_gaps": []
     },
     {
       "id": "carried-table-row-definitions-passive-layout",
@@ -7285,13 +7285,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact background shape page-layer position, fill color, and paint order."
+        "The registered Word reference confirms that a shape inside the `background` destination becomes a full-page cyan fill `(0,0)-(612.1,792.1)` regardless of its authored 150-by-60-point frame, with no outline, and paints before body text. Converter output now matches this geometry, color, and paint order exactly."
       ]
     },
     {
       "id": "shape-z-order-text-passive-drawing-order",
       "input": "fixtures/shape-z-order-text-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/shape-z-order-text-passive.pdf",
       "word_reference_pages": [],
@@ -7325,7 +7325,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact z-order paint order and shape-text frame positioning."
+        "The registered Word reference confirms that z-order 23 foreground shape content paints after both surrounding body paragraphs. The converter now matches that layer sequence, exact 180-by-54-point frame, 7.2-point horizontal and 4-point vertical text insets, and black 0.75-point outline. Shape-text x origin is within 0.38 points; vertical glyph boxes retain the shared roughly 0.95-point bundled Arial-compatible metric residual."
       ]
     },
     {
@@ -7633,7 +7633,7 @@
         "After fill color."
       ],
       "intentional_security_differences": [
-        "Office drawing foreground fill color metadata is normalized into bounded passive PDF fill geometry rather than editable Office drawing state.",
+        "Word ignores the `fillForeColor` alias in print output; Word-compatible mode retains the default white fill while StrictSpec can normalize the bounded color value.",
         "Unsupported or active drawing payload properties adjacent to fill metadata are stripped before PDF rendering."
       ],
       "expected_diagnostics": [
@@ -7656,7 +7656,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Office fill color interpretation, shape bounds, and fill paint order."
+        "The registered Word reference confirms `fillForeColor=65535` is inert: Word and converter retain the default white fill, black 0.75-point outline, and exact 108-by-36-point frame."
       ]
     },
     {
@@ -7672,7 +7672,7 @@
         "After stroke color."
       ],
       "intentional_security_differences": [
-        "Office drawing foreground stroke color metadata is normalized into bounded passive PDF stroke geometry rather than editable Office drawing state.",
+        "Word ignores the `lineForeColor` alias in print output; Word-compatible mode retains the default black outline while StrictSpec can normalize the bounded color value.",
         "Unsupported or active drawing payload properties adjacent to stroke metadata are stripped before PDF rendering."
       ],
       "expected_diagnostics": [
@@ -7695,7 +7695,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Office stroke color interpretation, outline width, and paint order."
+        "The registered Word reference confirms `lineForeColor=255` is inert: Word and converter retain the default white fill, black 0.75-point outline, and exact 108-by-36-point frame."
       ]
     },
     {
@@ -7711,7 +7711,7 @@
         "After back fill."
       ],
       "intentional_security_differences": [
-        "Office drawing background fill color metadata is normalized into bounded passive PDF fill geometry rather than editable Office drawing state.",
+        "Word treats `fillBackColor` only as a secondary fill color; without an active pattern or gradient it does not replace the default white foreground fill.",
         "Unsupported or active drawing payload properties adjacent to background fill metadata are stripped before PDF rendering."
       ],
       "expected_diagnostics": [
@@ -7734,7 +7734,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Office background fill color fallback interpretation and fill paint order."
+        "The registered Word reference confirms standalone `fillBackColor=16711680` is inert: Word and converter retain the default white fill, black 0.75-point outline, and exact 108-by-36-point frame. Numeric gradient fill types still consume it as a bounded secondary color."
       ]
     },
     {
@@ -7750,7 +7750,7 @@
         "After back stroke."
       ],
       "intentional_security_differences": [
-        "Office drawing background stroke color metadata is normalized into bounded passive PDF stroke geometry rather than editable Office drawing state.",
+        "Word ignores standalone `lineBackColor` in print output; Word-compatible mode retains the default black outline while StrictSpec can normalize the bounded fallback value.",
         "Unsupported or active drawing payload properties adjacent to background stroke metadata are stripped before PDF rendering."
       ],
       "expected_diagnostics": [
@@ -7773,7 +7773,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Office background stroke color fallback interpretation and outline paint order."
+        "The registered Word reference confirms `lineBackColor=16711680` is inert: Word and converter retain the default white fill, black 0.75-point outline, and exact 108-by-36-point frame."
       ]
     },
     {

@@ -4360,6 +4360,10 @@ fn draw_passive_line(
             content.set_dash_pattern([dash, width.max(1.0)], 0.0);
             stroke_line(content, x1, y1, x2, y2, width);
         }
+        LineStyle::FineDashed => {
+            content.set_dash_pattern([0.42, 0.14], 0.0);
+            stroke_line(content, x1, y1, x2, y2, width);
+        }
         LineStyle::Double => draw_double_line(content, x1, y1, x2, y2, width),
         LineStyle::Triple => draw_triple_line(content, x1, y1, x2, y2, width),
         LineStyle::Wavy => stroke_wave_line(content, x1, y1, x2, y2, width),
@@ -4386,7 +4390,7 @@ fn draw_passive_joined_polyline(
     }
     if !matches!(
         style,
-        LineStyle::Solid | LineStyle::Dotted | LineStyle::Dashed
+        LineStyle::Solid | LineStyle::Dotted | LineStyle::Dashed | LineStyle::FineDashed
     ) {
         for segment in points.windows(2) {
             draw_passive_line(
@@ -4436,6 +4440,9 @@ fn set_passive_path_stroke_style(content: &mut Content, width: f32, style: LineS
         LineStyle::Dashed => {
             let dash = (width * 3.0).max(3.0);
             content.set_dash_pattern([dash, dash * 0.75], 0.0);
+        }
+        LineStyle::FineDashed => {
+            content.set_dash_pattern([0.42, 0.14], 0.0);
         }
     }
 }

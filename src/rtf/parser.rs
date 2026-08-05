@@ -34,6 +34,7 @@ const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 0;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
 const DEFAULT_SHAPE_TEXT_MARGIN_TWIPS: i32 = 80;
+const DEFAULT_MODERN_SHAPE_TEXT_HORIZONTAL_MARGIN_TWIPS: i32 = 144;
 const DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS: i32 = DEFAULT_SHAPE_WRAP_MARGIN_TWIPS;
 const MAX_PASSIVE_SHAPE_Z_ORDER: i32 = 65_535;
 const MAX_EXACT_JPEG_COLOR_MODE_BYTES: usize = 256 * 1024;
@@ -1104,6 +1105,17 @@ struct TableCellBorderFlags {
 }
 
 impl TableCellBorderFlags {
+    fn any(self) -> bool {
+        self.left
+            || self.right
+            || self.top
+            || self.bottom
+            || self.diagonal_down
+            || self.diagonal_up
+            || self.row_horizontal
+            || self.row_vertical
+    }
+
     fn is_set(self, side: TableCellBorderSide) -> bool {
         match side {
             TableCellBorderSide::Left => self.left,
@@ -4327,6 +4339,18 @@ impl Parser {
                         green: 255,
                         blue: 255,
                     }),
+                    text_margin_left_twips: if legacy_drawing {
+                        DEFAULT_SHAPE_TEXT_MARGIN_TWIPS
+                    } else {
+                        DEFAULT_MODERN_SHAPE_TEXT_HORIZONTAL_MARGIN_TWIPS
+                    },
+                    text_margin_right_twips: if legacy_drawing {
+                        DEFAULT_SHAPE_TEXT_MARGIN_TWIPS
+                    } else {
+                        DEFAULT_MODERN_SHAPE_TEXT_HORIZONTAL_MARGIN_TWIPS
+                    },
+                    text_margin_top_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
+                    text_margin_bottom_twips: DEFAULT_SHAPE_TEXT_MARGIN_TWIPS,
                     ..ShapeBuilder::default()
                 });
             }
@@ -5430,7 +5454,7 @@ impl Parser {
             }
             "pgbrdropt" => {
                 self.current_section_page.page_border_from_page_edge =
-                    control.parameter.unwrap_or(1) != 0;
+                    control.parameter.unwrap_or(1) == 0;
                 self.upsert_current_section_settings();
             }
             "box" => self.select_current_paragraph_box_border(),
@@ -14033,7 +14057,20 @@ impl Parser {
         if row.right_to_left {
             Self::normalize_right_to_left_table_row(&mut row);
         }
-        Self::apply_table_row_borders(&mut row);
+        let has_diagonal_cell_border = row
+            .cells
+            .iter()
+            .any(|cell| cell.borders.diagonal_down.visible || cell.borders.diagonal_up.visible);
+        if self.options.compatibility_mode == CompatibilityMode::StrictSpec
+            || !has_diagonal_cell_border
+        {
+            Self::apply_table_row_borders(&mut row);
+        } else if row.row_border_flags.any() {
+            self.diagnostics.push(Diagnostic::warning(
+                "row-level table borders ignored to match Word print behavior",
+                Some(offset),
+            ));
+        }
         self.last_table_row_template =
             Some(Self::table_row_template_from(&row, &self.state.paragraph));
 
@@ -14628,43 +14665,66 @@ impl Parser {
             }
             PictureKind::Emf => {
                 if let Some(emf) = parse_emf_vector_image_data(&picture.bytes) {
-                    self.ensure_image_pixels(emf.width_px, emf.height_px, offset)?;
-                    if emf.skipped_record_count > 0 {
+                    let word_suppresses_pixel_only_emf = self.options.compatibility_mode
+                        == CompatibilityMode::WordCompatiblePassive
+                        && emf.setpixel_command_count > 0
+                        && emf.commands.len() == emf.setpixel_command_count;
+                    if word_suppresses_pixel_only_emf {
                         self.diagnostics.push(Diagnostic::warning(
-                            format!(
-                                "EMF picture rendered as bounded passive vector preview with {} unsupported record(s) skipped",
-                                emf.skipped_record_count
-                            ),
+                            "pixel-only EMF picture suppressed for Word-compatible passive rendering",
                             Some(offset),
                         ));
+                        if picture.flushed_inline_body_paragraph
+                            && self.current_paragraph.runs.is_empty()
+                            && matches!(self.document.blocks.last(), Some(Block::Paragraph(_)))
+                            && let Some(Block::Paragraph(paragraph)) = self.document.blocks.pop()
+                        {
+                            self.current_paragraph = paragraph;
+                        }
+                        self.push_passive_field_text_for_destination(
+                            picture.owner_destination,
+                            "\u{200b}",
+                            offset,
+                        )?;
+                    } else {
+                        self.ensure_image_pixels(emf.width_px, emf.height_px, offset)?;
+                        if emf.skipped_record_count > 0 {
+                            self.diagnostics.push(Diagnostic::warning(
+                                format!(
+                                    "EMF picture rendered as bounded passive vector preview with {} unsupported record(s) skipped",
+                                    emf.skipped_record_count
+                                ),
+                                Some(offset),
+                            ));
+                        }
+                        self.push_static_image(
+                            picture.owner_destination,
+                            StaticImage {
+                                format: ImageFormat::WmfVector,
+                                bytes: Vec::new(),
+                                palette: Vec::new(),
+                                alpha_mask: None,
+                                tone_adjustment: None,
+                                vector_commands: emf.commands,
+                                width_px: emf.width_px,
+                                height_px: emf.height_px,
+                                natural_width_px_hint: Some(emf.width_px),
+                                natural_height_px_hint: Some(emf.height_px),
+                                display_width_twips: picture
+                                    .display_width_twips
+                                    .or(emf.frame_width_twips),
+                                display_height_twips: picture
+                                    .display_height_twips
+                                    .or(emf.frame_height_twips),
+                                scale_x_percent: picture.scale_x_percent,
+                                scale_y_percent: picture.scale_y_percent,
+                                crop: picture.crop,
+                                placement: None,
+                            },
+                            offset,
+                        )?;
+                        self.mark_shape_visual_result_rendered();
                     }
-                    self.push_static_image(
-                        picture.owner_destination,
-                        StaticImage {
-                            format: ImageFormat::WmfVector,
-                            bytes: Vec::new(),
-                            palette: Vec::new(),
-                            alpha_mask: None,
-                            tone_adjustment: None,
-                            vector_commands: emf.commands,
-                            width_px: emf.width_px,
-                            height_px: emf.height_px,
-                            natural_width_px_hint: Some(emf.width_px),
-                            natural_height_px_hint: Some(emf.height_px),
-                            display_width_twips: picture
-                                .display_width_twips
-                                .or(emf.frame_width_twips),
-                            display_height_twips: picture
-                                .display_height_twips
-                                .or(emf.frame_height_twips),
-                            scale_x_percent: picture.scale_x_percent,
-                            scale_y_percent: picture.scale_y_percent,
-                            crop: picture.crop,
-                            placement: None,
-                        },
-                        offset,
-                    )?;
-                    self.mark_shape_visual_result_rendered();
                 } else if let Some(emf) = parse_emf_header_dimensions(&picture.bytes) {
                     let image = passive_emf_placeholder_image(&picture, &emf);
                     self.ensure_image_pixels(image.width_px, image.height_px, offset)?;
@@ -16005,8 +16065,23 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
-            "fillColor" | "fillForeColor" => {
+            "fillColor" => {
                 if let Some(color) = parse_office_shape_color(value) {
+                    if let Some(shape) = self.current_shape.as_mut() {
+                        shape.fill_color = Some(color);
+                        shape.fill_color_from_foreground = true;
+                    }
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
+            "fillForeColor" => {
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "Office shape fillForeColor alias ignored to match Word print behavior",
+                        None,
+                    ));
+                } else if let Some(color) = parse_office_shape_color(value) {
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.fill_color = Some(color);
                         shape.fill_color_from_foreground = true;
@@ -16019,7 +16094,9 @@ impl Parser {
                 if let Some(color) = parse_office_shape_color(value) {
                     if let Some(shape) = self.current_shape.as_mut() {
                         shape.fill_gradient_color = Some(color);
-                        if !shape.fill_color_from_foreground {
+                        if self.options.compatibility_mode == CompatibilityMode::StrictSpec
+                            && !shape.fill_color_from_foreground
+                        {
                             shape.fill_color = Some(color);
                         }
                     }
@@ -16063,7 +16140,7 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
-            "lineColor" | "lineForeColor" => {
+            "lineColor" => {
                 if let Some(color) = parse_office_shape_color(value)
                     && let Some(shape) = self.current_shape.as_mut()
                 {
@@ -16073,8 +16150,28 @@ impl Parser {
                     self.mark_current_shape_unsupported_or_active_property_stripped();
                 }
             }
+            "lineForeColor" => {
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "Office shape lineForeColor alias ignored to match Word print behavior",
+                        None,
+                    ));
+                } else if let Some(color) = parse_office_shape_color(value)
+                    && let Some(shape) = self.current_shape.as_mut()
+                {
+                    shape.stroke_color = color;
+                    shape.stroke_color_from_foreground = true;
+                } else {
+                    self.mark_current_shape_unsupported_or_active_property_stripped();
+                }
+            }
             "lineBackColor" => {
-                if let Some(color) = parse_office_shape_color(value) {
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                    self.diagnostics.push(Diagnostic::warning(
+                        "Office shape lineBackColor ignored to match Word print behavior",
+                        None,
+                    ));
+                } else if let Some(color) = parse_office_shape_color(value) {
                     if let Some(shape) = self.current_shape.as_mut()
                         && !shape.stroke_color_from_foreground
                     {
@@ -31086,6 +31183,7 @@ struct ParsedEmfVector {
     frame_width_twips: Option<i32>,
     frame_height_twips: Option<i32>,
     skipped_record_count: usize,
+    setpixel_command_count: usize,
     commands: Vec<StaticImageVectorCommand>,
 }
 
@@ -32012,6 +32110,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
     let mut record_count = 1usize;
     let mut commands = Vec::new();
     let mut skipped_record_count = 0usize;
+    let mut setpixel_command_count = 0usize;
     let mut reached_eof = false;
     let mut coordinates = EmfCoordinateState::from_header(&header);
     let mut current_position = (0i32, 0i32);
@@ -33175,6 +33274,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
                         fill_pattern: ShadingPattern::None,
                         fill_color: Some(color),
                     });
+                    setpixel_command_count = setpixel_command_count.checked_add(1)?;
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -33973,6 +34073,7 @@ fn parse_emf_vector_image_data(bytes: &[u8]) -> Option<ParsedEmfVector> {
         frame_width_twips: header.frame_width_twips,
         frame_height_twips: header.frame_height_twips,
         skipped_record_count,
+        setpixel_command_count,
         commands,
     })
 }
@@ -54240,10 +54341,10 @@ After\par}"#;
     fn normalizes_page_border_reference_mode_as_safe_metadata() {
         let output = parse_rtf(r"{\rtf1\pgbrdropt\pgbrdrt\brdrs Body\par}").unwrap();
 
-        assert!(output.document.page.page_border_from_page_edge);
+        assert!(!output.document.page.page_border_from_page_edge);
 
         let output = parse_rtf(r"{\rtf1\pgbrdropt0\pgbrdrt\brdrs Body\par}").unwrap();
-        assert!(!output.document.page.page_border_from_page_edge);
+        assert!(output.document.page.page_border_from_page_edge);
     }
 
     #[test]
@@ -54340,7 +54441,7 @@ After\par}"#;
         let Block::SectionSettings(settings) = &output.document.blocks[2] else {
             panic!("expected section page settings block");
         };
-        assert!(settings.page_border_from_page_edge);
+        assert!(!settings.page_border_from_page_edge);
     }
 
     #[test]
@@ -61579,7 +61680,7 @@ After\par}"#;
     }
 
     #[test]
-    fn emf_setpixelv_records_become_passive_filled_rectangles() {
+    fn strict_spec_emf_setpixelv_records_become_passive_filled_rectangles() {
         let records = [
             emf_setpixelv_record(
                 10,
@@ -61604,7 +61705,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\emfblip {}}}}}",
             bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -61647,6 +61755,37 @@ After\par}"#;
                 },
             ]
         );
+    }
+
+    #[test]
+    fn word_compatible_pixel_only_emf_is_suppressed() {
+        let records = [emf_setpixelv_record(
+            10,
+            20,
+            Color {
+                red: 20,
+                green: 40,
+                blue: 60,
+            },
+        )];
+        let input = format!(
+            r"{{\rtf1 Before{{\pict\emfblip {}}}After}}",
+            bytes_to_hex(&minimal_emf_with_records(160, 80, 2540, 1270, &records))
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(
+            !output
+                .document
+                .blocks
+                .iter()
+                .any(|block| matches!(block, Block::Image(_)))
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("pixel-only EMF picture suppressed")
+        }));
     }
 
     #[test]

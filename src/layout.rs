@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 
 use crate::fonts::{FontAssetStyle, FontProvider};
@@ -166,6 +168,7 @@ pub enum LineStyle {
     Triple,
     Dotted,
     Dashed,
+    FineDashed,
     Wavy,
     Emboss,
     Engrave,
@@ -775,6 +778,7 @@ struct PreparedTableRow {
     cell_paddings: Vec<ResolvedCellPadding>,
     cell_spacings: Vec<ResolvedCellSpacing>,
     cell_text_directions: Vec<TableCellTextDirection>,
+    top_border_inset: f32,
     row_height: f32,
 }
 
@@ -1291,7 +1295,7 @@ impl LayoutEngine {
             .map(|page| page.items.len())
             .collect::<Vec<_>>();
         layout_column_separators(&mut pages);
-        layout_page_borders(&mut pages, document);
+        layout_page_borders(&mut pages, document, &header_footer_sets);
         layout_repeating_header_footer(
             &mut pages,
             document,
@@ -3019,6 +3023,7 @@ fn apply_passive_drawing_z_order(pages: &mut [LayoutPage]) {
     for page in pages {
         move_below_text_drawings_to_background(page);
         sort_drawing_slots_by_z_order(&mut page.items);
+        move_above_text_drawings_to_foreground(page);
     }
 }
 
@@ -3076,6 +3081,39 @@ fn sort_drawing_slots_by_z_order(items: &mut [LayoutItem]) {
     for ((slot_index, _), (_, _, drawing)) in drawing_slots.into_iter().zip(drawings) {
         items[slot_index] = drawing;
     }
+}
+
+fn move_above_text_drawings_to_foreground(page: &mut LayoutPage) {
+    let mut foreground = page
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            drawing_order(item)
+                .filter(|order| !order.below_text)
+                .filter(|order| matches!(item, LayoutItem::Drawing(_)) || order.z_order != 0)
+                .map(|order| (order.z_order, index, item.clone()))
+        })
+        .collect::<Vec<_>>();
+    if foreground.is_empty() {
+        return;
+    }
+    foreground.sort_by(|(z_a, index_a, _), (z_b, index_b, _)| {
+        z_a.cmp(z_b).then_with(|| index_a.cmp(index_b))
+    });
+    let foreground_indices = foreground
+        .iter()
+        .map(|(_, index, _)| *index)
+        .collect::<HashSet<_>>();
+    let mut reordered = page
+        .items
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !foreground_indices.contains(index))
+        .map(|(_, item)| item.clone())
+        .collect::<Vec<_>>();
+    reordered.extend(foreground.into_iter().map(|(_, _, item)| item));
+    page.items = reordered;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -3995,19 +4033,48 @@ fn column_separator_content_bounds(items: &[LayoutItem]) -> Option<VerticalBound
         })
 }
 
-fn layout_page_borders(pages: &mut [LayoutPage], document: &Document) {
+fn layout_page_borders(
+    pages: &mut [LayoutPage],
+    document: &Document,
+    header_footer_sets: &[HeaderFooterSet],
+) {
     for page in pages {
         let geometry = page.geometry;
+        let header_footer_set = header_footer_sets
+            .get(geometry.header_footer_index)
+            .or_else(|| header_footer_sets.first());
+        let has_header_content = header_footer_set.is_some_and(|set| {
+            !set.header.is_empty()
+                || !set.first_page_header.is_empty()
+                || !set.even_page_header.is_empty()
+                || !set.header_images.is_empty()
+                || !set.first_page_header_images.is_empty()
+                || !set.even_page_header_images.is_empty()
+                || !set.header_shapes.is_empty()
+                || !set.first_page_header_shapes.is_empty()
+                || !set.even_page_header_shapes.is_empty()
+        });
+        let has_footer_content = header_footer_set.is_some_and(|set| {
+            !set.footer.is_empty()
+                || !set.first_page_footer.is_empty()
+                || !set.even_page_footer.is_empty()
+                || !set.footer_images.is_empty()
+                || !set.first_page_footer_images.is_empty()
+                || !set.even_page_footer_images.is_empty()
+                || !set.footer_shapes.is_empty()
+                || !set.first_page_footer_shapes.is_empty()
+                || !set.even_page_footer_shapes.is_empty()
+        });
         let borders = geometry.page_borders;
         let spacing = geometry.page_border_spacing;
         let body_left = geometry.margin_left;
         let body_right = geometry.margin_left + geometry.content_width;
-        let body_top = if geometry.page_border_includes_header {
+        let body_top = if geometry.page_border_includes_header && has_header_content {
             (geometry.height - geometry.header_distance).max(geometry.height - geometry.margin_top)
         } else {
             geometry.height - geometry.margin_top
         };
-        let body_bottom = if geometry.page_border_includes_footer {
+        let body_bottom = if geometry.page_border_includes_footer && has_footer_content {
             geometry.footer_distance.min(geometry.margin_bottom)
         } else {
             geometry.margin_bottom
@@ -4029,7 +4096,7 @@ fn layout_page_borders(pages: &mut [LayoutPage], document: &Document) {
         };
 
         if borders.top.visible {
-            let (width, color, style) = table_border_stroke(&borders.top, document);
+            let (width, color, style) = page_border_stroke(&borders.top, document);
             page.items.push(LayoutItem::Line {
                 x1: left,
                 y1: top,
@@ -4041,7 +4108,7 @@ fn layout_page_borders(pages: &mut [LayoutPage], document: &Document) {
             });
         }
         if borders.bottom.visible {
-            let (width, color, style) = table_border_stroke(&borders.bottom, document);
+            let (width, color, style) = page_border_stroke(&borders.bottom, document);
             page.items.push(LayoutItem::Line {
                 x1: left,
                 y1: bottom,
@@ -4053,7 +4120,7 @@ fn layout_page_borders(pages: &mut [LayoutPage], document: &Document) {
             });
         }
         if borders.left.visible {
-            let (width, color, style) = table_border_stroke(&borders.left, document);
+            let (width, color, style) = page_border_stroke(&borders.left, document);
             page.items.push(LayoutItem::Line {
                 x1: left,
                 y1: top,
@@ -4065,7 +4132,7 @@ fn layout_page_borders(pages: &mut [LayoutPage], document: &Document) {
             });
         }
         if borders.right.visible {
-            let (width, color, style) = table_border_stroke(&borders.right, document);
+            let (width, color, style) = page_border_stroke(&borders.right, document);
             page.items.push(LayoutItem::Line {
                 x1: right,
                 y1: top,
@@ -4106,12 +4173,22 @@ fn layout_background_shapes(
         let mut background_column = 0usize;
 
         for shape in shapes {
+            let mut page_background = shape.clone();
+            page_background.left_twips = 0;
+            page_background.top_twips = 0;
+            page_background.width_twips = ((page.width * 20.0).round() as i32).saturating_add(2);
+            page_background.height_twips = ((page.height * 20.0).round() as i32).saturating_add(2);
+            page_background.horizontal_anchor = StaticShapeHorizontalAnchor::Page;
+            page_background.vertical_anchor = StaticShapeVerticalAnchor::Page;
+            page_background.below_text = true;
+            page_background.text_wrap = false;
+            page_background.stroke_width_twips = 0;
             layout_shape(
                 &mut scratch_pages,
                 &mut cursor_y,
                 None,
-                shape,
-                page.width,
+                &page_background,
+                page.width + 0.1,
                 0.0,
                 -1_000_000.0,
                 &mut background_geometry,
@@ -5061,6 +5138,7 @@ fn split_prepared_table_row_fragment(
         cell_paddings: remaining.cell_paddings.clone(),
         cell_spacings: remaining.cell_spacings.clone(),
         cell_text_directions: remaining.cell_text_directions.clone(),
+        top_border_inset: remaining.top_border_inset,
         row_height: 14.0,
     };
     let mut consumed = Vec::with_capacity(remaining.cell_lines.len());
@@ -5483,10 +5561,34 @@ fn prepare_table_row(
     font_provider: Option<&FontProvider>,
 ) -> PreparedTableRow {
     let visual_cells = table_visual_cells(row, column_widths, default_column_width);
-    let cell_paddings = visual_cells
+    let mut cell_paddings = visual_cells
         .iter()
         .map(|visual_cell| resolve_cell_padding(row, &row.cells[visual_cell.cell_index]))
         .collect::<Vec<_>>();
+    let has_diagonal_cell_border = visual_cells.iter().any(|visual_cell| {
+        let borders = &row.cells[visual_cell.cell_index].borders;
+        borders.diagonal_down.visible || borders.diagonal_up.visible
+    });
+    let top_border_inset = if has_diagonal_cell_border {
+        visual_cells
+            .iter()
+            .filter_map(|visual_cell| {
+                let border = &row.cells[visual_cell.cell_index].borders.top;
+                border
+                    .visible
+                    .then(|| table_border_stroke(border, document).0)
+            })
+            .fold(0.0, f32::max)
+    } else {
+        0.0
+    };
+    for (visual_cell, padding) in visual_cells.iter().zip(cell_paddings.iter_mut()) {
+        let cell = &row.cells[visual_cell.cell_index];
+        padding.top += top_border_inset;
+        if has_diagonal_cell_border && cell.borders.left.visible {
+            padding.left += table_border_stroke(&cell.borders.left, document).0 / 2.0;
+        }
+    }
     let cell_spacings = visual_cells
         .iter()
         .map(|visual_cell| resolve_cell_spacing(&row.cells[visual_cell.cell_index]))
@@ -5663,6 +5765,7 @@ fn prepare_table_row(
         cell_paddings,
         cell_spacings,
         cell_text_directions,
+        top_border_inset,
         row_height,
     }
 }
@@ -6502,10 +6605,11 @@ fn push_table_borders(
             });
         }
         if cell.borders.diagonal_down.visible {
-            let (width, color, style) = table_border_stroke(&cell.borders.diagonal_down, document);
+            let (width, color, style) =
+                diagonal_table_border_stroke(&cell.borders.diagonal_down, document);
             page.items.push(LayoutItem::Line {
                 x1,
-                y1: cell_top,
+                y1: cell_top - prepared.top_border_inset,
                 x2,
                 y2: cell_bottom,
                 width,
@@ -6514,12 +6618,13 @@ fn push_table_borders(
             });
         }
         if cell.borders.diagonal_up.visible {
-            let (width, color, style) = table_border_stroke(&cell.borders.diagonal_up, document);
+            let (width, color, style) =
+                diagonal_table_border_stroke(&cell.borders.diagonal_up, document);
             page.items.push(LayoutItem::Line {
                 x1,
                 y1: cell_bottom,
                 x2,
-                y2: cell_top,
+                y2: cell_top - prepared.top_border_inset,
                 width,
                 color,
                 style,
@@ -7094,6 +7199,28 @@ fn table_border_stroke(
     (width, color, style)
 }
 
+fn diagonal_table_border_stroke(
+    border: &TableCellBorder,
+    document: &Document,
+) -> (f32, PdfColor, LineStyle) {
+    let (width, color, style) = table_border_stroke(border, document);
+    if style == LineStyle::Dashed {
+        (0.14, color, LineStyle::FineDashed)
+    } else {
+        (width, color, style)
+    }
+}
+
+fn page_border_stroke(border: &TableCellBorder, document: &Document) -> (f32, PdfColor, LineStyle) {
+    let (mut width, color, style) = table_border_stroke(border, document);
+    if border.width_twips == TableCellBorder::default().width_twips
+        && border.style == BorderStyle::Single
+    {
+        width = 0.72;
+    }
+    (width, color, style)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_paragraph_borders(
     pages: &mut [LayoutPage],
@@ -7616,6 +7743,20 @@ fn layout_paragraph_with_auto_footnotes(
         }
         rendered_current_block_content = true;
         *cursor_y -= line.height;
+        if line_idx + 1 < line_count
+            && line
+                .runs
+                .iter()
+                .any(|run| inline_image_marker_index(&run.text).is_some())
+        {
+            let text_line_height = line
+                .runs
+                .iter()
+                .filter(|run| inline_image_marker_index(&run.text).is_none())
+                .map(|run| flow_run_line_height(run, document, font_provider))
+                .fold(0.0_f32, f32::max);
+            *cursor_y -= text_line_height * 0.25;
+        }
     }
     *cursor_y -=
         paragraph_bottom_border_reserve(&paragraph.style, render_between_border_after, document);
@@ -8064,7 +8205,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     let mut current_line_top_y = first_line_top_y;
     let mut drop_cap_applied = false;
 
-    for run in &paragraph.runs {
+    for (run_index, run) in paragraph.runs.iter().enumerate() {
         let mut segments = split_run_for_wrapping_with_drop_cap(
             run,
             markers,
@@ -8246,6 +8387,25 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
             } else {
                 0.0
             };
+            let is_final_paragraph_segment =
+                run_index + 1 == paragraph.runs.len() && segment_index + 1 == segments.len();
+            if is_final_paragraph_segment
+                && !segment.text.ends_with(char::is_whitespace)
+                && current
+                    .runs
+                    .iter()
+                    .any(|run| inline_image_marker_index(&run.text).is_some())
+            {
+                let mut paragraph_mark = segment.clone();
+                paragraph_mark.text = " ".to_string();
+                fit_width += measure_flow_run(
+                    &paragraph_mark,
+                    current.width + fit_width,
+                    &paragraph.style,
+                    document,
+                    font_provider,
+                );
+            }
             if current.width > 0.0
                 && current.width + fit_width > line_width + inline_image_body_edge_tolerance
             {
@@ -14261,6 +14421,88 @@ mod tests {
     }
 
     #[test]
+    fn word_uses_default_colors_for_office_shape_color_aliases() {
+        for fixture in [
+            include_str!("../fixtures/shape-fill-fore-color-passive.rtf"),
+            include_str!("../fixtures/shape-fill-back-color-passive.rtf"),
+            include_str!("../fixtures/shape-line-fore-color-passive.rtf"),
+            include_str!("../fixtures/shape-line-back-color-passive.rtf"),
+        ] {
+            let parsed = parse_rtf(fixture).unwrap();
+            let shape = parsed
+                .document
+                .blocks
+                .iter()
+                .find_map(|block| match block {
+                    Block::Shape(shape) => Some(shape),
+                    _ => None,
+                })
+                .expect("modern rectangle with color alias");
+
+            assert_eq!(
+                shape.fill_color,
+                Some(Color {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                })
+            );
+            assert_eq!(
+                shape.stroke_color,
+                Color {
+                    red: 0,
+                    green: 0,
+                    blue: 0,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn word_background_shape_covers_page_without_outline() {
+        let parsed = parse_rtf(include_str!("../fixtures/background-shape-passive.rtf")).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let page = &layout.pages[0];
+        let background = page.items.iter().find_map(|item| match item {
+            LayoutItem::Drawing(drawing) if drawing.below_text => match drawing.item.as_ref() {
+                LayoutItem::Highlight {
+                    x,
+                    y,
+                    width,
+                    height,
+                    color,
+                } => Some((*x, *y, *width, *height, *color)),
+                _ => None,
+            },
+            LayoutItem::Highlight {
+                x,
+                y,
+                width,
+                height,
+                color,
+            } => Some((*x, *y, *width, *height, *color)),
+            _ => None,
+        });
+        let (x, y, width, height, color) = background.expect("page background fill");
+        assert!(x.abs() < f32::EPSILON);
+        assert!((y + 0.1).abs() < 0.01, "y={y}");
+        assert!((width - 612.1).abs() < 0.01, "width={width}");
+        assert!((height - 792.1).abs() < 0.01, "height={height}");
+        assert_eq!(color.red, 0.0);
+        assert_eq!(color.green, 1.0);
+        assert_eq!(color.blue, 1.0);
+        assert!(
+            page.items
+                .iter()
+                .all(|item| !matches!(item, LayoutItem::Line { .. })
+                    && !matches!(item, LayoutItem::Drawing(drawing)
+                        if matches!(drawing.item.as_ref(), LayoutItem::Line { .. }))),
+            "Word suppresses the authored background-shape outline: {:?}",
+            page.items
+        );
+    }
+
+    #[test]
     fn inline_image_line_uses_bounded_word_body_edge_tolerance() {
         let parsed = parse_rtf(include_str!("../fixtures/wmf-dashed-pen-passive.rtf")).unwrap();
         let layout = LayoutEngine::layout(&parsed.document);
@@ -14289,6 +14531,42 @@ mod tests {
             "Word keeps trailing text on the inline-image line: after={}, dashed={}",
             after.baseline_y,
             dashed.baseline_y
+        );
+    }
+
+    #[test]
+    fn inline_image_final_paragraph_mark_wraps_and_preserves_word_baseline_pitch() {
+        let parsed = parse_rtf(include_str!("../fixtures/wmf-hatch-brush-passive.rtf")).unwrap();
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        let page = &layout.pages[0];
+        let after = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.starts_with("After") => Some(text),
+                _ => None,
+            })
+            .expect("text after inline hatch image");
+        let trailing = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text)
+                    if text.text.starts_with("hatch") && text.baseline_y < after.baseline_y =>
+                {
+                    Some(text)
+                }
+                _ => None,
+            })
+            .expect("paragraph-final word wrapped after inline image");
+
+        assert!((trailing.x - 36.0).abs() < 0.01);
+        assert!(
+            ((after.baseline_y - trailing.baseline_y) - 13.8).abs() < 0.01,
+            "Word advances a normal Arial line pitch after an inline image: after={}, trailing={}",
+            after.baseline_y,
+            trailing.baseline_y
         );
     }
 
@@ -14492,6 +14770,44 @@ mod tests {
             layered_text, "Layered Box",
             "z-ordered shape text should be wrapped in the shape drawing layer: {:?}",
             layout.pages[0].items
+        );
+    }
+
+    #[test]
+    fn word_modern_shape_text_uses_default_insets_and_foreground_layer() {
+        let parsed = parse_rtf(include_str!("../fixtures/shape-z-order-text-passive.rtf")).unwrap();
+        let shape = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("z-ordered modern shape");
+        assert_eq!(shape.text_margin_left_twips, 144);
+        assert_eq!(shape.text_margin_right_twips, 144);
+        assert_eq!(shape.text_margin_top_twips, 80);
+        assert_eq!(shape.text_margin_bottom_twips, 80);
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        let items = &layout.pages[0].items;
+        let after_index = items
+            .iter()
+            .position(|item| {
+                matches!(item, LayoutItem::Text(fragment) if fragment.text.starts_with("After"))
+            })
+            .expect("body text after shape source position");
+        let layered_index = items
+            .iter()
+            .position(|item| {
+                matches!(item, LayoutItem::Drawing(drawing)
+                    if matches!(drawing.item.as_ref(), LayoutItem::Text(fragment) if fragment.text.starts_with("Layered")))
+            })
+            .expect("shape text in foreground drawing layer");
+        assert!(
+            after_index < layered_index,
+            "Word paints ordinary body text before foreground shape content: {items:?}"
         );
     }
 
@@ -16416,6 +16732,41 @@ mod tests {
             .count();
 
         assert_eq!(diagonals, 2);
+    }
+
+    #[test]
+    fn word_diagonal_cells_ignore_row_borders_and_use_fine_dashes() {
+        let parsed = parse_rtf(include_str!("../fixtures/table-borders-passive.rtf")).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let lines = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Line {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    width,
+                    style,
+                    ..
+                } => Some((*x1, *y1, *x2, *y2, *width, *style)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines.len(), 4, "Word omits all three row-level borders");
+        let fine_dash = lines
+            .iter()
+            .find(|line| line.5 == LineStyle::FineDashed)
+            .expect("fine dashed red diagonal");
+        assert!((fine_dash.4 - 0.14).abs() < 0.001);
+        assert!(lines.iter().any(|line| {
+            line.5 == LineStyle::Solid
+                && (line.4 - 1.5).abs() < 0.001
+                && (line.0 - line.2).abs() > 0.01
+                && (line.1 - line.3).abs() > 0.01
+        }));
     }
 
     #[test]
@@ -19846,6 +20197,7 @@ mod tests {
                 top: 0.0,
                 bottom: 0.0,
             }],
+            top_border_inset: 0.0,
             cell_text_directions: vec![TableCellTextDirection::LeftToRightTopToBottom],
             row_height: 30.0,
         };
@@ -19903,6 +20255,7 @@ mod tests {
                 top: 0.0,
                 bottom: 0.0,
             }],
+            top_border_inset: 0.0,
             cell_text_directions: vec![TableCellTextDirection::LeftToRightTopToBottom],
             row_height: 30.0,
         };
@@ -24295,6 +24648,14 @@ mod tests {
         document.page.footer_distance_twips = 360;
         document.page.page_border_includes_header = true;
         document.page.page_border_includes_footer = true;
+        let Block::Paragraph(header) = paragraph_with_text("Header") else {
+            unreachable!()
+        };
+        let Block::Paragraph(footer) = paragraph_with_text("Footer") else {
+            unreachable!()
+        };
+        document.header = vec![header];
+        document.footer = vec![footer];
         document.page.page_borders.top = TableCellBorder {
             visible: true,
             ..TableCellBorder::default()
@@ -24320,6 +24681,33 @@ mod tests {
             LayoutItem::Line { y1, y2, .. }
                 if (*y1 - bottom_y).abs() < 0.01 && (*y2 - bottom_y).abs() < 0.01
         )));
+    }
+
+    #[test]
+    fn word_pgbrdropt_uses_text_margin_scope_without_empty_header_expansion() {
+        let parsed = parse_rtf(include_str!("../fixtures/page-border-scope-passive.rtf")).unwrap();
+        assert!(!parsed.document.page.page_border_from_page_edge);
+        let layout = LayoutEngine::layout(&parsed.document);
+        let lines = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Line {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    width,
+                    ..
+                } => Some((*x1, *y1, *x2, *y2, *width)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 3);
+        assert!(lines.iter().all(|line| (line.4 - 0.72).abs() < 0.001));
+        assert!(lines.contains(&(36.0, 360.0, 270.0, 360.0, 0.72)));
+        assert!(lines.contains(&(36.0, 36.0, 270.0, 36.0, 0.72)));
+        assert!(lines.contains(&(36.0, 360.0, 36.0, 36.0, 0.72)));
     }
 
     #[test]

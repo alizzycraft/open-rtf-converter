@@ -1455,8 +1455,10 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/AcroForm",
                 b"/Annots",
             ],
-            must_contain_pdf: &[b" re", b" f"],
-            must_emit_diagnostics: &[],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "pixel-only EMF picture suppressed for Word-compatible passive rendering",
+            ],
         },
         ReferenceFixture {
             input: "fixtures/emf-polyline-polygon-passive.rtf",
@@ -3807,7 +3809,9 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/Annots",
             ],
             must_contain_pdf: &[],
-            must_emit_diagnostics: &[],
+            must_emit_diagnostics: &[
+                "row-level table borders ignored to match Word print behavior",
+            ],
         },
         ReferenceFixture {
             input: "fixtures/carried-table-row-definitions-passive.rtf",

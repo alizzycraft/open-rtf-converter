@@ -56253,7 +56253,7 @@ fn emf_exttextouta_records_render_passively_without_payload_leakage() {
 }
 
 #[test]
-fn emf_setpixelv_records_render_passively_without_payload_leakage() {
+fn strict_spec_emf_setpixelv_records_render_passively_without_payload_leakage() {
     let records = [
         emf_setpixelv_record(
             10,
@@ -56277,7 +56277,14 @@ fn emf_setpixelv_records_render_passively_without_payload_leakage() {
     let emf = minimal_emf_with_records(160, 80, 2540, 1270, &records);
     let emf_hex = bytes_to_hex(&emf);
     let input = format!("{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} after\\par}}").into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
     let text = collect_text(&parsed.document);
     let image = parsed
         .document
@@ -56320,6 +56327,10 @@ fn emf_setpixelv_records_render_passively_without_payload_leakage() {
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             diagnostics: true,
             ..ConvertOptions::browser_safe_defaults()
         },
@@ -56364,6 +56375,55 @@ fn emf_setpixelv_records_render_passively_without_payload_leakage() {
                 .any(|window| window == forbidden),
             "EMF SETPIXELV payload leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn word_compatible_pixel_only_emf_is_omitted_without_payload_leakage() {
+    let emf = minimal_emf_with_records(
+        160,
+        80,
+        2540,
+        1270,
+        &[emf_setpixelv_record(
+            10,
+            20,
+            Color {
+                red: 20,
+                green: 40,
+                blue: 60,
+            },
+        )],
+    );
+    let input = format!(
+        "{{\\rtf1 before {{\\pict\\emfblip {}}} after\\par}}",
+        bytes_to_hex(&emf)
+    )
+    .into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+
+    assert!(collect_text(&parsed.document).contains("before"));
+    assert!(collect_text(&parsed.document).contains("after"));
+    assert!(
+        !parsed
+            .document
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Image(_)))
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("pixel-only EMF picture suppressed")
+    }));
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::browser_safe_defaults()).unwrap();
+    let pdf = String::from_utf8_lossy(&output.pdf);
+    for forbidden in ["emfblip", "20454d46", "/Subtype /Image", "/EmbeddedFile"] {
+        assert!(
+            !pdf.contains(forbidden),
+            "pixel-only EMF payload leaked: {forbidden}"
         );
     }
 }
@@ -73992,7 +74052,7 @@ fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(parsed.document.page.page_border_from_page_edge);
+    assert!(!parsed.document.page.page_border_from_page_edge);
     assert!(parsed.document.page.page_borders.top.visible);
     assert!(parsed.document.page.page_borders.left.visible);
     assert!(text.contains("Body"));
@@ -77979,7 +78039,7 @@ fn invalid_office_shape_fill_color_is_stripped_without_becoming_visible_black() 
 }
 
 #[test]
-fn office_shape_fill_fore_color_renders_passively_without_property_leakage() {
+fn office_shape_fill_fore_color_is_inert_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillForeColor}{\sv 65535}}{\sp{\sn pFragments}{\sv hidden-fill-fore-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
@@ -78001,7 +78061,7 @@ fn office_shape_fill_fore_color_renders_passively_without_property_leakage() {
         Some(open_rtf_converter::model::Color {
             red: 255,
             green: 255,
-            blue: 0,
+            blue: 255,
         })
     );
     for forbidden in [
@@ -78037,7 +78097,7 @@ fn office_shape_fill_fore_color_renders_passively_without_property_leakage() {
             .operations
             .iter()
             .any(|operation| operation.operator == "f" || operation.operator == "B"),
-        "fillForeColor should render a passive filled shape"
+        "Word's default white fill should remain visible"
     );
     for forbidden in [
         b"shapeType".as_slice(),
@@ -78152,7 +78212,7 @@ fn invalid_office_shape_fill_fore_color_is_stripped_without_becoming_visible_bla
 }
 
 #[test]
-fn office_shape_fill_back_color_renders_passively_without_property_leakage() {
+fn office_shape_fill_back_color_is_secondary_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillBackColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-fill-back-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
@@ -78172,8 +78232,8 @@ fn office_shape_fill_back_color_renders_passively_without_property_leakage() {
     assert_eq!(
         shape.fill_color,
         Some(open_rtf_converter::model::Color {
-            red: 0,
-            green: 0,
+            red: 255,
+            green: 255,
             blue: 255,
         })
     );
@@ -78211,7 +78271,7 @@ fn office_shape_fill_back_color_renders_passively_without_property_leakage() {
             .operations
             .iter()
             .any(|operation| operation.operator == "f" || operation.operator == "B"),
-        "fillBackColor should render a passive filled shape"
+        "Word's default white fill should remain visible"
     );
     for forbidden in [
         b"shapeType".as_slice(),
@@ -78237,7 +78297,7 @@ fn office_shape_fill_back_color_renders_passively_without_property_leakage() {
 }
 
 #[test]
-fn office_shape_fill_fore_color_takes_precedence_over_fill_back_color() {
+fn office_shape_fill_color_aliases_leave_word_default_fill() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillBackColor}{\sv 16711680}}{\sp{\sn fillForeColor}{\sv 65535}}{\sp{\sn pFragments}{\sv hidden-fill-precedence-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
@@ -78256,7 +78316,7 @@ fn office_shape_fill_fore_color_takes_precedence_over_fill_back_color() {
         Some(open_rtf_converter::model::Color {
             red: 255,
             green: 255,
-            blue: 0,
+            blue: 255,
         })
     );
     for forbidden in [
@@ -78269,6 +78329,46 @@ fn office_shape_fill_fore_color_takes_precedence_over_fill_back_color() {
             "fill color precedence metadata leaked to normalized text: {forbidden}"
         );
     }
+}
+
+#[test]
+fn strict_spec_retains_bounded_office_shape_color_aliases() {
+    let input = br#"{\rtf1 {\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn fillType}{\sv 4}}{\sp{\sn fillBackColor}{\sv 16711680}}{\sp{\sn fillForeColor}{\sv 65535}}{\sp{\sn lineBackColor}{\sv 16711680}}{\sp{\sn lineForeColor}{\sv 255}}}}}"#.to_vec();
+    let parsed = parse_rtf_bytes_strict(&input);
+    let shape = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Shape(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("strict-spec shape with bounded color aliases");
+
+    assert_eq!(
+        shape.fill_color,
+        Some(open_rtf_converter::model::Color {
+            red: 255,
+            green: 255,
+            blue: 0,
+        })
+    );
+    assert_eq!(
+        shape.fill_gradient_color,
+        Some(open_rtf_converter::model::Color {
+            red: 0,
+            green: 0,
+            blue: 255,
+        })
+    );
+    assert_eq!(
+        shape.stroke_color,
+        open_rtf_converter::model::Color {
+            red: 255,
+            green: 0,
+            blue: 0,
+        }
+    );
 }
 
 #[test]
@@ -79527,7 +79627,7 @@ fn oversized_office_shape_line_color_is_stripped_without_payload_leakage() {
 }
 
 #[test]
-fn office_shape_line_fore_color_renders_passively_without_property_leakage() {
+fn office_shape_line_fore_color_is_inert_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineForeColor}{\sv 255}}{\sp{\sn pFragments}{\sv hidden-line-fore-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
@@ -79547,7 +79647,7 @@ fn office_shape_line_fore_color_renders_passively_without_property_leakage() {
     assert_eq!(
         shape.stroke_color,
         open_rtf_converter::model::Color {
-            red: 255,
+            red: 0,
             green: 0,
             blue: 0,
         }
@@ -79585,7 +79685,7 @@ fn office_shape_line_fore_color_renders_passively_without_property_leakage() {
             .operations
             .iter()
             .any(|operation| operation.operator == "S"),
-        "lineForeColor should render a passive stroked shape"
+        "Word's default black outline should remain visible"
     );
     for forbidden in [
         b"shapeType".as_slice(),
@@ -79696,7 +79796,7 @@ fn invalid_office_shape_line_fore_color_is_stripped_without_payload_leakage() {
 }
 
 #[test]
-fn office_shape_line_back_color_renders_passively_without_property_leakage() {
+fn office_shape_line_back_color_is_inert_without_property_leakage() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineBackColor}{\sv 16711680}}{\sp{\sn pFragments}{\sv hidden-line-back-color-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
@@ -79718,7 +79818,7 @@ fn office_shape_line_back_color_renders_passively_without_property_leakage() {
         open_rtf_converter::model::Color {
             red: 0,
             green: 0,
-            blue: 255,
+            blue: 0,
         }
     );
     for forbidden in [
@@ -79754,7 +79854,7 @@ fn office_shape_line_back_color_renders_passively_without_property_leakage() {
             .operations
             .iter()
             .any(|operation| operation.operator == "S"),
-        "lineBackColor should render a passive stroked shape"
+        "Word's default black outline should remain visible"
     );
     for forbidden in [
         b"shapeType".as_slice(),
@@ -79780,7 +79880,7 @@ fn office_shape_line_back_color_renders_passively_without_property_leakage() {
 }
 
 #[test]
-fn office_shape_line_fore_color_takes_precedence_over_line_back_color() {
+fn office_shape_line_color_aliases_leave_word_default_outline() {
     let input = br#"{\rtf1 Before\par{\shp{\*\shpinst\shpleft720\shptop720\shpright2880\shpbottom1440{\sp{\sn shapeType}{\sv 1}}{\sp{\sn lineBackColor}{\sv 16711680}}{\sp{\sn lineForeColor}{\sv 255}}{\sp{\sn pFragments}{\sv hidden-line-color-precedence-payload}}}}After\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
@@ -79797,11 +79897,11 @@ fn office_shape_line_fore_color_takes_precedence_over_line_back_color() {
     assert_eq!(
         shape.stroke_color,
         open_rtf_converter::model::Color {
-            red: 255,
+            red: 0,
             green: 0,
             blue: 0,
         },
-        "lineForeColor should remain authoritative over lineBackColor"
+        "Word ignores both line-color aliases"
     );
     for forbidden in [
         "lineBackColor",
@@ -92299,11 +92399,11 @@ fn disabled_office_shape_line_remains_hidden_after_line_fore_color_metadata_with
     assert_eq!(
         shape.stroke_color,
         open_rtf_converter::model::Color {
-            red: 255,
+            red: 0,
             green: 0,
             blue: 0,
         },
-        "safe stroke color can be normalized, but final fLine state keeps it invisible"
+        "Word ignores lineForeColor while final fLine state keeps the outline invisible"
     );
     for forbidden in [
         "shapeType",
