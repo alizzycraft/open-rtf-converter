@@ -3098,7 +3098,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact page-border inset and visual fallback thickness."
+        "The focused Word 16.0 audit confirms that border-art ID 42 is a proprietary scissors-and-dashed-strip tile rendered as 34 vector paths (30 fills and four 0.14-point strokes), with a clipped union from x=35.88 to 250.16 and y=-7.92 to 24.18 points. The bounded passive fallback intentionally preserves neither the art identity nor its tiling semantics: it emits one black 4-point line from x=36.00 to 270.00 at y=24.00, so the left origin and art-band inner edge differ by only 0.12 and 0.18 points while the line extends 19.84 points farther right. The 4-point fallback exactly reflects the authored brdrw80 width and remains the documented acceptable approximation. Body text origins differ by 0.02 points horizontally and the established 0.95-point bundled Arial-compatible vertical residual. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; four-times renders were visually inspected."
       ]
     },
     {
