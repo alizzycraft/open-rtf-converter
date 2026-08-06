@@ -2868,9 +2868,9 @@
       "must_preserve_text": [
         "Visible title",
         "Numbered title",
-        "Ref text VISIBLE TITLE",
-        "Ref number 1.",
-        "Ref contexts full 1. relative 1 malformed [Field removed: no passive result]"
+        "Ref text NUMBERED TITLE",
+        "Ref number 0",
+        "Ref contexts full 0 relative 0 malformed [Field removed: no passive result]"
       ],
       "intentional_security_differences": [
         "Resultless STYLEREF fields resolve only from safe prior styled text and list-number state; field instructions are not executed.",
@@ -2906,7 +2906,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact STYLEREF result selection when multiple style matches precede the field and when list-number switches are combined with styled paragraphs."
+        "The focused Word 16.0 audit confirms that STYLEREF selects the latest preceding safe paragraph using the named style, so the text result is NUMBERED TITLE rather than the earlier VISIBLE TITLE. The fixture omits mandatory \\levelstartat metadata; Word recovers the marker as 0., and WordCompatiblePassive now does the same while StrictSpec retains the historical one-based recovery. Word's \\n, \\r, and \\w STYLEREF results all omit trailing list punctuation and produce 0 for this single-level list; the converter now matches those bounded results. The malformed \\nfoo field remains an intentional difference: Word emits a wrapped bold host-generated error, while the converter emits a deterministic passive placeholder. Both outputs are one-page text-only PDFs with zero drawings, images, links, annotations, or widgets; safe lines share x origins within 0.02 points and the established 0.83-point bundled Times-compatible vertical residual. Multi-level relative-context selection remains a bounded passive approximation until a dedicated registered reference exercises that case."
       ]
     },
     {

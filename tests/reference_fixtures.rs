@@ -2410,9 +2410,9 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_preserve_text: &[
                 "Visible title",
                 "Numbered title",
-                "Ref text VISIBLE TITLE",
-                "Ref number 1.",
-                "Ref contexts full 1. relative 1 malformed [Field removed: no passive result]",
+        "Ref text NUMBERED TITLE",
+        "Ref number 0",
+        "Ref contexts full 0 relative 0 malformed [Field removed: no passive result]",
             ],
             must_not_leak: &[
                 b"STYLEREF",

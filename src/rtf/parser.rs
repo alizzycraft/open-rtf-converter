@@ -11243,10 +11243,14 @@ impl Parser {
                 .iter()
                 .rev()
                 .find_map(|(index, text)| (*index == style_index).then(|| text.clone()))?;
-            match number_mode {
-                StyleRefNumberMode::Rendered | StyleRefNumberMode::FullContext => number_text,
-                StyleRefNumberMode::RelativeContext => {
-                    trim_style_ref_trailing_number_delimiters(&number_text)?
+            if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                word_compatible_style_ref_number_text(&number_text, number_mode)?
+            } else {
+                match number_mode {
+                    StyleRefNumberMode::Rendered | StyleRefNumberMode::FullContext => number_text,
+                    StyleRefNumberMode::RelativeContext => {
+                        trim_style_ref_trailing_number_delimiters(&number_text)?
+                    }
                 }
             }
         } else {
@@ -11379,7 +11383,7 @@ impl Parser {
                     paragraph.style.drop_cap_lines = 0;
                 }
                 if paragraph_style_index.is_some() {
-                    pending_style_reference_text = paragraph_plain_text(&paragraph);
+                    pending_style_reference_text = paragraph_style_ref_text(&paragraph);
                     pending_style_reference_number_text =
                         paragraph_style_ref_number_text(&paragraph);
                 }
@@ -11411,7 +11415,7 @@ impl Parser {
                 paragraph.style.drop_cap_lines = 0;
             }
             if let Some(index) = paragraph_style_index {
-                if let Some(text) = paragraph_plain_text(&paragraph) {
+                if let Some(text) = paragraph_style_ref_text(&paragraph) {
                     self.store_style_reference_text(index, text, offset)?;
                 }
                 if let Some(text) = paragraph_style_ref_number_text(&paragraph) {
@@ -19080,7 +19084,14 @@ impl Parser {
     }
 
     fn start_list_level(&mut self) {
-        self.current_list_level = Some(ListLevelDefinition::default());
+        let mut level = ListLevelDefinition::default();
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+            // `\\levelstartat` is mandatory in a conforming list-level
+            // definition. Word recovers an omitted value as zero; StrictSpec
+            // retains the converter's historical one-based approximation.
+            level.start_at = 0;
+        }
+        self.current_list_level = Some(level);
         self.state.list_context = ListContext::ListLevel;
     }
 
@@ -31083,6 +31094,17 @@ fn paragraph_plain_text(paragraph: &Paragraph) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+fn paragraph_style_ref_text(paragraph: &Paragraph) -> Option<String> {
+    let text = paragraph_plain_text(paragraph)?;
+    let text = if paragraph_style_ref_number_text(paragraph).is_some() {
+        text.split_once('\t').map(|(_, body)| body).unwrap_or(&text)
+    } else {
+        &text
+    };
+    let text = text.trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
 fn paragraph_style_ref_number_text(paragraph: &Paragraph) -> Option<String> {
     let mut text = String::new();
     for run in &paragraph.runs {
@@ -31111,6 +31133,19 @@ fn trim_style_ref_trailing_number_delimiters(text: &str) -> Option<String> {
         .trim()
         .to_string();
     (!trimmed.is_empty()).then_some(trimmed)
+}
+
+fn word_compatible_style_ref_number_text(text: &str, mode: StyleRefNumberMode) -> Option<String> {
+    let text = trim_style_ref_trailing_number_delimiters(text)?;
+    if mode != StyleRefNumberMode::Rendered {
+        return Some(text);
+    }
+
+    text.rsplit(|ch: char| {
+        matches!(ch, '.' | ')' | ':' | '-' | '\u{2013}' | '\u{2014}') || ch.is_whitespace()
+    })
+    .find(|part| !part.is_empty())
+    .map(str::to_string)
 }
 
 fn push_text_to_runs(runs: &mut Vec<Run>, text: &str, character_style: &CharacterStyle) {
@@ -49263,13 +49298,13 @@ mod tests {
     #[test]
     fn resultless_styleref_fields_render_latest_safe_styled_paragraph_text() {
         let output = parse_rtf(
-            r#"{\rtf1{\stylesheet{\s1 Heading One;}{\s2 Other Style;}}\s1 Visible heading\par\pard Body {\field{\*\fldinst STYLEREF "Heading One" \\* Upper}} again {\field{\*\fldinst STYLEREF 1}} missing {\field{\*\fldinst STYLEREF Missing}}\par}"#,
+            r#"{\rtf1{\stylesheet{\s1 Heading One;}{\s2 Other Style;}}\s1 Visible heading\par\s1 Latest heading\par\pard Body {\field{\*\fldinst STYLEREF "Heading One" \\* Upper}} again {\field{\*\fldinst STYLEREF 1}} missing {\field{\*\fldinst STYLEREF Missing}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
         assert!(
-            text.contains("Visible headingBody VISIBLE HEADING again Visible heading missing [Field removed: no passive result]"),
+            text.contains("Visible headingLatest headingBody LATEST HEADING again Latest heading missing [Field removed: no passive result]"),
             "text was {text:?}"
         );
         for forbidden in ["STYLEREF", "Heading One", "Other Style", "fldinst"] {
@@ -49294,7 +49329,7 @@ mod tests {
         let text = document_text(&output.document);
 
         assert!(
-            text.contains("1.\tNumbered headingRef 1."),
+            text.contains("0.\tNumbered headingRef 0"),
             "text was {text:?}"
         );
         assert!(!text.contains("Ref Numbered heading"));
@@ -49311,6 +49346,16 @@ mod tests {
                 "STYLEREF number switch leaked style/list metadata: {forbidden}"
             );
         }
+
+        let strict = parse_rtf_strict(
+            r#"{\rtf1{\stylesheet{\s1 Heading One;}}{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\s1\ls1\ilvl0 Numbered heading\par\pard Ref {\field{\*\fldinst STYLEREF "Heading One" \\n}}\par}"#,
+        )
+        .unwrap();
+        assert!(
+            document_text(&strict.document).contains("1.\tNumbered headingRef 1."),
+            "strict text was {:?}",
+            document_text(&strict.document)
+        );
     }
 
     #[test]
@@ -49323,7 +49368,7 @@ mod tests {
 
         assert!(
             text.contains(
-                "1.\tNumbered headingFull 1. relative 1 malformed [Field removed: no passive result]"
+                "0.\tNumbered headingFull 0 relative 0 malformed [Field removed: no passive result]"
             ),
             "text was {text:?}"
         );
@@ -52200,7 +52245,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_follow_controls_to_synthesized_marker_suffix() {
         let output = parse_rtf(
-            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelfollow0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid1}{\list{\listlevel\levelnfc0\levelfollow1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid2}{\list{\listlevel\levelnfc0\levelfollow2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid3}}{\*\listoverridetable{\listoverride\listid1\ls1}{\listoverride\listid2\ls2}{\listoverride\listid3\ls3}}\pard\ls1\ilvl0 Tab\par\pard\ls2\ilvl0 Space\par\pard\ls3\ilvl0 Nothing\par}",
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\levelfollow0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid1}{\list{\listlevel\levelnfc0\levelstartat1\levelfollow1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid2}{\list{\listlevel\levelnfc0\levelstartat1\levelfollow2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid3}}{\*\listoverridetable{\listoverride\listid1\ls1}{\listoverride\listid2\ls2}{\listoverride\listid3\ls3}}\pard\ls1\ilvl0 Tab\par\pard\ls2\ilvl0 Space\par\pard\ls3\ilvl0 Nothing\par}",
         )
         .unwrap();
         let paragraph_text = |index: usize| match &output.document.blocks[index] {
@@ -52222,7 +52267,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_marker_character_formatting_to_marker_run() {
         let output = parse_rtf(
-            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;\red255\green255\blue0;\red0\green0\blue255;}{\*\listtable{\list{\listlevel\levelnfc0\f1\fs28\b\i\ul\ulc3\strike\caps\cf1\highlight2\chshdng5000{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}",
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;\red255\green255\blue0;\red0\green0\blue255;}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\f1\fs28\b\i\ul\ulc3\strike\caps\cf1\highlight2\chshdng5000{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}",
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -52265,7 +52310,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_marker_double_strike_to_marker_run_only() {
         let output = parse_rtf(
-            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\strikedl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Double strike item\par}",
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\strikedl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Double strike item\par}",
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -52290,7 +52335,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_marker_underline_variants_to_marker_runs_only() {
         let output = parse_rtf(
-            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\uldb{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\ulth{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\uld{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\uldash{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\ulwave{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\ulw{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Double marker\par\pard\ls2\ilvl0 Thick marker\par\pard\ls3\ilvl0 Dotted marker\par\pard\ls4\ilvl0 Dashed marker\par\pard\ls5\ilvl0 Wave marker\par\pard\ls6\ilvl0 Words marker\par}",
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\uldb{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\ulth{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\uld{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\levelstartat1\uldash{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\levelstartat1\ulwave{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\levelstartat1\ulw{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Double marker\par\pard\ls2\ilvl0 Thick marker\par\pard\ls3\ilvl0 Dotted marker\par\pard\ls4\ilvl0 Dashed marker\par\pard\ls5\ilvl0 Wave marker\par\pard\ls6\ilvl0 Words marker\par}",
         )
         .unwrap();
 
@@ -52327,7 +52372,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_marker_text_effects_to_marker_runs_only() {
         let output = parse_rtf(
-            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\outl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\shad{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\embo{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\impr{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\scaps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}}\pard\ls1\ilvl0 Outline marker\par\pard\ls2\ilvl0 Shadow marker\par\pard\ls3\ilvl0 Emboss marker\par\pard\ls4\ilvl0 Engrave marker\par\pard\ls5\ilvl0 Small caps marker\par}",
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\outl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\shad{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\embo{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\levelstartat1\impr{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\levelstartat1\scaps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}}\pard\ls1\ilvl0 Outline marker\par\pard\ls2\ilvl0 Shadow marker\par\pard\ls3\ilvl0 Emboss marker\par\pard\ls4\ilvl0 Engrave marker\par\pard\ls5\ilvl0 Small caps marker\par}",
         )
         .unwrap();
 
@@ -52356,7 +52401,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_marker_emphasis_marks_to_marker_runs_only() {
         let output = parse_rtf(
-            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\accdot{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\acccomma{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\accdot\accnone{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}}\pard\ls1\ilvl0 Dot marker\par\pard\ls2\ilvl0 Comma marker\par\pard\ls3\ilvl0\b Plain marker\par}",
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\accdot{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\acccomma{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\accdot\accnone{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}}\pard\ls1\ilvl0 Dot marker\par\pard\ls2\ilvl0 Comma marker\par\pard\ls3\ilvl0\b Plain marker\par}",
         )
         .unwrap();
 
@@ -52390,7 +52435,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_marker_script_and_spacing_to_marker_runs_only() {
         let output = parse_rtf(
-            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par}",
+            r"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\levelstartat1\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\levelstartat1\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\levelstartat1\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\levelstartat1\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par}",
         )
         .unwrap();
 
@@ -52450,7 +52495,7 @@ After\par}"#;
     #[test]
     fn applies_list_level_marker_character_border_to_marker_run_only() {
         let output = parse_rtf(
-            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\chbrdr\brdrdash\brdrw80\brdrcf1\brsp120{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Bordered marker\par}",
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\chbrdr\brdrdash\brdrw80\brdrcf1\brsp120{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Bordered marker\par}",
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -52477,7 +52522,7 @@ After\par}"#;
     #[test]
     fn list_level_marker_plain_resets_accumulated_marker_character_style() {
         let output = parse_rtf(
-            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\b\ul\chbrdr\brdrs\brdrw80\plain\i\cf1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Reset item\par}",
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\b\ul\chbrdr\brdrs\brdrw80\plain\i\cf1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Reset item\par}",
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -52507,7 +52552,7 @@ After\par}"#;
     #[test]
     fn list_level_marker_character_style_applies_to_marker_run_only() {
         let output = parse_rtf(
-            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\stylesheet{\cs5\b\ul\cf1 Marker emphasis;}}{\*\listtable{\list{\listlevel\levelnfc0\i\cs5{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled marker\par}",
+            r"{\rtf1{\colortbl;\red255\green0\blue0;}{\stylesheet{\cs5\b\ul\cf1 Marker emphasis;}}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\i\cs5{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled marker\par}",
         )
         .unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -52921,7 +52966,7 @@ After\par}"#;
             ..RtfParseOptions::default()
         };
         let output = parse_rtf_bytes_with_options(
-            br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid1}}{\*\listoverridetable{\listoverride\listid1\ls1}}\pard\ls1\ilvl0 Body\par}",
+            br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid1}}{\*\listoverridetable{\listoverride\listid1\ls1}}\pard\ls1\ilvl0 Body\par}",
             &options,
         )
         .unwrap();

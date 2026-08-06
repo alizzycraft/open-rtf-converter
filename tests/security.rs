@@ -5501,7 +5501,7 @@ fn list_level_indent_and_spacing_render_passively_without_control_leakage() {
 
 #[test]
 fn list_level_follow_controls_render_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelfollow1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelfollow2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}}{\*\listoverridetable{\listoverride\listid5\ls5}{\listoverride\listid6\ls6}}\pard\ls5\ilvl0 Space\par\pard\ls6\ilvl0 Nothing\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\levelfollow1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\levelfollow2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}}{\*\listoverridetable{\listoverride\listid5\ls5}{\listoverride\listid6\ls6}}\pard\ls5\ilvl0 Space\par\pard\ls6\ilvl0 Nothing\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let first = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -5556,7 +5556,7 @@ fn list_level_follow_controls_render_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_formatting_renders_passively_without_control_leakage() {
-    let input = br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;\red255\green255\blue0;\red0\green0\blue255;}{\*\listtable{\list{\listlevel\levelnfc0\f1\afs28\ab\ai\aul\ulc3\astrike\acaps\acf1\chshdng5000\chcbpat2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}".to_vec();
+    let input = br"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;\red255\green255\blue0;\red0\green0\blue255;}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\f1\afs28\ab\ai\aul\ulc3\astrike\acaps\acf1\chshdng5000\chcbpat2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled item\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -5633,7 +5633,7 @@ fn list_level_marker_formatting_renders_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_double_strike_renders_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\strikedl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Double strike item\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\strikedl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Double strike item\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -5688,7 +5688,7 @@ fn list_level_marker_double_strike_renders_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_underline_variants_render_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\uldb{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\ulth{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\uld{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\uldash{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\ulwave{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\ulw{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Double marker\par\pard\ls2\ilvl0 Thick marker\par\pard\ls3\ilvl0 Dotted marker\par\pard\ls4\ilvl0 Dashed marker\par\pard\ls5\ilvl0 Wave marker\par\pard\ls6\ilvl0 Words marker\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\uldb{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\ulth{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\uld{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\levelstartat1\uldash{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\levelstartat1\ulwave{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\levelstartat1\ulw{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Double marker\par\pard\ls2\ilvl0 Thick marker\par\pard\ls3\ilvl0 Dotted marker\par\pard\ls4\ilvl0 Dashed marker\par\pard\ls5\ilvl0 Wave marker\par\pard\ls6\ilvl0 Words marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
 
     for (index, (text, underline)) in [
@@ -5766,7 +5766,7 @@ fn list_level_marker_underline_variants_render_passively_without_control_leakage
 
 #[test]
 fn list_level_marker_text_effects_render_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\outl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\shad{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\embo{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\impr{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\scaps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\ol{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Outline marker\par\pard\ls2\ilvl0 Shadow marker\par\pard\ls3\ilvl0 Emboss marker\par\pard\ls4\ilvl0 Engrave marker\par\pard\ls5\ilvl0 Small caps marker\par\pard\ls6\ilvl0 Overline marker\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\outl{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\shad{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\embo{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\levelstartat1\impr{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\levelstartat1\scaps{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\levelstartat1\ol{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}}\pard\ls1\ilvl0 Outline marker\par\pard\ls2\ilvl0 Shadow marker\par\pard\ls3\ilvl0 Emboss marker\par\pard\ls4\ilvl0 Engrave marker\par\pard\ls5\ilvl0 Small caps marker\par\pard\ls6\ilvl0 Overline marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
 
     for (index, text) in [
@@ -5886,7 +5886,7 @@ fn list_level_marker_text_effects_render_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_emphasis_marks_render_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\accdot{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\acccomma{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\accdot\accnone{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}}\pard\ls1\ilvl0 Dot marker\par\pard\ls2\ilvl0 Comma marker\par\pard\ls3\ilvl0\b Plain marker\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\accdot{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\acccomma{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\accdot\accnone{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}}\pard\ls1\ilvl0 Dot marker\par\pard\ls2\ilvl0 Comma marker\par\pard\ls3\ilvl0\b Plain marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
 
     for (index, expected) in [
@@ -5956,7 +5956,7 @@ fn list_level_marker_emphasis_marks_render_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_script_and_spacing_render_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}{\list{\listlevel\levelnfc0\aup{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid12}{\list{\listlevel\levelnfc0\adn{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid13}{\list{\listlevel\levelnfc0\aexpnd4{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid14}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}{\listoverride\listid12\ls8}{\listoverride\listid13\ls9}{\listoverride\listid14\ls10}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par\pard\ls8\ilvl0 Associated up marker\par\pard\ls9\ilvl0 Associated down marker\par\pard\ls10\ilvl0 Associated spaced marker\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\super{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\sub{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\up8{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\levelstartat1\dn6{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\levelstartat1\expndtw80{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}{\list{\listlevel\levelnfc0\levelstartat1\kerning2{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid10}{\list{\listlevel\levelnfc0\levelstartat1\charscalex150{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid11}{\list{\listlevel\levelnfc0\levelstartat1\aup{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid12}{\list{\listlevel\levelnfc0\levelstartat1\adn{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid13}{\list{\listlevel\levelnfc0\levelstartat1\aexpnd4{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid14}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}{\listoverride\listid10\ls6}{\listoverride\listid11\ls7}{\listoverride\listid12\ls8}{\listoverride\listid13\ls9}{\listoverride\listid14\ls10}}\pard\ls1\ilvl0 Raised marker\par\pard\ls2\ilvl0 Lowered marker\par\pard\ls3\ilvl0 Manual up marker\par\pard\ls4\ilvl0 Manual down marker\par\pard\ls5\ilvl0 Spaced marker\par\pard\ls6\ilvl0 Kerned marker\par\pard\ls7\ilvl0 Scaled marker\par\pard\ls8\ilvl0 Associated up marker\par\pard\ls9\ilvl0 Associated down marker\par\pard\ls10\ilvl0 Associated spaced marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
 
     for (index, text) in [
@@ -6100,7 +6100,7 @@ fn list_level_marker_script_and_spacing_render_passively_without_control_leakage
 
 #[test]
 fn list_level_marker_character_border_renders_passively_without_control_leakage() {
-    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\chbrdr\brdrdash\brdrw80\brdrcf1\brsp120{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Bordered marker\par}".to_vec();
+    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\chbrdr\brdrdash\brdrw80\brdrcf1\brsp120{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Bordered marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -6161,7 +6161,7 @@ fn list_level_marker_character_border_renders_passively_without_control_leakage(
 
 #[test]
 fn list_level_marker_relief_and_compound_borders_render_passively_without_control_leakage() {
-    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\chbrdr\brdrinset\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\chbrdr\brdroutset\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\chbrdr\brdrtnthsg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\chbrdr\brdrthtnmg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\chbrdr\brdrtnthtnlg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}}\pard\ls1\ilvl0 Engraved marker\par\pard\ls2\ilvl0 Embossed marker\par\pard\ls3\ilvl0 Thin thick marker\par\pard\ls4\ilvl0 Thick thin marker\par\pard\ls5\ilvl0 Thin thick thin marker\par}".to_vec();
+    let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\chbrdr\brdrinset\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}{\list{\listlevel\levelnfc0\levelstartat1\chbrdr\brdroutset\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid6}{\list{\listlevel\levelnfc0\levelstartat1\chbrdr\brdrtnthsg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid7}{\list{\listlevel\levelnfc0\levelstartat1\chbrdr\brdrthtnmg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid8}{\list{\listlevel\levelnfc0\levelstartat1\chbrdr\brdrtnthtnlg\brdrw60{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid9}}{\*\listoverridetable{\listoverride\listid5\ls1}{\listoverride\listid6\ls2}{\listoverride\listid7\ls3}{\listoverride\listid8\ls4}{\listoverride\listid9\ls5}}\pard\ls1\ilvl0 Engraved marker\par\pard\ls2\ilvl0 Embossed marker\par\pard\ls3\ilvl0 Thin thick marker\par\pard\ls4\ilvl0 Thick thin marker\par\pard\ls5\ilvl0 Thin thick thin marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraphs = parsed
         .document
@@ -6279,7 +6279,7 @@ fn list_level_marker_relief_and_compound_borders_render_passively_without_contro
 
 #[test]
 fn list_level_marker_plain_reset_renders_passively_without_control_leakage() {
-    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\b\ul\chbrdr\brdrs\brdrw80\plain\i\cf1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Reset item\par}".to_vec();
+    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\b\ul\chbrdr\brdrs\brdrw80\plain\i\cf1{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Reset item\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -6342,7 +6342,7 @@ fn list_level_marker_plain_reset_renders_passively_without_control_leakage() {
 
 #[test]
 fn list_level_marker_character_style_renders_passively_without_control_leakage() {
-    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\stylesheet{\cs5\b\ul\cf1 Marker emphasis;}}{\*\listtable{\list{\listlevel\levelnfc0\i\cs5{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled marker\par}".to_vec();
+    let input = br"{\rtf1{\colortbl;\red255\green0\blue0;}{\stylesheet{\cs5\b\ul\cf1 Marker emphasis;}}{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1\i\cs5{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid5}}{\*\listoverridetable{\listoverride\listid5\ls1}}\pard\ls1\ilvl0 Styled marker\par}".to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
@@ -12780,8 +12780,8 @@ fn resultless_styleref_number_switch_renders_list_number_without_payload_leakage
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("1.\tNumbered title"));
-    assert!(text.contains("Ref 1."));
+    assert!(text.contains("0.\tNumbered title"));
+    assert!(text.contains("Ref 0"));
     assert!(!text.contains("Ref Numbered title"));
     for forbidden in [
         "STYLEREF",
@@ -12812,7 +12812,7 @@ fn resultless_styleref_number_switch_renders_list_number_without_payload_leakage
 
     assert!(rendered_text.contains("Numbered title"));
     assert!(
-        rendered_text.contains("Ref 1."),
+        rendered_text.contains("Ref 0"),
         "decoded PDF text did not contain passive STYLEREF list number: {rendered_text:?}"
     );
     assert!(!rendered_text.contains("Ref Numbered title"));
@@ -12847,7 +12847,7 @@ fn resultless_styleref_number_context_switches_render_without_payload_leakage() 
 
     assert!(
         text.contains(
-            "1.\tNumbered titleFull 1. relative 1 malformed [Field removed: no passive result]"
+            "0.\tNumbered titleFull 0 relative 0 malformed [Field removed: no passive result]"
         ),
         "text was {text:?}"
     );
@@ -12880,7 +12880,7 @@ fn resultless_styleref_number_context_switches_render_without_payload_leakage() 
     let rendered_text = decoded_pdf_text(&content);
 
     assert!(
-        rendered_text.contains("Full 1. relative 1 malformed [Field removed: no passive result]"),
+        rendered_text.contains("Full 0 relative 0 malformed [Field removed: no passive result]"),
         "decoded PDF text did not contain passive STYLEREF number contexts: {rendered_text:?}"
     );
     for forbidden in [
