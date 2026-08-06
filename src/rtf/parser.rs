@@ -212,8 +212,11 @@ struct ParserState {
     office_math_radical_degree_hide_property_seen: bool,
     office_math_phantom_container_direct: bool,
     office_math_phantom_property_direct: bool,
+    office_math_phantom_argument_context: bool,
     office_math_phantom_hidden: bool,
     office_math_phantom_show_property_seen: bool,
+    office_math_phantom_zero_width: bool,
+    office_math_phantom_zero_width_property_seen: bool,
     office_math_accent_container_direct: bool,
     office_math_accent_property_direct: bool,
     office_math_accent_character_capture: bool,
@@ -375,8 +378,11 @@ impl Default for ParserState {
             office_math_radical_degree_hide_property_seen: false,
             office_math_phantom_container_direct: false,
             office_math_phantom_property_direct: false,
+            office_math_phantom_argument_context: false,
             office_math_phantom_hidden: true,
             office_math_phantom_show_property_seen: false,
+            office_math_phantom_zero_width: false,
+            office_math_phantom_zero_width_property_seen: false,
             office_math_accent_container_direct: false,
             office_math_accent_property_direct: false,
             office_math_accent_character_capture: false,
@@ -2323,6 +2329,7 @@ impl Parser {
         child.office_math_phantom_container_direct = false;
         child.office_math_phantom_property_direct = false;
         child.office_math_phantom_show_property_seen = false;
+        child.office_math_phantom_zero_width_property_seen = false;
         child.office_math_accent_container_direct = false;
         child.office_math_accent_property_direct = false;
         child.office_math_accent_character_capture = false;
@@ -2553,6 +2560,12 @@ impl Parser {
                 if previous.office_math_phantom_container_direct {
                     previous.character.hidden = self.state.office_math_phantom_hidden;
                 }
+            }
+            if self.state.office_math_phantom_zero_width_property_seen
+                && !self.state.office_math_phantom_container_direct
+            {
+                previous.office_math_phantom_zero_width = self.state.office_math_phantom_zero_width;
+                previous.office_math_phantom_zero_width_property_seen = true;
             }
             self.finish_office_math_accent_group(&mut previous, offset)?;
             self.finish_office_math_group_char_group(&mut previous, offset)?;
@@ -3325,7 +3338,10 @@ impl Parser {
             }
             "mphant" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_phantom_container_direct = true;
+                self.state.office_math_phantom_argument_context = false;
                 self.state.office_math_phantom_hidden = true;
+                self.state.office_math_phantom_zero_width = false;
+                self.state.character.passive_math_phantom_id = Some(offset);
                 self.state.character.hidden = true;
             }
             "mphantPr"
@@ -3341,6 +3357,13 @@ impl Parser {
                 self.state.office_math_phantom_hidden = control.parameter.unwrap_or(1) == 0;
                 self.state.office_math_phantom_show_property_seen = true;
                 self.state.character.hidden = self.state.office_math_phantom_hidden;
+            }
+            "mzeroWid"
+                if destination_allows_visible_content(&self.state)
+                    && self.office_math_in_phantom_property_group() =>
+            {
+                self.state.office_math_phantom_zero_width = control.parameter.unwrap_or(1) != 0;
+                self.state.office_math_phantom_zero_width_property_seen = true;
             }
             "mborderBox" if destination_allows_visible_content(&self.state) => {
                 self.state.character.border = passive_office_math_border_box();
@@ -3591,6 +3614,11 @@ impl Parser {
                 && self.office_math_direct_parent_is_nary() =>
             {
                 self.state.character.passive_math_nary_base_id = Some(offset);
+            }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_is_phantom() =>
+            {
+                self.state.office_math_phantom_argument_context = true;
             }
             "msub" if destination_allows_visible_content(&self.state) => {
                 if self.office_math_direct_parent_allows_script_slot() {
@@ -6666,6 +6694,7 @@ impl Parser {
                 }
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(bytes.len(), offset)?;
+                    self.push_hidden_office_math_phantom_advance(&visible_text, offset)?;
                 } else {
                     self.push_text(&visible_text, offset)?;
                 }
@@ -6673,6 +6702,7 @@ impl Parser {
             Destination::ListText => {
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(bytes.len(), offset)?;
+                    self.push_hidden_office_math_phantom_advance(&visible_text, offset)?;
                 } else {
                     self.push_list_marker_text(&visible_text, offset)?;
                 }
@@ -6692,6 +6722,7 @@ impl Parser {
             | Destination::EndnoteContinuationSeparator => {
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(bytes.len(), offset)?;
+                    self.push_hidden_office_math_phantom_advance(&visible_text, offset)?;
                 } else {
                     self.push_text(&visible_text, offset)?
                 }
@@ -6907,6 +6938,8 @@ impl Parser {
                 }
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(1, offset)?;
+                    let ch = self.decode_text_hex_byte(byte);
+                    self.push_hidden_office_math_phantom_advance(&ch.to_string(), offset)?;
                 } else {
                     let ch = self.decode_text_hex_byte(byte);
                     self.push_text(&ch.to_string(), offset)?;
@@ -6915,6 +6948,8 @@ impl Parser {
             Destination::ListText => {
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(1, offset)?;
+                    let ch = self.decode_text_hex_byte(byte);
+                    self.push_hidden_office_math_phantom_advance(&ch.to_string(), offset)?;
                 } else {
                     let ch = self.decode_text_hex_byte(byte);
                     self.push_list_marker_text(&ch.to_string(), offset)?;
@@ -6935,6 +6970,8 @@ impl Parser {
             | Destination::EndnoteContinuationSeparator => {
                 if self.state.character.hidden {
                     self.count_skipped_destination_bytes(1, offset)?;
+                    let ch = self.decode_text_hex_byte(byte);
+                    self.push_hidden_office_math_phantom_advance(&ch.to_string(), offset)?;
                 } else {
                     let ch = self.decode_text_hex_byte(byte);
                     self.push_text(&ch.to_string(), offset)?;
@@ -8940,6 +8977,7 @@ impl Parser {
         }
         if self.state.character.hidden {
             self.count_skipped_destination_bytes(text.len(), offset)?;
+            self.push_hidden_office_math_phantom_advance(text, offset)?;
             return Ok(());
         }
         self.mark_object_result_visible_content();
@@ -9075,6 +9113,94 @@ impl Parser {
         Ok(())
     }
 
+    fn push_hidden_office_math_phantom_advance(
+        &mut self,
+        text: &str,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if !self.state.office_math_phantom_argument_context
+            || self.state.office_math_phantom_zero_width
+        {
+            return Ok(());
+        }
+        let max_width_twips = self.limits().max_page_dimension_twips.max(1);
+        let width_twips =
+            passive_math_phantom_text_width_twips(text, &self.state.character).min(max_width_twips);
+        if width_twips <= 0 {
+            return Ok(());
+        }
+        self.output_text_chars = self
+            .output_text_chars
+            .checked_add(1)
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
+        if self.output_text_chars > self.limits().max_output_text_chars {
+            return Err(ParseError::OutputTextTooLarge(offset));
+        }
+
+        let paragraph = if self.state.destination == Destination::Header {
+            &mut self.current_header_paragraph
+        } else if self.state.destination == Destination::FirstPageHeader {
+            &mut self.current_first_page_header_paragraph
+        } else if self.state.destination == Destination::EvenPageHeader {
+            &mut self.current_even_page_header_paragraph
+        } else if self.state.destination == Destination::Footer {
+            &mut self.current_footer_paragraph
+        } else if self.state.destination == Destination::FirstPageFooter {
+            &mut self.current_first_page_footer_paragraph
+        } else if self.state.destination == Destination::EvenPageFooter {
+            &mut self.current_even_page_footer_paragraph
+        } else if self.state.destination == Destination::Footnote {
+            &mut self.current_footnote_paragraph
+        } else if self.state.destination == Destination::Endnote {
+            &mut self.current_endnote_paragraph
+        } else if self.state.destination == Destination::FootnoteSeparator {
+            &mut self.current_footnote_separator_paragraph
+        } else if self.state.destination == Destination::FootnoteContinuationSeparator {
+            &mut self.current_footnote_continuation_separator_paragraph
+        } else if self.state.destination == Destination::EndnoteSeparator {
+            &mut self.current_endnote_separator_paragraph
+        } else if self.state.destination == Destination::EndnoteContinuationSeparator {
+            &mut self.current_endnote_continuation_separator_paragraph
+        } else if self.state.destination == Destination::ShapeText {
+            if let Some(shape) = self.current_shape.as_mut() {
+                &mut shape.current_text_paragraph
+            } else {
+                &mut self.current_paragraph
+            }
+        } else if let Some(row) = self.current_table_row.as_mut() {
+            row.cell_open = true;
+            &mut row.current_cell_paragraph
+        } else {
+            &mut self.current_paragraph
+        };
+        let mut style = self.state.character.clone();
+        style.hidden = false;
+        style.character_spacing_twips = width_twips;
+        if let Some(last) = paragraph.runs.last_mut()
+            && last.text == PASSIVE_ADVANCE_MARKER
+            && last.style.passive_math_phantom_id == style.passive_math_phantom_id
+        {
+            last.style.character_spacing_twips = last
+                .style
+                .character_spacing_twips
+                .saturating_add(width_twips)
+                .min(max_width_twips);
+            return Ok(());
+        }
+        push_text_to_paragraph(
+            paragraph,
+            PASSIVE_ADVANCE_MARKER,
+            &self.state.paragraph,
+            &style,
+        );
+        Ok(())
+    }
+
+    fn skip_hidden_visible_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
+        self.count_skipped_destination_bytes(text.len(), offset)?;
+        self.push_hidden_office_math_phantom_advance(text, offset)
+    }
+
     fn push_visible_control_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         if self.capture_nested_table_text(text, offset)? {
             return Ok(());
@@ -9085,14 +9211,14 @@ impl Parser {
                     self.finish_table(offset)?;
                 }
                 if self.state.character.hidden {
-                    self.count_skipped_destination_bytes(text.len(), offset)
+                    self.skip_hidden_visible_text(text, offset)
                 } else {
                     self.push_text(text, offset)
                 }
             }
             Destination::ListText => {
                 if self.state.character.hidden {
-                    self.count_skipped_destination_bytes(text.len(), offset)
+                    self.skip_hidden_visible_text(text, offset)
                 } else {
                     self.push_list_marker_text(text, offset)
                 }
@@ -9111,7 +9237,7 @@ impl Parser {
             | Destination::EndnoteSeparator
             | Destination::EndnoteContinuationSeparator => {
                 if self.state.character.hidden {
-                    self.count_skipped_destination_bytes(text.len(), offset)
+                    self.skip_hidden_visible_text(text, offset)
                 } else {
                     self.push_text(text, offset)
                 }
@@ -25845,6 +25971,10 @@ fn is_office_math_control(name: &str) -> bool {
             | "msPre"
             | "msPrePr"
             | "mshow"
+            | "mtransp"
+            | "mzeroAsc"
+            | "mzeroDesc"
+            | "mzeroWid"
             | "msSub"
             | "msSubPr"
             | "msSubSup"
@@ -30648,6 +30778,31 @@ fn format_zero_padded_decimal_counter(value: i32, width: usize) -> String {
         return value.to_string();
     }
     format!("{value:0width$}")
+}
+
+fn passive_math_phantom_text_width_twips(text: &str, style: &CharacterStyle) -> i32 {
+    let width_milli_em = text.chars().fold(0_i64, |width, ch| {
+        let char_width = if ch.is_control() {
+            0
+        } else if ch.is_whitespace() {
+            250
+        } else if matches!(ch, 'i' | 'l' | 'I' | 'j' | 't' | 'f') {
+            278
+        } else if matches!(ch, 'm' | 'w' | 'M' | 'W') {
+            833
+        } else if ch.is_ascii_uppercase() {
+            667
+        } else if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            500
+        } else if ch.is_ascii_punctuation() {
+            333
+        } else {
+            1_000
+        };
+        width.saturating_add(char_width)
+    });
+    let width_twips = (style.font_size_points() * 20.0) * (width_milli_em as f32 / 1_000.0);
+    width_twips.round().clamp(0.0, i32::MAX as f32) as i32
 }
 
 fn push_text_to_paragraph(

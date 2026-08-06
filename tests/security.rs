@@ -25781,9 +25781,16 @@ fn office_math_phantoms_are_stripped_from_passive_output() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
     assert!(
-        text.contains("Before  After"),
+        visible_text.contains("Before  After"),
         "visible text around Office math phantom should remain: {text:?}"
+    );
+    let phantom_advance = run_style_for_text(&parsed.document, PASSIVE_ADVANCE_MARKER)
+        .expect("hidden phantom width advance");
+    assert!(
+        (3_300..=3_500).contains(&phantom_advance.character_spacing_twips),
+        "hidden phantom should retain a bounded width estimate without retaining its text: {phantom_advance:?}"
     );
     for forbidden in [
         "mmath",
@@ -25827,6 +25834,27 @@ fn office_math_phantoms_are_stripped_from_passive_output() {
         rendered_text.contains("Before  After"),
         "visible text around Office math phantom missing from PDF text: {rendered_text:?}"
     );
+    let layout = LayoutEngine::layout(&parsed.document);
+    let before_x = layout.pages[0]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Text(fragment) if fragment.text.starts_with("Before") => Some(fragment.x),
+            _ => None,
+        })
+        .expect("text before hidden phantom");
+    let after_x = layout.pages[0]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Text(fragment) if fragment.text.contains("After") => Some(fragment.x),
+            _ => None,
+        })
+        .expect("text after hidden phantom");
+    assert!(
+        (190.0..=260.0).contains(&(after_x - before_x)),
+        "hidden phantom should reserve bounded horizontal flow without rendering its text: before={before_x}, after={after_x}"
+    );
     for forbidden in [
         b"mmath".as_slice(),
         b"moMath",
@@ -25850,6 +25878,85 @@ fn office_math_phantoms_are_stripped_from_passive_output() {
             String::from_utf8_lossy(forbidden)
         );
     }
+}
+
+#[test]
+fn office_math_phantom_zero_width_suppresses_hidden_advance() {
+    let input = rtf(&[
+        "{",
+        "\\",
+        "rtf1 Before {",
+        "\\",
+        "mmath{",
+        "\\",
+        "moMath{",
+        "\\",
+        "mphant{",
+        "\\",
+        "mphantPr{",
+        "\\",
+        "mshow0}{",
+        "\\",
+        "mzeroWid1}}{",
+        "\\",
+        "me{",
+        "\\",
+        "mtext HIDDEN-PHANTOM-PAYLOAD}}}}} After",
+        "\\",
+        "par}",
+    ]);
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+    assert!(
+        text.contains("Before  After"),
+        "zero-width hidden phantom should retain surrounding text: {text:?}"
+    );
+    assert!(!text.contains(PASSIVE_ADVANCE_MARKER));
+    assert!(!text.contains("HIDDEN-PHANTOM-PAYLOAD"));
+    assert!(
+        parsed.diagnostics.iter().all(|diagnostic| !diagnostic
+            .message
+            .contains("unknown RTF destination")
+            && !diagnostic.message.contains("unsupported RTF control")),
+        "zero-width phantom controls should be recognized: {:?}",
+        parsed.diagnostics
+    );
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    let before_x = layout.pages[0]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Text(fragment) if fragment.text.starts_with("Before") => Some(fragment.x),
+            _ => None,
+        })
+        .expect("text before zero-width phantom");
+    let after_x = layout.pages[0]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Text(fragment) if fragment.text.contains("After") => Some(fragment.x),
+            _ => None,
+        })
+        .expect("text after zero-width phantom");
+    assert!(
+        after_x - before_x < 80.0,
+        "zero-width phantom should not reserve hidden horizontal flow: before={before_x}, after={after_x}"
+    );
+
+    let output = convert_rtf_to_pdf(&input, &ConvertOptions::default()).unwrap();
+    assert!(
+        !output
+            .pdf
+            .windows("HIDDEN-PHANTOM-PAYLOAD".len())
+            .any(|window| window == b"HIDDEN-PHANTOM-PAYLOAD")
+    );
+    assert!(
+        !output
+            .pdf
+            .windows(PASSIVE_ADVANCE_MARKER.len())
+            .any(|window| window == PASSIVE_ADVANCE_MARKER.as_bytes())
+    );
 }
 
 #[test]
