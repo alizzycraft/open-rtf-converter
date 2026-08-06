@@ -2736,7 +2736,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact INFO/custom-property/DOCVARIABLE spacing and metadata field formatting."
+        "The registered Word 16.0 reference prints every resultless INFO, custom DOCPROPERTY, and DOCVARIABLE field at zero width, including missing and host-dependent values. The converter intentionally avoids dynamic field evaluation but retains bounded sanitized values already present in parsed metadata, plus explicit passive placeholders for host-dependent INFO Filename and a missing DOCVARIABLE. Nested active fields, link targets, and linked custom-property sources remain stripped. Both outputs are one-page PDFs with zero drawings/images and a 13.8-point line cadence; safe values/placeholders expand current flow to 11 lines versus Word's 7. Current/Word first-text origins are (36.00,35.49) and (36.02,36.44) points."
       ]
     },
     {
