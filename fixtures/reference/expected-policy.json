@@ -800,7 +800,7 @@
     {
       "id": "wmf-patblt-passive-rectangle",
       "input": "fixtures/wmf-patblt-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-patblt-passive.pdf",
       "word_reference_pages": [],
@@ -840,7 +840,7 @@
         " f"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF PATBLT rectangle placement and brush color.",
+        "Word-compatible PATBLT recovery matches Word's solid red brush and rectangle edges within 0.07 points using the measured bounded legacy playback map.",
         "The converter intentionally supports only safe source-independent raster operations; unsupported raster operations remain placeholdered or stripped."
       ]
     },
@@ -935,7 +935,7 @@
     {
       "id": "wmf-dibbitblt-patcopy-passive-rectangle",
       "input": "fixtures/wmf-dibbitblt-patcopy-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-dibbitblt-patcopy-passive.pdf",
       "word_reference_pages": [],
@@ -976,7 +976,7 @@
         " f"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF DIBBITBLT PATCOPY rectangle placement and brush color.",
+        "Word-compatible DIBBITBLT PATCOPY recovery matches Word's selected brown brush and rectangle edges within 0.07 points using its distinct bounded legacy playback map.",
         "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
       ]
     },

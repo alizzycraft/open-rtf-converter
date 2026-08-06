@@ -41322,26 +41322,33 @@ fn parse_wmf_vector_image_data(
                     return None;
                 }
                 if is_passive_invisible_wmf_patblt(data) {
-                } else if let Some((left, top, right, bottom, fill_color)) =
+                } else if let Some((mut left, mut top, mut right, mut bottom, fill_color)) =
                     parse_wmf_patblt_passive_transfer(
                         data,
                         coordinates,
                         state.fill_color,
                         emf_commands_are_unpainted_clip_scope(&commands),
                     )
-                    && bounds_is_visible((left, top, right, bottom))
                 {
-                    commands.push(StaticImageVectorCommand::Rectangle {
-                        left,
-                        top,
-                        right,
-                        bottom,
-                        stroke_color: None,
-                        stroke_width: 0.0,
-                        stroke_style: BorderStyle::Single,
-                        fill_pattern: ShadingPattern::None,
-                        fill_color: Some(fill_color),
-                    });
+                    if word_compatible_passive && !viewport_extent_explicit {
+                        (left, top, right, bottom) = word_compatible_wmf_patblt_bounds(
+                            (left, top, right, bottom),
+                            coordinates,
+                        );
+                    }
+                    if bounds_is_visible((left, top, right, bottom)) {
+                        commands.push(StaticImageVectorCommand::Rectangle {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color: None,
+                            stroke_width: 0.0,
+                            stroke_style: BorderStyle::Single,
+                            fill_pattern: ShadingPattern::None,
+                            fill_color: Some(fill_color),
+                        });
+                    }
                 }
             }
             0x0d33 => {
@@ -41394,7 +41401,7 @@ fn parse_wmf_vector_image_data(
                     _ => None,
                 } {
                     push_passive_source_raster_command(&mut commands, command)?;
-                } else if let Some((left, top, right, bottom, fill_color)) =
+                } else if let Some((mut left, mut top, mut right, mut bottom, fill_color)) =
                     parse_wmf_blt_passive_transfer(
                         data,
                         destination_offset,
@@ -41402,19 +41409,30 @@ fn parse_wmf_vector_image_data(
                         state.fill_color,
                         blank_destination,
                     )
-                    && bounds_is_visible((left, top, right, bottom))
                 {
-                    commands.push(StaticImageVectorCommand::Rectangle {
-                        left,
-                        top,
-                        right,
-                        bottom,
-                        stroke_color: None,
-                        stroke_width: 0.0,
-                        stroke_style: BorderStyle::Single,
-                        fill_pattern: ShadingPattern::None,
-                        fill_color: Some(fill_color),
-                    });
+                    if word_compatible_passive
+                        && !viewport_extent_explicit
+                        && function == 0x0940
+                        && read_le_u32(data, 0)? == WMF_PATCOPY_RASTER_OP
+                    {
+                        (left, top, right, bottom) = word_compatible_wmf_dibbitblt_patcopy_bounds(
+                            (left, top, right, bottom),
+                            coordinates,
+                        );
+                    }
+                    if bounds_is_visible((left, top, right, bottom)) {
+                        commands.push(StaticImageVectorCommand::Rectangle {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            stroke_color: None,
+                            stroke_width: 0.0,
+                            stroke_style: BorderStyle::Single,
+                            fill_pattern: ShadingPattern::None,
+                            fill_color: Some(fill_color),
+                        });
+                    }
                 } else if let Some(bounds) =
                     parse_wmf_blt_destination_bounds(data, destination_offset, coordinates)
                     && apply_passive_solid_backdrop_raster_transfer(
@@ -41846,6 +41864,14 @@ const WMF_WORD_OPEN_ARC_X_OFFSET_RATIO: f32 = 0.064_482_32;
 const WMF_WORD_OPEN_ARC_Y_OFFSET_RATIO: f32 = 0.103_166_096;
 const WMF_WORD_CLOSED_ARC_X_OFFSET_RATIO: f32 = 0.022_817_705;
 const WMF_WORD_CLOSED_ARC_Y_OFFSET_RATIO: f32 = 0.031_731_483;
+const WMF_WORD_PATBLT_X_SCALE: f32 = 0.793_633_6;
+const WMF_WORD_PATBLT_Y_SCALE: f32 = 0.725_626_77;
+const WMF_WORD_PATBLT_X_OFFSET_RATIO: f32 = 0.087_298_386;
+const WMF_WORD_PATBLT_Y_OFFSET_RATIO: f32 = 0.174_596_01;
+const WMF_WORD_DIBBITBLT_PATCOPY_X_SCALE: f32 = 0.283_445_27;
+const WMF_WORD_DIBBITBLT_PATCOPY_Y_SCALE: f32 = 1.247_168_1;
+const WMF_WORD_DIBBITBLT_PATCOPY_X_OFFSET_RATIO: f32 = -0.014_172_263;
+const WMF_WORD_DIBBITBLT_PATCOPY_Y_OFFSET_RATIO: f32 = -0.140_592_43;
 
 fn word_compatible_wmf_box_bounds(
     (left, top, right, bottom): (f32, f32, f32, f32),
@@ -43323,6 +43349,52 @@ fn word_compatible_wmf_arc_point(
     (
         x * WMF_WORD_ARC_X_SCALE + coordinates.image_width.max(1) as f32 * x_offset_ratio,
         y * WMF_WORD_ARC_Y_SCALE + coordinates.image_height.max(1) as f32 * y_offset_ratio,
+    )
+}
+
+fn word_compatible_wmf_patblt_bounds(
+    bounds: (f32, f32, f32, f32),
+    coordinates: WmfCoordinateMap,
+) -> (f32, f32, f32, f32) {
+    word_compatible_wmf_affine_bounds(
+        bounds,
+        coordinates,
+        WMF_WORD_PATBLT_X_SCALE,
+        WMF_WORD_PATBLT_Y_SCALE,
+        WMF_WORD_PATBLT_X_OFFSET_RATIO,
+        WMF_WORD_PATBLT_Y_OFFSET_RATIO,
+    )
+}
+
+fn word_compatible_wmf_dibbitblt_patcopy_bounds(
+    bounds: (f32, f32, f32, f32),
+    coordinates: WmfCoordinateMap,
+) -> (f32, f32, f32, f32) {
+    word_compatible_wmf_affine_bounds(
+        bounds,
+        coordinates,
+        WMF_WORD_DIBBITBLT_PATCOPY_X_SCALE,
+        WMF_WORD_DIBBITBLT_PATCOPY_Y_SCALE,
+        WMF_WORD_DIBBITBLT_PATCOPY_X_OFFSET_RATIO,
+        WMF_WORD_DIBBITBLT_PATCOPY_Y_OFFSET_RATIO,
+    )
+}
+
+fn word_compatible_wmf_affine_bounds(
+    (left, top, right, bottom): (f32, f32, f32, f32),
+    coordinates: WmfCoordinateMap,
+    x_scale: f32,
+    y_scale: f32,
+    x_offset_ratio: f32,
+    y_offset_ratio: f32,
+) -> (f32, f32, f32, f32) {
+    let x_offset = coordinates.image_width.max(1) as f32 * x_offset_ratio;
+    let y_offset = coordinates.image_height.max(1) as f32 * y_offset_ratio;
+    (
+        left * x_scale + x_offset,
+        top * y_scale + y_offset,
+        right * x_scale + x_offset,
+        bottom * y_scale + y_offset,
     )
 }
 
@@ -66110,7 +66182,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_patcopy_dibbitblt_records_become_passive_filled_rectangles() {
+    fn strict_spec_wmf_patcopy_dibbitblt_records_become_passive_filled_rectangles() {
         let wmf_hex = concat!(
             "0100090000032800000001000c0000000000",
             "050000000c026400c800",
@@ -66119,7 +66191,8 @@ After\par}"#;
             "0c00000040092100f000000000003c00460014000a000000",
             "030000000000",
         );
-        let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+        let output =
+            parse_rtf_strict(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -66272,7 +66345,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_blackness_and_whiteness_transfers_become_passive_filled_rectangles() {
+    fn strict_spec_wmf_blackness_and_whiteness_transfers_become_passive_filled_rectangles() {
         let cases = [
             (
                 concat!(
@@ -66357,7 +66430,15 @@ After\par}"#;
         ];
 
         for (wmf_hex, (left, top, right, bottom), fill_color) in cases {
-            let output = parse_rtf(&format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}")).unwrap();
+            let input = format!(r"{{\rtf1{{\pict\wmetafile8 {wmf_hex}}}}}");
+            let output = parse_rtf_bytes_with_options(
+                input.as_bytes(),
+                &RtfParseOptions {
+                    compatibility_mode: CompatibilityMode::StrictSpec,
+                    ..RtfParseOptions::default()
+                },
+            )
+            .unwrap();
             let image = match &output.document.blocks[0] {
                 Block::Image(image) => image,
                 _ => panic!("expected passive WMF vector image for {wmf_hex}"),
@@ -66535,7 +66616,8 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_patpaint_solid_source_after_solid_fill_ors_pattern_and_inverted_source() {
+    fn strict_spec_wmf_same_bounds_patpaint_solid_source_after_solid_fill_ors_pattern_and_inverted_source()
+     {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -66564,7 +66646,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -66799,7 +66888,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_dstinvert_bitblt_after_solid_fill_inverts_rectangle() {
+    fn strict_spec_wmf_same_bounds_dstinvert_bitblt_after_solid_fill_inverts_rectangle() {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -66822,7 +66911,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -66851,7 +66947,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_srcinvert_white_source_after_solid_fill_inverts_rectangle() {
+    fn strict_spec_wmf_same_bounds_srcinvert_white_source_after_solid_fill_inverts_rectangle() {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -66874,7 +66970,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -66903,7 +67006,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_srcand_solid_source_after_solid_fill_ands_rectangle() {
+    fn strict_spec_wmf_same_bounds_srcand_solid_source_after_solid_fill_ands_rectangle() {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -66926,7 +67029,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -66955,7 +67065,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_notsrcerase_solid_source_after_solid_fill_nors_rectangle() {
+    fn strict_spec_wmf_same_bounds_notsrcerase_solid_source_after_solid_fill_nors_rectangle() {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -66978,7 +67088,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -67007,7 +67124,8 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_srcerase_solid_source_after_solid_fill_ands_inverted_dest_rectangle() {
+    fn strict_spec_wmf_same_bounds_srcerase_solid_source_after_solid_fill_ands_inverted_dest_rectangle()
+     {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -67030,7 +67148,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -67059,7 +67184,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_srcpaint_solid_source_after_solid_fill_ors_rectangle() {
+    fn strict_spec_wmf_same_bounds_srcpaint_solid_source_after_solid_fill_ors_rectangle() {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -67082,7 +67207,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -67111,7 +67243,8 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_mergepaint_solid_source_after_solid_fill_ors_inverted_source_rectangle() {
+    fn strict_spec_wmf_same_bounds_mergepaint_solid_source_after_solid_fill_ors_inverted_source_rectangle()
+     {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -67134,7 +67267,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -67163,7 +67303,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_srcinvert_solid_source_after_solid_fill_xors_rectangle() {
+    fn strict_spec_wmf_same_bounds_srcinvert_solid_source_after_solid_fill_xors_rectangle() {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -67186,7 +67326,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -67529,7 +67676,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_same_bounds_patinvert_bitblt_after_solid_fill_xors_rectangle() {
+    fn strict_spec_wmf_same_bounds_patinvert_bitblt_after_solid_fill_xors_rectangle() {
         let records = [
             wmf_set_window_ext_record(200, 100),
             wmf_create_brush_record(Color {
@@ -67558,7 +67705,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,
@@ -67587,7 +67741,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_source_backed_patinvert_after_solid_fill_ignores_dib_and_xors_rectangle() {
+    fn strict_spec_wmf_source_backed_patinvert_after_solid_fill_ignores_dib_and_xors_rectangle() {
         let mut dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[1, 2, 3], [250, 251, 252]]);
         dib.extend_from_slice(b"TRAILING-WMF-PATINVERT-DIB-SOURCE /EmbeddedFile");
         let records = [
@@ -67611,7 +67765,14 @@ After\par}"#;
             r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
             bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
         );
-        let output = parse_rtf(&input).unwrap();
+        let output = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
 
         let image = match &output.document.blocks[0] {
             Block::Image(image) => image,

@@ -40832,7 +40832,7 @@ fn wmf_deleted_object_handles_are_reused_for_passive_style_selection() {
 }
 
 #[test]
-fn wmf_patblt_patcopy_renders_passive_brush_rectangle_without_payload_leakage() {
+fn word_wmf_patblt_patcopy_renders_recovered_brush_rectangle_without_payload_leakage() {
     let wmf_hex = concat!(
         "010009000003250000000100090000000000",
         "050000000c026400c800",
@@ -40870,10 +40870,10 @@ fn wmf_patblt_patcopy_renders_passive_brush_rectangle_without_payload_leakage() 
                 stroke_color: None,
                 fill_color: Some(color),
                 ..
-            } if (*left - 40.0).abs() < 0.01
-                && (*top - 20.0).abs() < 0.01
-                && (*right - 90.0).abs() < 0.01
-                && (*bottom - 50.0).abs() < 0.01
+            } if (*left - 49.205_02).abs() < 0.01
+                && (*top - 31.972_137).abs() < 0.01
+                && (*right - 88.886_7).abs() < 0.01
+                && (*bottom - 53.740_94).abs() < 0.01
                 && color.red == 255
                 && color.green == 0
                 && color.blue == 0
@@ -41153,7 +41153,7 @@ fn strict_spec_wmf_patcopy_bitblt_renders_passive_brush_rectangle() {
 }
 
 #[test]
-fn wmf_patcopy_dibbitblt_renders_passive_brush_rectangle_without_payload_leakage() {
+fn word_wmf_patcopy_dibbitblt_renders_recovered_brush_rectangle_without_payload_leakage() {
     let wmf_hex = concat!(
         "0100090000033f0000000200170000000000",
         "050000000c026400c800",
@@ -41185,12 +41185,12 @@ fn wmf_patcopy_dibbitblt_renders_passive_brush_rectangle_without_payload_leakage
     assert!(image.bytes.is_empty());
     assert_eq!(image.vector_commands.len(), 1);
     assert!(matches!(
-        image.vector_commands[0],
+        &image.vector_commands[0],
         StaticImageVectorCommand::Rectangle {
-            left: 10.0,
-            top: 20.0,
-            right: 80.0,
-            bottom: 80.0,
+            left,
+            top,
+            right,
+            bottom,
             stroke_color: None,
             fill_color: Some(Color {
                 red: 120,
@@ -41198,7 +41198,10 @@ fn wmf_patcopy_dibbitblt_renders_passive_brush_rectangle_without_payload_leakage
                 blue: 40
             }),
             ..
-        }
+        } if (*left - 0.0).abs() < 0.01
+            && (*top - 10.884_12).abs() < 0.01
+            && (*right - 19.841_17).abs() < 0.01
+            && (*bottom - 85.714_2).abs() < 0.01
     ));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
@@ -63768,7 +63771,7 @@ fn emf_miter_state_before_blank_raster_stays_unpainted_without_payload_leakage()
 }
 
 #[test]
-fn same_bounds_backdrop_raster_transfers_reduce_to_passive_solid_rectangles_without_payload_leakage()
+fn strict_spec_same_bounds_backdrop_raster_transfers_reduce_to_passive_solid_rectangles_without_payload_leakage()
  {
     let emf_payload = b"EMF-SAME-BOUNDS-DSTINVERT /JavaScript";
     let wmf_payload = b"WMF-SAME-BOUNDS-PATINVERT /EmbeddedFile";
@@ -63813,7 +63816,7 @@ fn same_bounds_backdrop_raster_transfers_reduce_to_passive_solid_rectangles_with
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -63872,6 +63875,10 @@ fn same_bounds_backdrop_raster_transfers_reduce_to_passive_solid_rectangles_with
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -63918,8 +63925,8 @@ fn same_bounds_backdrop_raster_transfers_reduce_to_passive_solid_rectangles_with
 }
 
 #[test]
-fn same_bounds_srcinvert_white_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
-{
+fn strict_spec_same_bounds_srcinvert_white_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
+ {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SAME-BOUNDS-SRCINVERT-WHITE-DIB /JavaScript");
     let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[255, 255, 255], [255, 255, 255]]);
@@ -63958,7 +63965,7 @@ fn same_bounds_srcinvert_white_source_reduces_to_passive_solid_rectangles_withou
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -64010,6 +64017,10 @@ fn same_bounds_srcinvert_white_source_reduces_to_passive_solid_rectangles_withou
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -64058,7 +64069,8 @@ fn same_bounds_srcinvert_white_source_reduces_to_passive_solid_rectangles_withou
 }
 
 #[test]
-fn same_bounds_srcand_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage() {
+fn strict_spec_same_bounds_srcand_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
+ {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SAME-BOUNDS-SRCAND-SOLID-DIB /JavaScript");
     let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
@@ -64097,7 +64109,7 @@ fn same_bounds_srcand_solid_source_reduces_to_passive_solid_rectangles_without_p
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -64149,6 +64161,10 @@ fn same_bounds_srcand_solid_source_reduces_to_passive_solid_rectangles_without_p
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -64197,7 +64213,8 @@ fn same_bounds_srcand_solid_source_reduces_to_passive_solid_rectangles_without_p
 }
 
 #[test]
-fn same_bounds_srcerase_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage() {
+fn strict_spec_same_bounds_srcerase_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
+ {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SAME-BOUNDS-SRCERASE-SOLID-DIB /JavaScript");
     let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
@@ -64236,7 +64253,7 @@ fn same_bounds_srcerase_solid_source_reduces_to_passive_solid_rectangles_without
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -64288,6 +64305,10 @@ fn same_bounds_srcerase_solid_source_reduces_to_passive_solid_rectangles_without
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -64336,7 +64357,7 @@ fn same_bounds_srcerase_solid_source_reduces_to_passive_solid_rectangles_without
 }
 
 #[test]
-fn same_bounds_notsrcerase_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
+fn strict_spec_same_bounds_notsrcerase_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
  {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SAME-BOUNDS-NOTSRCERASE-SOLID-DIB /JavaScript");
@@ -64376,7 +64397,7 @@ fn same_bounds_notsrcerase_solid_source_reduces_to_passive_solid_rectangles_with
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -64428,6 +64449,10 @@ fn same_bounds_notsrcerase_solid_source_reduces_to_passive_solid_rectangles_with
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -64476,7 +64501,7 @@ fn same_bounds_notsrcerase_solid_source_reduces_to_passive_solid_rectangles_with
 }
 
 #[test]
-fn same_bounds_srcpaint_mergepaint_solid_sources_reduce_without_payload_leakage() {
+fn strict_spec_same_bounds_srcpaint_mergepaint_solid_sources_reduce_without_payload_leakage() {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SAME-BOUNDS-SRCPAINT-SOLID-DIB /JavaScript");
     let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
@@ -64515,7 +64540,7 @@ fn same_bounds_srcpaint_mergepaint_solid_sources_reduce_without_payload_leakage(
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -64576,6 +64601,10 @@ fn same_bounds_srcpaint_mergepaint_solid_sources_reduce_without_payload_leakage(
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -64624,7 +64653,8 @@ fn same_bounds_srcpaint_mergepaint_solid_sources_reduce_without_payload_leakage(
 }
 
 #[test]
-fn same_bounds_patpaint_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage() {
+fn strict_spec_same_bounds_patpaint_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
+ {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SAME-BOUNDS-PATPAINT-SOLID-DIB /JavaScript");
     let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
@@ -64672,7 +64702,7 @@ fn same_bounds_patpaint_solid_source_reduces_to_passive_solid_rectangles_without
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -64724,6 +64754,10 @@ fn same_bounds_patpaint_solid_source_reduces_to_passive_solid_rectangles_without
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -64772,8 +64806,8 @@ fn same_bounds_patpaint_solid_source_reduces_to_passive_solid_rectangles_without
 }
 
 #[test]
-fn same_bounds_srcinvert_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
-{
+fn strict_spec_same_bounds_srcinvert_solid_source_reduces_to_passive_solid_rectangles_without_payload_leakage()
+ {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-SAME-BOUNDS-SRCINVERT-SOLID-DIB /JavaScript");
     let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[170, 170, 170], [170, 170, 170]]);
@@ -64812,7 +64846,7 @@ fn same_bounds_srcinvert_solid_source_reduces_to_passive_solid_rectangles_withou
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -64864,6 +64898,10 @@ fn same_bounds_srcinvert_solid_source_reduces_to_passive_solid_rectangles_withou
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
@@ -65310,7 +65348,7 @@ fn white_brush_patpaint_raster_transfers_render_without_payload_leakage() {
 }
 
 #[test]
-fn source_backed_patinvert_ignores_dib_source_without_payload_leakage() {
+fn strict_spec_source_backed_patinvert_ignores_dib_source_without_payload_leakage() {
     let mut emf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[1, 2, 3], [250, 251, 252]]);
     emf_dib.extend_from_slice(b"TRAILING-EMF-PATINVERT-DIB-SOURCE /JavaScript");
     let mut wmf_dib = minimal_24bit_dib_with_rgb_pixels(2, 1, &[[3, 2, 1], [252, 251, 250]]);
@@ -65358,7 +65396,7 @@ fn source_backed_patinvert_ignores_dib_source_without_payload_leakage() {
         "{{\\rtf1 before {{\\pict\\emfblip {emf_hex}}} middle {{\\pict\\wmetafile8\\picw200\\pich100\\picwgoal2160\\pichgoal720 {wmf_hex}}} after\\par}}"
     )
     .into_bytes();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
     let images: Vec<_> = parsed
         .document
@@ -65410,6 +65448,10 @@ fn source_backed_patinvert_ignores_dib_source_without_payload_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::browser_safe_defaults()
         },
     )
