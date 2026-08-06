@@ -86,6 +86,21 @@ enum CharacterSelector {
     DoubleByte,
 }
 
+fn is_word_double_byte_character(ch: char) -> bool {
+    matches!(
+        u32::from(ch),
+        0x1100..=0x11ff
+            | 0x2e80..=0x4dbf
+            | 0x4e00..=0x9fff
+            | 0xa960..=0xa97f
+            | 0xac00..=0xd7ff
+            | 0xf900..=0xfaff
+            | 0xfe30..=0xfe4f
+            | 0xff00..=0xffef
+            | 0x20000..=0x2fa1f
+    )
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct ParserState {
     character: CharacterStyle,
@@ -109,6 +124,9 @@ struct ParserState {
     current_tab_alignment: TabAlignment,
     code_page: CodePage,
     character_selector: CharacterSelector,
+    low_ansi_font_index: Option<i32>,
+    high_ansi_font_index: Option<i32>,
+    double_byte_font_index: Option<i32>,
     unicode_skip: usize,
     pending_unicode_high_surrogate: Option<u16>,
     skip_bytes: usize,
@@ -275,6 +293,9 @@ impl Default for ParserState {
             current_tab_alignment: TabAlignment::Left,
             code_page: CodePage::Windows1252,
             character_selector: CharacterSelector::Unspecified,
+            low_ansi_font_index: None,
+            high_ansi_font_index: None,
+            double_byte_font_index: None,
             unicode_skip: 1,
             pending_unicode_high_surrogate: None,
             skip_bytes: 0,
@@ -5749,9 +5770,24 @@ impl Parser {
             "sbkeven" => self.state.section_break_kind = SectionBreakKind::EvenPage,
             "sbkodd" => self.state.section_break_kind = SectionBreakKind::OddPage,
             "sbkcol" => self.state.section_break_kind = SectionBreakKind::Column,
-            "loch" => self.state.character_selector = CharacterSelector::LowAnsi,
-            "hich" => self.state.character_selector = CharacterSelector::HighAnsi,
-            "dbch" => self.state.character_selector = CharacterSelector::DoubleByte,
+            "loch" => {
+                self.state.character_selector = CharacterSelector::LowAnsi;
+                if let Some(font_index) = self.state.low_ansi_font_index {
+                    self.state.character.font_index = font_index;
+                }
+            }
+            "hich" => {
+                self.state.character_selector = CharacterSelector::HighAnsi;
+                if let Some(font_index) = self.state.high_ansi_font_index {
+                    self.state.character.font_index = font_index;
+                }
+            }
+            "dbch" => {
+                self.state.character_selector = CharacterSelector::DoubleByte;
+                if let Some(font_index) = self.state.double_byte_font_index {
+                    self.state.character.font_index = font_index;
+                }
+            }
             "b" | "ab" => self.state.character.bold = control.parameter.unwrap_or(1) != 0,
             "i" | "ai" => self.state.character.italic = control.parameter.unwrap_or(1) != 0,
             "ul" => {
@@ -5972,6 +6008,10 @@ impl Parser {
             "fittext" => self.set_character_fit_text(control.parameter, offset),
             "plain" => {
                 self.state.character = self.default_character_style();
+                self.state.character_selector = CharacterSelector::Unspecified;
+                self.state.low_ansi_font_index = None;
+                self.state.high_ansi_font_index = None;
+                self.state.double_byte_font_index = None;
                 self.sync_current_character_relief_controls();
             }
             "fs" | "afs" => {
@@ -6024,7 +6064,21 @@ impl Parser {
             "ilvl" => {
                 self.state.list_level_index = control.parameter.unwrap_or(0).clamp(0, 8) as usize;
             }
-            "f" | "af" => self.state.character.font_index = control.parameter.unwrap_or(0),
+            "f" => self.state.character.font_index = control.parameter.unwrap_or(0),
+            "af" => {
+                let font_index = control.parameter.unwrap_or(0);
+                match self.state.character_selector {
+                    CharacterSelector::LowAnsi => self.state.low_ansi_font_index = Some(font_index),
+                    CharacterSelector::HighAnsi => {
+                        self.state.high_ansi_font_index = Some(font_index)
+                    }
+                    CharacterSelector::DoubleByte => {
+                        self.state.double_byte_font_index = Some(font_index)
+                    }
+                    CharacterSelector::Unspecified => {}
+                }
+                self.state.character.font_index = font_index;
+            }
             "cf" | "acf" => {
                 self.state.character.color_index = control.parameter.unwrap_or(0).max(0) as usize
             }
@@ -9144,6 +9198,7 @@ impl Parser {
             self.capture_bookmark_text(marker_text, offset)?;
         }
         self.capture_bookmark_text(text, offset)?;
+        let associated_font_runs = self.word_associated_font_runs(text);
 
         let paragraph = if self.state.destination == Destination::Header {
             &mut self.current_header_paragraph
@@ -9194,8 +9249,56 @@ impl Parser {
         if self.state.field_result_form_field_shading {
             style.form_field_shading = true;
         }
-        push_text_to_paragraph(paragraph, text, &self.state.paragraph, &style);
+        if let Some(associated_font_runs) = associated_font_runs {
+            for (run_text, font_index) in associated_font_runs {
+                style.font_index = font_index;
+                push_text_to_paragraph(paragraph, &run_text, &self.state.paragraph, &style);
+            }
+        } else {
+            push_text_to_paragraph(paragraph, text, &self.state.paragraph, &style);
+        }
         Ok(())
+    }
+
+    fn word_associated_font_runs(&self, text: &str) -> Option<Vec<(String, i32)>> {
+        if self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive
+            || contains_internal_marker(text)
+            || (self.state.low_ansi_font_index.is_none()
+                && self.state.high_ansi_font_index.is_none()
+                && self.state.double_byte_font_index.is_none())
+        {
+            return None;
+        }
+
+        let fallback = self.state.character.font_index;
+        let mut runs: Vec<(String, i32)> = Vec::new();
+        for ch in text.chars() {
+            let font_index = if is_word_double_byte_character(ch) {
+                self.state
+                    .double_byte_font_index
+                    .or(self.state.high_ansi_font_index)
+                    .or(self.state.low_ansi_font_index)
+                    .unwrap_or(fallback)
+            } else if u32::from(ch) <= 0x7f {
+                self.state
+                    .low_ansi_font_index
+                    .or(self.state.high_ansi_font_index)
+                    .unwrap_or(fallback)
+            } else {
+                self.state
+                    .high_ansi_font_index
+                    .or(self.state.low_ansi_font_index)
+                    .unwrap_or(fallback)
+            };
+            if let Some((run_text, run_font_index)) = runs.last_mut()
+                && *run_font_index == font_index
+            {
+                run_text.push(ch);
+            } else {
+                runs.push((ch.to_string(), font_index));
+            }
+        }
+        Some(runs)
     }
 
     fn push_hidden_office_math_phantom_advance(
@@ -46124,6 +46227,25 @@ mod tests {
                 .message
                 .contains("hidden shape stripped before safe model normalization")
         }));
+    }
+
+    #[test]
+    fn word_associated_fonts_follow_character_ranges() {
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0\fswiss Calibri;}{\f1\froman Times New Roman;}}\loch\af0\hich\af0\dbch\af1\ltrch Latin \u20013? text\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+        let runs = paragraph
+            .runs
+            .iter()
+            .map(|run| (run.text.as_str(), run.style.font_index))
+            .collect::<Vec<_>>();
+
+        assert_eq!(runs, vec![("Latin ", 0), ("中", 1), (" text", 0)]);
     }
 
     #[test]

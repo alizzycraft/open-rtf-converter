@@ -6731,7 +6731,8 @@
       "intentional_security_differences": [
         "Word document metadata, default language, revision session IDs, and XML namespace/data-store payloads are classified before PDF rendering and never emitted as raw control text.",
         "Kerning is rendered as bounded passive positioned PDF text and paragraph hyphenation settings are normalized without preserving raw controls.",
-        "Vertical/session layout flags are treated as bounded passive layout hints, and nested object bytes inside metadata do not cross the safe model boundary."
+        "Vertical/session layout flags are treated as bounded passive layout hints, and nested object bytes inside metadata do not cross the safe model boundary.",
+        "Word associated-font slots are selected by character range so Latin text uses the low/high-ANSI sans family instead of the declared double-byte Roman family."
       ],
       "expected_diagnostics": [
         "character kerning rendered as bounded passive pair spacing",
@@ -6799,7 +6800,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact spacing and line layout impact of these Word metadata/session controls."
+        "Bundled Liberation Sans substitutes for Word's Calibri: line starts differ by 0.02 points, endpoints by 0.97-7.49 points, the first baseline by 1.07 points, and cadence is 13.8 rather than 14.64 points; safe text, font category, one-page flow, and passive structure match."
       ]
     },
     {
