@@ -25252,6 +25252,7 @@ mod tests {
         let mut document = Document::default();
         document.page.line_numbering.enabled = true;
         document.page.line_numbering.restart = LineNumberRestart::Page;
+        document.page.line_numbering.start = 5;
         document.blocks = vec![
             paragraph_with_text("First page"),
             Block::PageBreak,
@@ -25261,8 +25262,8 @@ mod tests {
         let layout = LayoutEngine::layout(&document);
 
         assert_eq!(layout.pages.len(), 2);
-        assert_eq!(layout_text(&layout.pages[0]), "1First page");
-        assert_eq!(layout_text(&layout.pages[1]), "1Second page");
+        assert_eq!(layout_text(&layout.pages[0]), "5First page");
+        assert_eq!(layout_text(&layout.pages[1]), "5Second page");
     }
 
     #[test]
@@ -25299,6 +25300,7 @@ mod tests {
         let mut document = Document::default();
         document.page.line_numbering.enabled = true;
         document.page.line_numbering.restart = LineNumberRestart::Continuous;
+        document.page.line_numbering.start = 5;
         let mut second_section = document.page.clone();
         second_section.line_numbering.restart = LineNumberRestart::Continuous;
         document.blocks = vec![
@@ -25311,8 +25313,8 @@ mod tests {
         let layout = LayoutEngine::layout(&document);
 
         assert_eq!(layout.pages.len(), 2);
-        assert_eq!(layout_text(&layout.pages[0]), "1First section");
-        assert_eq!(layout_text(&layout.pages[1]), "2Second section");
+        assert_eq!(layout_text(&layout.pages[0]), "5First section");
+        assert_eq!(layout_text(&layout.pages[1]), "6Second section");
     }
 
     #[test]
@@ -25322,6 +25324,7 @@ mod tests {
         document.page.line_numbering.restart = LineNumberRestart::Continuous;
         let mut second_section = document.page.clone();
         second_section.line_numbering.restart = LineNumberRestart::Section;
+        second_section.line_numbering.start = 7;
         document.blocks = vec![
             paragraph_with_text("First section"),
             Block::SectionBreak,
@@ -25333,7 +25336,7 @@ mod tests {
 
         assert_eq!(layout.pages.len(), 2);
         assert_eq!(layout_text(&layout.pages[0]), "1First section");
-        assert_eq!(layout_text(&layout.pages[1]), "1Second section");
+        assert_eq!(layout_text(&layout.pages[1]), "7Second section");
     }
 
     #[test]

@@ -27941,6 +27941,8 @@ fn line_number_restart_modes_render_passively_without_control_leakage() {
         "\\",
         "linemod1",
         "\\",
+        "linestarts5",
+        "\\",
         "linecont First",
         "\\",
         "par",
@@ -27949,7 +27951,30 @@ fn line_number_restart_modes_render_passively_without_control_leakage() {
         "\\",
         "sectd",
         "\\",
+        "linestarts5",
+        "\\",
         "linecont Second",
+        "\\",
+        "par}",
+    ]);
+    let page_restart = rtf(&[
+        "{",
+        "\\",
+        "rtf1",
+        "\\",
+        "sectd",
+        "\\",
+        "linex360",
+        "\\",
+        "linemod1",
+        "\\",
+        "linestarts5",
+        "\\",
+        "lineppage First",
+        "\\",
+        "par",
+        "\\",
+        "page Second",
         "\\",
         "par}",
     ]);
@@ -27964,6 +27989,8 @@ fn line_number_restart_modes_render_passively_without_control_leakage() {
         "\\",
         "linemod1",
         "\\",
+        "linestarts5",
+        "\\",
         "linecont First",
         "\\",
         "par",
@@ -27972,12 +27999,18 @@ fn line_number_restart_modes_render_passively_without_control_leakage() {
         "\\",
         "sectd",
         "\\",
+        "linestarts7",
+        "\\",
         "linerestart Second",
         "\\",
         "par}",
     ]);
 
-    for (input, expected_second) in [(&continuous, "2Second"), (&section_restart, "1Second")] {
+    for (input, expected_first, expected_second) in [
+        (&continuous, "5First", "6Second"),
+        (&page_restart, "5First", "5Second"),
+        (&section_restart, "5First", "7Second"),
+    ] {
         let output = convert_rtf_to_pdf(
             input,
             &ConvertOptions {
@@ -27997,7 +28030,7 @@ fn line_number_restart_modes_render_passively_without_control_leakage() {
             .collect::<String>();
 
         assert!(
-            rendered_text.contains("1First"),
+            rendered_text.contains(expected_first),
             "first section should render passive line number text: {rendered_text:?}"
         );
         assert!(
@@ -28007,8 +28040,10 @@ fn line_number_restart_modes_render_passively_without_control_leakage() {
         for forbidden in [
             b"linecont".as_slice(),
             b"linerestart",
+            b"lineppage",
             b"linemod",
             b"linex",
+            b"linestarts",
             b"sectd",
             b"/JavaScript",
             b"/EmbeddedFile",
