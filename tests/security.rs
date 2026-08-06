@@ -11674,8 +11674,10 @@ fn resultless_autonum_fields_render_bounded_passive_numbers_without_instruction_
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
-    assert!(text.contains("Clause 1. Legal 2. Outline 3."));
+    assert!(visible_text.contains("Clause 1.. Legal 11. Outline 1.."));
+    assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 3);
     assert!(!text.contains("AUTONUM"));
     assert!(!text.contains("AUTONUMLGL"));
     assert!(!text.contains("AUTONUMOUT"));
@@ -11687,6 +11689,16 @@ fn resultless_autonum_fields_render_bounded_passive_numbers_without_instruction_
             .message
             .contains("rendering passive field AUTONUM without executing field instruction")
     }));
+
+    let strict = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(collect_text(&strict.document).contains("Clause 1. Legal 2. Outline 3."));
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -11701,7 +11713,7 @@ fn resultless_autonum_fields_render_bounded_passive_numbers_without_instruction_
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     assert!(
-        rendered_text.contains("Clause 1. Legal 2. Outline 3."),
+        rendered_text.contains("Clause 1.. Legal 11. Outline 1.."),
         "decoded PDF text did not contain passive AUTONUM values: {rendered_text:?}"
     );
     for forbidden in [
@@ -11709,6 +11721,7 @@ fn resultless_autonum_fields_render_bounded_passive_numbers_without_instruction_
         b"AUTONUMLGL",
         b"AUTONUMOUT",
         b"fldinst",
+        PASSIVE_ADVANCE_MARKER.as_bytes(),
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -11771,8 +11784,10 @@ fn resultless_listnum_fields_render_bounded_passive_numbers_without_instruction_
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
-    assert!(text.contains("Item 1. Sub 1. Named 1. Named next 2. Reset 7. Next 8."));
+    assert!(visible_text.contains("Item 1). Sub a). Named 2.. Named next 3.. Reset 7.. Next 8.."));
+    assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 6);
     for forbidden in [
         "LISTNUM",
         "LegalDefault",
@@ -11792,6 +11807,19 @@ fn resultless_listnum_fields_render_bounded_passive_numbers_without_instruction_
             .contains("rendering passive field LISTNUM without executing field instruction")
     }));
 
+    let strict = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        collect_text(&strict.document)
+            .contains("Item 1. Sub 1. Named 1. Named next 2. Reset 7. Next 8.")
+    );
+
     let output = convert_rtf_to_pdf(
         &input,
         &ConvertOptions {
@@ -11805,13 +11833,14 @@ fn resultless_listnum_fields_render_bounded_passive_numbers_without_instruction_
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     assert!(
-        rendered_text.contains("Item 1. Sub 1. Named 1. Named next 2. Reset 7. Next 8."),
+        rendered_text.contains("Item 1). Sub a). Named 2.. Named next 3.. Reset 7.. Next 8.."),
         "decoded PDF text did not contain passive LISTNUM values: {rendered_text:?}"
     );
     for forbidden in [
         b"LISTNUM".as_slice(),
         b"LegalDefault",
         b"fldinst",
+        PASSIVE_ADVANCE_MARKER.as_bytes(),
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",

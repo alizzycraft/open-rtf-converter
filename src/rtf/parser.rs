@@ -38,6 +38,7 @@ const OFFICE_MATH_FRACTION_SCRIPT_FONT_SCALE_PERCENT: i32 = 71;
 const OFFICE_MATH_LOWER_LIMIT_SHIFT_HALF_POINTS: i32 = -15;
 const OFFICE_MATH_UPPER_LIMIT_SHIFT_HALF_POINTS: i32 = 17;
 const OFFICE_MATH_LIMIT_FONT_SCALE_PERCENT: i32 = 71;
+const WORD_LEGACY_NUMBER_FIELD_LEADING_TWIPS: i32 = 40;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 0;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
@@ -1859,7 +1860,7 @@ struct Parser {
     pending_old_style_list_marker: Option<OldStyleListMarker>,
     suppress_word_legacy_list_paragraph: bool,
     field_sequence_counters: Vec<FieldSequenceCounter>,
-    field_auto_number_counter: i32,
+    field_auto_number_counters: [i32; 3],
     field_list_number_counters: Vec<FieldSequenceCounter>,
     document_properties: Vec<(DocumentProperty, String)>,
     custom_document_properties: Vec<(String, String)>,
@@ -2072,7 +2073,7 @@ impl Parser {
             pending_old_style_list_marker: None,
             suppress_word_legacy_list_paragraph: false,
             field_sequence_counters: Vec::new(),
-            field_auto_number_counter: 0,
+            field_auto_number_counters: [0; 3],
             field_list_number_counters: Vec::new(),
             document_properties: Vec::new(),
             custom_document_properties: Vec::new(),
@@ -10369,7 +10370,24 @@ impl Parser {
                 self.clamp_font_size(font_size_half_points, offset);
         }
 
-        let result = if field_instruction_name(instruction) == Some("EQ") {
+        let leading_result = if self.options.compatibility_mode
+            == CompatibilityMode::WordCompatiblePassive
+            && field_instruction_name(instruction)
+                .is_some_and(|name| is_auto_number_field(name) || name == "LISTNUM")
+        {
+            self.push_passive_advance_marker(
+                destination,
+                WORD_LEGACY_NUMBER_FIELD_LEADING_TWIPS,
+                0,
+                offset,
+            )
+        } else {
+            Ok(())
+        };
+
+        let result = if let Err(error) = leading_result {
+            Err(error)
+        } else if field_instruction_name(instruction) == Some("EQ") {
             if let Some(segments) = passive_eq_field_segments(instruction).filter(|segments| {
                 segments
                     .iter()
@@ -10531,7 +10549,7 @@ impl Parser {
         let result = if field_instruction_name(instruction) == Some("SEQ") {
             self.passive_sequence_field_result(instruction, offset)?
         } else if field_instruction_name(instruction).is_some_and(is_auto_number_field) {
-            self.passive_auto_number_field_result(offset)?
+            self.passive_auto_number_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("LISTNUM") {
             self.passive_list_number_field_result(instruction, offset)?
         } else if field_instruction_name(instruction) == Some("SET") {
@@ -10617,7 +10635,15 @@ impl Parser {
             )
         };
 
-        Ok(result.and_then(|result| apply_field_format_switches(instruction, result)))
+        let result = result.and_then(|result| apply_field_format_switches(instruction, result));
+        Ok(
+            if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                result
+                    .map(|result| passive_word_compatible_number_field_syntax(instruction, result))
+            } else {
+                result
+            },
+        )
     }
 
     fn passive_doc_property_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
@@ -10901,18 +10927,31 @@ impl Parser {
 
     fn passive_auto_number_field_result(
         &mut self,
+        instruction: &str,
         offset: usize,
     ) -> Result<Option<PassiveFieldResult>, ParseError> {
+        let counter_index =
+            if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                match field_instruction_name(instruction) {
+                    Some("AUTONUM") => 0,
+                    Some("AUTONUMLGL") => 1,
+                    Some("AUTONUMOUT") => 2,
+                    _ => return Ok(None),
+                }
+            } else {
+                0
+            };
         let max_value = self.limits().max_page_number_start.max(1);
-        if self.field_auto_number_counter >= max_value {
+        let counter = &mut self.field_auto_number_counters[counter_index];
+        if *counter >= max_value {
             return Err(ParseError::ResourceLimitExceeded {
                 resource: "field auto number value".to_string(),
                 offset,
             });
         }
-        self.field_auto_number_counter += 1;
+        *counter += 1;
         Ok(Some(PassiveFieldResult {
-            text: self.field_auto_number_counter.to_string(),
+            text: counter.to_string(),
             font_name: None,
             font_size_half_points: None,
             form_field: false,
@@ -10929,7 +10968,13 @@ impl Parser {
         };
 
         let max_value = self.limits().max_page_number_start.max(1);
-        let key = format!("{}\u{1f}{}", list_number.name, list_number.level);
+        let counter_name =
+            if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                passive_word_compatible_list_number_counter_name(&list_number.name)
+            } else {
+                list_number.name.clone()
+            };
+        let key = format!("{}\u{1f}{}", counter_name, list_number.level);
         let value = if let Some(reset_value) = list_number.reset_value {
             if reset_value < 0 || reset_value > max_value {
                 return Err(ParseError::ResourceLimitExceeded {
@@ -28137,6 +28182,76 @@ fn is_auto_number_field(name: &str) -> bool {
     matches!(name, "AUTONUM" | "AUTONUMLGL" | "AUTONUMOUT")
 }
 
+fn passive_word_compatible_number_field_syntax(
+    instruction: &str,
+    mut result: PassiveFieldResult,
+) -> PassiveFieldResult {
+    match field_instruction_name(instruction) {
+        Some("AUTONUM" | "AUTONUMOUT") => result.text.push('.'),
+        Some("AUTONUMLGL") if !field_has_flag_switch(instruction, 'e') => {
+            result
+                .text
+                .push(field_switch_character_value(instruction, 's').unwrap_or('.'));
+        }
+        Some("LISTNUM") => {
+            if let Some(list_number) = field_list_number_instruction(instruction) {
+                let (format, prefix, suffix) =
+                    passive_word_compatible_list_number_decoration(&list_number);
+                if let Ok(value) = result.text.parse::<i32>() {
+                    result.text = format_list_counter(value, format);
+                }
+                result.text = format!("{prefix}{}{suffix}", result.text);
+            }
+        }
+        _ => {}
+    }
+    result
+}
+
+fn passive_word_compatible_list_number_counter_name(name: &str) -> String {
+    if name.is_empty()
+        || name.eq_ignore_ascii_case("NumberDefault")
+        || name.eq_ignore_ascii_case("OutlineDefault")
+        || name.eq_ignore_ascii_case("LegalDefault")
+    {
+        String::new()
+    } else {
+        name.to_ascii_lowercase()
+    }
+}
+
+fn passive_word_compatible_list_number_decoration(
+    instruction: &FieldListNumberInstruction,
+) -> (ListNumberFormat, &'static str, &'static str) {
+    if instruction.name.is_empty() || instruction.name.eq_ignore_ascii_case("NumberDefault") {
+        return match instruction.level {
+            1 => (ListNumberFormat::Decimal, "", ")"),
+            2 => (ListNumberFormat::LowerLetter, "", ")"),
+            3 => (ListNumberFormat::LowerRoman, "", ")"),
+            4 => (ListNumberFormat::Decimal, "(", ")"),
+            5 => (ListNumberFormat::LowerLetter, "(", ")"),
+            6 => (ListNumberFormat::LowerRoman, "(", ")"),
+            7 => (ListNumberFormat::Decimal, "", "."),
+            8 => (ListNumberFormat::LowerLetter, "", "."),
+            9 => (ListNumberFormat::LowerRoman, "", "."),
+            _ => (ListNumberFormat::Decimal, "", "."),
+        };
+    }
+    if instruction.name.eq_ignore_ascii_case("OutlineDefault") {
+        return match instruction.level {
+            1 => (ListNumberFormat::UpperRoman, "", "."),
+            2 => (ListNumberFormat::UpperLetter, "", "."),
+            3 => (ListNumberFormat::Decimal, "", "."),
+            4 => (ListNumberFormat::LowerLetter, "", ")"),
+            _ => (ListNumberFormat::Decimal, "", "."),
+        };
+    }
+    if instruction.name.eq_ignore_ascii_case("LegalDefault") {
+        return (ListNumberFormat::Decimal, "", ".");
+    }
+    (ListNumberFormat::Decimal, "", "")
+}
+
 fn is_external_resultless_field(name: &str) -> bool {
     matches!(
         name,
@@ -30379,6 +30494,84 @@ fn field_switch_string_value(instruction: &str, switch: u8) -> Option<String> {
                 return Some(value);
             }
         }
+    }
+    None
+}
+
+fn field_has_flag_switch(instruction: &str, target: char) -> bool {
+    let mut in_quote = false;
+    let mut escaped = false;
+    for (index, ch) in instruction.char_indices() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quote = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_quote = true;
+            continue;
+        }
+        if ch != '\\' {
+            continue;
+        }
+        let after_slash = index + ch.len_utf8();
+        let mut chars = instruction[after_slash..].chars();
+        let Some(candidate) = chars.next() else {
+            break;
+        };
+        if candidate.eq_ignore_ascii_case(&target) && chars.next().is_none_or(char::is_whitespace) {
+            return true;
+        }
+    }
+    false
+}
+
+fn field_switch_character_value(instruction: &str, target: char) -> Option<char> {
+    let mut in_quote = false;
+    let mut escaped = false;
+    for (index, ch) in instruction.char_indices() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quote = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_quote = true;
+            continue;
+        }
+        if ch != '\\' {
+            continue;
+        }
+        let after_slash = index + ch.len_utf8();
+        let mut chars = instruction[after_slash..].chars();
+        let Some(candidate) = chars.next() else {
+            break;
+        };
+        if !candidate.eq_ignore_ascii_case(&target) {
+            continue;
+        }
+        let value_start = after_slash + candidate.len_utf8();
+        let value = instruction[value_start..].trim_start();
+        let value = if value.starts_with('"') {
+            field_quoted_prefix(value)?
+        } else {
+            value.to_string()
+        };
+        return value.chars().next().filter(|ch| {
+            !ch.is_control()
+                && !matches!(ch, '\\' | '{' | '}' | '\u{fffd}')
+                && !contains_internal_marker(&ch.to_string())
+        });
     }
     None
 }
@@ -49036,6 +49229,35 @@ mod tests {
             ),
             "unexpected result: {result:?}"
         );
+    }
+
+    #[test]
+    fn word_compatible_legacy_number_fields_apply_bounded_builtin_templates() {
+        let output = parse_rtf(
+            r#"{\rtf1 Legal {\field{\*\fldinst AUTONUMLGL \\e}}. sep {\field{\*\fldinst AUTONUMLGL \\s "-"}}. level six {\field{\*\fldinst LISTNUM NumberDefault \\l 6}}\par}"#,
+        )
+        .unwrap();
+        let text = document_text(&output.document);
+        let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
+
+        assert!(
+            visible_text.contains("Legal 1. sep 2-. level six (i)"),
+            "text was {text:?}"
+        );
+        assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 3);
+        for forbidden in [
+            "AUTONUMLGL",
+            "LISTNUM",
+            "NumberDefault",
+            "\\e",
+            "\\s",
+            "\\l",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "field syntax leaked: {forbidden}"
+            );
+        }
     }
 
     #[test]

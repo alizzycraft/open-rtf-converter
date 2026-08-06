@@ -2320,8 +2320,8 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "Visible before generated counters.",
                 "Figure 1 and Figure 2 Table 1",
                 "Reset Figure 4 then 5 repeat 5 hidden  next 7",
-                "Auto Clause 1. Legal 2. Outline 3.",
-                "List Item 1. Sub 1. Named 1. Named next 2. Reset 7. Next 8.",
+                "Auto Clause 1.. Legal 11. Outline 1..",
+                "List Item 1). Sub a). Named 2.. Named next 3.. Reset 7.. Next 8..",
                 "Visible after generated counters.",
             ],
             must_not_leak: &[

@@ -2751,14 +2751,14 @@
         "Visible before generated counters.",
         "Figure 1 and Figure 2 Table 1",
         "Reset Figure 4 then 5 repeat 5 hidden  next 7",
-        "Auto Clause 1. Legal 2. Outline 3.",
-        "List Item 1. Sub 1. Named 1. Named next 2. Reset 7. Next 8.",
+        "Auto Clause 1.. Legal 11. Outline 1..",
+        "List Item 1). Sub a). Named 2.. Named next 3.. Reset 7.. Next 8..",
         "Visible after generated counters."
       ],
       "intentional_security_differences": [
         "Generated counter fields are resolved into bounded passive text without preserving executable field instructions.",
         "SEQ hidden and repeat-current switches affect only passive counter state and visible text; raw switches are stripped before PDF rendering.",
-        "AUTONUM and LISTNUM counters are bounded passive approximations and do not preserve Word field state."
+        "AUTONUM and LISTNUM counters use bounded passive state and built-in Word list templates without preserving executable field instructions or external list-template state."
       ],
       "expected_diagnostics": [
         "rendering passive field SEQ without executing field instruction",
@@ -2787,7 +2787,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact AUTONUM/AUTONUMLGL/AUTONUMOUT and LISTNUM numbering semantics."
+        "The registered Word 16.0 reference confirms that SEQ state already matches exactly. Word gives AUTONUM, AUTONUMLGL, and AUTONUMOUT independent counters; AUTONUM/AUTONUMOUT include a trailing period, while AUTONUMLGL's \\s switch replaces that separator (\\s 1 yields 11). Resultless LISTNUM uses a NumberDefault-style level-one 1) form and level-two a) form, and shares built-in level state with LegalDefault, whose level-one form is decimal plus a period; reset 7 and following 8 therefore render 7. and 8. Word also inserts a 1.86-2.00-point invisible lead-in before each legacy AUTONUM/LISTNUM result. WordCompatiblePassive now reproduces those bounded visible semantics with a 2-point layout-only advance while StrictSpec retains the former generic decimal approximation. Current and Word are one-page text-only PDFs with identical normalized text, eight-line flow, and zero drawings/images; corresponding legacy field origins differ by at most 0.19 points after bundled-font accumulation."
       ]
     },
     {
