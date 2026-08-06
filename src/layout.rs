@@ -4805,7 +4805,8 @@ fn layout_table(
         );
         let top_offset = table_row_vertical_offset_points(row, prepared.row_height);
         let row_wrap_margins = table_row_wrap_margin_points(row);
-        let top_margin = row_wrap_margins.top.max(0.0);
+        let top_margin =
+            row_wrap_margins.top.max(0.0) + distributed_table_row_top_spacing_points(row);
         let bottom_margin = row_wrap_margins.bottom.max(0.0);
         if table_row_has_wrap_margins(row) && row.vertical_offset_twips != 0 {
             // Positioned Word tables use their vertical offset from the page
@@ -5721,10 +5722,11 @@ fn prepare_table_row(
             padding.left += table_border_stroke(&cell.borders.left, document).0 / 2.0;
         }
     }
-    let cell_spacings = visual_cells
+    let mut cell_spacings = visual_cells
         .iter()
         .map(|visual_cell| resolve_cell_spacing(&row.cells[visual_cell.cell_index]))
         .collect::<Vec<_>>();
+    distribute_heterogeneous_cell_spacing(&mut cell_spacings);
     let cell_text_directions = visual_cells
         .iter()
         .map(|visual_cell| row.cells[visual_cell.cell_index].text_direction)
@@ -6205,6 +6207,57 @@ fn resolve_cell_spacing(cell: &TableCell) -> ResolvedCellSpacing {
         top: twips_to_points(spacing.top_twips.unwrap_or(0).max(0)),
         bottom: twips_to_points(spacing.bottom_twips.unwrap_or(0).max(0)),
     }
+}
+
+fn has_heterogeneous_horizontal_cell_spacing(spacings: &[ResolvedCellSpacing]) -> bool {
+    spacings.windows(2).any(|pair| {
+        (pair[0].left - pair[1].left).abs() > f32::EPSILON
+            || (pair[0].right - pair[1].right).abs() > f32::EPSILON
+    })
+}
+
+fn distribute_heterogeneous_cell_spacing(spacings: &mut [ResolvedCellSpacing]) {
+    if spacings.len() < 2 || !has_heterogeneous_horizontal_cell_spacing(spacings) {
+        return;
+    }
+    let authored = spacings.to_vec();
+    let outer_left = authored
+        .iter()
+        .map(|spacing| spacing.left)
+        .fold(f32::INFINITY, f32::min);
+    let outer_right = authored
+        .iter()
+        .map(|spacing| spacing.right)
+        .fold(f32::INFINITY, f32::min);
+    let last = spacings.len() - 1;
+    for (index, spacing) in spacings.iter_mut().enumerate() {
+        spacing.left = if index == 0 {
+            authored[index].left + outer_left
+        } else {
+            (authored[index].left - authored[index - 1].right).max(0.0)
+        };
+        spacing.right = if index == last {
+            authored[index].right + outer_right
+        } else {
+            (authored[index].right - authored[index + 1].left).max(0.0)
+        };
+    }
+}
+
+fn distributed_table_row_top_spacing_points(row: &TableRow) -> f32 {
+    let spacings = row
+        .cells
+        .iter()
+        .map(resolve_cell_spacing)
+        .collect::<Vec<_>>();
+    if !has_heterogeneous_horizontal_cell_spacing(&spacings) {
+        return 0.0;
+    }
+    spacings
+        .iter()
+        .map(|spacing| spacing.top)
+        .fold(f32::INFINITY, f32::min)
+        .max(0.0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -20593,6 +20646,46 @@ mod tests {
                 .windows(2)
                 .any(|pair| (pair[0] - 138.0).abs() < 0.01 && (pair[1] - 150.0).abs() < 0.01),
             "expected spacing to create a passive gap between adjacent cell borders: {vertical_borders:?}"
+        );
+    }
+
+    #[test]
+    fn distributes_heterogeneous_cell_spacing_like_word() {
+        let parsed = parse_rtf(include_str!(
+            "../fixtures/table-spacing-autofit-passive.rtf"
+        ))
+        .unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let text_fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let before = text_fragments
+            .iter()
+            .copied()
+            .find(|fragment| fragment.text == "Before ")
+            .expect("before-table fragment");
+        let unit_fragments = text_fragments
+            .iter()
+            .copied()
+            .filter(|fragment| fragment.text == "Unit ")
+            .collect::<Vec<_>>();
+        let [left, right] = unit_fragments.as_slice() else {
+            panic!("expected two Unit fragments, got {unit_fragments:?}");
+        };
+
+        assert!((left.x - 42.0).abs() < 0.01);
+        assert!((right.x - 159.0).abs() < 0.01);
+        let baseline_gap = before.baseline_y - left.baseline_y;
+        assert!(
+            (baseline_gap - 18.0).abs() < 0.01,
+            "before={}, left={}, gap={baseline_gap}",
+            before.baseline_y,
+            left.baseline_y
         );
     }
 

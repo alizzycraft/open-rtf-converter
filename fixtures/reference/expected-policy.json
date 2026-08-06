@@ -3271,7 +3271,7 @@
     {
       "id": "table-spacing-autofit-passive-layout",
       "input": "fixtures/table-spacing-autofit-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/table-spacing-autofit-passive.pdf",
       "word_reference_pages": [],
@@ -3329,7 +3329,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word distributes the fixture's non-standard clspdl/clspdr aliases three points differently around the explicitly spaced row; authored cell boundaries, the borderless appearance, and ordinary zero-gap rows otherwise match closely."
+        "The registered Word reference confirms that heterogeneous cell spacing is distributed at shared boundaries: row-default top spacing precedes the row, the outer left spacing is added to the first cell, and adjacent left/right values are netted without changing authored usable widths. Corrected Unit left/right origins are 42.00/159.00 points versus Word's 42.024/159.05; every table and following text box retains only the shared 0.90-0.96-point Arial metric residual. Equal-spacing and ordinary zero-gap rows retain their existing bounded geometry."
       ]
     },
     {
