@@ -32,6 +32,7 @@ const AUTO_PARAGRAPH_SPACING_TWIPS: i32 = 240;
 const DEFAULT_PARAGRAPH_BORDER_SIDE_GAP_POINTS: f32 = 1.5;
 const MAX_LAYOUT_COLUMNS: usize = 16;
 const PASSIVE_NARROW_FONT_SCALE_PERCENT: i32 = 82;
+const OFFICE_MATH_EQUATION_ARRAY_HALF_ROW_PITCH_HALF_POINTS: i32 = 14;
 const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
 const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
 const LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER: &str = "888";
@@ -8240,6 +8241,9 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     let paragraph = stacked_math_limit_paragraph.as_ref().unwrap_or(paragraph);
     let stacked_math_paragraph = stack_passive_math_fractions(paragraph, document, font_provider);
     let paragraph = stacked_math_paragraph.as_ref().unwrap_or(paragraph);
+    let stacked_math_array_paragraph =
+        stack_passive_math_equation_arrays(paragraph, document, font_provider);
+    let paragraph = stacked_math_array_paragraph.as_ref().unwrap_or(paragraph);
     let mut lines = Vec::new();
     let mut current = Line {
         runs: Vec::new(),
@@ -8779,6 +8783,119 @@ fn stack_passive_math_fractions(
             fraction_width - denominator_start - denominator_width,
             &marker_style,
         );
+        start = end;
+    }
+    Some(output)
+}
+
+fn stack_passive_math_equation_arrays(
+    paragraph: &Paragraph,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> Option<Paragraph> {
+    if !paragraph
+        .runs
+        .iter()
+        .any(|run| run.style.passive_math_equation_array_id.is_some())
+    {
+        return None;
+    }
+
+    let mut output = Paragraph {
+        style: paragraph.style.clone(),
+        runs: Vec::with_capacity(paragraph.runs.len().saturating_add(8)),
+    };
+    let mut start = 0usize;
+    while start < paragraph.runs.len() {
+        let Some(array_id) = paragraph.runs[start].style.passive_math_equation_array_id else {
+            output.runs.push(paragraph.runs[start].clone());
+            start += 1;
+            continue;
+        };
+        let mut end = start + 1;
+        while end < paragraph.runs.len()
+            && paragraph.runs[end].style.passive_math_equation_array_id == Some(array_id)
+        {
+            end += 1;
+        }
+        let array_runs = &paragraph.runs[start..end];
+        let row_count = array_runs
+            .iter()
+            .map(|run| run.style.passive_math_equation_array_row)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+            .min(array_runs.len().saturating_add(1));
+        let mut rows = vec![Vec::new(); row_count];
+        for run in array_runs {
+            let row_index = run
+                .style
+                .passive_math_equation_array_row
+                .min(row_count.saturating_sub(1));
+            let mut row_run = run.clone();
+            row_run.text.retain(|ch| ch != '\n' && ch != '\r');
+            if !row_run.text.is_empty() {
+                rows[row_index].push(row_run);
+            }
+        }
+        if rows.iter().any(Vec::is_empty) {
+            output.runs.extend_from_slice(array_runs);
+            start = end;
+            continue;
+        }
+
+        let row_widths = rows
+            .iter()
+            .map(|row| {
+                passive_math_model_runs_width(row, &paragraph.style, document, font_provider)
+            })
+            .collect::<Vec<_>>();
+        let array_width = row_widths.iter().copied().fold(0.1_f32, f32::max);
+        let mut marker_style = array_runs[0].style.clone();
+        marker_style.passive_math_equation_array_id = None;
+        marker_style.passive_math_equation_array_row = 0;
+        marker_style.baseline_shift_half_points = 0;
+        marker_style.font_size_scale_percent = 100;
+        marker_style.character_spacing_twips = points_to_bounded_twips(array_width);
+        output.runs.push(Run {
+            text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
+            style: marker_style.clone(),
+        });
+
+        let mut cursor = 0.0_f32;
+        let row_count_i64 = i64::try_from(row_count).unwrap_or(i64::MAX);
+        for (row_index, (row, row_width)) in
+            rows.into_iter().zip(row_widths.into_iter()).enumerate()
+        {
+            let row_start = (array_width - row_width) / 2.0;
+            push_passive_math_advance(&mut output.runs, row_start - cursor, &marker_style);
+            cursor = row_start;
+            let row_index_i64 = i64::try_from(row_index).unwrap_or(i64::MAX);
+            let centered_index = row_count_i64
+                .saturating_sub(1)
+                .saturating_sub(row_index_i64.saturating_mul(2));
+            let row_shift_half_points = centered_index
+                .saturating_mul(i64::from(
+                    OFFICE_MATH_EQUATION_ARRAY_HALF_ROW_PITCH_HALF_POINTS,
+                ))
+                .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                as i32;
+            for mut run in row {
+                if !is_passive_advance_marker(&run.text)
+                    && !is_passive_math_stack_anchor_marker(&run.text)
+                {
+                    run.style.baseline_shift_half_points = run
+                        .style
+                        .baseline_shift_half_points
+                        .saturating_add(row_shift_half_points);
+                }
+                run.style.passive_math_equation_array_id = None;
+                run.style.passive_math_equation_array_row = 0;
+                output.runs.push(run);
+            }
+            cursor += row_width;
+        }
+        push_passive_math_advance(&mut output.runs, array_width - cursor, &marker_style);
         start = end;
     }
     Some(output)
@@ -11378,7 +11495,8 @@ fn flow_run_line_height(
         return 0.0;
     }
     if is_passive_math_fraction_rule_marker(&run.text) {
-        return run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER;
+        return (run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER)
+            + run.style.baseline_shift_points().abs();
     }
     if is_passive_math_stack_anchor_marker(&run.text) {
         return 0.0;
@@ -11777,14 +11895,18 @@ fn push_line_with_rotation(
                     x,
                     baseline_y,
                     cursor_advance,
-                    cursor_baseline_delta + PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS,
+                    cursor_baseline_delta
+                        + run.style.baseline_shift_points()
+                        + PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS,
                     rotation,
                 );
                 let (x2, y2) = rotated_line_run_origin(
                     x,
                     baseline_y,
                     cursor_advance + fraction_width,
-                    cursor_baseline_delta + PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS,
+                    cursor_baseline_delta
+                        + run.style.baseline_shift_points()
+                        + PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS,
                     rotation,
                 );
                 page.items.push(LayoutItem::Line {

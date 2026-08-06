@@ -2214,7 +2214,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word PDF visibly prints executable-looking property payloads, URLs, object-data labels, hidden n-ary limits, and hidden phantom content, so its payload-driven absolute paragraph flow is intentionally not a compatibility target. Within retained safe content, lower/upper limits now use Word's measured 71% script scale, approximately -7.5/+8.5-point baseline shifts, centered stack placement, and maximum constituent width instead of flattened inline placement. Current limit offsets differ from Word by at most 0.18 points before the established bundled-font glyph-box residual. Exact equation-array row origin, n-ary glyph construction, and visible phantom spacing remain focused audit items."
+        "The registered Word PDF visibly prints executable-looking property payloads, URLs, object-data labels, hidden n-ary limits, and hidden phantom content, so its payload-driven absolute paragraph flow is intentionally not a compatibility target. Within retained safe content, equation-array rows now share a centered inline origin, use a 14-point baseline pitch (14.04 points in Word), reserve only the widest row, and let following text resume at that right edge; their current x origins differ by 0.02 points and the bundled Tinos-for-Cambria-Math row width is 0.99 points narrower. Lower/upper limits use Word's measured 71% script scale, approximately -7.5/+8.5-point baseline shifts, centered stack placement, and maximum constituent width; current limit offsets differ from Word by at most 0.18 points before the established bundled-font glyph-box residual. N-ary glyph construction and visible phantom spacing remain focused audit items."
       ]
     },
     {

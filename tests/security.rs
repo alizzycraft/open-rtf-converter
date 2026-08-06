@@ -25475,6 +25475,15 @@ fn office_math_equation_arrays_render_passive_rows() {
         text.contains("Before X=1\nY=2 After"),
         "unexpected equation-array math text: {text:?}"
     );
+    let first_row_style = run_style_for_text(&parsed.document, "X=1").expect("first array row");
+    let second_row_style = run_style_for_text(&parsed.document, "\nY=2").expect("second array row");
+    assert_eq!(
+        first_row_style.passive_math_equation_array_id,
+        second_row_style.passive_math_equation_array_id
+    );
+    assert!(first_row_style.passive_math_equation_array_id.is_some());
+    assert_eq!(first_row_style.passive_math_equation_array_row, 0);
+    assert_eq!(second_row_style.passive_math_equation_array_row, 1);
     for forbidden in [
         "mmath", "moMath", "meqArr", "meqArrPr", "me", "mtext", "calc.exe", "objdata", "414243",
     ] {
@@ -25504,7 +25513,7 @@ fn office_math_equation_arrays_render_passive_rows() {
     let page_id = *parsed_pdf.get_pages().values().next().expect("page");
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
-    for visible in ["Before X=1", "Y=2 After"] {
+    for visible in ["Before ", "X=1", "Y=2", " After"] {
         assert!(
             rendered_text.contains(visible),
             "equation-array visible text missing from PDF text: {visible}; got {rendered_text:?}"
@@ -25515,6 +25524,14 @@ fn office_math_equation_arrays_render_passive_rows() {
     assert!(
         y_position.1 < x_position.1,
         "Office math equation-array rows should render below prior rows: X=1={x_position:?}, Y=2={y_position:?}"
+    );
+    assert!(
+        (y_position.0 - x_position.0).abs() <= 0.1,
+        "Office math equation-array rows should share a common horizontal origin: X=1={x_position:?}, Y=2={y_position:?}"
+    );
+    assert!(
+        ((x_position.1 - y_position.1) - 14.0).abs() <= 0.1,
+        "Office math equation-array rows should retain Word's measured 14-point baseline pitch: X=1={x_position:?}, Y=2={y_position:?}"
     );
     for forbidden in [
         b"mmath".as_slice(),

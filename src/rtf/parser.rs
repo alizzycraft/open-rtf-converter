@@ -173,6 +173,7 @@ struct ParserState {
     office_math_delimiter_argument_seen: bool,
     office_math_array_context: OfficeMathArrayKind,
     office_math_array_container_direct: OfficeMathArrayKind,
+    office_math_array_id: Option<usize>,
     office_math_array_rows_seen: usize,
     office_math_array_row_direct: bool,
     office_math_array_row_cells_seen: usize,
@@ -335,6 +336,7 @@ impl Default for ParserState {
             office_math_delimiter_argument_seen: false,
             office_math_array_context: OfficeMathArrayKind::None,
             office_math_array_container_direct: OfficeMathArrayKind::None,
+            office_math_array_id: None,
             office_math_array_rows_seen: 0,
             office_math_array_row_direct: false,
             office_math_array_row_cells_seen: 0,
@@ -3470,7 +3472,7 @@ impl Parser {
                 self.state.destination = Destination::Ignored;
             }
             "mmatrix" if destination_allows_visible_content(&self.state) => {
-                self.start_office_math_array(OfficeMathArrayKind::Matrix);
+                self.start_office_math_array(OfficeMathArrayKind::Matrix, offset);
             }
             "mmatrixPr"
                 if destination_allows_visible_content(&self.state)
@@ -3495,7 +3497,7 @@ impl Parser {
                 self.state.office_math_delimiter_text.clear();
             }
             "meqArr" if destination_allows_visible_content(&self.state) => {
-                self.start_office_math_array(OfficeMathArrayKind::EquationArray);
+                self.start_office_math_array(OfficeMathArrayKind::EquationArray, offset);
             }
             "meqArrPr"
                 if destination_allows_visible_content(&self.state)
@@ -7984,9 +7986,11 @@ impl Parser {
             || self.office_math_direct_parent_is_delimiter()
     }
 
-    fn start_office_math_array(&mut self, kind: OfficeMathArrayKind) {
+    fn start_office_math_array(&mut self, kind: OfficeMathArrayKind, offset: usize) {
         self.state.office_math_array_context = kind;
         self.state.office_math_array_container_direct = kind;
+        self.state.office_math_array_id =
+            (kind == OfficeMathArrayKind::EquationArray).then_some(offset);
         self.state.office_math_array_rows_seen = 0;
         self.state.office_math_array_row_direct = false;
         self.state.office_math_array_row_cells_seen = 0;
@@ -8306,16 +8310,18 @@ impl Parser {
     }
 
     fn start_office_math_equation_array_row(&mut self, offset: usize) -> Result<(), ParseError> {
-        let row_index = self
+        let (row_index, array_id) = self
             .stack
             .last_mut()
             .map(|parent| {
                 let row_index = parent.office_math_array_rows_seen;
                 parent.office_math_array_rows_seen =
                     parent.office_math_array_rows_seen.saturating_add(1);
-                row_index
+                (row_index, parent.office_math_array_id)
             })
-            .unwrap_or(0);
+            .unwrap_or((0, None));
+        self.state.character.passive_math_equation_array_id = array_id;
+        self.state.character.passive_math_equation_array_row = row_index;
         if row_index > 0 {
             self.push_text("\n", offset)?;
         }
