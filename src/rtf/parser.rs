@@ -2523,7 +2523,13 @@ impl Parser {
                 previous.shape_result_seen |= self.state.shape_result_seen;
                 previous.shape_visual_result_rendered |= self.state.shape_visual_result_rendered;
             } else if self.state.inside_shape && !previous.inside_shape {
-                self.finish_paragraph(offset)?;
+                if !self
+                    .current_shape
+                    .as_ref()
+                    .is_some_and(|shape| shape.hidden)
+                {
+                    self.finish_paragraph(offset)?;
+                }
                 let rendered_shape = self.finish_shape(offset)?;
                 if !self.state.shape_result_seen && !rendered_shape && !self.state.character.hidden
                 {
@@ -4435,11 +4441,14 @@ impl Parser {
             }
             "shp" | "do" if destination_allows_visible_content(&self.state) => {
                 let owner_destination = self.state.destination;
+                let hidden_by_character_state = self.state.character.hidden;
                 let legacy_drawing = control.name == "do";
                 let legacy_word_hairline = legacy_drawing
                     && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive;
-                self.finish_table(offset)?;
-                self.finish_current_paragraph_for_destination(offset)?;
+                if !hidden_by_character_state {
+                    self.finish_table(offset)?;
+                    self.finish_current_paragraph_for_destination(offset)?;
+                }
                 self.state.inside_shape = true;
                 self.state.shape_result_seen = false;
                 self.state.shape_visual_result_rendered = false;
@@ -4447,6 +4456,7 @@ impl Parser {
                 self.current_shape = Some(ShapeBuilder {
                     owner_destination,
                     legacy_drawing,
+                    hidden: hidden_by_character_state,
                     text_wrap: !legacy_drawing
                         && self.options.compatibility_mode
                             == CompatibilityMode::WordCompatiblePassive,
@@ -46098,6 +46108,22 @@ mod tests {
         assert!(!text.contains("https://example.com"));
         assert!(!text.contains("414243"));
         assert!(!text.contains("hidden-payload"));
+    }
+
+    #[test]
+    fn hidden_shape_does_not_split_visible_paragraph() {
+        let output = parse_rtf(
+            r#"{\rtf1 Before {\v hidden {\shp{\shpinst{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-payload}}}}}{\v0 After}\par}"#,
+        )
+        .unwrap();
+
+        assert_eq!(output.document.blocks.len(), 1);
+        assert_eq!(document_text(&output.document), "Before After");
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("hidden shape stripped before safe model normalization")
+        }));
     }
 
     #[test]

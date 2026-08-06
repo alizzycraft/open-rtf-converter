@@ -6520,10 +6520,12 @@
       "intentional_security_differences": [
         "Hidden text is stripped from visible output together with nested active fields, object payloads, and drawing payloads.",
         "Character animation controls render as static passive text without preserving animation behavior or raw controls.",
-        "Nested active content inside hidden text is removed before the safe model reaches PDF rendering."
+        "Nested active content inside hidden text is removed before the safe model reaches PDF rendering.",
+        "Word's zero-area stroked rectangle export artifact is normalized away because it has no visible extent."
       ],
       "expected_diagnostics": [
         "active content removed: OLE object before safe model normalization",
+        "hidden shape stripped before safe model normalization",
         "character animation stripped for passive static PDF output"
       ],
       "forbidden_pdf_markers": [
@@ -6547,9 +6549,7 @@
         "/RichMedia"
       ],
       "expected_pdf_markers": [],
-      "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact spacing around stripped hidden text and static animation rendering."
-      ]
+      "known_gaps": []
     },
     {
       "id": "font-template-metadata-passive-stripping",

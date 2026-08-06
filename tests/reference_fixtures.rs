@@ -4951,6 +4951,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_contain_pdf: &[],
             must_emit_diagnostics: &[
                 "active content removed: OLE object before safe model normalization",
+                "hidden shape stripped before safe model normalization",
                 "character animation stripped for passive static PDF output",
             ],
         },
