@@ -2657,7 +2657,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact metadata field formatting and spacing."
+        "The registered Word 16.0 reference leaves every resultless DOCPROPERTY and valid TITLE/AUTHOR/LASTSAVEDBY/COMMENTS shortcut blank, while dynamically treating the unsupported MANAGER/COMPANY/CATEGORY shortcuts as unresolved bookmark references and printing three bold errors. The converter intentionally avoids field evaluation and instead renders bounded values from already-parsed safe metadata; nested active fields remain stripped before those values reach the model. Both outputs remain one-page PDFs with zero drawings/images and nine visible text lines at a 13.8-point cadence. Current/Word text origins are (36.00,35.49) and (36.02,36.44) points; their different wrapping is limited to the intentional safe-value versus dynamic-error content."
       ]
     },
     {
