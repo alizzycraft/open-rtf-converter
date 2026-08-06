@@ -2854,7 +2854,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact REF, PAGEREF, NOTEREF, and STYLEREF spacing, footnote marker formatting, and page-reference behavior."
+        "The focused Word 16.0 audit confirms that visible-bookmark REF, the same-page PAGEREF value 1, and named-style STYLEREF with Upper formatting match the converter's safe passive values. Word dynamically replaces the resultless SET-seeded REF, unsafe REF, missing REF/PAGEREF/NOTEREF, numeric-style STYLEREF, and missing-style STYLEREF with bold host-generated errors; the converter intentionally emits sanitized in-document values or deterministic placeholders instead. Word also emits two internal GoTo links for the PAGEREF and note reference, while the passive PDF has zero links, annotations, widgets, or actions. The fixture's underspecified note formatting is host-dependent: Word uses a lowercase-Roman body marker and treats the leading F of the note text as its superscript note mark, whereas the converter deterministically retains a numeric marker and the complete safe Footnote text. Both outputs remain one-page, image-free PDFs with one 144-point separator; first-text origins are (72.00,82.35) and (72.02,83.18) points."
       ]
     },
     {
