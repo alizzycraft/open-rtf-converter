@@ -1105,7 +1105,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Focused Word audit confirms the two-pixel red/green order and orientation match. Word-compatible playback now applies Word's record-specific destination-extent transform: current and Word image sizes are both 42.42939 by 15.42875 points. Their remaining 0.04-point horizontal and 0.61-point vertical origin differences are shared inline-frame and bundled-font metric residuals.",
+        "Focused Word audit confirms the two-pixel red/green order and orientation match. Word-compatible playback now applies Word's shared source-raster origin transform and record-specific STRETCHDIB extents: current bounds are (99.5023,59.3499)-(141.9317,74.7787) points versus Word's (99.5030,59.4107)-(141.9324,74.8395). Width matches exactly, height differs by 0.000002 points, and the remaining 0.0007-by-0.0608-point origin residual is shared inline-frame/font positioning.",
         "The converter preserves only normalized passive pixels; source DIB headers and raw metafile transfer records remain outside the PDF layer."
       ]
     },
@@ -1191,7 +1191,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Focused Word audit confirms the visible DIBBITBLT two-pixel red/green order matches and neither renderer paints the fixture's trailing DIBSTRETCHBLT record. Exact DIBBITBLT geometry remains a bounded legacy playback approximation: current bounds are (68.77, 58.80)-(69.85, 59.16) points versus Word's (68.90, 59.41)-(69.76, 59.90) points.",
+        "Focused Word audit confirms the visible DIBBITBLT two-pixel red/green order matches and neither renderer paints the fixture's trailing DIBSTRETCHBLT record. Word-compatible playback now reproduces Word's source-bitmap-width and destination-row scaling: current size is 0.857144 by 0.489797 points versus Word's 0.857147 by 0.489797. The remaining 0.086-by-0.061-point origin residual follows the preceding bundled-font/inline-frame positioning.",
         "The converter preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },
@@ -1237,7 +1237,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Focused Word audit confirms record-specific source-window orientation now matches: bottom-up STRETCHDIB selects dark pixels (40,50,60)/(70,80,90), while DIBBITBLT selects medium pixels (130,140,150)/(160,170,180). The STRETCHDIB destination extent now matches Word exactly at 42.42939 by 15.42875 points; the cropped DIBBITBLT destination still uses a bounded record-specific geometry approximation pending its independent transform recovery.",
+        "Focused Word audit confirms record-specific source-window orientation and geometry now match: bottom-up STRETCHDIB selects dark pixels (40,50,60)/(70,80,90), while DIBBITBLT selects medium pixels (130,140,150)/(160,170,180). STRETCHDIB size matches Word at 42.42939 by 15.42875 points; cropped DIBBITBLT is 1.285717 by 0.489797 versus Word's 1.285712 by 0.489797. Both origins retain only a shared 0.012-by-0.061-point inline-frame/font residual.",
         "The converter preserves only cropped normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },

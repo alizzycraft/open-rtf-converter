@@ -42395,6 +42395,7 @@ fn parse_wmf_vector_image_data(
                         coordinates,
                         state.fill_color,
                         blank_destination,
+                        word_compatible_passive,
                     ),
                     0x0b41 => parse_wmf_dibstretchblt_srcopy(
                         data,
@@ -43129,11 +43130,11 @@ fn parse_wmf_stretchdib_srcopy(
     let destination_width = i32::from(read_le_i16(data, 16)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 18)?);
     let destination_x = i32::from(read_le_i16(data, 20)?);
-    let destination_extent_scale =
+    let destination_geometry =
         if word_compatible_passive && read_le_u32(data, 0)? == WMF_SRCCOPY_RASTER_OP {
-            word_compatible_wmf_stretchdib_extent_scale()
+            word_compatible_wmf_srccopy_raster_geometry(0.982_161_8, 1.071_441_3)
         } else {
-            (1.0, 1.0)
+            WmfSourceTransferGeometry::identity()
         };
 
     wmf_source_dib_transfer_command(
@@ -43147,7 +43148,7 @@ fn parse_wmf_stretchdib_srcopy(
         destination_width,
         destination_height,
         coordinates,
-        destination_extent_scale,
+        destination_geometry,
         transfer_mode,
     )
 }
@@ -43186,6 +43187,7 @@ fn parse_wmf_dibbitblt_srcopy(
     coordinates: WmfCoordinateMap,
     selected_fill_color: Option<Color>,
     blank_destination: bool,
+    word_compatible_passive: bool,
 ) -> Option<PassiveSourceRasterCommand> {
     const DIB_HEADER_OFFSET: usize = 16;
 
@@ -43204,6 +43206,14 @@ fn parse_wmf_dibbitblt_srcopy(
     let destination_width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 12)?);
     let destination_x = i32::from(read_le_i16(data, 14)?);
+    let destination_geometry =
+        if word_compatible_passive && read_le_u32(data, 0)? == WMF_SRCCOPY_RASTER_OP {
+            let (bitmap_width, _) = bounded_wmf_dib_dimensions(&data[DIB_HEADER_OFFSET..])?;
+            let x_extent_scale = (bitmap_width as f32 / destination_width as f32) * 0.793_652;
+            word_compatible_wmf_srccopy_raster_geometry(x_extent_scale, 1.360_547_8)
+        } else {
+            WmfSourceTransferGeometry::identity()
+        };
 
     wmf_source_dib_transfer_command(
         &data[DIB_HEADER_OFFSET..],
@@ -43216,7 +43226,7 @@ fn parse_wmf_dibbitblt_srcopy(
         destination_width,
         destination_height,
         coordinates,
-        (1.0, 1.0),
+        destination_geometry,
         transfer_mode,
     )
 }
@@ -43261,7 +43271,7 @@ fn parse_wmf_dibstretchblt_srcopy(
         destination_width,
         destination_height,
         coordinates,
-        (1.0, 1.0),
+        WmfSourceTransferGeometry::identity(),
         transfer_mode,
     )
 }
@@ -43278,7 +43288,7 @@ fn wmf_source_dib_transfer_command(
     destination_width: i32,
     destination_height: i32,
     coordinates: WmfCoordinateMap,
-    destination_extent_scale: (f32, f32),
+    destination_geometry: WmfSourceTransferGeometry,
     transfer_mode: PassiveSourceRasterTransferMode,
 ) -> Option<PassiveSourceRasterCommand> {
     let bounds = scaled_wmf_source_transfer_bounds(
@@ -43287,7 +43297,7 @@ fn wmf_source_dib_transfer_command(
         destination_width,
         destination_height,
         coordinates,
-        destination_extent_scale,
+        destination_geometry,
     )?;
     if let PassiveSourceRasterTransferMode::SourceIgnoring {
         raster_op,
@@ -43330,13 +43340,44 @@ fn wmf_source_dib_transfer_command(
     )
 }
 
-fn word_compatible_wmf_stretchdib_extent_scale() -> (f32, f32) {
-    // Word's legacy WMF playback scales STRETCHDIB destination extents
-    // independently of their logical origin. These bounded ratios are shared
-    // by the full-source and cropped-source registered references.
-    const X_SCALE: f32 = 0.982_161_8;
-    const Y_SCALE: f32 = 1.071_441_3;
-    (X_SCALE, Y_SCALE)
+#[derive(Debug, Copy, Clone)]
+struct WmfSourceTransferGeometry {
+    origin_x_scale: f32,
+    origin_y_scale: f32,
+    origin_x_offset_ratio: f32,
+    origin_y_offset_ratio: f32,
+    extent_x_scale: f32,
+    extent_y_scale: f32,
+}
+
+impl WmfSourceTransferGeometry {
+    const fn identity() -> Self {
+        Self {
+            origin_x_scale: 1.0,
+            origin_y_scale: 1.0,
+            origin_x_offset_ratio: 0.0,
+            origin_y_offset_ratio: 0.0,
+            extent_x_scale: 1.0,
+            extent_y_scale: 1.0,
+        }
+    }
+}
+
+fn word_compatible_wmf_srccopy_raster_geometry(
+    extent_x_scale: f32,
+    extent_y_scale: f32,
+) -> WmfSourceTransferGeometry {
+    // Word's legacy source-raster playback uses a shared device transform for
+    // destination origins. Record-specific extent behavior remains explicit at
+    // each call site so it cannot affect unrelated raster operations.
+    WmfSourceTransferGeometry {
+        origin_x_scale: 0.952_366_9,
+        origin_y_scale: 1.088_299_2,
+        origin_x_offset_ratio: 0.003_969_973,
+        origin_y_offset_ratio: -0.006_766_688,
+        extent_x_scale,
+        extent_y_scale,
+    }
 }
 
 fn scaled_wmf_source_transfer_bounds(
@@ -43345,7 +43386,7 @@ fn scaled_wmf_source_transfer_bounds(
     destination_width: i32,
     destination_height: i32,
     coordinates: WmfCoordinateMap,
-    (x_scale, y_scale): (f32, f32),
+    geometry: WmfSourceTransferGeometry,
 ) -> Option<(f32, f32, f32, f32)> {
     let (left, top, right, bottom) = wmf_source_transfer_bounds(
         destination_x,
@@ -43354,12 +43395,61 @@ fn scaled_wmf_source_transfer_bounds(
         destination_height,
         coordinates,
     )?;
-    if !x_scale.is_finite() || !y_scale.is_finite() || x_scale <= 0.0 || y_scale <= 0.0 {
+    let values = [
+        geometry.origin_x_scale,
+        geometry.origin_y_scale,
+        geometry.origin_x_offset_ratio,
+        geometry.origin_y_offset_ratio,
+        geometry.extent_x_scale,
+        geometry.extent_y_scale,
+    ];
+    if values.iter().any(|value| !value.is_finite())
+        || geometry.origin_x_scale <= 0.0
+        || geometry.origin_y_scale <= 0.0
+        || geometry.extent_x_scale <= 0.0
+        || geometry.extent_y_scale <= 0.0
+    {
         return None;
     }
-    let right = left + ((right - left) * x_scale);
-    let bottom = top + ((bottom - top) * y_scale);
+    let width = right - left;
+    let height = bottom - top;
+    let left = left * geometry.origin_x_scale
+        + coordinates.image_width.max(1) as f32 * geometry.origin_x_offset_ratio;
+    let top = top * geometry.origin_y_scale
+        + coordinates.image_height.max(1) as f32 * geometry.origin_y_offset_ratio;
+    let right = left + (width * geometry.extent_x_scale);
+    let bottom = top + (height * geometry.extent_y_scale);
     bounds_is_visible((left, top, right, bottom)).then_some((left, top, right, bottom))
+}
+
+fn bounded_wmf_dib_dimensions(dib_bytes: &[u8]) -> Option<(u32, u32)> {
+    const BITMAPCOREHEADER_SIZE: u32 = 12;
+    const BITMAPINFOHEADER_SIZE: u32 = 40;
+
+    let header_size = read_le_u32(dib_bytes, 0)?;
+    let (width, height) = match header_size {
+        BITMAPCOREHEADER_SIZE => (
+            u32::from(read_le_u16(dib_bytes, 4)?),
+            u32::from(read_le_u16(dib_bytes, 6)?),
+        ),
+        BITMAPINFOHEADER_SIZE.. => {
+            if usize::try_from(header_size).ok()? > dib_bytes.len() {
+                return None;
+            }
+            let width = read_le_i32(dib_bytes, 4)?;
+            let height = read_le_i32(dib_bytes, 8)?;
+            if width <= 0 || height == 0 {
+                return None;
+            }
+            (u32::try_from(width).ok()?, height.unsigned_abs())
+        }
+        _ => return None,
+    };
+    let pixels = usize::try_from(width)
+        .ok()?
+        .checked_mul(usize::try_from(height).ok()?)?;
+    (width > 0 && height > 0 && pixels <= MAX_PASSIVE_VECTOR_RASTER_PIXELS)
+        .then_some((width, height))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -70269,9 +70359,10 @@ After\par}"#;
         else {
             panic!("expected passive raster command");
         };
-        assert_eq!((*left, *top), (15.0, 25.0));
-        assert!((*right - 93.572_945).abs() < 0.000_1);
-        assert!((*bottom - 67.857_65).abs() < 0.000_1);
+        assert!((*left - 15.079_498).abs() < 0.000_1);
+        assert!((*top - 26.530_811).abs() < 0.000_1);
+        assert!((*right - 93.652_44).abs() < 0.000_1);
+        assert!((*bottom - 69.388_46).abs() < 0.000_1);
         assert_eq!(image.format, ImageFormat::Rgb8);
         assert_eq!((image.width_px, image.height_px), (2, 1));
         assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0]);
@@ -70465,9 +70556,10 @@ After\par}"#;
         else {
             panic!("expected passive solid rectangle");
         };
-        assert_eq!((left, top), (15.0, 25.0));
-        assert!((right - 93.572_945).abs() < 0.000_1);
-        assert!((bottom - 67.857_65).abs() < 0.000_1);
+        assert!((left - 15.079_498).abs() < 0.000_1);
+        assert!((top - 26.530_811).abs() < 0.000_1);
+        assert!((right - 93.652_44).abs() < 0.000_1);
+        assert!((bottom - 69.388_46).abs() < 0.000_1);
         assert_eq!(stroke_color, None);
         assert_eq!(
             fill_color,
@@ -70684,9 +70776,10 @@ After\par}"#;
         else {
             panic!("expected passive PNG raster command");
         };
-        assert_eq!((*left, *top), (15.0, 25.0));
-        assert!((*right - 93.572_945).abs() < 0.000_1);
-        assert!((*bottom - 67.857_65).abs() < 0.000_1);
+        assert!((*left - 15.079_498).abs() < 0.000_1);
+        assert!((*top - 26.530_811).abs() < 0.000_1);
+        assert!((*right - 93.652_44).abs() < 0.000_1);
+        assert!((*bottom - 69.388_46).abs() < 0.000_1);
         assert_eq!(image.format, ImageFormat::Png);
         assert_eq!((image.width_px, image.height_px), (2, 1));
         assert!(image.palette.is_empty());
@@ -70851,19 +70944,23 @@ After\par}"#;
         assert!(image.bytes.is_empty());
         assert_eq!(output.diagnostics.len(), 0);
         assert_eq!(image.vector_commands.len(), 1);
-        assert!(matches!(
-            &image.vector_commands[0],
-            StaticImageVectorCommand::RasterImage {
-                left: 15.0,
-                top: 25.0,
-                right: 17.0,
-                bottom: 26.0,
-                image,
-            } if image.format == ImageFormat::Rgb8
-                && image.width_px == 2
-                && image.height_px == 1
-                && image.bytes == vec![255, 0, 0, 0, 255, 0]
-        ));
+        let StaticImageVectorCommand::RasterImage {
+            left,
+            top,
+            right,
+            bottom,
+            image,
+        } = &image.vector_commands[0]
+        else {
+            panic!("expected passive DIBBITBLT raster command");
+        };
+        assert!((*left - 15.079_498).abs() < 0.000_1);
+        assert!((*top - 26.530_811).abs() < 0.000_1);
+        assert!((*right - 16.666_801).abs() < 0.000_1);
+        assert!((*bottom - 27.891_36).abs() < 0.000_1);
+        assert_eq!(image.format, ImageFormat::Rgb8);
+        assert_eq!((image.width_px, image.height_px), (2, 1));
+        assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0]);
     }
 
     #[test]
@@ -70966,19 +71063,24 @@ After\par}"#;
         else {
             panic!("expected passive raster command");
         };
-        assert_eq!((left, top), (15.0, 25.0));
-        assert!((right - 93.572_945).abs() < 0.000_1);
-        assert!((bottom - 67.857_65).abs() < 0.000_1);
-        assert!(matches!(
-            image.vector_commands[1],
-            StaticImageVectorCommand::RasterImage {
-                left: 25.0,
-                top: 35.0,
-                right: 27.0,
-                bottom: 36.0,
-                ..
-            }
-        ));
+        assert!((left - 15.079_498).abs() < 0.000_1);
+        assert!((top - 26.530_811).abs() < 0.000_1);
+        assert!((right - 93.652_44).abs() < 0.000_1);
+        assert!((bottom - 69.388_46).abs() < 0.000_1);
+        let StaticImageVectorCommand::RasterImage {
+            left,
+            top,
+            right,
+            bottom,
+            ..
+        } = image.vector_commands[1]
+        else {
+            panic!("expected cropped passive DIBBITBLT raster command");
+        };
+        assert!((left - 24.603_168).abs() < 0.000_1);
+        assert!((top - 37.413_803).abs() < 0.000_1);
+        assert!((right - 26.984_123).abs() < 0.000_1);
+        assert!((bottom - 38.774_35).abs() < 0.000_1);
         assert!(matches!(
             image.vector_commands[2],
             StaticImageVectorCommand::RasterImage {
@@ -71087,9 +71189,10 @@ After\par}"#;
         else {
             panic!("expected passive JPEG clip rectangle");
         };
-        assert_eq!((left, top), (15.0, 25.0));
-        assert!((right - 93.572_945).abs() < 0.000_1);
-        assert!((bottom - 67.857_65).abs() < 0.000_1);
+        assert!((left - 15.079_498).abs() < 0.000_1);
+        assert!((top - 26.530_811).abs() < 0.000_1);
+        assert!((right - 93.652_44).abs() < 0.000_1);
+        assert!((bottom - 69.388_46).abs() < 0.000_1);
         let StaticImageVectorCommand::RasterImage {
             left,
             top,
@@ -71100,10 +71203,10 @@ After\par}"#;
         else {
             panic!("expected clipped passive JPEG raster");
         };
-        assert!((left - -63.572_945).abs() < 0.000_1);
-        assert_eq!(top, 25.0);
-        assert!((right - 172.145_89).abs() < 0.000_1);
-        assert!((bottom - 67.857_65).abs() < 0.000_1);
+        assert!((left - -63.493_446).abs() < 0.000_1);
+        assert!((top - 26.530_811).abs() < 0.000_1);
+        assert!((right - 172.225_39).abs() < 0.000_1);
+        assert!((bottom - 69.388_46).abs() < 0.000_1);
         assert!(matches!(
             image.vector_commands[5],
             StaticImageVectorCommand::ClipRect {

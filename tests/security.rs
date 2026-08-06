@@ -41980,9 +41980,10 @@ fn wmf_srccopy_stretchdib_renders_passive_image_without_payload_leakage() {
     else {
         panic!("expected passive raster command");
     };
-    assert_eq!((*left, *top), (15.0, 25.0));
-    assert!((*right - 93.572_945).abs() < 0.000_1);
-    assert!((*bottom - 67.857_65).abs() < 0.000_1);
+    assert!((*left - 15.079_498).abs() < 0.000_1);
+    assert!((*top - 26.530_811).abs() < 0.000_1);
+    assert!((*right - 93.652_44).abs() < 0.000_1);
+    assert!((*bottom - 69.388_46).abs() < 0.000_1);
     assert_eq!(raster.format, ImageFormat::Rgb8);
     assert_eq!((raster.width_px, raster.height_px), (2, 1));
     assert_eq!(raster.bytes, vec![255, 0, 0, 0, 255, 0]);
@@ -42485,19 +42486,23 @@ fn wmf_srccopy_dib_blt_records_render_passive_images_without_payload_leakage() {
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
     assert_eq!(image.vector_commands.len(), 2);
-    assert!(matches!(
-        &image.vector_commands[0],
-        StaticImageVectorCommand::RasterImage {
-            left: 15.0,
-            top: 25.0,
-            right: 17.0,
-            bottom: 26.0,
-            image,
-        } if image.format == ImageFormat::Rgb8
-            && image.width_px == 2
-            && image.height_px == 1
-            && image.bytes == vec![255, 0, 0, 0, 255, 0]
-    ));
+    let StaticImageVectorCommand::RasterImage {
+        left,
+        top,
+        right,
+        bottom,
+        image: raster,
+    } = &image.vector_commands[0]
+    else {
+        panic!("expected passive DIBBITBLT raster command");
+    };
+    assert!((*left - 15.079_498).abs() < 0.000_1);
+    assert!((*top - 26.530_811).abs() < 0.000_1);
+    assert!((*right - 16.666_801).abs() < 0.000_1);
+    assert!((*bottom - 27.891_36).abs() < 0.000_1);
+    assert_eq!(raster.format, ImageFormat::Rgb8);
+    assert_eq!((raster.width_px, raster.height_px), (2, 1));
+    assert_eq!(raster.bytes, vec![255, 0, 0, 0, 255, 0]);
     assert!(matches!(
         &image.vector_commands[1],
         StaticImageVectorCommand::RasterImage {
@@ -42746,9 +42751,10 @@ fn wmf_srccopy_cropped_jpeg_embedded_dibs_render_clipped_without_payload_leakage
     else {
         panic!("expected passive JPEG clip rectangle");
     };
-    assert_eq!((left, top), (15.0, 25.0));
-    assert!((right - 93.572_945).abs() < 0.000_1);
-    assert!((bottom - 67.857_65).abs() < 0.000_1);
+    assert!((left - 15.079_498).abs() < 0.000_1);
+    assert!((top - 26.530_811).abs() < 0.000_1);
+    assert!((right - 93.652_44).abs() < 0.000_1);
+    assert!((bottom - 69.388_46).abs() < 0.000_1);
     let StaticImageVectorCommand::RasterImage {
         left,
         top,
@@ -42759,10 +42765,10 @@ fn wmf_srccopy_cropped_jpeg_embedded_dibs_render_clipped_without_payload_leakage
     else {
         panic!("expected clipped passive JPEG raster");
     };
-    assert!((*left - -63.572_945).abs() < 0.000_1);
-    assert_eq!(*top, 25.0);
-    assert!((*right - 172.145_89).abs() < 0.000_1);
-    assert!((*bottom - 67.857_65).abs() < 0.000_1);
+    assert!((*left - -63.493_446).abs() < 0.000_1);
+    assert!((*top - 26.530_811).abs() < 0.000_1);
+    assert!((*right - 172.225_39).abs() < 0.000_1);
+    assert!((*bottom - 69.388_46).abs() < 0.000_1);
     assert_eq!(raster.format, ImageFormat::Jpeg);
     assert_eq!((raster.width_px, raster.height_px), (3, 2));
     assert_eq!(raster.bytes, jpeg);
