@@ -39187,26 +39187,22 @@ fn rgb_luminance(red: u8, green: u8, blue: u8) -> u8 {
 }
 
 fn adjust_picture_sample(sample: u8, adjustments: PictureAdjustments) -> u8 {
-    let contrast = i64::from(
+    let contrast = f64::from(
         adjustments
             .contrast_fixed
             .unwrap_or(65_536)
             .clamp(0, 196_608),
-    );
-    let brightness = i64::from(
+    ) / 65_536.0;
+    let brightness = f64::from(
         adjustments
             .brightness_fixed
             .unwrap_or(0)
-            .clamp(-65_536, 65_536),
-    );
-    let contrasted = if contrast == 65_536 {
-        i64::from(sample)
-    } else {
-        let centered = i64::from(sample) - 128;
-        ((centered * contrast) + 32_768) / 65_536 + 128
-    };
-    let brightened = contrasted + ((brightness * 255) / 65_536);
-    brightened.clamp(0, 255) as u8
+            .clamp(-32_768, 32_768),
+    ) / 32_768.0;
+    let adjusted = (f64::from(sample) - 127.5) * contrast
+        + 127.5
+        + brightness * 255.0 * (contrast + 1.0) / 2.0;
+    adjusted.round().clamp(0.0, 255.0) as u8
 }
 
 fn apply_jpeg_picture_color_mode_as_rgb8(
@@ -39414,7 +39410,7 @@ fn apply_png_picture_color_mode(
     if !unfilter_png_scanlines(&mut scanlines, row_len, components) {
         return false;
     }
-    if let Some(mask) = alpha_mask.as_ref() {
+    let decoded_alpha = if let Some(mask) = alpha_mask.as_ref() {
         let Some(alpha_row_len) = width.checked_add(1) else {
             return false;
         };
@@ -39427,21 +39423,10 @@ fn apply_png_picture_color_mode(
         if !unfilter_png_scanlines(&mut alpha, alpha_row_len, 1) {
             return false;
         }
-        for (row, alpha_row) in scanlines
-            .chunks_exact_mut(row_len)
-            .zip(alpha.chunks_exact(alpha_row_len))
-        {
-            for (pixel, opacity) in row[1..]
-                .chunks_exact_mut(components)
-                .zip(alpha_row[1..].iter().copied())
-            {
-                for component in pixel {
-                    *component = ((u16::from(*component) * u16::from(opacity) + 127) / 255) as u8;
-                }
-            }
-        }
-        *alpha_mask = None;
-    }
+        Some((alpha, alpha_row_len))
+    } else {
+        None
+    };
 
     for row in scanlines.chunks_exact_mut(row_len) {
         let pixels = &mut row[1..];
@@ -39457,6 +39442,25 @@ fn apply_png_picture_color_mode(
                 }
             }
             _ => return false,
+        }
+    }
+
+    // Word retains the PNG soft mask through picture color adjustment. Keep
+    // fully transparent base samples canonical black so inert RGB cannot vary
+    // between decoders, but never flatten opacity into the painted pixels.
+    if let Some((alpha, alpha_row_len)) = decoded_alpha {
+        for (row, alpha_row) in scanlines
+            .chunks_exact_mut(row_len)
+            .zip(alpha.chunks_exact(alpha_row_len))
+        {
+            for (pixel, opacity) in row[1..]
+                .chunks_exact_mut(components)
+                .zip(alpha_row[1..].iter().copied())
+            {
+                if opacity == 0 {
+                    pixel.fill(0);
+                }
+            }
         }
     }
 
@@ -58821,11 +58825,35 @@ After\par}"#;
         }));
         let scanlines = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&image.bytes, 4)
             .expect("PNG scanline");
-        assert_eq!(scanlines, vec![0, 255, 128, 255]);
+        assert_eq!(scanlines, vec![0, 255, 255, 255]);
     }
 
     #[test]
-    fn word_picture_adjustments_flatten_alpha_and_use_rec709_luminance() {
+    fn word_picture_tone_uses_signed_brightness_and_half_sample_contrast_center() {
+        let sample = |value, brightness_fixed, contrast_fixed| {
+            adjust_picture_sample(
+                value,
+                PictureAdjustments {
+                    brightness_fixed,
+                    contrast_fixed,
+                    ..PictureAdjustments::default()
+                },
+            )
+        };
+
+        assert_eq!(sample(0, Some(16_384), None), 128);
+        assert_eq!(sample(128, Some(-16_384), None), 1);
+        assert_eq!(sample(64, None, Some(131_072)), 1);
+        assert_eq!(sample(128, None, Some(131_072)), 129);
+        assert_eq!(sample(0, None, Some(32_768)), 64);
+        assert_eq!(sample(255, None, Some(32_768)), 191);
+        assert_eq!(sample(0, Some(16_384), Some(131_072)), 64);
+        assert_eq!(sample(32, Some(16_384), Some(131_072)), 128);
+        assert_eq!(sample(0, Some(32_768), Some(131_072)), 255);
+    }
+
+    #[test]
+    fn word_picture_adjustments_preserve_alpha_and_match_visible_pixels() {
         let output = parse_rtf(include_str!(
             "../../fixtures/picture-adjustments-passive.rtf"
         ))
@@ -58841,16 +58869,18 @@ After\par}"#;
             .collect::<Vec<_>>();
 
         assert_eq!(images.len(), 3);
-        assert!(images[0].alpha_mask.is_none());
-        assert!(images[1].alpha_mask.is_none());
+        assert!(images.iter().all(|image| image.alpha_mask.is_some()));
         let grayscale =
             miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&images[0].bytes, 7)
                 .expect("grayscale scanline");
         let bilevel = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&images[1].bytes, 7)
             .expect("bilevel scanline");
+        let tone = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&images[2].bytes, 7)
+            .expect("tone scanline");
 
         assert_eq!(grayscale, vec![0, 0, 0, 0, 18, 18, 18]);
         assert_eq!(bilevel, vec![0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tone, vec![0, 0, 0, 0, 255, 255, 255]);
     }
 
     #[test]
@@ -58865,7 +58895,7 @@ After\par}"#;
             ),
             Some(ImageToneAdjustment {
                 decode_low: 1.0,
-                decode_high: 127.0 / 255.0,
+                decode_high: 1.0,
             })
         );
     }
@@ -58881,14 +58911,14 @@ After\par}"#;
             passive_jpeg_tone_adjustment(ImageFormat::JpegGrayscaleInverted, adjustments),
             Some(ImageToneAdjustment {
                 decode_low: 1.0,
-                decode_high: 127.0 / 255.0,
+                decode_high: 1.0,
             })
         );
         assert_eq!(
             passive_jpeg_tone_adjustment(ImageFormat::JpegCmykInverted, adjustments),
             Some(ImageToneAdjustment {
                 decode_low: 1.0,
-                decode_high: 127.0 / 255.0,
+                decode_high: 1.0,
             })
         );
     }
@@ -58910,7 +58940,7 @@ After\par}"#;
         };
 
         assert_eq!(image.format, ImageFormat::Rgb8);
-        assert_eq!(image.bytes, vec![1, 0, 65, 0, 0, 33]);
+        assert_eq!(image.bytes, vec![0, 0, 0, 0, 0, 0]);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains(
                 "DIB picture brightness/contrast property rendered as bounded passive image pixels",

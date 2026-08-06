@@ -5339,7 +5339,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Grayscale and bilevel pixels now match Word exactly after alpha-to-black flattening and Rec. 709 luminance conversion; the combined brightness/contrast transform remains gated on the dedicated Word tone probe."
+        "Dedicated Word 16.0 ramps establish the exact bounded tone transform: contrast is centered at 127.5, brightness uses a signed 32768 full-range scale, and the brightness contribution is multiplied by `(contrast + 1) / 2` before nearest-byte rounding and clipping. The converter now matches every isolated and combined ramp sample. Word preserves the PNG soft mask through grayscale, bilevel, and tone adjustment; corrected page-level pixels for the registered fixture match exactly (transparent/page-white plus opaque 18-gray, transparent/page-white plus opaque black, and two page-white tone samples)."
       ]
     },
     {

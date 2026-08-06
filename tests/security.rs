@@ -8242,7 +8242,7 @@ fn shape_picture_tone_metadata_updates_safe_image_without_property_leakage() {
     assert!(text.contains("Before"));
     assert!(text.contains("After"));
     assert_eq!(image.format, ImageFormat::Rgb8);
-    assert_eq!(image.bytes, vec![255, 191, 255, 159, 223, 255]);
+    assert_eq!(image.bytes, vec![255; 6]);
     assert!(
         parsed.diagnostics.iter().all(|diagnostic| !diagnostic
             .message
@@ -30852,7 +30852,7 @@ fn jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
     assert_eq!(
         image.tone_adjustment,
         Some(ImageToneAdjustment {
-            decode_low: 127.0 / 255.0,
+            decode_low: 1.0,
             decode_high: 1.0,
         })
     );
@@ -30899,8 +30899,8 @@ fn jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
     assert!(
         output
             .pdf
-            .windows(b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1]".len())
-            .any(|window| window == b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1]"),
+            .windows(b"/Decode [1 1 1 1 1 1]".len())
+            .any(|window| window == b"/Decode [1 1 1 1 1 1]"),
         "JPEG tone metadata should render as a passive PDF decode array"
     );
     for forbidden in [
@@ -30978,7 +30978,7 @@ fn grayscale_jpeg_brightness_metadata_renders_passive_decode_without_payload_lea
         image.tone_adjustment,
         Some(ImageToneAdjustment {
             decode_low: 0.0,
-            decode_high: 128.0 / 255.0,
+            decode_high: 0.0,
         })
     );
     assert!(text.contains("before"));
@@ -31018,8 +31018,8 @@ fn grayscale_jpeg_brightness_metadata_renders_passive_decode_without_payload_lea
     assert!(
         output
             .pdf
-            .windows(b"/Decode [0 0.5019608]".len())
-            .any(|window| window == b"/Decode [0 0.5019608]"),
+            .windows(b"/Decode [0 0]".len())
+            .any(|window| window == b"/Decode [0 0]"),
         "grayscale JPEG tone metadata should render as a one-channel passive PDF decode array"
     );
     for forbidden in [
@@ -31094,7 +31094,7 @@ fn cmyk_jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage(
     assert_eq!(
         image.tone_adjustment,
         Some(ImageToneAdjustment {
-            decode_low: 127.0 / 255.0,
+            decode_low: 1.0,
             decode_high: 1.0,
         })
     );
@@ -31141,10 +31141,8 @@ fn cmyk_jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage(
     assert!(
         output
             .pdf
-            .windows(b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1 0.49803922 1]".len())
-            .any(
-                |window| window == b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1 0.49803922 1]"
-            ),
+            .windows(b"/Decode [1 1 1 1 1 1 1 1]".len())
+            .any(|window| window == b"/Decode [1 1 1 1 1 1 1 1]"),
         "CMYK JPEG tone metadata should render as a four-channel passive PDF decode array"
     );
     for forbidden in [
@@ -31225,7 +31223,7 @@ fn cmyk_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leak
     assert_eq!(
         image.tone_adjustment,
         Some(ImageToneAdjustment {
-            decode_low: 127.0 / 255.0,
+            decode_low: 1.0,
             decode_high: 1.0,
         })
     );
@@ -31272,10 +31270,8 @@ fn cmyk_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leak
     assert!(
         output
             .pdf
-            .windows(b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1 0.49803922 1]".len())
-            .any(
-                |window| window == b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1 0.49803922 1]"
-            ),
+            .windows(b"/Decode [1 1 1 1 1 1 1 1]".len())
+            .any(|window| window == b"/Decode [1 1 1 1 1 1 1 1]"),
         "CMYK JPEG grayscale/tone metadata should keep the four-channel passive PDF decode array"
     );
     for forbidden in [
@@ -31517,7 +31513,7 @@ fn rgb_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leaka
     assert_eq!(
         image.tone_adjustment,
         Some(ImageToneAdjustment {
-            decode_low: 127.0 / 255.0,
+            decode_low: 1.0,
             decode_high: 1.0,
         })
     );
@@ -31564,8 +31560,8 @@ fn rgb_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leaka
     assert!(
         output
             .pdf
-            .windows(b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1]".len())
-            .any(|window| window == b"/Decode [0.49803922 1 0.49803922 1 0.49803922 1]")
+            .windows(b"/Decode [1 1 1 1 1 1]".len())
+            .any(|window| window == b"/Decode [1 1 1 1 1 1]")
     );
     assert!(
         output
