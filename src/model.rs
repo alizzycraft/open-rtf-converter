@@ -1077,6 +1077,7 @@ enum ShadingPatternKind {
     DarkCross,
     DarkDiagonalCross,
     VerticalGradient,
+    WordWmfBitmapHorizontal,
 }
 
 /// A passive RTF shading pattern and its independently authored foreground color.
@@ -1108,6 +1109,14 @@ impl ShadingPattern {
     pub const DarkCross: Self = Self::new(ShadingPatternKind::DarkCross);
     pub const DarkDiagonalCross: Self = Self::new(ShadingPatternKind::DarkDiagonalCross);
     pub const VerticalGradient: Self = Self::new(ShadingPatternKind::VerticalGradient);
+    /// Word-compatible playback of a legacy WMF `HS_HORIZONTAL` brush.
+    ///
+    /// Word rasterizes this brush as a scaled monochrome tile rather than using
+    /// the document-shading line pitch. Keeping the distinction in the passive
+    /// model lets the PDF backend reproduce that bounded appearance without
+    /// retaining the WMF payload or embedding a raster image.
+    pub const WordWmfBitmapHorizontal: Self =
+        Self::new(ShadingPatternKind::WordWmfBitmapHorizontal);
 
     const fn new(kind: ShadingPatternKind) -> Self {
         Self {

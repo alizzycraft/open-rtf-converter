@@ -38383,7 +38383,7 @@ fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
         matches!(
             command,
             StaticImageVectorCommand::Rectangle {
-                fill_pattern: ShadingPattern::Horizontal,
+                fill_pattern: ShadingPattern::WordWmfBitmapHorizontal,
                 fill_color: Some(color),
                 ..
             } if color.red == 255 && color.green == 0 && color.blue == 0
@@ -38422,14 +38422,25 @@ fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
             .any(|operation| operation.operator == "W"),
         "WMF hatch fill should be clipped to the passive rectangle"
     );
-    assert!(
+    assert_eq!(
         content
             .operations
             .iter()
             .filter(|operation| operation.operator == "l")
-            .count()
-            >= 2,
-        "WMF hatch fill should render as passive PDF line paths"
+            .count(),
+        1,
+        "Word's clipped legacy hatch should render as one passive PDF band"
+    );
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "w"
+                && operation
+                    .operands
+                    .first()
+                    .and_then(|operand| operand.as_f32().ok())
+                    .is_some_and(|width| (width - 5.1428).abs() < 0.01)
+        }),
+        "Word's scaled legacy hatch should retain its recovered 5.14-point band"
     );
     for forbidden in [
         b"/Subtype /Image".as_slice(),

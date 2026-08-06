@@ -3261,6 +3261,24 @@ fn draw_passive_hatch_lines(
         _ => 4.0,
     };
     match pattern {
+        ShadingPattern::WordWmfBitmapHorizontal => {
+            // Word rasterizes the legacy WMF HS_HORIZONTAL brush to a 32-row
+            // monochrome tile, then scales and clips it with the vector shape.
+            // The recovered reference has four one-row bands at an eight-row
+            // pitch. Only one band intersects this bounded rectangle. Preserve
+            // that appearance as a vector stroke so no raster/WMF payload is
+            // retained in the PDF.
+            const BAND_CENTER_FROM_BOTTOM: f32 = 0.320_55;
+            const BAND_HEIGHT_FRACTION: f32 = 0.247_05;
+            stroke_line(
+                content,
+                rect.x,
+                rect.y + (rect.height * BAND_CENTER_FROM_BOTTOM),
+                rect.x + rect.width,
+                rect.y + (rect.height * BAND_CENTER_FROM_BOTTOM),
+                rect.height * BAND_HEIGHT_FRACTION,
+            );
+        }
         ShadingPattern::Horizontal | ShadingPattern::DarkHorizontal => {
             draw_passive_horizontal_hatch_lines(content, rect, spacing);
         }

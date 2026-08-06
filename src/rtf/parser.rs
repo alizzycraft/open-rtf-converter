@@ -41656,7 +41656,13 @@ fn parse_wmf_vector_image_data(
                             }
                             WmfObject::Brush { color, pattern } => {
                                 state.fill_color = color;
-                                state.fill_pattern = pattern;
+                                state.fill_pattern = if word_compatible_passive
+                                    && pattern == ShadingPattern::Horizontal
+                                {
+                                    ShadingPattern::WordWmfBitmapHorizontal
+                                } else {
+                                    pattern
+                                };
                             }
                             WmfObject::Font {
                                 height,
