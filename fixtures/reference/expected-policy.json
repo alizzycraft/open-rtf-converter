@@ -4266,7 +4266,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of whether soft break hints have any visible wrapping impact in edge cases."
+        "The focused Word 16.0 audit confirms that softline, softcol, and softpage are zero-width passive hints in this ordinary single-column paragraph: Word and the converter preserve the identical seven-word first line and three-word second line without forcing line, column, or page breaks. Corresponding word x origins differ by at most 0.14 points, both line intervals are 13.8 points, and vertical origins retain only the established 0.95-point bundled Arial-compatible metric residual. Word extraction includes trailing paragraph spaces while the converter does not, with no visible or wrapping effect. Both PDFs are one page with zero drawings, images, links, annotations, widgets, or actions; four-times renders were visually inspected. Exact near-threshold hint selection is not exercised by this registered fixture, but stripping the hints is faithful to its Word output and keeps raw controls outside searchable PDF text."
       ]
     },
     {
