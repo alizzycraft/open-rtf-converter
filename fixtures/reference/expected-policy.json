@@ -1282,7 +1282,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact WMF cropped JPEG-in-DIB placement, scaling, clipping, and pixel orientation.",
+        "Word 16.0 still rejects this fixture during PDF export with an unexpected-error result after the former frame-header-only payload was replaced by a decoder-valid 3-by-2 JPEG on 2026-08-06. Exact Word placement, scaling, clipping, and orientation therefore remain unavailable.",
         "The converter preserves only bounded passive JPEG image draws; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },
@@ -5352,13 +5352,17 @@
         "After JPEG payload."
       ],
       "intentional_security_differences": [
-        "JPEG image bytes are trimmed at the end-of-image marker before PDF embedding, so trailing active-looking payload bytes cannot cross into the PDF layer.",
-        "The RTF jpegblip control is resolved into a bounded passive image and stripped from output bytes."
+        "The frame-header-only JPEG has no decodable scan and is omitted as zero-width Word-compatible content, so neither malformed image bytes nor trailing active-looking payload bytes can cross into the PDF layer.",
+        "The RTF jpegblip control and malformed payload are stripped from output bytes."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "malformed JPEG picture suppressed for Word-compatible passive rendering"
+      ],
       "forbidden_pdf_markers": [
         "jpegblip",
         "TRAILING-JPEG-AFTER-EOI",
+        "/DCTDecode",
+        "/Subtype /Image",
         "/JavaScript",
         "/EmbeddedFile",
         "/Launch",
@@ -5367,11 +5371,9 @@
         "/AcroForm",
         "/Annots"
       ],
-      "expected_pdf_markers": [
-        "/Subtype /Image"
-      ],
+      "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact JPEG placement and raster appearance."
+        "The registered Word reference and converter both omit the malformed JPEG without an image object or visible placeholder and keep the surrounding text contiguous. Text starts within 0.03 points horizontally; the converter's bundled Arial-compatible box is about 0.95 points higher and its line is about 3.51 points shorter than Word's Arial metrics."
       ]
     },
     {

@@ -14344,6 +14344,10 @@ impl Parser {
                     let width_px = jpeg.width_px;
                     let height_px = jpeg.height_px;
                     self.ensure_image_pixels(width_px, height_px, offset)?;
+                    if !jpeg_image_data_is_decodable(&picture.bytes, &jpeg) {
+                        self.handle_malformed_jpeg_picture(&picture, offset)?;
+                        return Ok(());
+                    }
                     let natural_width_px_hint =
                         self.normalized_picture_natural_size_hint(&picture, true, offset);
                     let natural_height_px_hint =
@@ -14380,15 +14384,7 @@ impl Parser {
                     self.mark_shape_visual_result_rendered();
                 }
                 None => {
-                    self.diagnostics.push(Diagnostic::warning(
-                        "malformed JPEG picture data replaced with bounded passive geometry placeholder",
-                        Some(offset),
-                    ));
-                    self.push_picture_placeholder_for_destination(
-                        picture.owner_destination,
-                        "[Image skipped: malformed JPEG]".to_string(),
-                        offset,
-                    )?;
+                    self.handle_malformed_jpeg_picture(&picture, offset)?;
                 }
             },
             PictureKind::Png => match parse_png_image_data(&picture.bytes) {
@@ -14948,6 +14944,41 @@ impl Parser {
             self.push_document_block(Block::Image(image), offset)?;
         }
         Ok(())
+    }
+
+    fn handle_malformed_jpeg_picture(
+        &mut self,
+        picture: &PictureBuilder,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+            self.diagnostics.push(Diagnostic::warning(
+                "malformed JPEG picture suppressed for Word-compatible passive rendering",
+                Some(offset),
+            ));
+            if picture.flushed_inline_body_paragraph
+                && self.current_paragraph.runs.is_empty()
+                && matches!(self.document.blocks.last(), Some(Block::Paragraph(_)))
+                && let Some(Block::Paragraph(paragraph)) = self.document.blocks.pop()
+            {
+                self.current_paragraph = paragraph;
+            }
+            self.push_passive_field_text_for_destination(
+                picture.owner_destination,
+                "\u{200b}",
+                offset,
+            )
+        } else {
+            self.diagnostics.push(Diagnostic::warning(
+                "malformed JPEG picture data replaced with bounded passive geometry placeholder",
+                Some(offset),
+            ));
+            self.push_picture_placeholder_for_destination(
+                picture.owner_destination,
+                "[Image skipped: malformed JPEG]".to_string(),
+                offset,
+            )
+        }
     }
 
     fn push_picture_placeholder_for_destination(
@@ -31888,6 +31919,7 @@ fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
     }
     let data_end = jpeg_eoi_end(bytes)?;
 
+    let mut parsed_frame = None;
     let mut pos = 2;
     while pos + 3 < bytes.len() {
         while pos < bytes.len() && bytes[pos] != 0xff {
@@ -31902,8 +31934,11 @@ fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
 
         let marker = bytes[pos];
         pos += 1;
-        if marker == 0xd9 || marker == 0xda {
+        if marker == 0xd9 {
             return None;
+        }
+        if marker == 0xda {
+            return parsed_frame;
         }
         if is_standalone_jpeg_marker(marker) {
             continue;
@@ -31938,7 +31973,7 @@ fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
                 4 => ImageFormat::JpegCmyk,
                 _ => return None,
             };
-            return Some(ParsedJpeg {
+            parsed_frame = Some(ParsedJpeg {
                 width_px: width,
                 height_px: height,
                 format,
@@ -31950,6 +31985,34 @@ fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
     }
 
     None
+}
+
+fn jpeg_image_data_is_decodable(bytes: &[u8], jpeg: &ParsedJpeg) -> bool {
+    let Some(encoded) = bytes.get(..jpeg.data_end) else {
+        return false;
+    };
+    let mut decoder = JpegDecoder::new(encoded);
+    let Ok(decoded) = decoder.decode() else {
+        return false;
+    };
+    let Some(info) = decoder.info() else {
+        return false;
+    };
+    if u32::from(info.width) != jpeg.width_px || u32::from(info.height) != jpeg.height_px {
+        return false;
+    }
+    let Some(pixel_count) = usize::from(info.width).checked_mul(usize::from(info.height)) else {
+        return false;
+    };
+    let expected_components = match info.pixel_format {
+        JpegPixelFormat::L8 => 1,
+        JpegPixelFormat::RGB24 => 3,
+        JpegPixelFormat::CMYK32 => 4,
+        _ => return false,
+    };
+    pixel_count
+        .checked_mul(expected_components)
+        .is_some_and(|expected_len| decoded.len() == expected_len)
 }
 
 fn jpeg_eoi_end(bytes: &[u8]) -> Option<usize> {
@@ -39348,6 +39411,9 @@ fn parse_compressed_dib_image_data(
         BI_JPEG => {
             let jpeg = parse_jpeg_image_data(payload)?;
             if jpeg.width_px != width_px || jpeg.height_px != height_px {
+                return None;
+            }
+            if !jpeg_image_data_is_decodable(payload, &jpeg) {
                 return None;
             }
             Some(ParsedCompressedDibImage {
@@ -58571,8 +58637,8 @@ After\par}"#;
     }
 
     #[test]
-    fn unsupported_jpeg_component_count_becomes_placeholder() {
-        let output = parse_rtf(&format!(
+    fn strict_spec_unsupported_jpeg_component_count_becomes_placeholder() {
+        let output = parse_rtf_strict(&format!(
             "{{\\rtf1{{\\pict\\jpegblip {}}}}}",
             bytes_to_hex(&minimal_jpeg_with_components(1, 1, 2))
         ))
@@ -58591,6 +58657,65 @@ After\par}"#;
                 .message
                 .contains("JPEG picture data was malformed")
         }));
+    }
+
+    #[test]
+    fn word_compatible_malformed_jpeg_is_suppressed_inline_without_spacing() {
+        let jpeg = minimal_jpeg_frame_header_with_components(2, 2, 3);
+        let input = format!(
+            "{{\\rtf1 Before JPEG.{{\\pict\\jpegblip {}}}After JPEG.\\par}}",
+            bytes_to_hex(&jpeg)
+        );
+        let output = parse_rtf(&input).unwrap();
+
+        assert!(
+            output
+                .document
+                .blocks
+                .iter()
+                .all(|block| { !matches!(block, Block::Image(_) | Block::Placeholder(_)) })
+        );
+        assert!(output.document.inline_images.is_empty());
+        assert_eq!(
+            document_text(&output.document),
+            "Before JPEG.\u{200b}After JPEG."
+        );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("malformed JPEG picture suppressed for Word-compatible passive rendering")
+        }));
+    }
+
+    #[test]
+    fn undecodable_jpeg_scan_is_suppressed_in_word_mode_and_placeholdered_in_strict_mode() {
+        let mut jpeg = minimal_jpeg_frame_header_with_components(2, 2, 3);
+        jpeg.truncate(jpeg.len() - 2);
+        jpeg.extend_from_slice(&[
+            0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
+            0xff, 0xd9,
+        ]);
+        assert!(parse_jpeg_image_data(&jpeg).is_some());
+        let input = format!("{{\\rtf1{{\\pict\\jpegblip {}}}}}", bytes_to_hex(&jpeg));
+
+        let word = parse_rtf(&input).unwrap();
+        assert!(
+            word.document
+                .blocks
+                .iter()
+                .all(|block| !matches!(block, Block::Image(_) | Block::Placeholder(_)))
+        );
+        assert!(word.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("malformed JPEG picture suppressed for Word-compatible passive rendering")
+        }));
+
+        let strict = parse_rtf_strict(&input).unwrap();
+        assert!(matches!(
+            strict.document.blocks.first(),
+            Some(Block::Placeholder(text)) if text.contains("malformed JPEG")
+        ));
     }
 
     #[test]
@@ -71237,6 +71362,24 @@ fn minimal_cmyk_jpeg_with_dimensions(width: u16, height: u16) -> Vec<u8> {
 
 #[cfg(test)]
 fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<u8> {
+    let template = match components {
+        1 => include_str!("../../fixtures/test-images/valid-grayscale-1x1.jpg.hex"),
+        3 => include_str!("../../fixtures/test-images/valid-rgb-1x1.jpg.hex"),
+        4 => include_str!("../../fixtures/test-images/valid-cmyk-1x1.jpg.hex"),
+        _ => return minimal_jpeg_frame_header_with_components(width, height, components),
+    };
+    let mut jpeg = test_hex_bytes(template.trim());
+    let sof = jpeg
+        .windows(2)
+        .position(|window| window == [0xff, 0xc0])
+        .expect("test JPEG SOF0 marker");
+    jpeg[sof + 5..sof + 7].copy_from_slice(&height.to_be_bytes());
+    jpeg[sof + 7..sof + 9].copy_from_slice(&width.to_be_bytes());
+    jpeg
+}
+
+#[cfg(test)]
+fn minimal_jpeg_frame_header_with_components(width: u16, height: u16, components: u8) -> Vec<u8> {
     let [height_hi, height_lo] = height.to_be_bytes();
     let [width_hi, width_lo] = width.to_be_bytes();
     let segment_len = 8 + u16::from(components) * 3;
@@ -71250,6 +71393,24 @@ fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<
     }
     jpeg.extend_from_slice(&[0xff, 0xd9]);
     jpeg
+}
+
+#[cfg(test)]
+fn test_hex_bytes(hex: &str) -> Vec<u8> {
+    fn nibble(byte: u8) -> u8 {
+        match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => panic!("invalid test hex digit"),
+        }
+    }
+
+    assert_eq!(hex.len() % 2, 0);
+    hex.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| (nibble(pair[0]) << 4) | nibble(pair[1]))
+        .collect()
 }
 
 #[cfg(test)]

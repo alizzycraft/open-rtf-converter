@@ -29701,6 +29701,61 @@ fn jpeg_picture_trailing_bytes_are_stripped_before_pdf_without_payload_leakage()
 }
 
 #[test]
+fn malformed_jpeg_without_scan_is_suppressed_without_payload_leakage() {
+    let mut payload = minimal_jpeg_frame_header_with_components(2, 2, 3);
+    payload.extend_from_slice(b"TRAILING-MALFORMED-JPEG /JavaScript /EmbeddedFile");
+    let payload_hex = bytes_to_hex(&payload);
+    let input =
+        format!("{{\\rtf1 before{{\\pict\\jpegblip {payload_hex}}}after\\par}}").into_bytes();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let text = collect_text(&parsed.document);
+
+    assert!(text.contains("before"));
+    assert!(text.contains("after"));
+    assert!(parsed.document.inline_images.is_empty());
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_) | Block::Placeholder(_)))
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("malformed JPEG picture suppressed for Word-compatible passive rendering")
+    }));
+
+    let output = convert_rtf_to_pdf(
+        &input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::browser_safe_defaults()
+        },
+    )
+    .unwrap();
+    assert!(PdfDocument::load_mem(&output.pdf).is_ok());
+    for forbidden in [
+        b"jpegblip".as_slice(),
+        b"TRAILING-MALFORMED-JPEG",
+        b"/DCTDecode",
+        b"/Subtype /Image",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "malformed JPEG payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn grayscale_jpeg_picture_renders_passively_without_control_leakage() {
     let image_hex = bytes_to_hex(&minimal_grayscale_jpeg_with_dimensions(1, 1));
     let input = rtf(&[
@@ -30027,7 +30082,8 @@ fn inert_picture_hit_test_metadata_is_consumed_without_payload_leakage() {
 
 #[test]
 fn visible_picture_color_mode_metadata_warns_without_payload_leakage() {
-    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let image = jpeg_with_large_ignored_app_segments(minimal_jpeg_with_dimensions(1, 1));
+    let image_hex = bytes_to_hex(&image);
     let input = rtf(&[
         "{",
         "\\",
@@ -30340,7 +30396,8 @@ fn decodable_jpeg_bilevel_metadata_rewrites_safe_pixels_without_decode_fallback(
 
 #[test]
 fn jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
-    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let image = jpeg_with_large_ignored_app_segments(minimal_jpeg_with_dimensions(1, 1));
+    let image_hex = bytes_to_hex(&image);
     let input = rtf(&[
         "{",
         "\\",
@@ -30468,7 +30525,8 @@ fn jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
 
 #[test]
 fn grayscale_jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
-    let image_hex = bytes_to_hex(&minimal_grayscale_jpeg_with_dimensions(1, 1));
+    let image = jpeg_with_large_ignored_app_segments(minimal_grayscale_jpeg_with_dimensions(1, 1));
+    let image_hex = bytes_to_hex(&image);
     let input = rtf(&[
         "{",
         "\\",
@@ -30584,7 +30642,8 @@ fn grayscale_jpeg_brightness_metadata_renders_passive_decode_without_payload_lea
 
 #[test]
 fn cmyk_jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage() {
-    let image_hex = bytes_to_hex(&minimal_cmyk_jpeg_with_dimensions(1, 1));
+    let image = jpeg_with_large_ignored_app_segments(minimal_cmyk_jpeg_with_dimensions(1, 1));
+    let image_hex = bytes_to_hex(&image);
     let input = rtf(&[
         "{",
         "\\",
@@ -30708,7 +30767,8 @@ fn cmyk_jpeg_brightness_metadata_renders_passive_decode_without_payload_leakage(
 
 #[test]
 fn cmyk_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leakage() {
-    let image_hex = bytes_to_hex(&minimal_cmyk_jpeg_with_dimensions(1, 1));
+    let image = jpeg_with_large_ignored_app_segments(minimal_cmyk_jpeg_with_dimensions(1, 1));
+    let image_hex = bytes_to_hex(&image);
     let input = rtf(&[
         "{",
         "\\",
@@ -30839,7 +30899,8 @@ fn cmyk_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leak
 
 #[test]
 fn cmyk_jpeg_bilevel_metadata_renders_passive_decode_without_payload_leakage() {
-    let image_hex = bytes_to_hex(&minimal_cmyk_jpeg_with_dimensions(1, 1));
+    let image = jpeg_with_large_ignored_app_segments(minimal_cmyk_jpeg_with_dimensions(1, 1));
+    let image_hex = bytes_to_hex(&image);
     let input = rtf(&[
         "{",
         "\\",
@@ -30998,7 +31059,8 @@ fn cmyk_jpeg_bilevel_metadata_renders_passive_decode_without_payload_leakage() {
 
 #[test]
 fn rgb_jpeg_grayscale_and_brightness_render_passive_decode_without_payload_leakage() {
-    let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(1, 1));
+    let image = jpeg_with_large_ignored_app_segments(minimal_jpeg_with_dimensions(1, 1));
+    let image_hex = bytes_to_hex(&image);
     let input = rtf(&[
         "{",
         "\\",
@@ -31465,8 +31527,20 @@ fn hostile_binary_picture_payload_is_not_retokenized_or_copied_to_pdf() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("before"));
-    assert!(text.contains("[Image skipped: malformed JPEG]"));
+    assert!(!text.contains("[Image skipped: malformed JPEG]"));
     assert!(text.contains("after"));
+    assert!(
+        parsed
+            .document
+            .blocks
+            .iter()
+            .all(|block| !matches!(block, Block::Image(_) | Block::Placeholder(_)))
+    );
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("malformed JPEG picture suppressed for Word-compatible passive rendering")
+    }));
     for forbidden in ["object", "objdata", "414243", "JavaScript", "EmbeddedFile"] {
         assert!(
             !text.contains(forbidden),
@@ -31494,12 +31568,14 @@ fn hostile_binary_picture_payload_is_not_retokenized_or_copied_to_pdf() {
     let rendered_text = decoded_pdf_text(&content);
 
     assert!(rendered_text.contains("before"));
-    assert!(rendered_text.contains("[Image skipped: malformed JPEG]"));
+    assert!(!rendered_text.contains("[Image skipped: malformed JPEG]"));
     assert!(rendered_text.contains("after"));
     for forbidden in [
         payload.as_slice(),
         b"objdata".as_slice(),
         b"414243",
+        b"/DCTDecode",
+        b"/Subtype /Image",
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
@@ -96291,6 +96367,23 @@ fn valid_rgb_jpeg_1x1_color() -> Color {
 }
 
 fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<u8> {
+    let template = match components {
+        1 => include_str!("../fixtures/test-images/valid-grayscale-1x1.jpg.hex"),
+        3 => include_str!("../fixtures/test-images/valid-rgb-1x1.jpg.hex"),
+        4 => include_str!("../fixtures/test-images/valid-cmyk-1x1.jpg.hex"),
+        _ => return minimal_jpeg_frame_header_with_components(width, height, components),
+    };
+    let mut jpeg = hex_bytes(template.trim());
+    let sof = jpeg
+        .windows(2)
+        .position(|window| window == [0xff, 0xc0])
+        .expect("test JPEG SOF0 marker");
+    jpeg[sof + 5..sof + 7].copy_from_slice(&height.to_be_bytes());
+    jpeg[sof + 7..sof + 9].copy_from_slice(&width.to_be_bytes());
+    jpeg
+}
+
+fn minimal_jpeg_frame_header_with_components(width: u16, height: u16, components: u8) -> Vec<u8> {
     let [height_hi, height_lo] = height.to_be_bytes();
     let [width_hi, width_lo] = width.to_be_bytes();
     let segment_len = 8 + u16::from(components) * 3;
@@ -96304,6 +96397,23 @@ fn minimal_jpeg_with_components(width: u16, height: u16, components: u8) -> Vec<
     }
     jpeg.extend_from_slice(&[0xff, 0xd9]);
     jpeg
+}
+
+fn jpeg_with_large_ignored_app_segments(jpeg: Vec<u8>) -> Vec<u8> {
+    const APP_PAYLOAD_LEN: usize = (u16::MAX as usize) - 2;
+    const APP_SEGMENT_COUNT: usize = 4;
+
+    assert!(jpeg.starts_with(&[0xff, 0xd8]));
+    let app_bytes = APP_SEGMENT_COUNT * (APP_PAYLOAD_LEN + 4);
+    let mut output = Vec::with_capacity(jpeg.len() + app_bytes);
+    output.extend_from_slice(&jpeg[..2]);
+    for _ in 0..APP_SEGMENT_COUNT {
+        output.extend_from_slice(&[0xff, 0xef]);
+        output.extend_from_slice(&u16::MAX.to_be_bytes());
+        output.resize(output.len() + APP_PAYLOAD_LEN, 0);
+    }
+    output.extend_from_slice(&jpeg[2..]);
+    output
 }
 
 fn hex_bytes(hex: &str) -> Vec<u8> {

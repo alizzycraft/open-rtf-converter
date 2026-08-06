@@ -4104,6 +4104,8 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_not_leak: &[
                 b"jpegblip",
                 b"TRAILING-JPEG-AFTER-EOI",
+                b"/DCTDecode",
+                b"/Subtype /Image",
                 b"/JavaScript",
                 b"/EmbeddedFile",
                 b"/Launch",
@@ -4112,8 +4114,10 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/AcroForm",
                 b"/Annots",
             ],
-            must_contain_pdf: &[b"/Subtype /Image"],
-            must_emit_diagnostics: &[],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "malformed JPEG picture suppressed for Word-compatible passive rendering",
+            ],
         },
         ReferenceFixture {
             input: "fixtures/associated-character-passive.rtf",
