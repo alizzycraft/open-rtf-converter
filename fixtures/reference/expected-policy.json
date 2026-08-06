@@ -2390,7 +2390,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of placeholder placement, MERGEFIELD display glyphs, and default/fallback text spacing."
+        "Word prints ASK's evaluated missing-reference error but omits the remaining resultless prompt/mail-merge fields at zero width, leaving 16 visible lines. The converter intentionally avoids evaluation and retains safe FILLIN, MERGEFIELD, and GREETINGLINE fallbacks plus explicit removal placeholders, producing 18 visible lines. Both outputs retain one page, zero images/drawings, 13.8-point line cadence, and uninterrupted authored order; current text starts at (36.00,35.49) points versus Word's (36.02,36.44), leaving only the shared bundled Arial-compatible metric residual outside the documented security differences."
       ]
     },
     {

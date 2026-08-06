@@ -4226,7 +4226,21 @@ fn passive_to_unicode_cmap(name: &'static [u8], mappings: &[(u8, char)]) -> Vec<
     for (glyph, unicode) in mappings {
         cmap.pair(*glyph, *unicode);
     }
-    cmap.finish().into_vec()
+    standards_compliant_to_unicode_cmap(cmap.finish().into_vec())
+}
+
+fn standards_compliant_to_unicode_cmap(mut cmap: Vec<u8>) -> Vec<u8> {
+    // pdf-writer 0.15 emits a generic CMapType 0 declaration, while the PDF
+    // specification requires a ToUnicode CMap to declare CMapType 2.
+    const GENERIC_DECLARATION: &[u8] = b"/CMapType 0 def";
+    const TO_UNICODE_DECLARATION: &[u8] = b"/CMapType 2 def";
+    let declaration = cmap
+        .windows(GENERIC_DECLARATION.len())
+        .position(|window| window == GENERIC_DECLARATION)
+        .expect("pdf-writer UnicodeCmap declaration");
+    cmap[declaration..declaration + GENERIC_DECLARATION.len()]
+        .copy_from_slice(TO_UNICODE_DECLARATION);
+    cmap
 }
 
 fn write_supplied_pdf_fonts(
@@ -4314,7 +4328,8 @@ fn write_supplied_pdf_fonts(
         for glyph in &supplied.used_glyphs {
             cmap.pair(glyph.cid, glyph.unicode);
         }
-        pdf.stream(supplied.to_unicode_ref, &cmap.finish());
+        let cmap = standards_compliant_to_unicode_cmap(cmap.finish().into_vec());
+        pdf.stream(supplied.to_unicode_ref, &cmap);
     }
 }
 
@@ -6521,7 +6536,7 @@ mod tests {
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: ParagraphStyle::default(),
             runs: vec![Run {
-                text: "Covered ő".to_string(),
+                text: "Covered ő «Client»".to_string(),
                 style,
             }],
         })];
@@ -6547,6 +6562,22 @@ mod tests {
         assert!(
             pdf.windows(b"/Subtype /Type0".len())
                 .any(|window| window == b"/Subtype /Type0")
+        );
+        assert!(
+            pdf.windows(b"/CMapType 2 def".len())
+                .any(|window| window == b"/CMapType 2 def")
+        );
+        assert!(
+            !pdf.windows(b"/CMapType 0 def".len())
+                .any(|window| window == b"/CMapType 0 def")
+        );
+        assert!(
+            pdf.windows(b"<00AB> <00AB>".len())
+                .any(|window| window == b"<00AB> <00AB>")
+        );
+        assert!(
+            pdf.windows(b"<00BB> <00BB>".len())
+                .any(|window| window == b"<00BB> <00BB>")
         );
         assert!(
             !pdf.windows(b"OpenRtfConverter-ExtendedLatin".len())
@@ -6957,6 +6988,14 @@ mod tests {
                 .filter(|window| *window == b"/ToUnicode")
                 .count()
                 >= 1
+        );
+        assert!(
+            pdf.windows(b"/CMapType 2 def".len())
+                .any(|window| window == b"/CMapType 2 def")
+        );
+        assert!(
+            !pdf.windows(b"/CMapType 0 def".len())
+                .any(|window| window == b"/CMapType 0 def")
         );
         assert!(
             pdf.windows(b"<61> <03B1>".len())
