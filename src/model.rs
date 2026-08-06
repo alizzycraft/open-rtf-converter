@@ -10,6 +10,7 @@ pub const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
 pub const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
 pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
 pub const PASSIVE_MATH_FRACTION_RULE_MARKER: &str = "\u{f0011}";
+pub const PASSIVE_MATH_STACK_ANCHOR_MARKER: &str = "\u{f0012}";
 pub const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
 pub const INLINE_IMAGE_MARKER_BASE: u32 = 0xF1000;
 pub const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
@@ -1215,6 +1216,8 @@ pub struct CharacterStyle {
     pub passive_math_fraction_id: Option<usize>,
     pub passive_math_fraction_part: PassiveMathFractionPart,
     pub passive_math_fraction_has_bar: bool,
+    pub passive_math_limit_id: Option<usize>,
+    pub passive_math_limit_part: PassiveMathLimitPart,
     pub baseline_shift_half_points: i32,
     pub font_size_scale_percent: i32,
     pub character_spacing_twips: i32,
@@ -1252,6 +1255,8 @@ impl Default for CharacterStyle {
             passive_math_fraction_id: None,
             passive_math_fraction_part: PassiveMathFractionPart::None,
             passive_math_fraction_has_bar: false,
+            passive_math_limit_id: None,
+            passive_math_limit_part: PassiveMathLimitPart::None,
             baseline_shift_half_points: 0,
             font_size_scale_percent: 100,
             character_spacing_twips: 0,
@@ -1280,6 +1285,15 @@ pub enum PassiveMathFractionPart {
     None,
     Numerator,
     Denominator,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum PassiveMathLimitPart {
+    #[default]
+    None,
+    Base,
+    Lower,
+    Upper,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

@@ -11,14 +11,15 @@ use crate::model::{
     FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnotePlacement,
     ImageCrop, ImageFormat, ImageToneAdjustment, LineNumberRestart, NESTED_TABLE_ANCHOR_MARKER,
     NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
-    PASSIVE_MATH_FRACTION_RULE_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
-    Paragraph, ParagraphStyle, PassiveMathFractionPart, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
-    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageVectorRaster,
-    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-    StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
+    PageSettings, PageVerticalAlignment, Paragraph, ParagraphStyle, PassiveMathFractionPart,
+    PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern,
+    StaticImage, StaticImageAlphaMask, StaticImagePlacement, StaticImageTextHorizontalAlign,
+    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
+    StaticImageVectorPathSegment, StaticImageVectorRaster, StaticImageVectorTextBounds,
+    StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
+    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapePoint,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
     TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
@@ -34,6 +35,9 @@ const DEFAULT_SCRIPT_FONT_SCALE_PERCENT: i32 = 65;
 const OFFICE_MATH_FRACTION_NUMERATOR_SHIFT_HALF_POINTS: i32 = 14;
 const OFFICE_MATH_FRACTION_DENOMINATOR_SHIFT_HALF_POINTS: i32 = -12;
 const OFFICE_MATH_FRACTION_SCRIPT_FONT_SCALE_PERCENT: i32 = 71;
+const OFFICE_MATH_LOWER_LIMIT_SHIFT_HALF_POINTS: i32 = -15;
+const OFFICE_MATH_UPPER_LIMIT_SHIFT_HALF_POINTS: i32 = 17;
+const OFFICE_MATH_LIMIT_FONT_SCALE_PERCENT: i32 = 71;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 0;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
@@ -192,6 +196,7 @@ struct ParserState {
     office_math_bar_position_text: String,
     office_math_bar_position: OfficeMathBarPosition,
     office_math_limit_container_direct: OfficeMathLimitKind,
+    office_math_limit_id: Option<usize>,
     office_math_nary_container_direct: bool,
     office_math_nary_property_direct: bool,
     office_math_nary_limit_location_capture: bool,
@@ -353,6 +358,7 @@ impl Default for ParserState {
             office_math_bar_position_text: String::new(),
             office_math_bar_position: OfficeMathBarPosition::Top,
             office_math_limit_container_direct: OfficeMathLimitKind::None,
+            office_math_limit_id: None,
             office_math_nary_container_direct: false,
             office_math_nary_property_direct: false,
             office_math_nary_limit_location_capture: false,
@@ -3500,6 +3506,7 @@ impl Parser {
             }
             "mlimLow" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_limit_container_direct = OfficeMathLimitKind::Lower;
+                self.state.office_math_limit_id = Some(offset);
             }
             "mlimLowPr"
                 if destination_allows_visible_content(&self.state)
@@ -3510,6 +3517,7 @@ impl Parser {
             }
             "mlimUpp" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_limit_container_direct = OfficeMathLimitKind::Upper;
+                self.state.office_math_limit_id = Some(offset);
             }
             "mlimUppPr"
                 if destination_allows_visible_content(&self.state)
@@ -3544,6 +3552,13 @@ impl Parser {
                     == OfficeMathArrayKind::EquationArray =>
             {
                 self.start_office_math_equation_array_row(offset)?;
+            }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_limit_kind() != OfficeMathLimitKind::None =>
+            {
+                self.state.character.passive_math_limit_id =
+                    self.office_math_direct_parent_limit_id();
+                self.state.character.passive_math_limit_part = PassiveMathLimitPart::Base;
             }
             "mlim" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_limit();
@@ -7991,6 +8006,13 @@ impl Parser {
             .unwrap_or(OfficeMathLimitKind::None)
     }
 
+    fn office_math_direct_parent_limit_id(&self) -> Option<usize> {
+        self.stack
+            .last()
+            .filter(|state| state.office_math_limit_container_direct != OfficeMathLimitKind::None)
+            .and_then(|state| state.office_math_limit_id)
+    }
+
     fn office_math_direct_parent_is_delimiter(&self) -> bool {
         self.stack
             .last()
@@ -8302,21 +8324,19 @@ impl Parser {
     }
 
     fn start_office_math_limit(&mut self) {
-        match self
-            .stack
-            .last()
-            .map(|state| state.office_math_limit_container_direct)
-            .unwrap_or(OfficeMathLimitKind::None)
-        {
+        self.state.character.passive_math_limit_id = self.office_math_direct_parent_limit_id();
+        match self.office_math_direct_parent_limit_kind() {
             OfficeMathLimitKind::Lower => {
                 self.state.character.baseline_shift_half_points =
-                    DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
-                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                    OFFICE_MATH_LOWER_LIMIT_SHIFT_HALF_POINTS;
+                self.state.character.font_size_scale_percent = OFFICE_MATH_LIMIT_FONT_SCALE_PERCENT;
+                self.state.character.passive_math_limit_part = PassiveMathLimitPart::Lower;
             }
             OfficeMathLimitKind::Upper => {
                 self.state.character.baseline_shift_half_points =
-                    DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
-                self.state.character.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                    OFFICE_MATH_UPPER_LIMIT_SHIFT_HALF_POINTS;
+                self.state.character.font_size_scale_percent = OFFICE_MATH_LIMIT_FONT_SCALE_PERCENT;
+                self.state.character.passive_math_limit_part = PassiveMathLimitPart::Upper;
             }
             OfficeMathLimitKind::None => {}
         }
@@ -30212,6 +30232,7 @@ fn is_internal_marker(text: &str) -> bool {
             | DOCUMENT_CHARS_WITH_SPACES_MARKER
             | PASSIVE_ADVANCE_MARKER
             | PASSIVE_MATH_FRACTION_RULE_MARKER
+            | PASSIVE_MATH_STACK_ANCHOR_MARKER
             | PENDING_NOTE_REFERENCE_MARKER
             | FOOTNOTE_REFERENCE_MARKER
             | FOOTNOTE_REFERENCE_MARKER_END
@@ -30230,6 +30251,7 @@ fn contains_internal_marker(text: &str) -> bool {
         || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
         || text.contains(PASSIVE_ADVANCE_MARKER)
         || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
+        || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
         || text.contains(PENDING_NOTE_REFERENCE_MARKER)
         || text.contains(FOOTNOTE_REFERENCE_MARKER)
         || text.contains(FOOTNOTE_REFERENCE_MARKER_END)
@@ -30250,6 +30272,7 @@ fn sanitize_internal_markers(text: &str) -> String {
         .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "\u{fffd}")
         .replace(PASSIVE_ADVANCE_MARKER, "\u{fffd}")
         .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "\u{fffd}")
+        .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "\u{fffd}")
         .replace(PENDING_NOTE_REFERENCE_MARKER, "\u{fffd}")
         .replace(FOOTNOTE_REFERENCE_MARKER, "\u{fffd}")
         .replace(FOOTNOTE_REFERENCE_MARKER_END, "\u{fffd}")

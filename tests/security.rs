@@ -14,12 +14,12 @@ use open_rtf_converter::model::{
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
     FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, ImageToneAdjustment,
     PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, PassiveMathFractionPart,
-    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
-    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageVectorPathSegment, StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind,
-    StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER,
-    TabAlignment, TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
-    inline_image_marker_index,
+    PassiveMathLimitPart, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageWrapSide,
+    StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
+    TableRowAlignment, TextRelief, UnderlineStyle, inline_image_marker_index,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -25584,11 +25584,41 @@ fn office_math_limits_render_passive_lower_and_upper_scripts() {
         "unexpected limit math text: {text:?}"
     );
     let lower_limit_style = run_style_for_text(&parsed.document, "x=0").expect("lower limit run");
-    assert!(lower_limit_style.baseline_shift_half_points < 0);
-    assert!(lower_limit_style.font_size_scale_percent < 100);
+    assert_eq!(lower_limit_style.baseline_shift_half_points, -15);
+    assert_eq!(lower_limit_style.font_size_scale_percent, 71);
+    assert_eq!(
+        lower_limit_style.passive_math_limit_part,
+        PassiveMathLimitPart::Lower
+    );
+    let lower_base_style = run_style_for_text(&parsed.document, "lim").expect("lower base run");
+    assert_eq!(
+        lower_base_style.passive_math_limit_part,
+        PassiveMathLimitPart::Base
+    );
+    assert_eq!(
+        lower_base_style.passive_math_limit_id,
+        lower_limit_style.passive_math_limit_id
+    );
     let upper_limit_style = run_style_for_text(&parsed.document, "n").expect("upper limit run");
-    assert!(upper_limit_style.baseline_shift_half_points > 0);
-    assert!(upper_limit_style.font_size_scale_percent < 100);
+    assert_eq!(upper_limit_style.baseline_shift_half_points, 17);
+    assert_eq!(upper_limit_style.font_size_scale_percent, 71);
+    assert_eq!(
+        upper_limit_style.passive_math_limit_part,
+        PassiveMathLimitPart::Upper
+    );
+    let upper_base_style = run_style_for_text(&parsed.document, "max").expect("upper base run");
+    assert_eq!(
+        upper_base_style.passive_math_limit_part,
+        PassiveMathLimitPart::Base
+    );
+    assert_eq!(
+        upper_base_style.passive_math_limit_id,
+        upper_limit_style.passive_math_limit_id
+    );
+    assert_ne!(
+        lower_limit_style.passive_math_limit_id,
+        upper_limit_style.passive_math_limit_id
+    );
     for forbidden in [
         "mmath",
         "moMath",
@@ -25642,6 +25672,14 @@ fn office_math_limits_render_passive_lower_and_upper_scripts() {
     assert!(
         upper_limit.1 > upper_base.1,
         "Office math upper limit should render above the base text: base={upper_base:?}, limit={upper_limit:?}"
+    );
+    assert!(
+        (lower_limit.0 - lower_base.0).abs() <= 2.0,
+        "Office math lower limit should be horizontally centered under the base text: base={lower_base:?}, limit={lower_limit:?}"
+    );
+    assert!(
+        (upper_limit.0 - upper_base.0 - 8.2).abs() <= 1.0,
+        "Office math upper limit should be horizontally centered over the base text: base={upper_base:?}, limit={upper_limit:?}"
     );
     for forbidden in [
         b"mmath".as_slice(),

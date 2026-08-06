@@ -2214,7 +2214,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact equation-array row placement, lower/upper limit baselines, n-ary glyph placement, and visible/hidden phantom spacing."
+        "The registered Word PDF visibly prints executable-looking property payloads, URLs, object-data labels, hidden n-ary limits, and hidden phantom content, so its payload-driven absolute paragraph flow is intentionally not a compatibility target. Within retained safe content, lower/upper limits now use Word's measured 71% script scale, approximately -7.5/+8.5-point baseline shifts, centered stack placement, and maximum constituent width instead of flattened inline placement. Current limit offsets differ from Word by at most 0.18 points before the established bundled-font glyph-box residual. Exact equation-array row origin, n-ary glyph construction, and visible phantom spacing remain focused audit items."
       ]
     },
     {

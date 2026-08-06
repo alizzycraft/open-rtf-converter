@@ -11,17 +11,18 @@ use crate::model::{
     EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
     FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
     NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
-    PASSIVE_MATH_FRACTION_RULE_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
-    Paragraph, ParagraphBorders, ParagraphStyle, PassiveMathFractionPart, Run,
-    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
-    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TableRowWrapMargins, UnderlineStyle, inline_image_marker_index,
+    PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
+    PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle,
+    PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
+    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
+    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS,
+    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
+    TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
+    inline_image_marker_index,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -8234,6 +8235,9 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     };
     let operator_spaced_math_paragraph = apply_passive_math_operator_spacing(paragraph);
     let paragraph = operator_spaced_math_paragraph.as_ref().unwrap_or(paragraph);
+    let stacked_math_limit_paragraph =
+        stack_passive_math_limits(paragraph, document, font_provider);
+    let paragraph = stacked_math_limit_paragraph.as_ref().unwrap_or(paragraph);
     let stacked_math_paragraph = stack_passive_math_fractions(paragraph, document, font_provider);
     let paragraph = stacked_math_paragraph.as_ref().unwrap_or(paragraph);
     let mut lines = Vec::new();
@@ -8308,6 +8312,9 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
             );
             if is_passive_math_fraction_rule_marker(&segment.text) {
                 fit_width = passive_math_fraction_width_points(&segment.style);
+            }
+            if is_passive_math_stack_anchor_marker(&segment.text) {
+                fit_width = passive_math_stack_width_points(&segment.style);
             }
             let mut intervals = line_content_intervals(current_line_top_y, current.height);
             intervals.retain(|(_, width)| *width >= 12.0);
@@ -8602,6 +8609,93 @@ fn passive_math_operator_side_space_em(ch: char) -> Option<f32> {
     } else {
         None
     }
+}
+
+fn stack_passive_math_limits(
+    paragraph: &Paragraph,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> Option<Paragraph> {
+    if !paragraph
+        .runs
+        .iter()
+        .any(|run| run.style.passive_math_limit_id.is_some())
+    {
+        return None;
+    }
+
+    let mut output = Paragraph {
+        style: paragraph.style.clone(),
+        runs: Vec::with_capacity(paragraph.runs.len().saturating_add(6)),
+    };
+    let mut start = 0usize;
+    while start < paragraph.runs.len() {
+        let Some(limit_id) = paragraph.runs[start].style.passive_math_limit_id else {
+            output.runs.push(paragraph.runs[start].clone());
+            start += 1;
+            continue;
+        };
+        let mut end = start + 1;
+        while end < paragraph.runs.len()
+            && paragraph.runs[end].style.passive_math_limit_id == Some(limit_id)
+        {
+            end += 1;
+        }
+        let limit_runs = &paragraph.runs[start..end];
+        let base = limit_runs
+            .iter()
+            .filter(|run| run.style.passive_math_limit_part == PassiveMathLimitPart::Base)
+            .cloned()
+            .collect::<Vec<_>>();
+        let script = limit_runs
+            .iter()
+            .filter(|run| {
+                matches!(
+                    run.style.passive_math_limit_part,
+                    PassiveMathLimitPart::Lower | PassiveMathLimitPart::Upper
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if base.is_empty() || script.is_empty() {
+            output.runs.extend_from_slice(limit_runs);
+            start = end;
+            continue;
+        }
+
+        let base_width =
+            passive_math_model_runs_width(&base, &paragraph.style, document, font_provider);
+        let script_width =
+            passive_math_model_runs_width(&script, &paragraph.style, document, font_provider);
+        let stack_width = base_width.max(script_width).max(0.1);
+        let mut marker_style = limit_runs[0].style.clone();
+        marker_style.passive_math_limit_part = PassiveMathLimitPart::None;
+        marker_style.baseline_shift_half_points = 0;
+        marker_style.font_size_scale_percent = 100;
+        marker_style.character_spacing_twips = points_to_bounded_twips(stack_width);
+        output.runs.push(Run {
+            text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
+            style: marker_style.clone(),
+        });
+
+        let base_start = (stack_width - base_width) / 2.0;
+        push_passive_math_advance(&mut output.runs, base_start, &marker_style);
+        output.runs.extend(base);
+        let script_start = (stack_width - script_width) / 2.0;
+        push_passive_math_advance(
+            &mut output.runs,
+            script_start - base_start - base_width,
+            &marker_style,
+        );
+        output.runs.extend(script);
+        push_passive_math_advance(
+            &mut output.runs,
+            stack_width - script_start - script_width,
+            &marker_style,
+        );
+        start = end;
+    }
+    Some(output)
 }
 
 fn stack_passive_math_fractions(
@@ -9345,6 +9439,7 @@ fn contains_inline_marker(text: &str) -> bool {
         || text.contains(ENDNOTE_REFERENCE_MARKER_END)
         || text.contains(PASSIVE_ADVANCE_MARKER)
         || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
+        || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
         || text.contains(NESTED_TABLE_ANCHOR_MARKER)
 }
 
@@ -9958,7 +10053,8 @@ fn remove_internal_stat_markers(text: &str) -> String {
         .replace(DOCUMENT_CHARS_MARKER, "")
         .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "")
         .replace(PASSIVE_ADVANCE_MARKER, "")
-        .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "");
+        .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "")
+        .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "");
     while let Some((start, end)) = next_bookmark_page_marker_range(&cleaned, 0) {
         cleaned.replace_range(start..end, "");
     }
@@ -10779,8 +10875,13 @@ fn push_text_segments_preserving_tabs(
     for (idx, ch) in text.char_indices() {
         let is_passive_advance = ch.to_string() == PASSIVE_ADVANCE_MARKER;
         let is_math_fraction_rule = ch.to_string() == PASSIVE_MATH_FRACTION_RULE_MARKER;
+        let is_math_stack_anchor = ch.to_string() == PASSIVE_MATH_STACK_ANCHOR_MARKER;
         let inline_image_index = inline_image_marker_index(&ch.to_string());
-        if ch == '\t' || is_passive_advance || is_math_fraction_rule || inline_image_index.is_some()
+        if ch == '\t'
+            || is_passive_advance
+            || is_math_fraction_rule
+            || is_math_stack_anchor
+            || inline_image_index.is_some()
         {
             if start < idx {
                 let text = text[start..idx].replace('\u{00ad}', "");
@@ -10805,6 +10906,20 @@ fn push_text_segments_preserving_tabs(
             if is_math_fraction_rule {
                 output.push(FlowRun {
                     text: PASSIVE_MATH_FRACTION_RULE_MARKER.to_string(),
+                    style: style.clone(),
+                    width: 0.0,
+                    line_height_points: 0.0,
+                    tab_leader: TabLeader::None,
+                    tab_alignment: TabAlignment::Left,
+                    tab_stop_position: None,
+                    soft_hyphen_after: false,
+                });
+                start = idx + ch.len_utf8();
+                continue;
+            }
+            if is_math_stack_anchor {
+                output.push(FlowRun {
+                    text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
                     style: style.clone(),
                     width: 0.0,
                     line_height_points: 0.0,
@@ -11139,6 +11254,8 @@ fn apply_fit_text_scaling_to_segment(
     if target_twips <= 0
         || segment.text.is_empty()
         || is_passive_advance_marker(&segment.text)
+        || is_passive_math_fraction_rule_marker(&segment.text)
+        || is_passive_math_stack_anchor_marker(&segment.text)
         || parse_bookmark_page_marker_id(&segment.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
         || parse_bookmark_page_marker_id(&segment.text, BOOKMARK_PAGE_REF_MARKER).is_some()
     {
@@ -11263,6 +11380,9 @@ fn flow_run_line_height(
     if is_passive_math_fraction_rule_marker(&run.text) {
         return run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER;
     }
+    if is_passive_math_stack_anchor_marker(&run.text) {
+        return 0.0;
+    }
     let border_extra = character_border_inset(&run.style) * 2.0;
     if run.text.chars().any(is_passive_checkbox_char) {
         return (run.line_height_points * 1.15)
@@ -11334,6 +11454,9 @@ fn measure_flow_run(
         return passive_advance_width_points(&run.style);
     }
     if is_passive_math_fraction_rule_marker(&run.text) {
+        return 0.0;
+    }
+    if is_passive_math_stack_anchor_marker(&run.text) {
         return 0.0;
     }
     if run.text == "\t" {
@@ -11411,6 +11534,10 @@ fn is_passive_math_fraction_rule_marker(text: &str) -> bool {
     text == PASSIVE_MATH_FRACTION_RULE_MARKER
 }
 
+fn is_passive_math_stack_anchor_marker(text: &str) -> bool {
+    text == PASSIVE_MATH_STACK_ANCHOR_MARKER
+}
+
 fn inline_image_for_marker<'a>(document: &'a Document, text: &str) -> Option<&'a StaticImage> {
     document.inline_images.get(inline_image_marker_index(text)?)
 }
@@ -11424,6 +11551,10 @@ fn passive_advance_baseline_delta_points(style: &CharacterStyle) -> f32 {
 }
 
 fn passive_math_fraction_width_points(style: &CharacterStyle) -> f32 {
+    twips_to_points(style.character_spacing_twips).max(0.0)
+}
+
+fn passive_math_stack_width_points(style: &CharacterStyle) -> f32 {
     twips_to_points(style.character_spacing_twips).max(0.0)
 }
 
@@ -11625,6 +11756,7 @@ fn push_line_with_rotation(
     let last_spaced_run_index = line.runs.iter().rposition(|run| {
         !is_passive_advance_marker(&run.text)
             && !is_passive_math_fraction_rule_marker(&run.text)
+            && !is_passive_math_stack_anchor_marker(&run.text)
             && run.text != "\t"
             && !run.text.is_empty()
     });
@@ -11665,6 +11797,9 @@ fn push_line_with_rotation(
                     style: LineStyle::Solid,
                 });
             }
+            continue;
+        }
+        if is_passive_math_stack_anchor_marker(&run.text) {
             continue;
         }
         if let Some(image) = inline_image_for_marker(document, &run.text) {
