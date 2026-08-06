@@ -42157,7 +42157,15 @@ fn wmf_srccopy_cropped_embedded_dibs_render_passive_images_without_payload_leaka
     assert_eq!(image.format, ImageFormat::WmfVector);
     assert!(image.bytes.is_empty());
     assert_eq!(image.vector_commands.len(), 3);
-    for command in &image.vector_commands {
+    assert!(matches!(
+        &image.vector_commands[0],
+        StaticImageVectorCommand::RasterImage { image, .. }
+            if image.format == ImageFormat::Rgb8
+                && image.width_px == 2
+                && image.height_px == 1
+                && image.bytes == vec![40, 50, 60, 70, 80, 90]
+    ));
+    for command in &image.vector_commands[1..] {
         assert!(matches!(
             command,
             StaticImageVectorCommand::RasterImage {

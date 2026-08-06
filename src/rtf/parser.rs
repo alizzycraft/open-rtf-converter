@@ -41397,6 +41397,7 @@ fn parse_wmf_vector_image_data(
                         coordinates,
                         state.fill_color,
                         blank_destination,
+                        word_compatible_passive,
                     ),
                     _ => None,
                 } {
@@ -42081,6 +42082,7 @@ fn parse_wmf_stretchdib_srcopy(
     coordinates: WmfCoordinateMap,
     selected_fill_color: Option<Color>,
     blank_destination: bool,
+    word_compatible_passive: bool,
 ) -> Option<PassiveSourceRasterCommand> {
     const DIB_RGB_COLORS: u16 = 0;
     const DIB_HEADER_OFFSET: usize = 22;
@@ -42099,10 +42101,18 @@ fn parse_wmf_stretchdib_srcopy(
 
     let source_height = i32::from(read_le_i16(data, 6)?);
     let source_width = i32::from(read_le_i16(data, 8)?);
-    let source_y = i32::from(read_le_i16(data, 10)?);
+    let mut source_y = i32::from(read_le_i16(data, 10)?);
     let source_x = i32::from(read_le_i16(data, 12)?);
     if source_width <= 0 || source_height == 0 {
         return None;
+    }
+    let source_height_abs = i32::try_from(source_height.unsigned_abs()).ok()?;
+    if word_compatible_passive && source_height > 0 {
+        source_y = word_compatible_wmf_stretchdib_source_y(
+            &data[DIB_HEADER_OFFSET..],
+            source_y,
+            source_height_abs,
+        )?;
     }
 
     let destination_height = i32::from(read_le_i16(data, 14)?.unsigned_abs().max(1));
@@ -42115,7 +42125,7 @@ fn parse_wmf_stretchdib_srcopy(
         source_x,
         source_y,
         source_width,
-        i32::try_from(source_height.unsigned_abs()).ok()?,
+        source_height_abs,
         destination_x,
         destination_y,
         destination_width,
@@ -42123,6 +42133,35 @@ fn parse_wmf_stretchdib_srcopy(
         coordinates,
         transfer_mode,
     )
+}
+
+fn word_compatible_wmf_stretchdib_source_y(
+    dib_bytes: &[u8],
+    source_y: i32,
+    source_height: i32,
+) -> Option<i32> {
+    const BITMAPCOREHEADER_SIZE: u32 = 12;
+    const BITMAPINFOHEADER_SIZE: u32 = 40;
+
+    let header_size = read_le_u32(dib_bytes, 0)?;
+    let raw_bitmap_height = match header_size {
+        BITMAPCOREHEADER_SIZE => i32::from(read_le_u16(dib_bytes, 6)?),
+        BITMAPINFOHEADER_SIZE.. => {
+            if usize::try_from(header_size).ok()? > dib_bytes.len() {
+                return None;
+            }
+            read_le_i32(dib_bytes, 8)?
+        }
+        _ => return None,
+    };
+
+    if raw_bitmap_height > 0 {
+        raw_bitmap_height
+            .checked_sub(source_y)?
+            .checked_sub(source_height)
+    } else {
+        Some(source_y)
+    }
 }
 
 fn parse_wmf_dibbitblt_srcopy(
@@ -69405,7 +69444,7 @@ After\par}"#;
     }
 
     #[test]
-    fn wmf_srccopy_cropped_embedded_dib_records_become_passive_raster_images() {
+    fn word_compatible_wmf_srccopy_cropped_embedded_dib_records_use_record_specific_rows() {
         let dib = minimal_24bit_dib_with_rgb_pixels(
             3,
             2,
@@ -69437,16 +69476,22 @@ After\par}"#;
         assert!(image.bytes.is_empty());
         assert_eq!(output.diagnostics.len(), 0);
         assert_eq!(image.vector_commands.len(), 3);
-        for command in &image.vector_commands {
-            assert!(matches!(
-                command,
-                StaticImageVectorCommand::RasterImage {
-                    image,
-                    ..
-                } if image.format == ImageFormat::Rgb8
+        assert!(matches!(
+            &image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage { image, .. }
+                if image.format == ImageFormat::Rgb8
                     && image.width_px == 2
                     && image.height_px == 1
-                    && image.bytes == vec![130, 140, 150, 160, 170, 180]
+                    && image.bytes == vec![40, 50, 60, 70, 80, 90]
+        ));
+        for command in &image.vector_commands[1..] {
+            assert!(matches!(
+                command,
+                StaticImageVectorCommand::RasterImage { image, .. }
+                    if image.format == ImageFormat::Rgb8
+                        && image.width_px == 2
+                        && image.height_px == 1
+                        && image.bytes == vec![130, 140, 150, 160, 170, 180]
             ));
         }
         assert!(matches!(
@@ -69479,6 +69524,48 @@ After\par}"#;
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn strict_spec_wmf_srccopy_cropped_embedded_dib_records_use_top_down_rows() {
+        let dib = minimal_24bit_dib_with_rgb_pixels(
+            3,
+            2,
+            &[
+                [10, 20, 30],
+                [40, 50, 60],
+                [70, 80, 90],
+                [100, 110, 120],
+                [130, 140, 150],
+                [160, 170, 180],
+            ],
+        );
+        let records = [
+            wmf_stretchdib_dib_record_with_source(15, 25, 80, 40, 1, 1, 2, 1, &dib),
+            wmf_dibbitblt_record_with_source(25, 35, 2, 1, 1, 1, &dib),
+            wmf_dibstretchblt_record_with_source(35, 45, 60, 30, 1, 1, 2, 1, &dib),
+        ];
+        let input = format!(
+            r"{{\rtf1{{\pict\wmetafile8 {}}}}}",
+            bytes_to_hex(&minimal_wmf_with_records(200, 100, &records))
+        );
+        let output = parse_rtf_strict(&input).unwrap();
+
+        let image = match &output.document.blocks[0] {
+            Block::Image(image) => image,
+            _ => panic!("expected passive WMF vector image"),
+        };
+        assert_eq!(image.vector_commands.len(), 3);
+        for command in &image.vector_commands {
+            assert!(matches!(
+                command,
+                StaticImageVectorCommand::RasterImage { image, .. }
+                    if image.format == ImageFormat::Rgb8
+                        && image.width_px == 2
+                        && image.height_px == 1
+                        && image.bytes == vec![130, 140, 150, 160, 170, 180]
+            ));
+        }
     }
 
     #[test]
