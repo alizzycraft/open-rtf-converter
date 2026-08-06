@@ -3383,7 +3383,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word places both cell baselines together and positions the second cell at x=168.05 even though its `\\clpad*` controls appear after the first cell's text has begun. The converter applies those late controls literally, placing the second cell at x=159 and 3 points lower. Exact malformed-row recovery and row-default/cell-specific precedence require focused Word probes before changing the bounded model."
+        "Focused Word 16.0 probes and Word's parsed cell-margin object model confirm a stable compatibility rule: per-cell `\\clpadl` and `\\clpadt` map to top and left respectively, row defaults retain their published sides, every cell shares the row's largest effective top inset, and modern bottom padding replaces the legacy half-`\\trgaph` post-table clearance. WordCompatiblePassive reproduces that bounded behavior while StrictSpec retains the published RTF side mapping. Corrected first/second cell x origins differ by 0.024/0.05 points, and all cell/following baselines retain only the shared 0.951-0.953-point bundled Arial-compatible metric residual."
       ]
     },
     {

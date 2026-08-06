@@ -13520,7 +13520,14 @@ impl Parser {
     fn set_current_cell_padding_left(&mut self, value: Option<i32>, offset: usize) {
         let padding = self.normalized_cell_padding(value, "left", offset);
         if let Some(row) = self.current_table_row.as_mut() {
-            row.current_cell_padding.left_twips = Some(padding);
+            if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                // Word's RTF reader exposes per-cell `clpadl` as the top
+                // margin. Row-default `trpaddl` remains an ordinary left
+                // margin, and StrictSpec retains the published RTF mapping.
+                row.current_cell_padding.top_twips = Some(padding);
+            } else {
+                row.current_cell_padding.left_twips = Some(padding);
+            }
         }
     }
 
@@ -13534,7 +13541,13 @@ impl Parser {
     fn set_current_cell_padding_top(&mut self, value: Option<i32>, offset: usize) {
         let padding = self.normalized_cell_padding(value, "top", offset);
         if let Some(row) = self.current_table_row.as_mut() {
-            row.current_cell_padding.top_twips = Some(padding);
+            if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                // This is the reciprocal half of Word's stable per-cell
+                // left/top compatibility mapping; see `clpadl` above.
+                row.current_cell_padding.left_twips = Some(padding);
+            } else {
+                row.current_cell_padding.top_twips = Some(padding);
+            }
         }
     }
 
@@ -14699,6 +14712,9 @@ impl Parser {
             return Ok(());
         }
 
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+            self.apply_word_table_cell_top_padding(&mut row);
+        }
         self.apply_table_row_preferred_width_fallback(&mut row);
         self.apply_table_row_vertical_position_alignment(&mut row, offset);
 
@@ -14748,6 +14764,34 @@ impl Parser {
             no_overlap: row.no_overlap,
         });
         Ok(())
+    }
+
+    fn apply_word_table_cell_top_padding(&self, row: &mut TableRowBuilder) {
+        let shared_top_twips = row
+            .cells
+            .iter()
+            .filter_map(|cell| cell.padding.top_twips)
+            .max()
+            .unwrap_or(0)
+            .max(0);
+        if shared_top_twips == 0 {
+            return;
+        }
+
+        // Word lays every cell out below the largest top margin in the row,
+        // even when that margin belongs to a center- or bottom-aligned cell.
+        // For a positive minimum-height row, the shared inset expands the
+        // minimum rather than reducing its content box.
+        for cell in &mut row.cells {
+            cell.padding.top_twips = Some(shared_top_twips);
+        }
+        if let Some(height_twips) = row.height_twips.as_mut()
+            && *height_twips > 0
+        {
+            *height_twips = height_twips
+                .saturating_add(shared_top_twips)
+                .min(self.limits().max_table_row_height_twips);
+        }
     }
 
     fn apply_table_row_preferred_width_fallback(&self, row: &mut TableRowBuilder) {
@@ -48254,9 +48298,31 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_table_cell_padding_controls() {
+    fn word_compatible_table_cell_padding_matches_word_left_top_mapping() {
         let output = parse_rtf(
             r"{\rtf1\trowd\clpadl240\clpadr120\clpadt60\clpadb180\cellx2000 Padded\cell\row}",
+        )
+        .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+        let padding = table.rows[0].cells[0].padding;
+
+        assert_eq!(padding.left_twips, Some(60));
+        assert_eq!(padding.right_twips, Some(120));
+        assert_eq!(padding.top_twips, Some(240));
+        assert_eq!(padding.bottom_twips, Some(180));
+    }
+
+    #[test]
+    fn strict_spec_retains_published_table_cell_padding_sides() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\trowd\clpadl240\clpadr120\clpadt60\clpadb180\cellx2000 Padded\cell\row}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -48269,6 +48335,21 @@ mod tests {
         assert_eq!(padding.right_twips, Some(120));
         assert_eq!(padding.top_twips, Some(60));
         assert_eq!(padding.bottom_twips, Some(180));
+    }
+
+    #[test]
+    fn word_compatible_table_rows_share_the_largest_top_padding() {
+        let output =
+            parse_rtf(r"{\rtf1\trowd\trrh1440\cellx2000 A\cell\clpadl360\cellx4000 B\cell\row}")
+                .unwrap();
+        let table = match &output.document.blocks[0] {
+            Block::Table(table) => table,
+            _ => panic!("expected table block"),
+        };
+
+        assert_eq!(table.rows[0].height_twips, Some(1800));
+        assert_eq!(table.rows[0].cells[0].padding.top_twips, Some(360));
+        assert_eq!(table.rows[0].cells[1].padding.top_twips, Some(360));
     }
 
     #[test]
@@ -48466,8 +48547,8 @@ mod tests {
         };
         let padding = table.rows[0].cells[0].padding;
 
-        assert_eq!(padding.left_twips, Some(120));
-        assert_eq!(padding.top_twips, Some(0));
+        assert_eq!(padding.left_twips, Some(0));
+        assert_eq!(padding.top_twips, Some(120));
         assert!(!output.diagnostics.is_empty());
     }
 

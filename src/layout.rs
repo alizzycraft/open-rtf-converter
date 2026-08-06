@@ -4953,7 +4953,8 @@ fn layout_table(
         *cursor_y = table_flow_cursor_y;
     } else {
         // Word reserves an authored bottom cell border below the final row.
-        // Without one, it carries half of the final row's authored cell gap.
+        // Modern bottom cell padding already supplies that clearance; only a
+        // borderless row without it carries half of the legacy `\trgaph`.
         // An omitted `\trgaph` therefore adds no synthetic flow gap.
         let following_gap = table
             .rows
@@ -4967,6 +4968,12 @@ fn layout_table(
                     .fold(0.0, f32::max);
                 if bottom_border_width > 0.0 {
                     bottom_border_width
+                } else if row
+                    .cells
+                    .iter()
+                    .any(|cell| cell.padding.bottom_twips.is_some())
+                {
+                    0.0
                 } else {
                     twips_to_points(row.cell_gap_twips.max(0)) * 0.5
                 }
@@ -19799,6 +19806,30 @@ mod tests {
         let without_gap = following_y("");
         let with_gap = following_y(r"\trgaph108");
         assert!((without_gap - with_gap - 2.7).abs() < 0.01);
+    }
+
+    #[test]
+    fn final_table_bottom_padding_replaces_legacy_cell_gap_clearance() {
+        let following_y = |row_controls: &str| {
+            let source =
+                format!(r"{{\rtf1\trowd{row_controls}\cellx2000 Cell\cell\row\pard After\par}}");
+            let parsed = crate::rtf::parse_rtf(&source).unwrap();
+            let layout = LayoutEngine::layout(&parsed.document);
+            layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.trim() == "After" => {
+                        Some(fragment.baseline_y)
+                    }
+                    _ => None,
+                })
+                .expect("following paragraph")
+        };
+
+        let without_gap = following_y(r"\trgaph0\trpaddb120");
+        let with_legacy_gap = following_y(r"\trgaph108\trpaddb120");
+        assert!((without_gap - with_legacy_gap).abs() < 0.01);
     }
 
     #[test]
