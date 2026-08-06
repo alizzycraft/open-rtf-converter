@@ -5498,7 +5498,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Greek charset glyph mapping, font fallback metrics, and Symbol-compatible text encoding."
+        "The focused Word 16.0 audit confirms exact semantic Greek decoding and PDF extraction for Αα Ππ Ωω. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the Greek endpoint by 3.96 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
       ]
     },
     {
@@ -5534,7 +5534,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Cyrillic charset glyph mapping, bundled-font metrics, and PDF text extraction behavior."
+        "The focused Word 16.0 audit confirms exact semantic Cyrillic decoding and PDF extraction for Привет. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the Cyrillic endpoint by 3.11 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
       ]
     },
     {
@@ -5570,7 +5570,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Central European charset glyph mapping, bundled-font metrics, and PDF text extraction behavior."
+        "The focused Word 16.0 audit confirms exact semantic Central European decoding and PDF extraction for árvíztűrő. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the decoded endpoint by 3.01 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
       ]
     },
     {
@@ -5606,7 +5606,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Turkish charset glyph mapping, bundled-font metrics, and PDF text extraction behavior."
+        "The focused Word 16.0 audit confirms exact semantic Turkish decoding and PDF extraction for ĞİŞ ğış. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the decoded endpoint by 3.06 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
       ]
     },
     {
@@ -5642,7 +5642,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact Baltic charset glyph mapping, bundled-font metrics, and PDF text extraction behavior."
+        "The focused Word 16.0 audit confirms exact semantic Baltic decoding and PDF extraction for Ąą Čč Ųų Śś Żż. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the decoded endpoint by 3.08 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
       ]
     },
     {
@@ -5681,7 +5681,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact IBM437 and MacRoman glyph mapping, font fallback metrics, and PDF text extraction behavior."
+        "The focused Word 16.0 audit shows that Word ignores these explicit per-font cpg437/cpg10000 declarations for the authored hex escapes and visibly treats them as Windows-1252, producing cafe ‚ / box ³ and ÒHelloÓ. The converter intentionally honors the declared IBM437 and MacRoman mappings, producing semantic café / box │ and “Hello” in both rendering and extraction. This deterministic standards-oriented difference retains identical four-line flow and zero drawings while avoiding mojibake; both outputs remain free of images, links, annotations, widgets, and actions."
       ]
     },
     {
@@ -5720,7 +5720,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact MacRoman and OEM glyph mapping, font fallback metrics, and PDF text extraction behavior."
+        "The focused Word 16.0 audit confirms exact semantic MacRoman and OEM decoding and PDF extraction for “Hello”, café, and │ when the code page is selected through fcharset77/fcharset255. Both outputs have identical four-line text and zero drawings; current/Word line starts differ by 0.02 points, decoded endpoints by at most 8.37 points, and cumulative baselines by at most 2.63 points because Word substitutes Calibri while the passive bundled path uses Liberation Sans with a fixed 13.8-point cadence."
       ]
     },
     {
