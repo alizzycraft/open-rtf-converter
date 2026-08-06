@@ -3613,7 +3613,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact split-row fragment heights, repeated-header placement, and object-result spacing."
+        "The focused Word audit confirms identical four-page split-row distribution: page 1 contains lines 000-019, pages 2 and 3 contain 020-041 and 042-063, and page 4 contains 064-069 plus the trailing paragraph. The header repeats on every page, and the safe object result occupies one ordinary 13.8-point line before it. Mandatory line-break controls are no longer retained in visible PDF text fragments, so every line uses the supplied Arial-compatible font. Current text starts at (36.00,35.49) points versus Word's (36.02,36.44), leaving only the shared bundled-font metric residual."
       ]
     },
     {

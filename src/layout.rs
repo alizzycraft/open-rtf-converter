@@ -9012,10 +9012,19 @@ fn split_run_for_wrapping(run: &Run, markers: &MarkerContext) -> Vec<FlowRun> {
             opportunity,
             BreakOpportunity::Allowed | BreakOpportunity::Mandatory
         ) {
-            if run.style.form_field_shading && matches!(opportunity, BreakOpportunity::Allowed) {
+            let mandatory = matches!(opportunity, BreakOpportunity::Mandatory);
+            if run.style.form_field_shading && !mandatory {
                 continue;
             }
-            let segment_text = &text[start..idx];
+            let raw_segment_text = &text[start..idx];
+            let segment_text = if mandatory {
+                raw_segment_text.trim_end_matches(|ch| {
+                    matches!(ch, '\r' | '\n' | '\u{0085}' | '\u{2028}' | '\u{2029}')
+                })
+            } else {
+                raw_segment_text
+            };
+            let has_break_terminator = segment_text.len() != raw_segment_text.len();
             if !segment_text.is_empty() {
                 let soft_hyphen_after = segment_text.ends_with('\u{00ad}');
                 push_text_segments_preserving_tabs(
@@ -9025,7 +9034,7 @@ fn split_run_for_wrapping(run: &Run, markers: &MarkerContext) -> Vec<FlowRun> {
                     soft_hyphen_after,
                 );
             }
-            if matches!(opportunity, BreakOpportunity::Mandatory) && idx < text.len() {
+            if mandatory && (idx < text.len() || has_break_terminator) {
                 output.push(FlowRun {
                     text: "\n".to_string(),
                     style: run.style.clone(),
@@ -20227,6 +20236,11 @@ mod tests {
         assert!(first_page_text.contains("Line 00"));
         assert!(!first_page_text.contains("Line 13"));
         assert!(later_page_text.contains("Line 13"));
+        assert!(layout.pages.iter().all(|page| {
+            page.items.iter().all(|item| {
+            !matches!(item, LayoutItem::Text(fragment) if fragment.text.contains(['\r', '\n']))
+        })
+        }));
     }
 
     #[test]
