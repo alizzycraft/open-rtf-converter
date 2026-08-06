@@ -57,6 +57,67 @@ fn word_compatible_modern_shape_retains_its_empty_anchor_paragraph() {
 }
 
 #[test]
+fn word_shape_picture_wmf_uses_exact_preview_coordinates() {
+    let input = fs::read("docs/sample.rtf").unwrap();
+    let parsed = parse_rtf_bytes(&input).unwrap();
+    let image = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) if image.format == ImageFormat::WmfVector => Some(image),
+            _ => None,
+        })
+        .expect("sample shape picture WMF preview");
+
+    assert!(image.vector_commands.iter().any(|command| matches!(
+        command,
+        StaticImageVectorCommand::Rectangle {
+            left,
+            top,
+            right,
+            bottom,
+            fill_color: Some(Color { red: 128, green: 128, blue: 128 }),
+            stroke_color: None,
+            ..
+        } if (*left - 23.0).abs() < 0.01
+            && (*top - 25.0).abs() < 0.01
+            && (*right - 356.0).abs() < 0.01
+            && (*bottom - 238.0).abs() < 0.01
+    )));
+    assert!(image.vector_commands.iter().any(|command| matches!(
+        command,
+        StaticImageVectorCommand::Rectangle {
+            left,
+            top,
+            right,
+            bottom,
+            fill_color: Some(Color { red: 255, green: 255, blue: 0 }),
+            stroke_color: Some(Color { red: 0, green: 0, blue: 255 }),
+            ..
+        } if (*left - 0.0).abs() < 0.01
+            && (*top - 1.0).abs() < 0.01
+            && (*right - 330.0).abs() < 0.01
+            && (*bottom - 212.0).abs() < 0.01
+    )));
+    assert!(image.vector_commands.iter().any(|command| matches!(
+        command,
+        StaticImageVectorCommand::Ellipse {
+            left,
+            top,
+            right,
+            bottom,
+            fill_color: Some(Color { red: 0, green: 0, blue: 255 }),
+            stroke_color: Some(Color { red: 255, green: 0, blue: 255 }),
+            ..
+        } if (*left - 239.0).abs() < 0.01
+            && (*top - 121.0).abs() < 0.01
+            && (*right - 630.0).abs() < 0.01
+            && (*bottom - 302.0).abs() < 0.01
+    )));
+}
+
+#[test]
 fn inline_wmf_picture_stays_in_its_surrounding_safe_paragraph() {
     let input = fs::read("fixtures/wmf-text-passive.rtf").unwrap();
     let parsed = parse_rtf_bytes(&input).unwrap();
@@ -97295,10 +97356,10 @@ fn wmf_patblt_record(x: i16, y: i16, width: i16, height: i16, raster_op: u32) ->
     write_test_le_u32(&mut record, 0, 9);
     write_test_le_u16(&mut record, 4, 0x061d);
     write_test_le_u32(&mut record, 6, raster_op);
-    write_test_le_i16(&mut record, 10, y);
-    write_test_le_i16(&mut record, 12, x);
-    write_test_le_i16(&mut record, 14, height);
-    write_test_le_i16(&mut record, 16, width);
+    write_test_le_i16(&mut record, 10, height);
+    write_test_le_i16(&mut record, 12, width);
+    write_test_le_i16(&mut record, 14, y);
+    write_test_le_i16(&mut record, 16, x);
     record
 }
 

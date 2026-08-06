@@ -7972,7 +7972,7 @@
     {
       "id": "sample-complex-passive-rendering",
       "input": "docs/sample.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/sample.pdf",
       "word_reference_pages": [],
@@ -8010,7 +8010,7 @@
       "known_gaps": [
         "The registered Word 16.0 reference and corrected converter both use two pages, begin the alignment examples on page two, and preserve explicit blank-paragraph cadence around the table and list. Representative page-two text origins differ by at most about 1.1 points vertically and 0.02 points horizontally; bundled font widths remain approximate.",
         "Symbol list templates that store a private-use U+F0xx code now normalize through the authored Symbol font to passive Unicode bullets. Word and the converter visibly render the same six bullets; PDF text extraction remains implementation-dependent for the converter's passive bullet glyphs.",
-        "The passive embedded-object result preserves Word's colors, overlap, shadow direction, and overall 157.5-by-78.75-point bounded frame, but its visible rectangle/ellipse commands remain undersized inside that frame: Word's visible union is about 157.8 by 78.6 points versus the converter's about 138.1 by 65.7 points. Exact internal preview scaling remains a focused compatibility target.",
+        "The embedded-object result now decodes Word's META_PATBLT height/width/y/x parameter order and uses the exact WMF preview coordinate space inside the parent Office shape. Rectangle, ellipse, overlap, shadow, and colors visibly match; x/size bounds differ by at most about 0.22 points, stroke width by 0.04 points, and the complete preview is uniformly about 2.1-2.4 points lower from the accumulated bundled-font/blank-line vertical residual.",
         "JPEG pictureBiLevel exact thresholding is implemented for bounded decodable RGB/grayscale streams; CMYK, oversized, or undecodable JPEG streams still use a WASM-safe passive approximation."
       ]
     }

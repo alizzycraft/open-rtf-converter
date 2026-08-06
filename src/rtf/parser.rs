@@ -15488,6 +15488,7 @@ impl Parser {
                 if let Some(wmf) = parse_wmf_vector_image_data(
                     &picture.bytes,
                     self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive,
+                    self.state.inside_shape && self.current_shape.is_some(),
                 ) {
                     self.ensure_image_pixels(wmf.width_px, wmf.height_px, offset)?;
                     let natural_width_px_hint =
@@ -41603,6 +41604,7 @@ fn read_le_f32(bytes: &[u8], offset: usize) -> Option<f32> {
 fn parse_wmf_vector_image_data(
     bytes: &[u8],
     word_compatible_passive: bool,
+    shape_picture_result: bool,
 ) -> Option<ParsedWmfVector> {
     let header = parse_wmf_header_info(bytes)?;
     let header_size_words = read_le_u16(bytes, header.header_start + 2)?;
@@ -41630,6 +41632,7 @@ fn parse_wmf_vector_image_data(
     let mut current_point = (0.0f32, 0.0f32);
     let mut replaceable_clip_command_start: Option<usize> = None;
     let mut clip_scope_command_start: Option<usize> = None;
+    let word_coordinate_recovery = word_compatible_passive && !shape_picture_result;
 
     while pos + 6 <= header.file_end {
         record_count = record_count.checked_add(1)?;
@@ -41898,7 +41901,7 @@ fn parse_wmf_vector_image_data(
                             } => {
                                 state.stroke_color = color;
                                 state.stroke_width = normalized_wmf_stroke_width(
-                                    if word_compatible_passive {
+                                    if word_compatible_passive && !shape_picture_result {
                                         width.max(4)
                                     } else {
                                         width
@@ -42031,12 +42034,12 @@ fn parse_wmf_vector_image_data(
             }
             0x0214 => match parse_wmf_yx_point(data, 0, coordinates) {
                 Some(mut point) => {
-                    if word_compatible_passive
+                    if word_coordinate_recovery
                         && state.stock_pen_selected
                         && !viewport_extent_explicit
                     {
                         point = word_compatible_wmf_path_point(point, coordinates);
-                    } else if word_compatible_passive && !viewport_extent_explicit {
+                    } else if word_coordinate_recovery && !viewport_extent_explicit {
                         point = word_compatible_wmf_custom_line_point(point, coordinates);
                     }
                     current_point = point;
@@ -42045,12 +42048,12 @@ fn parse_wmf_vector_image_data(
             },
             0x0213 => match parse_wmf_yx_point(data, 0, coordinates) {
                 Some(mut end) => {
-                    if word_compatible_passive
+                    if word_coordinate_recovery
                         && state.stock_pen_selected
                         && !viewport_extent_explicit
                     {
                         end = word_compatible_wmf_path_point(end, coordinates);
-                    } else if word_compatible_passive && !viewport_extent_explicit {
+                    } else if word_coordinate_recovery && !viewport_extent_explicit {
                         end = word_compatible_wmf_custom_line_point(end, coordinates);
                     }
                     if segment_is_visible(current_point, end) {
@@ -42080,7 +42083,7 @@ fn parse_wmf_vector_image_data(
                     pos = record_end;
                     continue;
                 };
-                if word_compatible_passive && state.stock_pen_selected && !viewport_extent_explicit
+                if word_coordinate_recovery && state.stock_pen_selected && !viewport_extent_explicit
                 {
                     bounds = word_compatible_wmf_box_bounds(bounds, coordinates);
                 }
@@ -42190,7 +42193,7 @@ fn parse_wmf_vector_image_data(
                     pos = record_end;
                     continue;
                 };
-                if word_compatible_passive && state.stock_pen_selected && !viewport_extent_explicit
+                if word_coordinate_recovery && state.stock_pen_selected && !viewport_extent_explicit
                 {
                     for point in &mut points {
                         *point = word_compatible_wmf_path_point(*point, coordinates);
@@ -42232,7 +42235,7 @@ fn parse_wmf_vector_image_data(
                     pos = record_end;
                     continue;
                 };
-                if word_compatible_passive && !viewport_extent_explicit {
+                if word_coordinate_recovery && !viewport_extent_explicit {
                     for polygon in &mut polygons {
                         for point in polygon {
                             *point = word_compatible_wmf_path_point(*point, coordinates);
@@ -42327,7 +42330,7 @@ fn parse_wmf_vector_image_data(
                     pos = record_end;
                     continue;
                 };
-                if word_compatible_passive && !viewport_extent_explicit {
+                if word_coordinate_recovery && !viewport_extent_explicit {
                     bounds = if function == 0x0418 {
                         word_compatible_wmf_ellipse_bounds(bounds, coordinates)
                     } else {
@@ -42369,7 +42372,7 @@ fn parse_wmf_vector_image_data(
                             pos = record_end;
                             continue;
                         };
-                        if word_compatible_passive && !viewport_extent_explicit {
+                        if word_coordinate_recovery && !viewport_extent_explicit {
                             corner_width = corner_width * WMF_WORD_BOX_X_SCALE
                                 + 2.0
                                     * coordinates.image_width.max(1) as f32
@@ -42403,7 +42406,7 @@ fn parse_wmf_vector_image_data(
                 let Some((points, center)) = parse_wmf_arc_record(
                     data,
                     coordinates,
-                    word_compatible_passive && !viewport_extent_explicit,
+                    word_coordinate_recovery && !viewport_extent_explicit,
                     function != 0x0817,
                 ) else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
@@ -42590,7 +42593,7 @@ fn parse_wmf_vector_image_data(
                     return None;
                 }
                 if is_passive_invisible_wmf_patblt(data) {
-                } else if let Some((mut left, mut top, mut right, mut bottom, fill_color)) =
+                } else if let Some((left, top, right, bottom, fill_color)) =
                     parse_wmf_patblt_passive_transfer(
                         data,
                         coordinates,
@@ -42598,12 +42601,13 @@ fn parse_wmf_vector_image_data(
                         emf_commands_are_unpainted_clip_scope(&commands),
                     )
                 {
-                    if word_compatible_passive && !viewport_extent_explicit {
-                        (left, top, right, bottom) = word_compatible_wmf_patblt_bounds(
-                            (left, top, right, bottom),
-                            coordinates,
-                        );
-                    }
+                    let (left, top, right, bottom) = if word_coordinate_recovery
+                        && !viewport_extent_explicit
+                    {
+                        word_compatible_wmf_patblt_bounds((left, top, right, bottom), coordinates)
+                    } else {
+                        (left, top, right, bottom)
+                    };
                     if bounds_is_visible((left, top, right, bottom)) {
                         commands.push(StaticImageVectorCommand::Rectangle {
                             left,
@@ -42680,7 +42684,7 @@ fn parse_wmf_vector_image_data(
                         blank_destination,
                     )
                 {
-                    if word_compatible_passive
+                    if word_coordinate_recovery
                         && !viewport_extent_explicit
                         && function == 0x0940
                         && read_le_u32(data, 0)? == WMF_PATCOPY_RASTER_OP
@@ -42727,7 +42731,7 @@ fn parse_wmf_vector_image_data(
                 if let Some((x1, y1, x2, y2, color)) = parse_wmf_setpixel_line(
                     data,
                     coordinates,
-                    word_compatible_passive && !viewport_extent_explicit,
+                    word_coordinate_recovery && !viewport_extent_explicit,
                 ) && x2 > x1
                 {
                     commands.push(StaticImageVectorCommand::Line {
@@ -43137,10 +43141,10 @@ const WMF_WORD_OPEN_ARC_X_OFFSET_RATIO: f32 = 0.064_482_32;
 const WMF_WORD_OPEN_ARC_Y_OFFSET_RATIO: f32 = 0.103_166_096;
 const WMF_WORD_CLOSED_ARC_X_OFFSET_RATIO: f32 = 0.022_817_705;
 const WMF_WORD_CLOSED_ARC_Y_OFFSET_RATIO: f32 = 0.031_731_483;
-const WMF_WORD_PATBLT_X_SCALE: f32 = 0.793_633_6;
-const WMF_WORD_PATBLT_Y_SCALE: f32 = 0.725_626_77;
-const WMF_WORD_PATBLT_X_OFFSET_RATIO: f32 = 0.087_298_386;
-const WMF_WORD_PATBLT_Y_OFFSET_RATIO: f32 = 0.174_596_01;
+const WMF_WORD_PATBLT_X_SCALE: f32 = 0.992_042;
+const WMF_WORD_PATBLT_Y_SCALE: f32 = 1.088_440_2;
+const WMF_WORD_PATBLT_X_OFFSET_RATIO: f32 = -0.001_985_4;
+const WMF_WORD_PATBLT_Y_OFFSET_RATIO: f32 = -0.006_810_675;
 const WMF_WORD_DIBBITBLT_PATCOPY_X_SCALE: f32 = 0.283_445_27;
 const WMF_WORD_DIBBITBLT_PATCOPY_Y_SCALE: f32 = 1.247_168_1;
 const WMF_WORD_DIBBITBLT_PATCOPY_X_OFFSET_RATIO: f32 = -0.014_172_263;
@@ -43274,10 +43278,10 @@ fn parse_wmf_patblt_passive_transfer(
     if data.len() < 12 {
         return None;
     }
-    let y = i32::from(read_le_i16(data, 4)?);
-    let x = i32::from(read_le_i16(data, 6)?);
-    let height = i32::from(read_le_i16(data, 8)?.unsigned_abs().max(1));
-    let width = i32::from(read_le_i16(data, 10)?.unsigned_abs().max(1));
+    let height = i32::from(read_le_i16(data, 4)?.unsigned_abs().max(1));
+    let width = i32::from(read_le_i16(data, 6)?.unsigned_abs().max(1));
+    let y = i32::from(read_le_i16(data, 8)?);
+    let x = i32::from(read_le_i16(data, 10)?);
     let left_top = coordinates.normalized_point(x, y);
     let right_bottom =
         coordinates.normalized_point(x.saturating_add(width), y.saturating_add(height));
@@ -43293,7 +43297,7 @@ fn parse_wmf_patblt_passive_transfer(
 fn is_passive_invisible_wmf_patblt(data: &[u8]) -> bool {
     data.len() >= 12
         && matches!(
-            (read_le_i16(data, 8), read_le_i16(data, 10)),
+            (read_le_i16(data, 4), read_le_i16(data, 6)),
             (Some(0), _) | (_, Some(0))
         )
 }
@@ -68386,7 +68390,7 @@ After\par}"#;
                     "050000000c026400c800",
                     "07000000fc020000ff0000000000",
                     "040000002d010000",
-                    "090000001d0642000000140028001e003200",
+                    "090000001d06420000001e00320014002800",
                     "030000000000",
                 ),
                 (40.0, 20.0, 90.0, 50.0),
@@ -73484,10 +73488,10 @@ fn wmf_patblt_record(x: i16, y: i16, width: i16, height: i16, raster_op: u32) ->
     write_test_le_u32(&mut record, 0, 9);
     write_test_le_u16(&mut record, 4, 0x061d);
     write_test_le_u32(&mut record, 6, raster_op);
-    write_test_le_i16(&mut record, 10, y);
-    write_test_le_i16(&mut record, 12, x);
-    write_test_le_i16(&mut record, 14, height);
-    write_test_le_i16(&mut record, 16, width);
+    write_test_le_i16(&mut record, 10, height);
+    write_test_le_i16(&mut record, 12, width);
+    write_test_le_i16(&mut record, 14, y);
+    write_test_le_i16(&mut record, 16, x);
     record
 }
 
