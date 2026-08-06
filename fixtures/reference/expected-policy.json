@@ -5112,7 +5112,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact merged-cell border suppression, shading extents, and cell text placement."
+        "The registered Word 16.0 reference confirms matching horizontal- and vertical-merge border suppression, merged shading coverage, and cell text placement. Positive `\\trrh` values are minimum content heights: Word adds the top cell-border stroke to each row, which the converter now matches while retaining negative exact-height behavior. Current border coordinates are within 0.10 points of Word, text x origins within 0.13 points, and the remaining 0.92-1.00-point vertical text offset is the established bundled Arial-compatible metric residual."
       ]
     },
     {

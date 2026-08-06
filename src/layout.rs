@@ -5586,22 +5586,24 @@ fn prepare_table_row(
         let borders = &row.cells[visual_cell.cell_index].borders;
         borders.diagonal_down.visible || borders.diagonal_up.visible
     });
-    // Word places text below the top border in auto-height rows and grows the
-    // row by that stroke width. Fixed-height rows keep their authored height;
-    // diagonal cells retain the inset so their endpoints meet the border.
-    let top_border_inset = if row.height_twips.is_none() || has_diagonal_cell_border {
-        visual_cells
-            .iter()
-            .filter_map(|visual_cell| {
-                let border = &row.cells[visual_cell.cell_index].borders.top;
-                border
-                    .visible
-                    .then(|| table_border_stroke(border, document).0)
-            })
-            .fold(0.0, f32::max)
-    } else {
-        0.0
-    };
+    // Word places text below the top border and grows auto-height and positive
+    // minimum-height rows by that stroke width. Negative exact-height rows keep
+    // their authored height; diagonal cells retain the inset so their endpoints
+    // meet the border even when the exact height clips the available content.
+    let top_border_inset =
+        if row.height_twips.is_none_or(|height| height >= 0) || has_diagonal_cell_border {
+            visual_cells
+                .iter()
+                .filter_map(|visual_cell| {
+                    let border = &row.cells[visual_cell.cell_index].borders.top;
+                    border
+                        .visible
+                        .then(|| table_border_stroke(border, document).0)
+                })
+                .fold(0.0, f32::max)
+        } else {
+            0.0
+        };
     for (visual_cell, padding) in visual_cells.iter().zip(cell_paddings.iter_mut()) {
         let cell = &row.cells[visual_cell.cell_index];
         padding.top += top_border_inset;
@@ -5775,7 +5777,10 @@ fn prepare_table_row(
         Some(height) if height < 0 => {
             twips_to_points(height.checked_abs().unwrap_or(i32::MAX)).max(1.0)
         }
-        Some(height) => twips_to_points(height).max(row_height),
+        Some(height) => {
+            let natural_content_height = (row_height - top_border_inset).max(0.0);
+            twips_to_points(height).max(natural_content_height) + top_border_inset
+        }
         None => row_height,
     };
 
@@ -16749,7 +16754,7 @@ mod tests {
         assert!(has_vertical_line_at(page, 60.0));
         assert!(has_vertical_line_at(page, 150.0));
         assert!(has_horizontal_line_at(page, 72.0, 144.0, 723.0));
-        assert!(has_horizontal_line_at(page, 72.0, 144.0, 675.0));
+        assert!(has_horizontal_line_at(page, 72.0, 144.0, 674.5));
     }
 
     #[test]
@@ -17820,7 +17825,7 @@ mod tests {
     }
 
     #[test]
-    fn lays_out_table_row_height_as_minimum_height() {
+    fn lays_out_table_row_minimum_height_plus_top_border_width() {
         let mut document = Document::default();
         document.colors = vec![
             Color::default(),
@@ -17853,7 +17858,13 @@ mod tests {
                     shading_pattern: crate::model::ShadingPattern::None,
                     padding: TableCellPadding::default(),
                     spacing: Default::default(),
-                    borders: TableCellBorders::default(),
+                    borders: TableCellBorders {
+                        top: TableCellBorder {
+                            width_twips: 20,
+                            ..TableCellBorder::default()
+                        },
+                        ..TableCellBorders::default()
+                    },
                     fit_text: false,
                     text_direction: TableCellTextDirection::LeftToRightTopToBottom,
                     vertical_align: TableCellVerticalAlign::Top,
@@ -17880,7 +17891,7 @@ mod tests {
             })
             .expect("row background");
 
-        assert!((height - 36.0).abs() < 0.01);
+        assert!((height - 37.0).abs() < 0.01);
     }
 
     #[test]
@@ -18056,7 +18067,7 @@ mod tests {
         assert_eq!(prepared.cell_lines[0].len(), 1);
         assert_eq!(prepared.cell_lines[1].len(), 1);
         assert_eq!(prepared.cell_lines[2].len(), 2);
-        assert!((prepared.row_height - 72.0).abs() < 0.01);
+        assert!((prepared.row_height - 73.0).abs() < 0.01);
         let fragments = layout
             .pages
             .iter()
@@ -19074,7 +19085,7 @@ mod tests {
             })
             .expect("compact cell text");
 
-        assert!((row_height - twips_to_points(489)).abs() < 0.01);
+        assert!((row_height - twips_to_points(489) - 0.5).abs() < 0.01);
         assert!((text_x - 77.4).abs() < 0.01);
     }
 
@@ -20108,7 +20119,7 @@ mod tests {
         assert!(text.contains("Merged top"));
         assert!(!text.contains("Hidden continuation"));
         assert!(text.contains("Right bottom"));
-        assert!((merged_shading_height - 72.0).abs() < 0.01);
+        assert!((merged_shading_height - 73.0).abs() < 0.01);
         assert!(baseline_y("Merged") < baseline_y("Right"));
         assert!(!has_horizontal_line_segment_at_y(
             page, 72.0, 144.0, internal_y
