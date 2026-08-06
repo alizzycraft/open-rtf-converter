@@ -4659,7 +4659,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact rotated rectangle path geometry and fill/stroke placement."
+        "The focused Word audit confirms OfficeArt rotation is interpreted as 16.16 fixed degrees and produces matching yellow fill, red 0.75-point stroke, wrap flow, and one-page structure. Current polygon bounds are (109.50,76.90)-(214.50,175.10) points versus Word's (109.51,76.89)-(214.49,175.11), with corresponding vertices within 0.02 points. The right wrapped segment starts 1.55 points left of Word due to the documented bundled-font/exclusion metric residual."
       ]
     },
     {
