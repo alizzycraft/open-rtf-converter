@@ -3869,7 +3869,9 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/URI",
             ],
             must_contain_pdf: &[b" S"],
-            must_emit_diagnostics: &[],
+            must_emit_diagnostics: &[
+                "row-level table borders ignored to match Word print behavior",
+            ],
         },
         ReferenceFixture {
             input: "fixtures/intbl-zero-body-flow-passive.rtf",

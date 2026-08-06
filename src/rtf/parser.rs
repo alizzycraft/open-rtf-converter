@@ -782,6 +782,7 @@ impl Default for NestedCellProperties {
 fn nested_table_from_capture(
     capture: NestedTableCapture,
     paragraph_style: &ParagraphStyle,
+    preserve_row_borders: bool,
 ) -> Option<Table> {
     if capture.rows.is_empty() {
         return None;
@@ -859,30 +860,31 @@ fn nested_table_from_capture(
             || borders.left.visible
             || borders.diagonal_down.visible
             || borders.diagonal_up.visible
-    }) || row_outer_left_borders
-        .iter()
-        .flatten()
-        .any(|border| border.visible)
-        || row_outer_right_borders
+    }) || (preserve_row_borders
+        && (row_outer_left_borders
             .iter()
             .flatten()
             .any(|border| border.visible)
-        || row_outer_top_borders
-            .iter()
-            .flatten()
-            .any(|border| border.visible)
-        || row_outer_bottom_borders
-            .iter()
-            .flatten()
-            .any(|border| border.visible)
-        || row_inner_horizontal_borders
-            .iter()
-            .flatten()
-            .any(|border| border.visible)
-        || row_inner_vertical_borders
-            .iter()
-            .flatten()
-            .any(|border| border.visible);
+            || row_outer_right_borders
+                .iter()
+                .flatten()
+                .any(|border| border.visible)
+            || row_outer_top_borders
+                .iter()
+                .flatten()
+                .any(|border| border.visible)
+            || row_outer_bottom_borders
+                .iter()
+                .flatten()
+                .any(|border| border.visible)
+            || row_inner_horizontal_borders
+                .iter()
+                .flatten()
+                .any(|border| border.visible)
+            || row_inner_vertical_borders
+                .iter()
+                .flatten()
+                .any(|border| border.visible)));
     let rows = capture
         .rows
         .into_iter()
@@ -944,16 +946,29 @@ fn nested_table_from_capture(
             TableRow {
                 column_widths_twips: Vec::new(),
                 cells: {
-                    let horizontal_border = row_inner_horizontal_borders
-                        .get(row_index)
-                        .copied()
+                    let horizontal_border = preserve_row_borders
+                        .then(|| {
+                            row_inner_horizontal_borders
+                                .get(row_index)
+                                .copied()
+                                .flatten()
+                        })
                         .flatten();
-                    let vertical_border =
-                        row_inner_vertical_borders.get(row_index).copied().flatten();
-                    let left_border = row_outer_left_borders.get(row_index).copied().flatten();
-                    let right_border = row_outer_right_borders.get(row_index).copied().flatten();
-                    let top_border = row_outer_top_borders.get(row_index).copied().flatten();
-                    let bottom_border = row_outer_bottom_borders.get(row_index).copied().flatten();
+                    let vertical_border = preserve_row_borders
+                        .then(|| row_inner_vertical_borders.get(row_index).copied().flatten())
+                        .flatten();
+                    let left_border = preserve_row_borders
+                        .then(|| row_outer_left_borders.get(row_index).copied().flatten())
+                        .flatten();
+                    let right_border = preserve_row_borders
+                        .then(|| row_outer_right_borders.get(row_index).copied().flatten())
+                        .flatten();
+                    let top_border = preserve_row_borders
+                        .then(|| row_outer_top_borders.get(row_index).copied().flatten())
+                        .flatten();
+                    let bottom_border = preserve_row_borders
+                        .then(|| row_outer_bottom_borders.get(row_index).copied().flatten())
+                        .flatten();
                     let cell_count = cells.len();
                     for (cell_index, cell) in cells.iter_mut().enumerate() {
                         if cell_index == 0
@@ -1014,6 +1029,21 @@ fn nested_table_from_capture(
         borders_visible,
         preserve_authored_widths: false,
     })
+}
+
+fn nested_capture_has_row_border_controls(capture: &NestedTableCapture) -> bool {
+    capture.row_outer_left_borders.iter().any(Option::is_some)
+        || capture.row_outer_right_borders.iter().any(Option::is_some)
+        || capture.row_outer_top_borders.iter().any(Option::is_some)
+        || capture.row_outer_bottom_borders.iter().any(Option::is_some)
+        || capture
+            .row_inner_horizontal_borders
+            .iter()
+            .any(Option::is_some)
+        || capture
+            .row_inner_vertical_borders
+            .iter()
+            .any(Option::is_some)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -13971,6 +14001,8 @@ impl Parser {
         let page_content_width_twips = self.current_page_content_width_twips();
         let max_width_twips = self.limits().max_page_dimension_twips;
         let nested_paragraph_style = self.state.paragraph.clone();
+        let preserve_nested_row_borders =
+            self.options.compatibility_mode == CompatibilityMode::StrictSpec;
         self.ensure_carried_table_row();
         let Some(row) = self.current_table_row.as_mut() else {
             return self.push_text("\t", offset);
@@ -14068,10 +14100,19 @@ impl Parser {
             .get(cell_index)
             .copied()
             .unwrap_or_default();
+        let mut ignored_nested_row_borders = false;
         let nested_table = row
             .nested_table_capture
             .take()
-            .and_then(|capture| nested_table_from_capture(capture, &nested_paragraph_style))
+            .and_then(|capture| {
+                ignored_nested_row_borders = !preserve_nested_row_borders
+                    && nested_capture_has_row_border_controls(&capture);
+                nested_table_from_capture(
+                    capture,
+                    &nested_paragraph_style,
+                    preserve_nested_row_borders,
+                )
+            })
             .map(Box::new);
         row.cells.push(TableCell {
             paragraphs,
@@ -14109,6 +14150,12 @@ impl Parser {
         }
         row.current_cell_preferred_width = PreferredTableWidth::default();
         row.cell_open = false;
+        if ignored_nested_row_borders {
+            self.diagnostics.push(Diagnostic::warning(
+                "row-level table borders ignored to match Word print behavior",
+                Some(offset),
+            ));
+        }
         Ok(())
     }
 
@@ -14145,13 +14192,7 @@ impl Parser {
         if row.right_to_left {
             Self::normalize_right_to_left_table_row(&mut row);
         }
-        let has_diagonal_cell_border = row
-            .cells
-            .iter()
-            .any(|cell| cell.borders.diagonal_down.visible || cell.borders.diagonal_up.visible);
-        if self.options.compatibility_mode == CompatibilityMode::StrictSpec
-            || !has_diagonal_cell_border
-        {
+        if self.options.compatibility_mode == CompatibilityMode::StrictSpec {
             Self::apply_table_row_borders(&mut row);
         } else if row.row_border_flags.any() {
             self.diagnostics.push(Diagnostic::warning(
@@ -46247,7 +46288,7 @@ mod tests {
         assert_eq!(table.rows[1].cells[0].borders.left.width_twips, 30);
         assert_eq!(table.rows[1].cells[0].borders.top.width_twips, 30);
         assert_eq!(table.rows[1].cells[0].borders.bottom.width_twips, 30);
-        assert_eq!(table.rows[1].cells[1].borders.bottom.width_twips, 20);
+        assert!(!table.rows[1].cells[1].borders.bottom.visible);
         assert_eq!(table.rows[1].cells[1].borders.right.width_twips, 30);
 
         let second = match &output.document.blocks[1] {
@@ -46261,6 +46302,11 @@ mod tests {
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("row-level table borders ignored to match Word print behavior")
+        }));
     }
 
     #[test]
@@ -46404,9 +46450,13 @@ mod tests {
     }
 
     #[test]
-    fn preserves_nested_row_inner_border_controls_as_passive_cell_edges() {
-        let output = parse_rtf(
-            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trbrdrt\brdrth\brdrw40\trbrdrl\brdrdash\brdrw50\trbrdrr\brdrdot\brdrw60\trbrdrb\brdrdb\brdrw20\trbrdrh\brdrs\brdrw20\trbrdrv\brdrdot\brdrw30\cellx2000 A\nestcell\cellx4000 B\nestrow}\cell\row}",
+    fn strict_spec_preserves_nested_row_inner_border_controls_as_passive_cell_edges() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trbrdrt\brdrth\brdrw40\trbrdrl\brdrdash\brdrw50\trbrdrr\brdrdot\brdrw60\trbrdrb\brdrdb\brdrw20\trbrdrh\brdrs\brdrw20\trbrdrv\brdrdot\brdrw30\cellx2000 A\nestcell\cellx4000 B\nestrow}\cell\row}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -46452,6 +46502,37 @@ mod tests {
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
+    }
+
+    #[test]
+    fn word_compatible_ignores_nested_row_border_controls() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\trbrdrt\brdrth\brdrw40\trbrdrl\brdrdash\brdrw50\trbrdrr\brdrdot\brdrw60\trbrdrb\brdrdb\brdrw20\trbrdrv\brdrdot\brdrw30\cellx2000 A\nestcell\cellx4000 B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let Block::Table(table) = &output.document.blocks[0] else {
+            panic!("expected table block");
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+
+        assert!(nested.rows[0].cells.iter().all(|cell| {
+            cell.borders.top.style == BorderStyle::Single
+                && cell.borders.right.style == BorderStyle::Single
+                && cell.borders.bottom.style == BorderStyle::Single
+                && cell.borders.left.style == BorderStyle::Single
+                && cell.borders.top.width_twips == 10
+                && cell.borders.right.width_twips == 10
+                && cell.borders.bottom.width_twips == 10
+                && cell.borders.left.width_twips == 10
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("row-level table borders ignored to match Word print behavior")
+        }));
     }
 
     #[test]
@@ -56730,9 +56811,13 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_table_row_border_controls_as_cell_perimeter_borders() {
-        let output = parse_rtf(
-            r"{\rtf1{\colortbl;\red255\green0\blue0;}\trowd\trbrdrt\brdrdb\brdrw80\brdrcf1\trbrdrl\brdrdash\brdrw40\trbrdrr\brdrdot\brdrw60\cellx1440 A\cell\cellx2880 B\cell\row}",
+    fn strict_spec_normalizes_table_row_border_controls_as_cell_perimeter_borders() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1{\colortbl;\red255\green0\blue0;}\trowd\trbrdrt\brdrdb\brdrw80\brdrcf1\trbrdrl\brdrdash\brdrw40\trbrdrr\brdrdot\brdrw60\cellx1440 A\cell\cellx2880 B\cell\row}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -56757,9 +56842,13 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_table_row_inner_border_controls_as_safe_cell_borders() {
-        let output = parse_rtf(
-            r"{\rtf1\trowd\trbrdrh\brdrdb\brdrw80\trbrdrv\brdrdot\brdrw60\cellx1000 A\cell\cellx2000 B\cell\cellx3000 C\cell\row}",
+    fn strict_spec_normalizes_table_row_inner_border_controls_as_safe_cell_borders() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\trowd\trbrdrh\brdrdb\brdrw80\trbrdrv\brdrdot\brdrw60\cellx1000 A\cell\cellx2000 B\cell\cellx3000 C\cell\row}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -56788,6 +56877,33 @@ After\par}"#;
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
+    }
+
+    #[test]
+    fn word_compatible_ignores_row_borders_but_keeps_cell_borders() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\trbrdrb\brdrs\brdrw20\cellx1200\cellx2400 A\cell B\cell\row\trowd\trbrdrb\brdrs\brdrw20\cellx1200\clbrdrr\brdrs\brdrw30\cellx2400 C\cell D\cell\row}",
+        )
+        .unwrap();
+        let Block::Table(table) = &output.document.blocks[0] else {
+            panic!("expected table");
+        };
+
+        assert!(
+            table.rows[0]
+                .cells
+                .iter()
+                .all(|cell| !cell.borders.bottom.visible)
+        );
+        assert!(!table.rows[1].cells[0].borders.bottom.visible);
+        assert!(!table.rows[1].cells[1].borders.bottom.visible);
+        assert!(table.rows[1].cells[1].borders.right.visible);
+        assert_eq!(table.rows[1].cells[1].borders.right.width_twips, 30);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("row-level table borders ignored to match Word print behavior")
+        }));
     }
 
     #[test]

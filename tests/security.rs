@@ -3338,7 +3338,7 @@ fn unicode_color_table_separators_render_passively_without_control_leakage() {
 }
 
 #[test]
-fn table_row_borders_render_passively_without_control_leakage() {
+fn table_row_borders_are_ignored_without_control_leakage_in_word_mode() {
     let input = rtf(&[
         "{",
         "\\",
@@ -3383,6 +3383,11 @@ fn table_row_borders_render_passively_without_control_leakage() {
 
     assert!(text.contains("A"));
     assert!(text.contains("B"));
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("row-level table borders ignored to match Word print behavior")
+    }));
     for forbidden in [
         "trbrdrt", "trbrdrl", "brdrdb", "brdrdash", "brdrw", "brdrcf",
     ] {
@@ -3428,7 +3433,7 @@ fn table_row_borders_render_passively_without_control_leakage() {
 }
 
 #[test]
-fn table_row_inner_borders_render_passively_without_control_leakage() {
+fn table_row_inner_borders_are_ignored_without_control_leakage_in_word_mode() {
     let input = rtf(&[
         "{",
         "\\",
@@ -3468,6 +3473,11 @@ fn table_row_inner_borders_render_passively_without_control_leakage() {
     for expected in ["A", "B", "C"] {
         assert!(text.contains(expected));
     }
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("row-level table borders ignored to match Word print behavior")
+    }));
     for forbidden in ["trbrdrh", "trbrdrv", "brdrdb", "brdrdot", "brdrw"] {
         assert!(
             !text.contains(forbidden),
@@ -3505,10 +3515,7 @@ fn table_row_inner_borders_render_passively_without_control_leakage() {
             "decoded PDF text did not contain table cell text {expected:?}: {rendered_text:?}"
         );
     }
-    assert!(
-        stroke_count >= 3,
-        "expected passive table inner border strokes, saw {stroke_count}"
-    );
+    assert_eq!(stroke_count, 0, "Word ignores row-level table borders");
     for forbidden in [
         b"trbrdrh".as_slice(),
         b"trbrdrv",
@@ -72881,7 +72888,8 @@ fn table_border_spacing_renders_passively_without_control_leakage() {
         .expect("table");
     let cell = &table.rows[0].cells[0];
 
-    assert_eq!(cell.borders.top.spacing_twips, 60);
+    assert!(!cell.borders.top.visible);
+    assert_eq!(cell.borders.top.spacing_twips, 0);
     assert_eq!(cell.borders.left.spacing_twips, 240);
     assert_eq!(cell.borders.right.spacing_twips, 120);
     assert!(text.contains("Spaced cell"));

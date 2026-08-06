@@ -4974,7 +4974,7 @@
     {
       "id": "carried-table-row-definitions-passive-layout",
       "input": "fixtures/carried-table-row-definitions-passive.rtf",
-      "category": "must_match_closely",
+      "category": "acceptable_approximation",
       "word_reference_status": "pending_word_export",
       "word_reference_pdf": null,
       "word_reference_pages": [],
@@ -4991,7 +4991,9 @@
         "Carried table row definitions are normalized into bounded passive row geometry for following intbl rows.",
         "Raw row definitions, table state controls, cell boundaries, and border metadata are stripped before PDF rendering."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "row-level table borders ignored to match Word print behavior"
+      ],
       "forbidden_pdf_markers": [
         "trowd",
         "trgaph",
@@ -5018,7 +5020,7 @@
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact carried-row border reuse, cell widths, and row spacing."
+        "Word 16.0 rejects the malformed original as a corrupted table, so no baseline is fabricated or registered. A Word-valid counterpart with the complete row definition repeated proves the converter normalizes the carried row to the equivalent explicit geometry. Expanded Word probes show that authored row-level border controls are ignored while explicit cell borders remain visible; Word-compatible mode now follows that behavior and StrictSpec retains normalized row-border perimeters. Current and Word-valid-probe border centers differ by at most 0.04 points and text x origins by at most 0.05 points; the remaining 0.89-0.95-point vertical offset is the established bundled Arial-compatible metric residual."
       ]
     },
     {

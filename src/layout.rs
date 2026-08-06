@@ -4897,12 +4897,25 @@ fn layout_table(
     if has_flow_exclusion {
         *cursor_y = table_flow_cursor_y;
     } else {
-        // Word carries half of the final row's authored cell gap below the
-        // table. An omitted `\trgaph` therefore adds no synthetic flow gap.
+        // Word reserves an authored bottom cell border below the final row.
+        // Without one, it carries half of the final row's authored cell gap.
+        // An omitted `\trgaph` therefore adds no synthetic flow gap.
         let following_gap = table
             .rows
             .last()
-            .map(|row| twips_to_points(row.cell_gap_twips.max(0)) * 0.5)
+            .map(|row| {
+                let bottom_border_width = row
+                    .cells
+                    .iter()
+                    .filter(|cell| cell.borders.bottom.visible)
+                    .map(|cell| table_border_stroke(&cell.borders.bottom, document).0)
+                    .fold(0.0, f32::max);
+                if bottom_border_width > 0.0 {
+                    bottom_border_width
+                } else {
+                    twips_to_points(row.cell_gap_twips.max(0)) * 0.5
+                }
+            })
             .unwrap_or(0.0);
         *cursor_y -= following_gap;
     }
@@ -5573,7 +5586,10 @@ fn prepare_table_row(
         let borders = &row.cells[visual_cell.cell_index].borders;
         borders.diagonal_down.visible || borders.diagonal_up.visible
     });
-    let top_border_inset = if has_diagonal_cell_border {
+    // Word places text below the top border in auto-height rows and grows the
+    // row by that stroke width. Fixed-height rows keep their authored height;
+    // diagonal cells retain the inset so their endpoints meet the border.
+    let top_border_inset = if row.height_twips.is_none() || has_diagonal_cell_border {
         visual_cells
             .iter()
             .filter_map(|visual_cell| {
@@ -16952,9 +16968,13 @@ mod tests {
     }
 
     #[test]
-    fn lays_out_table_row_borders_from_normalized_cell_perimeter() {
-        let parsed = crate::rtf::parse_rtf(
-            r"{\rtf1{\colortbl;\red255\green0\blue0;}\trowd\trbrdrt\brdrdb\brdrw80\brdrcf1\trbrdrl\brdrdash\brdrw40\cellx1440 A\cell\cellx2880 B\cell\row}",
+    fn strict_spec_lays_out_table_row_borders_from_normalized_cell_perimeter() {
+        let parsed = crate::rtf::parse_rtf_bytes_with_options(
+            br"{\rtf1{\colortbl;\red255\green0\blue0;}\trowd\trbrdrt\brdrdb\brdrw80\brdrcf1\trbrdrl\brdrdash\brdrw40\cellx1440 A\cell\cellx2880 B\cell\row}",
+            &crate::config::RtfParseOptions {
+                compatibility_mode: crate::config::CompatibilityMode::StrictSpec,
+                ..crate::config::RtfParseOptions::default()
+            },
         )
         .unwrap();
 
@@ -18242,7 +18262,7 @@ mod tests {
             })
             .expect("row background");
 
-        assert!((height - 45.0).abs() < 0.01);
+        assert!((height - 45.5).abs() < 0.01);
     }
 
     #[test]
@@ -19083,6 +19103,60 @@ mod tests {
     }
 
     #[test]
+    fn auto_height_table_rows_reserve_the_top_cell_border_width() {
+        let positions = |border: &str| {
+            let source =
+                format!(r"{{\rtf1\trowd\trgaph0{border}\cellx2000 Cell\cell\row\pard After\par}}");
+            let parsed = crate::rtf::parse_rtf(&source).unwrap();
+            let layout = LayoutEngine::layout(&parsed.document);
+            let baseline = |target: &str| {
+                layout.pages[0]
+                    .items
+                    .iter()
+                    .find_map(|item| match item {
+                        LayoutItem::Text(fragment) if fragment.text.trim() == target => {
+                            Some(fragment.baseline_y)
+                        }
+                        _ => None,
+                    })
+                    .expect("target text")
+            };
+            (baseline("Cell"), baseline("After"))
+        };
+
+        let plain = positions("");
+        let bordered = positions(r"\clbrdrt\brdrs\brdrw30");
+        assert!((plain.0 - bordered.0 - 1.5).abs() < 0.01);
+        assert!((plain.1 - bordered.1 - 1.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn final_table_bottom_border_replaces_cell_gap_flow_clearance() {
+        let following_y = |row_controls: &str| {
+            let source =
+                format!(r"{{\rtf1\trowd{row_controls}\cellx2000 Cell\cell\row\pard After\par}}");
+            let parsed = crate::rtf::parse_rtf(&source).unwrap();
+            let layout = LayoutEngine::layout(&parsed.document);
+            layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.trim() == "After" => {
+                        Some(fragment.baseline_y)
+                    }
+                    _ => None,
+                })
+                .expect("following paragraph")
+        };
+
+        let without_gap = following_y(r"\trgaph0");
+        let with_border = following_y(r"\trgaph108\clbrdrb\brdrs\brdrw30");
+        let with_gap = following_y(r"\trgaph108");
+        assert!((without_gap - with_border - 1.5).abs() < 0.01);
+        assert!((without_gap - with_gap - 2.7).abs() < 0.01);
+    }
+
+    #[test]
     fn lays_out_row_default_table_padding_from_normalized_cells() {
         let parsed = crate::rtf::parse_rtf(
             r"{\rtf1\trowd\trpaddl360\trpaddr120\cellx1440 A\cell\cellx2880 B\cell\row}",
@@ -19549,7 +19623,7 @@ mod tests {
             .expect("row background");
 
         assert!((text_x - 84.0).abs() < 0.01);
-        assert!((row_height - 33.0).abs() < 0.01);
+        assert!((row_height - 33.5).abs() < 0.01);
     }
 
     #[test]
