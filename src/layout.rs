@@ -8525,6 +8525,8 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
 fn apply_passive_math_operator_spacing(paragraph: &Paragraph) -> Option<Paragraph> {
     let has_spaced_operator = paragraph.runs.iter().any(|run| {
         run.style.passive_math
+            && !run.style.overline
+            && run.style.underline == UnderlineStyle::None
             && run.text.char_indices().any(|(index, ch)| {
                 passive_math_operator_side_space_em(ch).is_some()
                     && passive_math_operator_has_operands(&run.text, index, ch.len_utf8())
@@ -8539,7 +8541,10 @@ fn apply_passive_math_operator_spacing(paragraph: &Paragraph) -> Option<Paragrap
         runs: Vec::with_capacity(paragraph.runs.len().saturating_add(8)),
     };
     for run in &paragraph.runs {
-        if !run.style.passive_math {
+        if !run.style.passive_math
+            || run.style.overline
+            || run.style.underline != UnderlineStyle::None
+        {
             output.runs.push(run.clone());
             continue;
         }
@@ -11797,7 +11802,7 @@ fn push_line_with_rotation(
                 y1: y,
                 x2: run_x + text_width,
                 y2: y,
-                width: 0.5,
+                width: if style.passive_math { 0.84 } else { 0.5 },
                 color,
                 style: LineStyle::Solid,
             });

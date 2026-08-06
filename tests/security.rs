@@ -24110,6 +24110,21 @@ fn office_math_group_characters_render_passive_lines_without_fallback_leakage() 
     assert!(over_style.overline);
     let under_style = run_style_for_text(&parsed.document, "y").expect("under group run");
     assert_eq!(under_style.underline, UnderlineStyle::Single);
+    let layout = LayoutEngine::layout(&parsed.document);
+    let passive_over_group_lines = layout.pages[0]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            LayoutItem::Line { y1, y2, width, .. } if (*y1 - *y2).abs() < 0.01 => Some(*width),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        passive_over_group_lines.len(),
+        1,
+        "operator spacing must not split the passive over-group stroke"
+    );
+    assert!((passive_over_group_lines[0] - 0.84).abs() < 0.01);
     for forbidden in [
         "mmath",
         "moMath",

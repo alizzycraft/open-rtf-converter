@@ -2081,7 +2081,7 @@
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact radical bar, overbar, delimiter spacing, and stroke placement."
+        "The registered Word PDF visibly prints executable-looking property payloads and the authored hidden radical degree, while the passive converter intentionally removes them; exact paragraph flow is therefore neither possible nor desired. Within retained safe content, radicals and top bars remain continuous across decorated operators and use Word's measured 0.84-point weight, while delimiter binary-operator spacing is preserved without changing searchable text. The converter uses bounded radical-sign/overline primitives rather than Word's stretchable Cambria Math constructions, so exact bar height and radical contour remain an acceptable passive approximation."
       ]
     },
     {
@@ -2143,7 +2143,7 @@
         " S"
       ],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact manual-break baseline, group-character stroke placement, function spacing, and phantom spacing."
+        "The registered Word PDF visibly prints manual-break, group-character, function, and phantom property payloads (including the supposedly hidden phantom argument), whereas the passive converter intentionally strips them; Word's eight-line payload-driven flow is not a compatibility target. The retained safe content preserves the manual break, `FirstSecond`, passive `sin x` function spacing, and complete phantom removal. Stretchable group-character glyph construction remains a documented approximation: the converter uses one continuous 0.84-point over/underline stroke and deliberately suppresses operator spacing that would fragment that stroke."
       ]
     },
     {
