@@ -3566,7 +3566,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact repeated-header placement and page-break row distribution."
+        "The focused Word audit confirms five pages with identical row distribution: page 1 contains body rows 01-07, pages 2-4 contain 08-15, 16-23, and 24-31, and page 5 contains 32-36 plus the trailing paragraph. Header rows repeat at the same 36-point cadence. The fixture's undefined `\\clcbpat1` reference is ignored like Word instead of becoming a black fill. Current text starts at (36.00,35.49) points versus Word's (36.02,36.44), leaving only the shared bundled Arial-compatible metric residual."
       ]
     },
     {

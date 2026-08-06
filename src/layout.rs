@@ -3468,6 +3468,7 @@ fn layout_shape_text(
             let is_first_line = line_idx == 0;
             let is_last_line = line_idx + 1 == line_count;
             if shading_is_visible(
+                document,
                 paragraph.style.shading_color_index,
                 paragraph.style.shading_pattern,
             ) {
@@ -4309,6 +4310,7 @@ fn layout_repeating_header_footer(
                     line_idx + 1 == line_count,
                 );
                 if shading_is_visible(
+                    document,
                     paragraph.style.shading_color_index,
                     paragraph.style.shading_pattern,
                 ) {
@@ -6111,7 +6113,7 @@ fn push_table_row(
         let cell_top = top - spacing.top;
         let cell_width = (visual_cell.width - spacing.left - spacing.right).max(1.0);
         let cell_height = (span_height - spacing.top - spacing.bottom).max(1.0);
-        if shading_is_visible(cell.shading_color_index, cell.shading_pattern) {
+        if shading_is_visible(document, cell.shading_color_index, cell.shading_pattern) {
             push_shading_rect(
                 pages,
                 document,
@@ -6183,6 +6185,7 @@ fn push_table_row(
                 (visual_cell.width - spacing.left - spacing.right - padding.left - padding.right)
                     .max(1.0);
             if shading_is_visible(
+                document,
                 prepared_line.style.shading_color_index,
                 prepared_line.style.shading_pattern,
             ) {
@@ -6742,7 +6745,11 @@ fn push_nested_table_grid_at_depth(
                 row_end,
                 &row_heights,
             );
-            if shading_is_visible(render_cell.shading_color_index, render_cell.shading_pattern) {
+            if shading_is_visible(
+                document,
+                render_cell.shading_color_index,
+                render_cell.shading_pattern,
+            ) {
                 push_shading_rect(
                     pages,
                     document,
@@ -7670,6 +7677,7 @@ fn layout_paragraph_with_auto_footnotes(
             line_idx == 0,
         );
         if shading_is_visible(
+            document,
             paragraph.style.shading_color_index,
             paragraph.style.shading_pattern,
         ) {
@@ -12409,9 +12417,15 @@ fn shading_color(document: &Document, index: usize, basis_points: i32) -> PdfCol
     }
 }
 
-fn shading_is_visible(background_color_index: Option<usize>, pattern: ShadingPattern) -> bool {
-    background_color_index.is_some_and(|index| index > 0)
-        || pattern.foreground_color_index().is_some()
+fn shading_is_visible(
+    document: &Document,
+    background_color_index: Option<usize>,
+    pattern: ShadingPattern,
+) -> bool {
+    background_color_index.is_some_and(|index| index > 0 && index < document.colors.len())
+        || pattern
+            .foreground_color_index()
+            .is_some_and(|index| index < document.colors.len())
 }
 
 fn shading_fill_color(
@@ -12426,7 +12440,7 @@ fn shading_fill_color(
         blue: 1.0,
     };
     let background = background_color_index
-        .filter(|index| *index > 0)
+        .filter(|index| *index > 0 && *index < document.colors.len())
         .map(|index| color_for_index(document, index))
         .unwrap_or(white);
 
@@ -12434,7 +12448,10 @@ fn shading_fill_color(
         return background;
     }
 
-    if let Some(foreground_color_index) = pattern.foreground_color_index() {
+    if let Some(foreground_color_index) = pattern
+        .foreground_color_index()
+        .filter(|index| *index < document.colors.len())
+    {
         let foreground = color_for_index(document, foreground_color_index);
         let factor = (basis_points as f32 / 10_000.0).clamp(0.0, 1.0);
         return PdfColor {
@@ -12445,7 +12462,7 @@ fn shading_fill_color(
     }
 
     background_color_index
-        .filter(|index| *index > 0)
+        .filter(|index| *index > 0 && *index < document.colors.len())
         .map(|index| shading_color(document, index, basis_points))
         .unwrap_or(white)
 }
@@ -12463,10 +12480,13 @@ fn push_shading_rect(
     pattern: ShadingPattern,
 ) {
     let fill_color = shading_fill_color(document, background_color_index, basis_points, pattern);
-    let line_color = pattern
-        .foreground_color_index()
-        .map(|index| color_for_index(document, index))
-        .unwrap_or_default();
+    let line_color = match pattern.foreground_color_index() {
+        Some(index) => document
+            .colors
+            .get(index)
+            .map(|_| color_for_index(document, index)),
+        None => Some(PdfColor::default()),
+    };
     let page = pages.last_mut().expect("layout always has a page");
     page.items.push(LayoutItem::Highlight {
         x,
@@ -12475,7 +12495,9 @@ fn push_shading_rect(
         height,
         color: fill_color,
     });
-    push_shading_pattern_lines(page, x, y, width, height, line_color, pattern);
+    if let Some(line_color) = line_color {
+        push_shading_pattern_lines(page, x, y, width, height, line_color, pattern);
+    }
 }
 
 fn push_shading_pattern_lines(
@@ -22212,6 +22234,26 @@ mod tests {
             )
         }));
         assert!(layout_text(page).contains("Shaded paragraph"));
+    }
+
+    #[test]
+    fn ignores_shading_with_an_undefined_color_index() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\ansi\trowd\trhdr\trrh720\clcbpat1\cellx3600 Header row\cell\row}",
+        )
+        .unwrap();
+
+        let layout = LayoutEngine::layout(&parsed.document);
+        let page = &layout.pages[0];
+
+        assert!(layout_text(page).contains("Header row"));
+        assert!(
+            !page
+                .items
+                .iter()
+                .any(|item| matches!(item, LayoutItem::Highlight { .. })),
+            "an unresolved cell-color reference must not become an opaque black fill"
+        );
     }
 
     #[test]
