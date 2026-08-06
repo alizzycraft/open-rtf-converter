@@ -4726,7 +4726,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact same-page column break placement for section-break-as-column-flow."
+        "The focused Word audit confirms exact same-page column flow: the left and right segments begin at x=36.00/171.00 points versus Word's 36.02/171.07 points and share one baseline. The roughly 0.95-point vertical difference is the shared bundled Arial-compatible metric residual."
       ]
     },
     {
