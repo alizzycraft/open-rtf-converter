@@ -3524,7 +3524,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word baseline confirms the same top/center/bottom anchoring and following-paragraph position. Current cell x origins differ by at most 0.07 points and the following paragraph by 0.03 points; bundled-font/row-edge interactions place cell text 1.56-1.96 points above Word and remain a bounded row-height approximation. Unspecified authored border colors now match Word black."
+        "The registered Word baseline confirms the same top/center/bottom anchoring and following-paragraph position. Relative to the preceding paragraph baseline, current top/center/bottom cell baselines differ from Word by at most 0.04 points and post-table flow by 0.07 points; the shared 0.91-0.97-point absolute vertical offset is the established bundled Arial-compatible font-metric residual, not a table-layout error. Current cell x origins differ by at most 0.07 points, and unspecified authored border colors match Word black."
       ]
     },
     {
