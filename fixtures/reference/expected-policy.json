@@ -2408,10 +2408,9 @@
         "Barcode [Field removed: no passive result]",
         "Display barcode [Field removed: no passive result]",
         "Merge barcode [Field removed: no passive result]",
-        "Math 1",
-        "2",
+        "Math (1,2)",
         "Embed [Field removed: no passive result]",
-        "Go button Visible jump",
+        "Go button \"Visible jump\"",
         "Visible after template and embedded fields."
       ],
       "intentional_security_differences": [
@@ -2459,7 +2458,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact EQ fraction layout, placeholder line flow, and GOTOBUTTON display text spacing."
+        "The hardened Word reference prints this fixture's bare RTF-level \\f control as the literal EQ operand (1,2), and preserves the quoted GOTOBUTTON label; both safe visible details now match. Word evaluates or omits the resultless building-block, barcode, and embedded-object fields, including a generated barcode graphic, while the converter intentionally performs no template lookup, barcode generation, or object activation and retains bounded passive placeholders. Both outputs stay on one page; their line flow differs only where those security placeholders replace Word's dynamic or zero-width results."
       ]
     },
     {

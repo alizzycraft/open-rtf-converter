@@ -13798,17 +13798,10 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
     let text = collect_text(&parsed.document);
 
     assert!(
-        text.contains("Equation 1\u{2044}2 and escaped alpha\u{2044}beta"),
+        text.contains("Equation (1,2) and escaped alpha\u{2044}beta"),
         "normalized EQ text was {text:?}"
     );
-    for forbidden in [
-        "EQ",
-        "fldinst",
-        "\\f",
-        "(1,2)",
-        "(alpha,beta)",
-        "[Field removed",
-    ] {
+    for forbidden in ["EQ", "fldinst", "\\f", "(alpha,beta)", "[Field removed"] {
         assert!(
             !text.contains(forbidden),
             "forbidden EQ field content leaked to text: {forbidden}"
@@ -13819,6 +13812,20 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
             .message
             .contains("rendering passive field EQ without executing field instruction")
     }));
+
+    let strict = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    let strict_text = collect_text(&strict.document);
+    assert!(
+        strict_text.contains("Equation 1\u{2044}2 and escaped alpha\u{2044}beta"),
+        "strict EQ text was {strict_text:?}"
+    );
 
     let output = convert_rtf_to_pdf(
         &input,
@@ -13833,17 +13840,8 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
-    assert!(rendered_text.contains("Equation 1"));
-    assert!(rendered_text.contains("2 and escaped alpha"));
+    assert!(rendered_text.contains("Equation (1,2) and escaped alpha"));
     assert!(rendered_text.contains("beta"));
-    let numerator_position =
-        pdf_first_text_position_for_text(&content, "1").expect("EQ numerator position");
-    let denominator_position =
-        pdf_first_text_position_for_text(&content, "2").expect("EQ denominator position");
-    assert!(
-        numerator_position.1 > denominator_position.1,
-        "EQ fraction numerator should render above denominator: numerator={numerator_position:?}, denominator={denominator_position:?}"
-    );
     let alpha_position =
         pdf_first_text_position_for_text(&content, "alpha").expect("escaped EQ numerator position");
     let beta_position = pdf_first_text_position_for_text(&content, "beta")
@@ -13856,12 +13854,11 @@ fn resultless_eq_fraction_fields_render_passively_without_instruction_leakage() 
         pdf_text_font_names(&content)
             .iter()
             .any(|name| name.starts_with(b"TF")),
-        "EQ fractions should use a passive supplied font"
+        "escaped EQ fraction should use a passive supplied font"
     );
     for forbidden in [
         b"fldinst".as_slice(),
         b"\\f",
-        b"(1,2)",
         b"(alpha,beta)",
         b"/JavaScript",
         b"/EmbeddedFile",
@@ -13966,7 +13963,7 @@ fn resultless_eq_fields_reject_active_pdf_marker_components_before_pdf() {
 
     assert!(
         text.contains(
-            "frac [Field removed: no passive result] root [Field removed: no passive result] ok 1\u{2044}2"
+            "frac [Field removed: no passive result] root [Field removed: no passive result] ok (1,2)"
         ),
         "normalized text did not contain passive EQ placeholders: {text:?}"
     );
@@ -13999,7 +13996,7 @@ fn resultless_eq_fields_reject_active_pdf_marker_components_before_pdf() {
     let searchable_pdf = pdf_bytes_excluding_embedded_font_programs(&output.pdf);
     assert!(
         rendered_text.contains(
-            "frac [Field removed: no passive result] root [Field removed: no passive result] ok"
+            "frac [Field removed: no passive result] root [Field removed: no passive result] ok (1,2)"
         ),
         "decoded PDF text did not contain passive EQ placeholders: {rendered_text:?}"
     );
@@ -16183,12 +16180,24 @@ visible after\par}"#
 
     assert!(text.contains("Visible before"));
     assert!(text.contains("visible after"));
-    assert!(text.contains("eq 1\u{2044}2"));
-    assert!(text.contains("go Visible jump"));
+    assert!(text.contains("eq (1,2)"));
+    assert!(text.contains("go \"Visible jump\""));
     assert_eq!(
         text.matches("[Field removed: no passive result]").count(),
         6
     );
+    let strict = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    let strict_text = collect_text(&strict.document);
+    assert!(strict_text.contains("eq 1\u{2044}2"));
+    assert!(strict_text.contains("go Visible jump"));
+    assert!(!strict_text.contains("go \"Visible jump\""));
     for forbidden in [
         "AUTOTEXT",
         "AUTOTEXTLIST",
@@ -16229,15 +16238,8 @@ visible after\par}"#
 
     assert!(rendered_text.contains("Visible before"));
     assert!(rendered_text.contains("visible after"));
-    assert!(rendered_text.contains("eq 1"));
-    assert!(rendered_text.contains("2"));
-    assert!(
-        pdf_text_font_names(&content)
-            .iter()
-            .any(|name| name.starts_with(b"TF")),
-        "EQ field fraction should use a passive supplied font"
-    );
-    assert!(rendered_text.contains("go Visible jump"));
+    assert!(rendered_text.contains("eq (1,2)"));
+    assert!(rendered_text.contains("go \"Visible jump\""));
     assert!(rendered_text.contains("[Field removed: no passive result]"));
     for name in ["AUTOTEXT", "AUTOTEXTLIST"] {
         assert!(

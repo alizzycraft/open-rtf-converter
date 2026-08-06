@@ -10570,6 +10570,14 @@ impl Parser {
             self.passive_revision_number_field_result()
         } else if field_instruction_name(instruction) == Some("FILESIZE") {
             self.passive_file_size_field_result()
+        } else if field_instruction_name(instruction) == Some("EQ")
+            && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+        {
+            passive_word_compatible_eq_field_result(instruction)
+        } else if field_instruction_name(instruction) == Some("GOTOBUTTON")
+            && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+        {
+            passive_word_compatible_gotobutton_field_result(instruction)
         } else if field_instruction_name(instruction)
             .is_some_and(|name| matches!(name, "FORMTEXT" | "FORMDROPDOWN"))
             && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
@@ -28302,6 +28310,28 @@ fn passive_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
     })
 }
 
+fn passive_word_compatible_eq_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    let rest = field_rest_after_name(instruction)?.trim_start();
+    if rest.starts_with("\\f") || rest.starts_with("\\r") {
+        return passive_eq_field_result(instruction);
+    }
+
+    let (left, right, remainder) = field_parenthesized_pair(rest)?;
+    if !remainder.trim().is_empty()
+        || !is_safe_passive_eq_component(&left)
+        || !is_safe_passive_eq_component(&right)
+    {
+        return None;
+    }
+
+    Some(PassiveFieldResult {
+        text: rest.trim().to_string(),
+        font_name: None,
+        font_size_half_points: None,
+        form_field: false,
+    })
+}
+
 fn passive_eq_field_segments(instruction: &str) -> Option<Vec<PassiveFieldSegment>> {
     let mut rest = field_rest_after_name(instruction)?.trim_start();
     if let Some(stripped) = rest.strip_prefix("\\f") {
@@ -28610,6 +28640,19 @@ fn passive_macrobutton_field_result(instruction: &str) -> Option<PassiveFieldRes
 }
 
 fn passive_gotobutton_field_result(instruction: &str) -> Option<PassiveFieldResult> {
+    passive_gotobutton_field_result_with_quote_mode(instruction, false)
+}
+
+fn passive_word_compatible_gotobutton_field_result(
+    instruction: &str,
+) -> Option<PassiveFieldResult> {
+    passive_gotobutton_field_result_with_quote_mode(instruction, true)
+}
+
+fn passive_gotobutton_field_result_with_quote_mode(
+    instruction: &str,
+    preserve_quoted_display: bool,
+) -> Option<PassiveFieldResult> {
     let rest = field_rest_after_name(instruction)?;
     let rest = skip_field_argument(rest)?;
     let display = rest.trim_start();
@@ -28618,7 +28661,12 @@ fn passive_gotobutton_field_result(instruction: &str) -> Option<PassiveFieldResu
     }
 
     let text = if display.starts_with('"') {
-        field_quoted_prefix(display)?
+        let text = field_quoted_prefix(display)?;
+        if preserve_quoted_display {
+            format!("\"{text}\"")
+        } else {
+            text
+        }
     } else {
         display.trim_end().to_string()
     };
@@ -49837,9 +49885,9 @@ After\par}"#;
         assert!(text.contains("barcode"));
         assert!(text.contains("display"));
         assert!(text.contains("mergebarcode"));
-        assert!(text.contains("eq 1\u{2044}2"));
+        assert!(text.contains("eq (1,2)"));
         assert!(text.contains("embed"));
-        assert!(text.contains("go Visible jump"));
+        assert!(text.contains("go \"Visible jump\""));
         assert!(text.contains("After"));
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
@@ -49912,7 +49960,7 @@ After\par}"#;
         let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
         let stripped_text = document_text(&stripped.document);
         assert!(stripped_text.contains("Before"));
-        assert!(stripped_text.contains("go Visible jump"));
+        assert!(stripped_text.contains("go \"Visible jump\""));
         assert!(stripped_text.contains("After"));
         assert!(!stripped_text.contains("[Field removed"));
         assert!(stripped.diagnostics.iter().any(|diagnostic| {
@@ -49942,7 +49990,7 @@ After\par}"#;
 
         assert!(
             text.contains(
-                "frac [Field removed: no passive result] root [Field removed: no passive result] ok 1\u{2044}2"
+                "frac [Field removed: no passive result] root [Field removed: no passive result] ok (1,2)"
             ),
             "text was {text:?}"
         );

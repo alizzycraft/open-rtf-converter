@@ -2046,10 +2046,9 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 "Barcode [Field removed: no passive result]",
                 "Display barcode [Field removed: no passive result]",
                 "Merge barcode [Field removed: no passive result]",
-                "Math 1",
-                "2",
+                "Math (1,2)",
                 "Embed [Field removed: no passive result]",
-                "Go button Visible jump",
+                "Go button \"Visible jump\"",
                 "Visible after template and embedded fields.",
             ],
             must_not_leak: &[
