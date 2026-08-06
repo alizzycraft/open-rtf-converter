@@ -2,6 +2,7 @@ param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$OutputDirectory = (Join-Path $RepositoryRoot 'target\word365-auto'),
     [string]$Fixture = '',
+    [string]$InputPath = '',
     [int]$Limit = 0,
     [bool]$ShowWord = $true,
     [switch]$HideWord,
@@ -106,7 +107,17 @@ Write-Host 'Early-bound Word interop compiled successfully.'
 if ($ValidateOnly) { return }
 
 $fixturesDirectory = Join-Path $RepositoryRoot 'fixtures'
-if ($Fixture) {
+if ($Fixture -and $InputPath) {
+    throw 'Specify either -Fixture or -InputPath, not both.'
+}
+if ($InputPath) {
+    $resolvedInput = Get-Item -LiteralPath $InputPath -ErrorAction Stop
+    if ($resolvedInput.PSIsContainer -or $resolvedInput.Extension -ne '.rtf') {
+        throw "InputPath must name an RTF file: '$InputPath'."
+    }
+    $files = @($resolvedInput)
+}
+elseif ($Fixture) {
     $files = @(Get-ChildItem $fixturesDirectory -Filter $Fixture -File)
     if ($files.Count -eq 0) { throw "No fixture matched '$Fixture'." }
 }
