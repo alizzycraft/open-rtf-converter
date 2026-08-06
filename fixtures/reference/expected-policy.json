@@ -5183,12 +5183,12 @@
       "expected_pages": 1,
       "must_preserve_text": [
         "Before old list.",
-        "3.Indented decimal item",
-        "IV.Upper roman item",
+        "Indented decimal item",
+        "Upper roman item",
         "After old list."
       ],
       "intentional_security_differences": [
-        "Old-style list controls are normalized into bounded passive marker text and paragraph indentation, not preserved as editable Word list state."
+        "Word-compatible conversion strips standalone old-style list destinations as non-printing compatibility metadata; StrictSpec retains the bounded passive marker and indentation fallback without preserving editable Word list state."
       ],
       "expected_diagnostics": [],
       "forbidden_pdf_markers": [
@@ -5208,7 +5208,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact old-style list marker indentation, hanging offset, tab spacing, and numbering continuation."
+        "The focused Word 16.0 audit confirms that both standalone old-style pn destinations are non-printing compatibility metadata: Word emits neither the synthesized 3./IV. markers nor their pnindent, pnhang, or pnsp layout, and the following paragraph also remains at the 36-point body origin. WordCompatiblePassive now strips each destination as a group, while StrictSpec retains the bounded marker/indentation fallback and its existing security coverage. Current and Word have identical four-line text and 13.8-point cadence; corresponding word x origins differ by at most 0.15 points and y origins retain the established 0.95-point bundled Arial-compatible residual. Both PDFs are one page with zero drawings, images, links, annotations, widgets, or actions; focused geometry was inspected."
       ]
     },
     {

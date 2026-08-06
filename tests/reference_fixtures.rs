@@ -3992,8 +3992,8 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             expected_pages: 1,
             must_preserve_text: &[
                 "Before old list.",
-                "3.Indented decimal item",
-                "IV.Upper roman item",
+                "Indented decimal item",
+                "Upper roman item",
                 "After old list.",
             ],
             must_not_leak: &[

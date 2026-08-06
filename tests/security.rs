@@ -3988,7 +3988,7 @@ fn old_style_list_marker_text_renders_passively_without_control_leakage() {
         "\\",
         "par}",
     ]);
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("3.\tThird item"));
@@ -4008,6 +4008,10 @@ fn old_style_list_marker_text_renders_passively_without_control_leakage() {
         &output_path,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -4065,7 +4069,7 @@ fn old_style_list_marker_text_reset_clears_stale_styled_runs_without_leakage() {
         "\\",
         "par}",
     ]);
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("7.\tItem"));
@@ -4085,6 +4089,10 @@ fn old_style_list_marker_text_reset_clears_stale_styled_runs_without_leakage() {
         &output_path,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -4112,7 +4120,7 @@ fn old_style_marker_only_paragraph_flushes_without_leaking_to_next_paragraph() {
     let input =
         br"{\rtf1{\colortbl;\red255\green0\blue0;}{\pn\pnucrm\pnstart4\pnb\pncf1}\par Next\par}"
             .to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let paragraphs: Vec<_> = parsed
         .document
         .blocks
@@ -4135,6 +4143,10 @@ fn old_style_marker_only_paragraph_flushes_without_leaking_to_next_paragraph() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -5051,7 +5063,7 @@ fn list_table_metadata_controls_do_not_leak_or_override_visible_markers() {
 #[test]
 fn old_style_list_format_controls_synthesize_passive_markers_without_leakage() {
     let input = br"{\rtf1{\pn\pnucrm\pnrnot0\pnstart4}Fourth item\par{\pn\pnlcltr\pnrnot0\pnstart28}Lower alpha\par{\pn\pnord\pnrnot0\pnstart13}Ordinal\par{\pn\pnbul\pnrnot0}Bullet\par}".to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("IV.\tFourth item"));
@@ -5077,6 +5089,10 @@ fn old_style_list_format_controls_synthesize_passive_markers_without_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -5117,7 +5133,7 @@ fn old_style_list_format_controls_synthesize_passive_markers_without_leakage() {
 #[test]
 fn old_style_list_indent_controls_render_passively_without_control_leakage() {
     let input = br"{\rtf1{\pn\pndec\pnstart1\pnindent720\pnhang}Indented item\par}".to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected old-style list paragraph"),
@@ -5131,6 +5147,10 @@ fn old_style_list_indent_controls_render_passively_without_control_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -5167,7 +5187,7 @@ fn old_style_list_indent_controls_render_passively_without_control_leakage() {
 #[test]
 fn old_style_list_spacing_renders_passively_without_control_leakage() {
     let input = br"{\rtf1{\pn\pndec\pnstart1\pnindent720\pnhang\pnsp360}Spaced item\par}".to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected old-style list paragraph"),
@@ -5182,6 +5202,10 @@ fn old_style_list_spacing_renders_passively_without_control_leakage() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -5220,7 +5244,7 @@ fn old_style_list_spacing_renders_passively_without_control_leakage() {
 fn old_style_list_marker_formatting_renders_passively_without_control_leakage() {
     let input =
         br"{\rtf1{\colortbl;\red255\green0\blue0;}{\pn\pndec\pnb\pni\pnul\pnstrike\pncaps\pncf1\pnfs28}Formatted item\par}".to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let paragraph = match &parsed.document.blocks[0] {
         Block::Paragraph(paragraph) => paragraph,
         _ => panic!("expected old-style list paragraph"),
@@ -5245,6 +5269,10 @@ fn old_style_list_marker_formatting_renders_passively_without_control_leakage() 
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -5285,7 +5313,7 @@ fn old_style_list_marker_formatting_renders_passively_without_control_leakage() 
 #[test]
 fn old_style_list_marker_underline_variants_render_passively_without_control_leakage() {
     let input = br"{\rtf1{\pn\pndec\pnuldb}Double old marker\par{\pn\pndec\pnuld}Dotted old marker\par{\pn\pndec\pnuldash}Dashed old marker\par{\pn\pndec\pnulwave}Wave old marker\par{\pn\pndec\pnulw}Words old marker\par{\pn\pndec\pnuldb\pnulnone}Plain old marker\par}".to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
 
     for (index, (text, underline)) in [
         ("Double old marker", UnderlineStyle::Double),
@@ -5318,6 +5346,10 @@ fn old_style_list_marker_underline_variants_render_passively_without_control_lea
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
@@ -6625,7 +6657,7 @@ fn ordinal_list_markers_render_as_passive_pdf_text() {
 #[test]
 fn cardinal_and_ordinal_text_list_markers_render_as_passive_pdf_text() {
     let input = br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc6\levelstartat21{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid21}{\list{\listlevel\levelnfc7\levelstartat22{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid22}{\list{\listlevel\levelnfc6\levelstartat1000{\leveltext\'02\'00.;}{\levelnumbers\'01;}}\listid23}}{\*\listoverridetable{\listoverride\listid21\ls21}{\listoverride\listid22\ls22}{\listoverride\listid23\ls23}}\pard\ls21\ilvl0 Cardinal text\par\pard\ls22\ilvl0 Ordinal text\par\pard\ls23\ilvl0 Fallback text\par{\pn\pncard\pnstart21}Old cardinal\par{\pn\pnordt\pnstart22}Old ordinal\par}".to_vec();
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
 
     for expected in [
@@ -6651,6 +6683,10 @@ fn cardinal_and_ordinal_text_list_markers_render_as_passive_pdf_text() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )

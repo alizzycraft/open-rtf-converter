@@ -4816,7 +4816,14 @@ impl Parser {
                 self.state.destination = Destination::ListText;
             }
             "pn" if destination_allows_visible_old_style_list_marker(&self.state) => {
-                self.start_old_style_list_marker();
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && control_starts_group
+                {
+                    self.pending_old_style_list_marker = None;
+                    self.state.destination = Destination::Ignored;
+                } else {
+                    self.start_old_style_list_marker();
+                }
             }
             "pndec" if destination_allows_visible_old_style_list_marker(&self.state) => {
                 self.set_old_style_list_marker_format(ListNumberFormat::Decimal);
@@ -52169,9 +52176,10 @@ After\par}"#;
 
     #[test]
     fn prefixes_old_style_pn_marker_text_to_following_paragraph() {
-        let output =
-            parse_rtf(r"{\rtf1{\pn\pndec\pnstart3{\pntxtb 3}{\pntxta .\tab}}Third item\par}")
-                .unwrap();
+        let output = parse_rtf_strict(
+            r"{\rtf1{\pn\pndec\pnstart3{\pntxtb 3}{\pntxta .\tab}}Third item\par}",
+        )
+        .unwrap();
         let paragraph = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected old-style list paragraph"),
@@ -52186,8 +52194,47 @@ After\par}"#;
     }
 
     #[test]
+    fn word_suppresses_standalone_old_style_pn_destination() {
+        let output = parse_rtf(
+            r"{\rtf1 Before\par{\pn\pndec\pnstart3\pnindent720\pnhang\pnsp360}Decimal item\par{\pn\pnucrm\pnstart4\pnindent720\pnhang}Roman item\par After\par}",
+        )
+        .unwrap();
+        let paragraphs = output
+            .document
+            .blocks
+            .iter()
+            .map(|block| match block {
+                Block::Paragraph(paragraph) => paragraph,
+                _ => panic!("expected paragraphs"),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paragraph_plain_text(paragraphs[0]).as_deref(),
+            Some("Before")
+        );
+        assert_eq!(
+            paragraph_plain_text(paragraphs[1]).as_deref(),
+            Some("Decimal item")
+        );
+        assert_eq!(
+            paragraph_plain_text(paragraphs[2]).as_deref(),
+            Some("Roman item")
+        );
+        assert_eq!(
+            paragraph_plain_text(paragraphs[3]).as_deref(),
+            Some("After")
+        );
+        for paragraph in paragraphs {
+            assert_eq!(paragraph.style.left_indent_twips, 0);
+            assert_eq!(paragraph.style.first_line_indent_twips, 0);
+            assert!(paragraph.style.tab_stops_twips.is_empty());
+        }
+    }
+
+    #[test]
     fn synthesizes_old_style_roman_marker_without_explicit_marker_text() {
-        let output = parse_rtf(r"{\rtf1{\pn\pnucrm\pnstart4}Fourth item\par}").unwrap();
+        let output = parse_rtf_strict(r"{\rtf1{\pn\pnucrm\pnstart4}Fourth item\par}").unwrap();
         let paragraph = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected old-style list paragraph"),
@@ -52204,7 +52251,7 @@ After\par}"#;
 
     #[test]
     fn synthesizes_old_style_alpha_ordinal_and_bullet_markers() {
-        let output = parse_rtf(
+        let output = parse_rtf_strict(
             r"{\rtf1{\pn\pnlcltr\pnstart28}Lower alpha\par{\pn\pnord\pnstart13}Ordinal\par{\pn\pnbul}Bullet\par}",
         )
         .unwrap();
@@ -52221,7 +52268,8 @@ After\par}"#;
     #[test]
     fn applies_old_style_list_indent_controls_to_marker_paragraph() {
         let output =
-            parse_rtf(r"{\rtf1{\pn\pndec\pnstart2\pnindent720\pnhang}Indented\par}").unwrap();
+            parse_rtf_strict(r"{\rtf1{\pn\pndec\pnstart2\pnindent720\pnhang}Indented\par}")
+                .unwrap();
         let paragraph = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected old-style list paragraph"),
@@ -52241,7 +52289,8 @@ After\par}"#;
     #[test]
     fn applies_old_style_list_spacing_control_as_safe_tab_stop() {
         let output =
-            parse_rtf(r"{\rtf1{\pn\pndec\pnstart2\pnindent720\pnhang\pnsp360}Spaced\par}").unwrap();
+            parse_rtf_strict(r"{\rtf1{\pn\pndec\pnstart2\pnindent720\pnhang\pnsp360}Spaced\par}")
+                .unwrap();
         let paragraph = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected old-style list paragraph"),
@@ -52267,6 +52316,7 @@ After\par}"#;
     #[test]
     fn old_style_list_spacing_obeys_tab_stop_limit() {
         let options = RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
             limits: RtfLimits {
                 max_tab_stops: 0,
                 ..RtfLimits::default()
@@ -52282,7 +52332,7 @@ After\par}"#;
 
     #[test]
     fn applies_old_style_list_marker_character_format_controls_to_marker_run() {
-        let output = parse_rtf(
+        let output = parse_rtf_strict(
             r"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Courier New;}}{\colortbl;\red255\green0\blue0;}{\pn\pndec\pnb\pni\pnul\pnstrike\pncaps\pncf1\pnf1\pnfs28}Formatted item\par}",
         )
         .unwrap();
@@ -52957,7 +53007,7 @@ After\par}"#;
 
     #[test]
     fn synthesizes_cardinal_and_ordinal_text_old_style_markers() {
-        let output = parse_rtf(
+        let output = parse_rtf_strict(
             r"{\rtf1{\pn\pncard\pnstart21}Cardinal old style\par{\pn\pnordt\pnstart22}Ordinal old style\par{\pn\pncard\pnstart1000}Fallback old style\par}",
         )
         .unwrap();
