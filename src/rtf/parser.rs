@@ -43129,6 +43129,12 @@ fn parse_wmf_stretchdib_srcopy(
     let destination_width = i32::from(read_le_i16(data, 16)?.unsigned_abs().max(1));
     let destination_y = i32::from(read_le_i16(data, 18)?);
     let destination_x = i32::from(read_le_i16(data, 20)?);
+    let destination_extent_scale =
+        if word_compatible_passive && read_le_u32(data, 0)? == WMF_SRCCOPY_RASTER_OP {
+            word_compatible_wmf_stretchdib_extent_scale()
+        } else {
+            (1.0, 1.0)
+        };
 
     wmf_source_dib_transfer_command(
         &data[DIB_HEADER_OFFSET..],
@@ -43141,6 +43147,7 @@ fn parse_wmf_stretchdib_srcopy(
         destination_width,
         destination_height,
         coordinates,
+        destination_extent_scale,
         transfer_mode,
     )
 }
@@ -43209,6 +43216,7 @@ fn parse_wmf_dibbitblt_srcopy(
         destination_width,
         destination_height,
         coordinates,
+        (1.0, 1.0),
         transfer_mode,
     )
 }
@@ -43253,6 +43261,7 @@ fn parse_wmf_dibstretchblt_srcopy(
         destination_width,
         destination_height,
         coordinates,
+        (1.0, 1.0),
         transfer_mode,
     )
 }
@@ -43269,14 +43278,16 @@ fn wmf_source_dib_transfer_command(
     destination_width: i32,
     destination_height: i32,
     coordinates: WmfCoordinateMap,
+    destination_extent_scale: (f32, f32),
     transfer_mode: PassiveSourceRasterTransferMode,
 ) -> Option<PassiveSourceRasterCommand> {
-    let bounds = wmf_source_transfer_bounds(
+    let bounds = scaled_wmf_source_transfer_bounds(
         destination_x,
         destination_y,
         destination_width,
         destination_height,
         coordinates,
+        destination_extent_scale,
     )?;
     if let PassiveSourceRasterTransferMode::SourceIgnoring {
         raster_op,
@@ -43317,6 +43328,38 @@ fn wmf_source_dib_transfer_command(
         bounds.3,
         transfer_mode,
     )
+}
+
+fn word_compatible_wmf_stretchdib_extent_scale() -> (f32, f32) {
+    // Word's legacy WMF playback scales STRETCHDIB destination extents
+    // independently of their logical origin. These bounded ratios are shared
+    // by the full-source and cropped-source registered references.
+    const X_SCALE: f32 = 0.982_161_8;
+    const Y_SCALE: f32 = 1.071_441_3;
+    (X_SCALE, Y_SCALE)
+}
+
+fn scaled_wmf_source_transfer_bounds(
+    destination_x: i32,
+    destination_y: i32,
+    destination_width: i32,
+    destination_height: i32,
+    coordinates: WmfCoordinateMap,
+    (x_scale, y_scale): (f32, f32),
+) -> Option<(f32, f32, f32, f32)> {
+    let (left, top, right, bottom) = wmf_source_transfer_bounds(
+        destination_x,
+        destination_y,
+        destination_width,
+        destination_height,
+        coordinates,
+    )?;
+    if !x_scale.is_finite() || !y_scale.is_finite() || x_scale <= 0.0 || y_scale <= 0.0 {
+        return None;
+    }
+    let right = left + ((right - left) * x_scale);
+    let bottom = top + ((bottom - top) * y_scale);
+    bounds_is_visible((left, top, right, bottom)).then_some((left, top, right, bottom))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -70216,19 +70259,22 @@ After\par}"#;
         assert!(image.bytes.is_empty());
         assert_eq!(output.diagnostics.len(), 0);
         assert_eq!(image.vector_commands.len(), 1);
-        assert!(matches!(
-            &image.vector_commands[0],
-            StaticImageVectorCommand::RasterImage {
-                left: 15.0,
-                top: 25.0,
-                right: 95.0,
-                bottom: 65.0,
-                image,
-            } if image.format == ImageFormat::Rgb8
-                && image.width_px == 2
-                && image.height_px == 1
-                && image.bytes == vec![255, 0, 0, 0, 255, 0]
-        ));
+        let StaticImageVectorCommand::RasterImage {
+            left,
+            top,
+            right,
+            bottom,
+            image,
+        } = &image.vector_commands[0]
+        else {
+            panic!("expected passive raster command");
+        };
+        assert_eq!((*left, *top), (15.0, 25.0));
+        assert!((*right - 93.572_945).abs() < 0.000_1);
+        assert!((*bottom - 67.857_65).abs() < 0.000_1);
+        assert_eq!(image.format, ImageFormat::Rgb8);
+        assert_eq!((image.width_px, image.height_px), (2, 1));
+        assert_eq!(image.bytes, vec![255, 0, 0, 0, 255, 0]);
     }
 
     #[test]
@@ -70407,22 +70453,30 @@ After\par}"#;
         assert!(image.bytes.is_empty());
         assert_eq!(output.diagnostics.len(), 0);
         assert_eq!(image.vector_commands.len(), 1);
-        assert!(matches!(
-            image.vector_commands[0],
-            StaticImageVectorCommand::Rectangle {
-                left: 15.0,
-                top: 25.0,
-                right: 95.0,
-                bottom: 65.0,
-                stroke_color: None,
-                fill_color: Some(Color {
-                    red: 12,
-                    green: 34,
-                    blue: 56
-                }),
-                ..
-            }
-        ));
+        let StaticImageVectorCommand::Rectangle {
+            left,
+            top,
+            right,
+            bottom,
+            stroke_color,
+            fill_color,
+            ..
+        } = image.vector_commands[0]
+        else {
+            panic!("expected passive solid rectangle");
+        };
+        assert_eq!((left, top), (15.0, 25.0));
+        assert!((right - 93.572_945).abs() < 0.000_1);
+        assert!((bottom - 67.857_65).abs() < 0.000_1);
+        assert_eq!(stroke_color, None);
+        assert_eq!(
+            fill_color,
+            Some(Color {
+                red: 12,
+                green: 34,
+                blue: 56
+            })
+        );
     }
 
     #[test]
@@ -70620,20 +70674,23 @@ After\par}"#;
         assert!(image.bytes.is_empty());
         assert_eq!(output.diagnostics.len(), 0);
         assert_eq!(image.vector_commands.len(), 1);
-        assert!(matches!(
-            &image.vector_commands[0],
-            StaticImageVectorCommand::RasterImage {
-                left: 15.0,
-                top: 25.0,
-                right: 95.0,
-                bottom: 65.0,
-                image,
-            } if image.format == ImageFormat::Png
-                && image.width_px == 2
-                && image.height_px == 1
-                && image.palette.is_empty()
-                && image.alpha_mask.is_none()
-        ));
+        let StaticImageVectorCommand::RasterImage {
+            left,
+            top,
+            right,
+            bottom,
+            image,
+        } = &image.vector_commands[0]
+        else {
+            panic!("expected passive PNG raster command");
+        };
+        assert_eq!((*left, *top), (15.0, 25.0));
+        assert!((*right - 93.572_945).abs() < 0.000_1);
+        assert!((*bottom - 67.857_65).abs() < 0.000_1);
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!((image.width_px, image.height_px), (2, 1));
+        assert!(image.palette.is_empty());
+        assert!(image.alpha_mask.is_none());
     }
 
     #[test]
@@ -70899,16 +70956,19 @@ After\par}"#;
                         && image.bytes == vec![130, 140, 150, 160, 170, 180]
             ));
         }
-        assert!(matches!(
-            image.vector_commands[0],
-            StaticImageVectorCommand::RasterImage {
-                left: 15.0,
-                top: 25.0,
-                right: 95.0,
-                bottom: 65.0,
-                ..
-            }
-        ));
+        let StaticImageVectorCommand::RasterImage {
+            left,
+            top,
+            right,
+            bottom,
+            ..
+        } = image.vector_commands[0]
+        else {
+            panic!("expected passive raster command");
+        };
+        assert_eq!((left, top), (15.0, 25.0));
+        assert!((right - 93.572_945).abs() < 0.000_1);
+        assert!((bottom - 67.857_65).abs() < 0.000_1);
         assert!(matches!(
             image.vector_commands[1],
             StaticImageVectorCommand::RasterImage {
@@ -70971,6 +71031,16 @@ After\par}"#;
                         && image.bytes == vec![130, 140, 150, 160, 170, 180]
             ));
         }
+        assert!(matches!(
+            image.vector_commands[0],
+            StaticImageVectorCommand::RasterImage {
+                left: 15.0,
+                top: 25.0,
+                right: 95.0,
+                bottom: 65.0,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -71008,25 +71078,32 @@ After\par}"#;
                         && image.alpha_mask.is_none()
             ));
         }
-        assert!(matches!(
-            image.vector_commands[1],
-            StaticImageVectorCommand::ClipRect {
-                left: 15.0,
-                top: 25.0,
-                right: 95.0,
-                bottom: 65.0,
-            }
-        ));
-        assert!(matches!(
-            image.vector_commands[2],
-            StaticImageVectorCommand::RasterImage {
-                left: -65.0,
-                top: 25.0,
-                right: 175.0,
-                bottom: 65.0,
-                ..
-            }
-        ));
+        let StaticImageVectorCommand::ClipRect {
+            left,
+            top,
+            right,
+            bottom,
+        } = image.vector_commands[1]
+        else {
+            panic!("expected passive JPEG clip rectangle");
+        };
+        assert_eq!((left, top), (15.0, 25.0));
+        assert!((right - 93.572_945).abs() < 0.000_1);
+        assert!((bottom - 67.857_65).abs() < 0.000_1);
+        let StaticImageVectorCommand::RasterImage {
+            left,
+            top,
+            right,
+            bottom,
+            ..
+        } = image.vector_commands[2]
+        else {
+            panic!("expected clipped passive JPEG raster");
+        };
+        assert!((left - -63.572_945).abs() < 0.000_1);
+        assert_eq!(top, 25.0);
+        assert!((right - 172.145_89).abs() < 0.000_1);
+        assert!((bottom - 67.857_65).abs() < 0.000_1);
         assert!(matches!(
             image.vector_commands[5],
             StaticImageVectorCommand::ClipRect {

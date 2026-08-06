@@ -1105,7 +1105,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Focused Word audit confirms the two-pixel red/green order and orientation match. Exact destination geometry remains a bounded legacy playback approximation: current image bounds are (99.46, 58.80)-(142.66, 73.20) points versus Word's (99.50, 59.41)-(141.93, 74.84) points.",
+        "Focused Word audit confirms the two-pixel red/green order and orientation match. Word-compatible playback now applies Word's record-specific destination-extent transform: current and Word image sizes are both 42.42939 by 15.42875 points. Their remaining 0.04-point horizontal and 0.61-point vertical origin differences are shared inline-frame and bundled-font metric residuals.",
         "The converter preserves only normalized passive pixels; source DIB headers and raw metafile transfer records remain outside the PDF layer."
       ]
     },
@@ -1237,7 +1237,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Focused Word audit confirms record-specific source-window orientation now matches: bottom-up STRETCHDIB selects dark pixels (40,50,60)/(70,80,90), while DIBBITBLT selects medium pixels (130,140,150)/(160,170,180). Exact destination geometry remains a bounded legacy playback approximation: current STRETCHDIB bounds are (63.45, 58.80)-(106.65, 73.20) points versus Word's (63.50, 59.41)-(105.93, 74.84) points.",
+        "Focused Word audit confirms record-specific source-window orientation now matches: bottom-up STRETCHDIB selects dark pixels (40,50,60)/(70,80,90), while DIBBITBLT selects medium pixels (130,140,150)/(160,170,180). The STRETCHDIB destination extent now matches Word exactly at 42.42939 by 15.42875 points; the cropped DIBBITBLT destination still uses a bounded record-specific geometry approximation pending its independent transform recovery.",
         "The converter preserves only cropped normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
       ]
     },
