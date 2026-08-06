@@ -7504,6 +7504,8 @@ fn layout_paragraph_with_auto_footnotes(
     mut auto_footnotes: Option<AutoFootnoteFlush<'_>>,
     mut page_advance_hook: Option<&mut dyn FnMut(&mut Vec<LayoutPage>, &mut f32, &PageGeometry)>,
 ) {
+    let two_in_one_paragraph = word_two_in_one_layout_paragraph(paragraph);
+    let paragraph = two_in_one_paragraph.as_ref().unwrap_or(paragraph);
     let mut markers = markers.clone();
     if paragraph.style.page_break_before && !pages.last().is_none_or(|page| page.items.is_empty()) {
         flush_auto_footnotes_before_page_advance(
@@ -7852,6 +7854,39 @@ fn layout_paragraph_with_auto_footnotes(
     if !suppress_contextual_space_after {
         *cursor_y -= twips_to_points(effective_space_after_twips(&paragraph.style));
     }
+}
+
+fn word_two_in_one_layout_paragraph(paragraph: &Paragraph) -> Option<Paragraph> {
+    if !paragraph.style.two_in_one || paragraph.runs.is_empty() {
+        return None;
+    }
+
+    let mut layout_paragraph = paragraph.clone();
+    layout_paragraph.style.two_in_one = false;
+    let mut saw_visible_character = false;
+    let mut inserted_break = false;
+    for run in &mut layout_paragraph.runs {
+        run.style.font_size_scale_percent =
+            ((run.style.font_size_scale_percent.max(1) + 1) / 2).max(1);
+        if inserted_break {
+            continue;
+        }
+        let mut break_byte = None;
+        for (index, ch) in run.text.char_indices() {
+            if ch.is_whitespace() && saw_visible_character {
+                break_byte = Some(index + ch.len_utf8());
+                break;
+            }
+            if !ch.is_whitespace() {
+                saw_visible_character = true;
+            }
+        }
+        if let Some(index) = break_byte {
+            run.text.insert(index, '\n');
+            inserted_break = true;
+        }
+    }
+    Some(layout_paragraph)
 }
 
 fn run_page_advance_hook(

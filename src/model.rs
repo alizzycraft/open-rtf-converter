@@ -990,6 +990,9 @@ pub struct ParagraphStyle {
     pub keep_with_next: bool,
     pub widow_control: bool,
     pub no_wrap: bool,
+    /// Word's bounded two-in-one character layout: visible text is rendered as
+    /// two half-size horizontal rows within one ordinary paragraph line slot.
+    pub two_in_one: bool,
     pub suppress_line_numbers: bool,
     pub auto_hyphenation: bool,
     pub hyphenate_caps: bool,
@@ -1028,6 +1031,7 @@ impl Default for ParagraphStyle {
             keep_with_next: false,
             widow_control: false,
             no_wrap: false,
+            two_in_one: false,
             suppress_line_numbers: false,
             auto_hyphenation: false,
             hyphenate_caps: true,

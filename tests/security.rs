@@ -26903,6 +26903,30 @@ fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("Visible compatibility text"));
+    assert!(parsed.document.blocks.iter().all(|block| {
+        !matches!(block, Block::Paragraph(paragraph) if !paragraph.style.two_in_one)
+    }));
+    let layout = LayoutEngine::layout(&parsed.document);
+    let fragments = layout.pages[0]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            LayoutItem::Text(fragment) => Some(fragment),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let first = fragments
+        .iter()
+        .find(|fragment| fragment.text == "Visible ")
+        .expect("two-in-one first row");
+    let second = fragments
+        .iter()
+        .find(|fragment| fragment.text.starts_with("compatibility"))
+        .expect("two-in-one second row");
+    assert!((first.style.font_size_points() - 6.0).abs() < 0.01);
+    assert!((second.style.font_size_points() - 6.0).abs() < 0.01);
+    assert!((second.baseline_y - first.baseline_y).abs() > 6.0);
+    assert!((second.baseline_y - first.baseline_y).abs() < 8.0);
     for forbidden in [
         "themelang",
         "dghspace",

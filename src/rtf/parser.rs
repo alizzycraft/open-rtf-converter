@@ -6594,6 +6594,13 @@ impl Parser {
                     Some(offset),
                 ));
             }
+            "twoinone" => {
+                self.state.paragraph.two_in_one = control.parameter.unwrap_or(1) != 0;
+                self.diagnostics.push(Diagnostic::warning(
+                    "East Asian inline layout rendered through bounded passive horizontal fallback",
+                    Some(offset),
+                ));
+            }
             name if let Some(feature) = custom_xml_markup_feature(name) => {
                 self.reject_active_content_only(feature, offset)?;
             }
@@ -26524,6 +26531,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.no_wrap == default.no_wrap {
         output.no_wrap = base.no_wrap;
+    }
+    if output.two_in_one == default.two_in_one {
+        output.two_in_one = base.two_in_one;
     }
     if output.suppress_line_numbers == default.suppress_line_numbers {
         output.suppress_line_numbers = base.suppress_line_numbers;

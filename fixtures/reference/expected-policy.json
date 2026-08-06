@@ -7015,7 +7015,7 @@
         "Follow-up compatibility paragraph."
       ],
       "intentional_security_differences": [
-        "Word layout and typography compatibility controls are interpreted only as bounded passive layout hints.",
+        "Word layout and typography compatibility controls are interpreted only as bounded passive layout hints; two-in-one text is represented as two half-size horizontal rows without preserving editor session state.",
         "Theme language, display, grid, East Asian typography, frame, and autofit compatibility controls never leak raw control names into PDF bytes.",
         "Compatibility controls do not create active PDF features or preserve Word session state."
       ],
@@ -7079,7 +7079,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of which compatibility controls change visible spacing or line layout and which are inert for this fixture."
+        "The focused Word audit proves twoinone is the visible control in this sequence: each paragraph splits after its first word into two 6-point rows within one 13.8-point slot. Current/Word row x origins differ by 0.02 points, endpoints by at most 0.11 points, and baselines by 0.35-0.55 points under bundled Tinos metrics. Word also emits a non-painted trailing 12-point paragraph space that the converter normalizes away; remaining compatibility controls are inert for this fixture's visible flow."
       ]
     },
     {
