@@ -39,6 +39,7 @@ const OFFICE_MATH_LOWER_LIMIT_SHIFT_HALF_POINTS: i32 = -15;
 const OFFICE_MATH_UPPER_LIMIT_SHIFT_HALF_POINTS: i32 = 17;
 const OFFICE_MATH_LIMIT_FONT_SCALE_PERCENT: i32 = 71;
 const WORD_LEGACY_NUMBER_FIELD_LEADING_TWIPS: i32 = 40;
+const WORD_LEGACY_PAGE_NUMBER_LEADING_TWIPS: i32 = 40;
 const WORD_LITERAL_DRAWING_FIELD_SIDE_BEARING_TWIPS: i32 = 36;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 0;
@@ -1885,6 +1886,7 @@ struct Parser {
     next_bookmark_marker_id: usize,
     styles: Vec<StyleDefinition>,
     current_section_page: PageSettings,
+    last_section_line_grid_twips: Option<i32>,
     current_section_index: usize,
     current_section_column_index: usize,
     note_type_mode: NoteTypeMode,
@@ -2098,6 +2100,7 @@ impl Parser {
             next_bookmark_marker_id: 1,
             styles: Vec::new(),
             current_section_page: Document::default().page,
+            last_section_line_grid_twips: None,
             current_section_index: 1,
             current_section_column_index: 0,
             note_type_mode: NoteTypeMode::FootnotesOnly,
@@ -5343,7 +5346,17 @@ impl Parser {
             }
             "par" => self.finish_current_paragraph_for_destination(offset)?,
             "line" => self.push_visible_control_text("\n", offset)?,
-            "chpgn" => self.push_visible_control_text(PAGE_NUMBER_MARKER, offset)?,
+            "chpgn" => {
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                    self.push_passive_advance_marker(
+                        self.state.destination,
+                        WORD_LEGACY_PAGE_NUMBER_LEADING_TWIPS,
+                        0,
+                        offset,
+                    )?;
+                }
+                self.push_visible_control_text(PAGE_NUMBER_MARKER, offset)?;
+            }
             "sectnum" => self.push_visible_control_text(SECTION_NUMBER_MARKER, offset)?,
             "chftn" => self.push_note_reference(offset)?,
             "chdate" | "chtime" | "chdpa" | "chdpl" => {
@@ -5697,6 +5710,7 @@ impl Parser {
             "sectd" => {
                 self.state.section_break_kind = SectionBreakKind::Page;
                 self.current_section_page = self.default_section_page_settings();
+                self.last_section_line_grid_twips = None;
                 self.current_section_page.page_number_format = Some(PageNumberFormat::Decimal);
                 self.upsert_current_section_settings();
             }
@@ -6370,6 +6384,18 @@ impl Parser {
                     "section default text grid cleared bounded passive paragraph line pitch",
                     Some(offset),
                 ));
+            }
+            name @ ("sectspecifycl" | "sectspecifyl") => {
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && let Some(line_grid_twips) = self.last_section_line_grid_twips
+                {
+                    self.current_section_page.text_line_grid_twips = Some(line_grid_twips);
+                    self.upsert_current_section_settings();
+                }
+                if let Some(message) = word_layout_compatibility_control_message(name) {
+                    self.diagnostics
+                        .push(Diagnostic::warning(message, Some(offset)));
+                }
             }
             "titlepg" => {
                 self.current_section_page.title_page = control.parameter.unwrap_or(1) != 0;
@@ -7301,14 +7327,17 @@ impl Parser {
         let value = value.unwrap_or(0).max(0);
         if value == 0 {
             self.current_section_page.text_line_grid_twips = None;
+            self.last_section_line_grid_twips = None;
         } else {
-            self.current_section_page.text_line_grid_twips = Some(self.clamp_page_value(
+            let line_grid_twips = self.clamp_page_value(
                 value,
                 1,
                 self.limits().max_line_spacing_twips.max(1),
                 "section line grid",
                 offset,
-            ));
+            );
+            self.current_section_page.text_line_grid_twips = Some(line_grid_twips);
+            self.last_section_line_grid_twips = Some(line_grid_twips);
         }
         self.upsert_current_section_settings();
         self.diagnostics.push(Diagnostic::warning(
@@ -48379,7 +48408,13 @@ mod tests {
         let output = parse_rtf(r"{\rtf1{\header \chpgn\par}Body text\page More text\par}").unwrap();
 
         assert_eq!(output.document.header.len(), 1);
-        assert_eq!(output.document.header[0].runs[0].text, PAGE_NUMBER_MARKER);
+        let text = output.document.header[0]
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>();
+        assert_eq!(text.replace(PASSIVE_ADVANCE_MARKER, ""), PAGE_NUMBER_MARKER);
+        assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 1);
     }
 
     #[test]
@@ -48389,7 +48424,12 @@ mod tests {
         assert_eq!(output.document.page.page_number_start, Some(7));
         assert!(!output.document.page.restart_page_numbering);
         assert_eq!(
-            output.document.header[0].runs[0].text,
+            output.document.header[0]
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>()
+                .replace(PASSIVE_ADVANCE_MARKER, ""),
             format!("Page {PAGE_NUMBER_MARKER}")
         );
     }
@@ -48408,7 +48448,12 @@ mod tests {
 
             assert_eq!(output.document.page.page_number_format, Some(expected));
             assert_eq!(
-                output.document.header[0].runs[0].text,
+                output.document.header[0]
+                    .runs
+                    .iter()
+                    .map(|run| run.text.as_str())
+                    .collect::<String>()
+                    .replace(PASSIVE_ADVANCE_MARKER, ""),
                 format!("Page {PAGE_NUMBER_MARKER}")
             );
         }
@@ -48422,7 +48467,12 @@ mod tests {
         assert_eq!(output.document.page.page_number_x_twips, Some(360));
         assert_eq!(output.document.page.page_number_y_twips, Some(1_440));
         assert_eq!(
-            output.document.header[0].runs[0].text,
+            output.document.header[0]
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>()
+                .replace(PASSIVE_ADVANCE_MARKER, ""),
             format!("Page {PAGE_NUMBER_MARKER}")
         );
         assert!(output.diagnostics.iter().all(|diagnostic| {
@@ -55917,6 +55967,17 @@ After\par}"#;
                 .iter()
                 .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
         );
+    }
+
+    #[test]
+    fn word_section_grid_specification_restores_preceding_line_grid() {
+        let input =
+            r"{\rtf1\sectd\sectlinegrid480\sectdefaultcl\sectspecifycl\sectspecifyl Body\par}";
+        let output = parse_rtf(input).unwrap();
+        assert_eq!(output.document.page.text_line_grid_twips, Some(480));
+
+        let strict = parse_rtf_strict(input).unwrap();
+        assert_eq!(strict.document.page.text_line_grid_twips, None);
     }
 
     #[test]

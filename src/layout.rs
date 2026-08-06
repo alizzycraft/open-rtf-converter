@@ -1320,6 +1320,7 @@ impl LayoutEngine {
             font_provider,
             None,
         );
+        layout_legacy_auto_page_numbers(&mut pages, document, font_provider);
         layout_background_shapes(
             &mut pages,
             &header_footer_sets,
@@ -4276,7 +4277,6 @@ fn layout_repeating_header_footer(
         let mut cursor_y = initial_cursor_y;
 
         for paragraph in paragraphs {
-            let paragraph_contains_page_number = paragraph_contains_page_number_marker(paragraph);
             let lines = wrap_paragraph_with_font_provider(
                 paragraph,
                 geometry.content_width,
@@ -4286,23 +4286,14 @@ fn layout_repeating_header_footer(
             );
             let line_count = lines.len();
             for (line_idx, line) in lines.into_iter().enumerate() {
-                let mut x = aligned_x(
+                let x = aligned_x(
                     geometry.margin_left,
                     geometry.content_width,
                     line.width,
                     &paragraph.style,
                     line_idx == 0,
                 );
-                let mut line_cursor_y = cursor_y;
-                if paragraph_contains_page_number {
-                    if let Some(page_number_x) = geometry.page_number_x {
-                        x = page_number_x.clamp(0.0, geometry.width);
-                    }
-                    if let Some(page_number_y) = geometry.page_number_y {
-                        line_cursor_y =
-                            (geometry.height - page_number_y).clamp(0.0, geometry.height);
-                    }
-                }
+                let line_cursor_y = cursor_y;
                 let word_spacing = justified_word_spacing(
                     &line,
                     &paragraph.style,
@@ -4443,7 +4434,10 @@ fn layout_repeating_header_footer(
                 let flow_collision = (page.height - geometry.margin_top - cursor_y).max(0.0);
                 let visual_collision = (body_bounds.top - header_bounds.bottom).max(0.0);
                 let available_shift = (body_bounds.bottom - geometry.margin_bottom).max(0.0);
-                let shift_down = flow_collision.min(visual_collision).min(available_shift);
+                let mut shift_down = flow_collision.min(visual_collision).min(available_shift);
+                if shift_down > 0.01 && geometry.text_line_grid_twips.is_some() {
+                    shift_down = (shift_down + 1.0).min(available_shift);
+                }
                 if shift_down > 0.01 {
                     for item in page.items.iter_mut().take(body_item_count) {
                         translate_layout_item_y(item, -shift_down);
@@ -4462,6 +4456,61 @@ fn layout_repeating_header_footer(
             }
         }
 
+        page.items.extend(scratch_pages.remove(0).items);
+    }
+}
+
+fn layout_legacy_auto_page_numbers(
+    pages: &mut [LayoutPage],
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) {
+    for page in pages {
+        let geometry = page.geometry;
+        if geometry.page_number_x.is_none() && geometry.page_number_y.is_none() {
+            continue;
+        }
+
+        let paragraph = Paragraph {
+            style: ParagraphStyle::default(),
+            runs: vec![Run {
+                text: page.display_page_number.clone(),
+                style: CharacterStyle::default(),
+            }],
+        };
+        let markers = marker_context(
+            page.display_page_number.clone(),
+            page.section_number.to_string(),
+            DocumentStats::default(),
+        );
+        let Some(line) = wrap_paragraph_with_font_provider(
+            &paragraph,
+            geometry.content_width,
+            &markers,
+            document,
+            font_provider,
+        )
+        .into_iter()
+        .next() else {
+            continue;
+        };
+
+        let horizontal_offset = geometry.page_number_x.unwrap_or(36.0);
+        let vertical_offset = geometry.page_number_y.unwrap_or(36.0);
+        let right_edge = (geometry.margin_left + geometry.content_width + horizontal_offset)
+            .clamp(0.0, geometry.width);
+        let x = (right_edge - line.width).clamp(0.0, geometry.width);
+        let line_cursor_y = (geometry.height - vertical_offset).clamp(0.0, geometry.height);
+        let mut scratch_pages = vec![new_layout_page(geometry, geometry.physical_page_number)];
+        push_line(
+            &mut scratch_pages,
+            &line,
+            x,
+            line_cursor_y,
+            document,
+            0.0,
+            0.0,
+        );
         page.items.extend(scratch_pages.remove(0).items);
     }
 }
@@ -9588,14 +9637,6 @@ fn contains_inline_marker(text: &str) -> bool {
         || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
         || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
         || text.contains(NESTED_TABLE_ANCHOR_MARKER)
-}
-
-fn paragraph_contains_page_number_marker(paragraph: &Paragraph) -> bool {
-    paragraph.runs.iter().any(|run| {
-        run.text.contains(PAGE_NUMBER_MARKER)
-            || run.text.contains(TOTAL_PAGES_MARKER)
-            || run.text.contains(SECTION_PAGES_MARKER)
-    })
 }
 
 #[derive(Debug, Default)]
@@ -26265,7 +26306,7 @@ mod tests {
     }
 
     #[test]
-    fn positions_header_page_number_from_safe_page_number_coordinates() {
+    fn keeps_header_page_number_in_header_and_emits_legacy_auto_page_number() {
         let mut document = Document::default();
         document.page.page_number_x_twips = Some(360);
         document.page.page_number_y_twips = Some(1_440);
@@ -26280,9 +26321,20 @@ mod tests {
 
         let layout = LayoutEngine::layout(&document);
         let fragment = text_fragment_for(&layout.pages[0], "Page ");
+        let legacy_number = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "1" => Some(fragment),
+                _ => None,
+            })
+            .max_by(|left, right| left.x.total_cmp(&right.x))
+            .expect("legacy page number");
 
-        assert!((fragment.x - 18.0).abs() < 0.01);
-        assert!((fragment.baseline_y - 708.75).abs() < 0.01);
+        assert!((fragment.x - 72.0).abs() < 0.01);
+        assert!((fragment.baseline_y - 744.75).abs() < 0.01);
+        assert!(legacy_number.x > 540.0);
+        assert!((legacy_number.baseline_y - 708.75).abs() < 0.01);
     }
 
     #[test]
@@ -26306,8 +26358,8 @@ mod tests {
         let layout = LayoutEngine::layout(&document);
         let fragment = text_fragment_for(&layout.pages[0], "Pages ");
 
-        assert!((fragment.x - 18.0).abs() < 0.01);
-        assert!((fragment.baseline_y - 708.75).abs() < 0.01);
+        assert!((fragment.x - 72.0).abs() < 0.01);
+        assert!((fragment.baseline_y - 744.75).abs() < 0.01);
         assert!(layout_text(&layout.pages[0]).contains("Pages 2"));
     }
 
@@ -26334,8 +26386,8 @@ mod tests {
         let layout = LayoutEngine::layout(&document);
         let fragment = text_fragment_for(&layout.pages[0], "Section ");
 
-        assert!((fragment.x - 18.0).abs() < 0.01);
-        assert!((fragment.baseline_y - 708.75).abs() < 0.01);
+        assert!((fragment.x - 72.0).abs() < 0.01);
+        assert!((fragment.baseline_y - 744.75).abs() < 0.01);
         assert!(layout_text(&layout.pages[0]).contains("Section pages 2"));
     }
 

@@ -15759,7 +15759,7 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert_eq!(parsed.document.page.text_line_grid_twips, None);
+    assert_eq!(parsed.document.page.text_line_grid_twips, Some(360));
     assert_eq!(parsed.document.page.page_number_x_twips, Some(360));
     assert_eq!(parsed.document.page.page_number_y_twips, Some(1_440));
     assert!(text.contains("Visible section grid"));
@@ -15835,12 +15835,12 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
     let page_number_position =
         pdf_first_text_position_for_text(&content, "Page").expect("page number position");
     assert!(
-        (page_number_position.0 - 18.0).abs() < 0.01,
-        "expected page number x at 18pt, got {page_number_position:?}"
+        (page_number_position.0 - 72.0).abs() < 0.01,
+        "expected header page number x at 72pt, got {page_number_position:?}"
     );
     assert!(
-        (page_number_position.1 - 709.65).abs() < 0.02,
-        "expected page number baseline near 709.65pt, got {page_number_position:?}"
+        (page_number_position.1 - 745.65).abs() < 0.02,
+        "expected header page number baseline near 745.65pt, got {page_number_position:?}"
     );
     for forbidden in [
         b"pgnx".as_slice(),
@@ -15855,6 +15855,7 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
+        PASSIVE_ADVANCE_MARKER.as_bytes(),
     ] {
         assert!(
             !output

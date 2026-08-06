@@ -3191,7 +3191,7 @@
         "Second grid line."
       ],
       "intentional_security_differences": [
-        "Page number positioning and section text-grid controls are normalized into bounded passive header/footer and paragraph layout metadata."
+        "Legacy page-number positioning and section text-grid controls are normalized into bounded passive auto-number, header, and paragraph layout metadata."
       ],
       "expected_diagnostics": [
         "page number position rendered as bounded passive header/footer coordinates",
@@ -3215,7 +3215,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact page-number baseline and section grid line pitch."
+        "The focused Word 16.0 audit confirms that pgnx360/pgny1440 leave the authored Page 1 header at its ordinary 36-point margin/header origin and emit a separate right-aligned legacy auto-page number whose right edge is 18 points beyond the body margin and whose glyph top is 72 points from the page top. WordCompatiblePassive now reproduces that two-number structure instead of moving the entire header; the header marker also receives Word's measured 2-point layout-only lead-in. The legacy number right edge differs by 0.17 points and its glyph top by 0.55 points from Word after bundled Arial-compatible metrics. The conflicting sectlinegrid360/sectdefaultcl/sectspecifycl/sectspecifyl sequence restores Word's 18-point body pitch in WordCompatiblePassive, while StrictSpec retains the explicit default-grid clearing behavior. Header/body x origins differ by at most 0.08 points and body vertical origins by the established 0.91-point font-metric residual. Both one-page PDFs contain identical visible structure with zero drawings, images, links, annotations, widgets, or actions; four-times renders were visually inspected."
       ]
     },
     {
