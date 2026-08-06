@@ -3235,6 +3235,7 @@ fn draw_passive_hatch_lines(
     pattern: ShadingPattern,
     color: PdfColor,
 ) {
+    let pattern = pattern.without_foreground_color();
     set_stroke_color(content, color);
     content.set_line_width(0.35);
 
@@ -3269,6 +3270,7 @@ fn draw_passive_hatch_lines(
             draw_passive_backward_diagonal_hatch_lines(content, rect, spacing);
         }
         ShadingPattern::None | ShadingPattern::VerticalGradient => {}
+        _ => {}
     }
 }
 

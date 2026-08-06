@@ -3467,9 +3467,10 @@ fn layout_shape_text(
             }
             let is_first_line = line_idx == 0;
             let is_last_line = line_idx + 1 == line_count;
-            if let Some(color_index) = paragraph.style.shading_color_index
-                && color_index > 0
-            {
+            if shading_is_visible(
+                paragraph.style.shading_color_index,
+                paragraph.style.shading_pattern,
+            ) {
                 let line_left_indent = twips_to_points(paragraph_line_left_indent_twips(
                     &paragraph.style,
                     is_first_line,
@@ -3481,7 +3482,7 @@ fn layout_shape_text(
                     cursor_y - line.height,
                     paragraph_line_width(content_width, &paragraph.style, is_first_line),
                     line.height,
-                    color_index,
+                    paragraph.style.shading_color_index,
                     paragraph.style.shading_basis_points,
                     paragraph.style.shading_pattern,
                 );
@@ -4307,9 +4308,10 @@ fn layout_repeating_header_footer(
                     paragraph_line_width(geometry.content_width, &paragraph.style, line_idx == 0),
                     line_idx + 1 == line_count,
                 );
-                if let Some(color_index) = paragraph.style.shading_color_index
-                    && color_index > 0
-                {
+                if shading_is_visible(
+                    paragraph.style.shading_color_index,
+                    paragraph.style.shading_pattern,
+                ) {
                     let line_left_indent = twips_to_points(paragraph_line_left_indent_twips(
                         &paragraph.style,
                         line_idx == 0,
@@ -4325,7 +4327,7 @@ fn layout_repeating_header_footer(
                             line_idx == 0,
                         ),
                         line.height,
-                        color_index,
+                        paragraph.style.shading_color_index,
                         paragraph.style.shading_basis_points,
                         paragraph.style.shading_pattern,
                     );
@@ -6109,9 +6111,7 @@ fn push_table_row(
         let cell_top = top - spacing.top;
         let cell_width = (visual_cell.width - spacing.left - spacing.right).max(1.0);
         let cell_height = (span_height - spacing.top - spacing.bottom).max(1.0);
-        if let Some(color_index) = cell.shading_color_index
-            && color_index > 0
-        {
+        if shading_is_visible(cell.shading_color_index, cell.shading_pattern) {
             push_shading_rect(
                 pages,
                 document,
@@ -6119,7 +6119,7 @@ fn push_table_row(
                 cell_top - cell_height,
                 cell_width,
                 cell_height,
-                color_index,
+                cell.shading_color_index,
                 cell.shading_basis_points,
                 cell.shading_pattern,
             );
@@ -6182,9 +6182,10 @@ fn push_table_row(
             let cell_content_width =
                 (visual_cell.width - spacing.left - spacing.right - padding.left - padding.right)
                     .max(1.0);
-            if let Some(color_index) = prepared_line.style.shading_color_index
-                && color_index > 0
-            {
+            if shading_is_visible(
+                prepared_line.style.shading_color_index,
+                prepared_line.style.shading_pattern,
+            ) {
                 let line_left_indent = twips_to_points(paragraph_line_left_indent_twips(
                     &prepared_line.style,
                     prepared_line.is_first_line,
@@ -6200,7 +6201,7 @@ fn push_table_row(
                         prepared_line.is_first_line,
                     ),
                     prepared_line.line.height,
-                    color_index,
+                    prepared_line.style.shading_color_index,
                     prepared_line.style.shading_basis_points,
                     prepared_line.style.shading_pattern,
                 );
@@ -6741,17 +6742,18 @@ fn push_nested_table_grid_at_depth(
                 row_end,
                 &row_heights,
             );
-            if let Some(color_index) = render_cell.shading_color_index
-                && color_index > 0
-                && let Some(page) = pages.last_mut()
-            {
-                page.items.push(LayoutItem::Highlight {
-                    x: row_left + visual_cell.x_offset,
-                    y: cell_top - cell_height,
-                    width: visual_cell.width.max(1.0),
-                    height: cell_height.max(1.0),
-                    color: shading_color(document, color_index, render_cell.shading_basis_points),
-                });
+            if shading_is_visible(render_cell.shading_color_index, render_cell.shading_pattern) {
+                push_shading_rect(
+                    pages,
+                    document,
+                    row_left + visual_cell.x_offset,
+                    cell_top - cell_height,
+                    visual_cell.width.max(1.0),
+                    cell_height.max(1.0),
+                    render_cell.shading_color_index,
+                    render_cell.shading_basis_points,
+                    render_cell.shading_pattern,
+                );
             }
             if render_child_tables && let Some(child_table) = render_cell.nested_table.as_deref() {
                 let left_inset = twips_to_points(
@@ -7667,21 +7669,24 @@ fn layout_paragraph_with_auto_footnotes(
             &paragraph.style,
             line_idx == 0,
         );
-        if let Some(color_index) = paragraph.style.shading_color_index
-            && color_index > 0
-        {
+        if shading_is_visible(
+            paragraph.style.shading_color_index,
+            paragraph.style.shading_pattern,
+        ) {
             let line_left_indent = twips_to_points(paragraph_line_left_indent_twips(
                 &paragraph.style,
                 line_idx == 0,
             ));
+            let shading_outset = 1.44;
             push_shading_rect(
                 pages,
                 document,
-                line_margin_left + line_left_indent,
+                (line_margin_left + line_left_indent - shading_outset).max(0.0),
                 *cursor_y - line.height,
-                paragraph_line_width(line_content_width, &paragraph.style, line_idx == 0),
+                paragraph_line_width(line_content_width, &paragraph.style, line_idx == 0)
+                    + (shading_outset * 2.0),
                 line.height,
-                color_index,
+                paragraph.style.shading_color_index,
                 paragraph.style.shading_basis_points,
                 paragraph.style.shading_pattern,
             );
@@ -12404,6 +12409,47 @@ fn shading_color(document: &Document, index: usize, basis_points: i32) -> PdfCol
     }
 }
 
+fn shading_is_visible(background_color_index: Option<usize>, pattern: ShadingPattern) -> bool {
+    background_color_index.is_some_and(|index| index > 0)
+        || pattern.foreground_color_index().is_some()
+}
+
+fn shading_fill_color(
+    document: &Document,
+    background_color_index: Option<usize>,
+    basis_points: i32,
+    pattern: ShadingPattern,
+) -> PdfColor {
+    let white = PdfColor {
+        red: 1.0,
+        green: 1.0,
+        blue: 1.0,
+    };
+    let background = background_color_index
+        .filter(|index| *index > 0)
+        .map(|index| color_for_index(document, index))
+        .unwrap_or(white);
+
+    if pattern.without_foreground_color() != ShadingPattern::None {
+        return background;
+    }
+
+    if let Some(foreground_color_index) = pattern.foreground_color_index() {
+        let foreground = color_for_index(document, foreground_color_index);
+        let factor = (basis_points as f32 / 10_000.0).clamp(0.0, 1.0);
+        return PdfColor {
+            red: background.red + ((foreground.red - background.red) * factor),
+            green: background.green + ((foreground.green - background.green) * factor),
+            blue: background.blue + ((foreground.blue - background.blue) * factor),
+        };
+    }
+
+    background_color_index
+        .filter(|index| *index > 0)
+        .map(|index| shading_color(document, index, basis_points))
+        .unwrap_or(white)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_shading_rect(
     pages: &mut [LayoutPage],
@@ -12412,12 +12458,15 @@ fn push_shading_rect(
     y: f32,
     width: f32,
     height: f32,
-    color_index: usize,
+    background_color_index: Option<usize>,
     basis_points: i32,
     pattern: ShadingPattern,
 ) {
-    let fill_color = shading_color(document, color_index, basis_points);
-    let line_color = color_for_index(document, color_index);
+    let fill_color = shading_fill_color(document, background_color_index, basis_points, pattern);
+    let line_color = pattern
+        .foreground_color_index()
+        .map(|index| color_for_index(document, index))
+        .unwrap_or_default();
     let page = pages.last_mut().expect("layout always has a page");
     page.items.push(LayoutItem::Highlight {
         x,
@@ -12438,12 +12487,13 @@ fn push_shading_pattern_lines(
     color: PdfColor,
     pattern: ShadingPattern,
 ) {
+    let pattern = pattern.without_foreground_color();
     if pattern == ShadingPattern::None || width <= 0.5 || height <= 0.5 {
         return;
     }
 
     let spacing = shading_pattern_spacing(pattern);
-    let stroke_width = 0.35;
+    let stroke_width = 0.24;
     match pattern {
         ShadingPattern::Horizontal | ShadingPattern::DarkHorizontal => {
             push_horizontal_shading_lines(page, x, y, width, height, spacing, stroke_width, color);
@@ -12502,6 +12552,7 @@ fn push_shading_pattern_lines(
             );
         }
         ShadingPattern::None | ShadingPattern::VerticalGradient => {}
+        _ => {}
     }
 }
 
@@ -12578,13 +12629,13 @@ fn push_passive_vertical_gradient_bands(
 }
 
 fn shading_pattern_spacing(pattern: ShadingPattern) -> f32 {
-    match pattern {
+    match pattern.without_foreground_color() {
         ShadingPattern::DarkHorizontal
         | ShadingPattern::DarkVertical
         | ShadingPattern::DarkForwardDiagonal
         | ShadingPattern::DarkBackwardDiagonal
         | ShadingPattern::DarkCross
-        | ShadingPattern::DarkDiagonalCross => 2.5,
+        | ShadingPattern::DarkDiagonalCross => 0.6,
         ShadingPattern::None
         | ShadingPattern::Horizontal
         | ShadingPattern::Vertical
@@ -12592,7 +12643,8 @@ fn shading_pattern_spacing(pattern: ShadingPattern) -> f32 {
         | ShadingPattern::BackwardDiagonal
         | ShadingPattern::Cross
         | ShadingPattern::DiagonalCross
-        | ShadingPattern::VerticalGradient => 4.0,
+        | ShadingPattern::VerticalGradient => 0.96,
+        _ => 0.96,
     }
 }
 
@@ -22150,8 +22202,8 @@ mod tests {
             matches!(
                 item,
                 LayoutItem::Highlight { x, width, color, .. }
-                    if (*x - 108.0).abs() < 0.01
-                        && (*width - 432.0).abs() < 0.01
+                    if (*x - 106.56).abs() < 0.01
+                        && (*width - 434.88).abs() < 0.01
                         && *color == PdfColor {
                             red: 240.0 / 255.0,
                             green: 240.0 / 255.0,
@@ -22172,11 +22224,17 @@ mod tests {
                 green: 0,
                 blue: 0,
             },
+            Color {
+                red: 0,
+                green: 0,
+                blue: 255,
+            },
         ];
         let mut paragraph_style = ParagraphStyle::default();
         paragraph_style.shading_color_index = Some(1);
         paragraph_style.shading_basis_points = 2_500;
-        paragraph_style.shading_pattern = ShadingPattern::Horizontal;
+        paragraph_style.shading_pattern =
+            ShadingPattern::Horizontal.with_foreground_color_index(Some(2));
         document.blocks = vec![
             Block::Paragraph(Paragraph {
                 style: paragraph_style,
@@ -22205,7 +22263,8 @@ mod tests {
                         nested_table: None,
                         shading_color_index: Some(1),
                         shading_basis_points: 5_000,
-                        shading_pattern: ShadingPattern::Vertical,
+                        shading_pattern: ShadingPattern::Vertical
+                            .with_foreground_color_index(Some(2)),
                         padding: TableCellPadding::default(),
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
@@ -22228,10 +22287,10 @@ mod tests {
 
         let layout = LayoutEngine::layout(&document);
         let page = &layout.pages[0];
-        let red = PdfColor {
-            red: 240.0 / 255.0,
+        let blue = PdfColor {
+            red: 0.0,
             green: 0.0,
-            blue: 0.0,
+            blue: 1.0,
         };
 
         assert!(page.items.iter().any(|item| matches!(
@@ -22243,16 +22302,16 @@ mod tests {
             item,
             LayoutItem::Line { y1, y2, width, color, style, .. }
                 if (*y1 - *y2).abs() < 0.01
-                    && (*width - 0.35).abs() < 0.01
-                    && *color == red
+                    && (*width - 0.24).abs() < 0.01
+                    && *color == blue
                     && *style == LineStyle::Solid
         )));
         assert!(page.items.iter().any(|item| matches!(
             item,
             LayoutItem::Line { x1, x2, width, color, style, .. }
                 if (*x1 - *x2).abs() < 0.01
-                    && (*width - 0.35).abs() < 0.01
-                    && *color == red
+                    && (*width - 0.24).abs() < 0.01
+                    && *color == blue
                     && *style == LineStyle::Solid
         )));
         assert!(layout_text(page).contains("Horizontal paragraph"));
@@ -22272,7 +22331,8 @@ mod tests {
         ];
         let mut paragraph_style = ParagraphStyle::default();
         paragraph_style.shading_color_index = Some(1);
-        paragraph_style.shading_pattern = ShadingPattern::ForwardDiagonal;
+        paragraph_style.shading_pattern =
+            ShadingPattern::ForwardDiagonal.with_foreground_color_index(Some(1));
         document.blocks = vec![
             Block::Paragraph(Paragraph {
                 style: paragraph_style,
@@ -22301,7 +22361,8 @@ mod tests {
                         nested_table: None,
                         shading_color_index: Some(1),
                         shading_basis_points: 10_000,
-                        shading_pattern: ShadingPattern::DarkCross,
+                        shading_pattern: ShadingPattern::DarkCross
+                            .with_foreground_color_index(Some(1)),
                         padding: TableCellPadding::default(),
                         spacing: Default::default(),
                         borders: TableCellBorders::default(),
@@ -22335,7 +22396,7 @@ mod tests {
             LayoutItem::Line { x1, y1, x2, y2, width, color, style }
                 if (*x1 - *x2).abs() > 0.01
                     && (*y1 - *y2).abs() > 0.01
-                    && (*width - 0.35).abs() < 0.01
+                    && (*width - 0.24).abs() < 0.01
                     && *color == red
                     && *style == LineStyle::Solid
         )));
@@ -22343,14 +22404,14 @@ mod tests {
             item,
             LayoutItem::Line { y1, y2, width, color, .. }
                 if (*y1 - *y2).abs() < 0.01
-                    && (*width - 0.35).abs() < 0.01
+                    && (*width - 0.24).abs() < 0.01
                     && *color == red
         )));
         assert!(page.items.iter().any(|item| matches!(
             item,
             LayoutItem::Line { x1, x2, width, color, .. }
                 if (*x1 - *x2).abs() < 0.01
-                    && (*width - 0.35).abs() < 0.01
+                    && (*width - 0.24).abs() < 0.01
                     && *color == red
         )));
         assert!(layout_text(page).contains("Diagonal paragraph"));

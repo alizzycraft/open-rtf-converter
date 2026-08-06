@@ -4873,7 +4873,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact paragraph/table shading color, density, and pattern line placement."
+        "The focused Word audit confirms matching red backgrounds, blue foreground patterns, 0.96-point hatch cadence, 0.24-point stripe weight, 13.8-point bands, table overlay order, and 1.44-point outer-paragraph overhang. Current text starts at (36.00,35.49) points versus Word's (36.02,36.44); the residual is the shared bundled Arial-compatible metric difference."
       ]
     },
     {

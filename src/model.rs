@@ -1055,7 +1055,7 @@ impl Default for ParagraphStyle {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-pub enum ShadingPattern {
+enum ShadingPatternKind {
     #[default]
     None,
     Horizontal,
@@ -1071,6 +1071,67 @@ pub enum ShadingPattern {
     DarkCross,
     DarkDiagonalCross,
     VerticalGradient,
+}
+
+/// A passive RTF shading pattern and its independently authored foreground color.
+///
+/// RTF stores the pattern background (`\cbpat`, `\clcbpat`, or `\trcbpat`) and
+/// foreground (`\cfpat`, `\clcfpat`, or `\trcfpat`) separately. The background
+/// remains on the containing paragraph or cell while this value carries the
+/// foreground so existing model consumers can continue treating pattern state as
+/// one bounded, copyable value.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub struct ShadingPattern {
+    kind: ShadingPatternKind,
+    foreground_color_index: Option<usize>,
+}
+
+#[allow(non_upper_case_globals)]
+impl ShadingPattern {
+    pub const None: Self = Self::new(ShadingPatternKind::None);
+    pub const Horizontal: Self = Self::new(ShadingPatternKind::Horizontal);
+    pub const Vertical: Self = Self::new(ShadingPatternKind::Vertical);
+    pub const ForwardDiagonal: Self = Self::new(ShadingPatternKind::ForwardDiagonal);
+    pub const BackwardDiagonal: Self = Self::new(ShadingPatternKind::BackwardDiagonal);
+    pub const Cross: Self = Self::new(ShadingPatternKind::Cross);
+    pub const DiagonalCross: Self = Self::new(ShadingPatternKind::DiagonalCross);
+    pub const DarkHorizontal: Self = Self::new(ShadingPatternKind::DarkHorizontal);
+    pub const DarkVertical: Self = Self::new(ShadingPatternKind::DarkVertical);
+    pub const DarkForwardDiagonal: Self = Self::new(ShadingPatternKind::DarkForwardDiagonal);
+    pub const DarkBackwardDiagonal: Self = Self::new(ShadingPatternKind::DarkBackwardDiagonal);
+    pub const DarkCross: Self = Self::new(ShadingPatternKind::DarkCross);
+    pub const DarkDiagonalCross: Self = Self::new(ShadingPatternKind::DarkDiagonalCross);
+    pub const VerticalGradient: Self = Self::new(ShadingPatternKind::VerticalGradient);
+
+    const fn new(kind: ShadingPatternKind) -> Self {
+        Self {
+            kind,
+            foreground_color_index: None,
+        }
+    }
+
+    pub fn foreground_color_index(self) -> Option<usize> {
+        self.foreground_color_index
+    }
+
+    pub fn with_foreground_color_index(mut self, color_index: Option<usize>) -> Self {
+        self.foreground_color_index = color_index;
+        self
+    }
+
+    pub fn with_pattern_from(self, pattern: Self) -> Self {
+        Self {
+            kind: pattern.kind,
+            foreground_color_index: self.foreground_color_index,
+        }
+    }
+
+    pub fn without_foreground_color(self) -> Self {
+        Self {
+            kind: self.kind,
+            foreground_color_index: None,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

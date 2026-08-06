@@ -5378,9 +5378,12 @@ impl Parser {
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
             }
-            "trcbpat" | "trcfpat" => {
+            "trcbpat" => {
                 self.set_current_table_row_shading(control.parameter.unwrap_or(0).max(0) as usize)
             }
+            "trcfpat" => self.set_current_table_row_shading_foreground(
+                control.parameter.unwrap_or(0).max(0) as usize,
+            ),
             "trshdng" => self.set_current_table_row_shading_basis(control.parameter, offset),
             name if let Some(pattern) = table_row_shading_pattern_control(name) => {
                 self.set_current_table_row_shading_pattern(pattern)
@@ -5388,8 +5391,13 @@ impl Parser {
             "cellx" => {
                 self.push_table_cell_boundary(control.parameter.unwrap_or(0).max(0), offset)?
             }
-            "clcbpat" | "clcfpat" => {
+            "clcbpat" => {
                 self.set_current_cell_shading(control.parameter.unwrap_or(0).max(0) as usize)
+            }
+            "clcfpat" => {
+                self.set_current_cell_shading_foreground(
+                    control.parameter.unwrap_or(0).max(0) as usize
+                )
             }
             "clshdng" => self.set_current_cell_shading_basis(control.parameter, offset),
             name if let Some(pattern) = table_cell_shading_pattern_control(name) => {
@@ -5856,13 +5864,21 @@ impl Parser {
                 self.state.character.highlight_shading_basis_points =
                     self.clamp_character_shading(control.parameter.unwrap_or(10_000), offset);
             }
-            "cbpat" | "cfpat" => {
+            "cbpat" => {
                 let color_index = control.parameter.unwrap_or(0).max(0) as usize;
                 self.state.paragraph.shading_color_index = if color_index == 0 {
                     None
                 } else {
                     Some(color_index)
                 };
+            }
+            "cfpat" => {
+                let color_index = control.parameter.unwrap_or(0).max(0) as usize;
+                self.state.paragraph.shading_pattern = self
+                    .state
+                    .paragraph
+                    .shading_pattern
+                    .with_foreground_color_index(Some(color_index));
             }
             "shading" => {
                 self.state.paragraph.shading_basis_points = self.clamp_shading_basis(
@@ -5872,7 +5888,11 @@ impl Parser {
                 );
             }
             name if let Some(pattern) = paragraph_shading_pattern_control(name) => {
-                self.state.paragraph.shading_pattern = pattern;
+                self.state.paragraph.shading_pattern = self
+                    .state
+                    .paragraph
+                    .shading_pattern
+                    .with_pattern_from(pattern);
             }
             "ql" => self.state.paragraph.alignment = Alignment::Left,
             "qc" => self.state.paragraph.alignment = Alignment::Center,
@@ -11894,8 +11914,14 @@ impl Parser {
                 self.set_nested_table_row_spacing("bottom", control.parameter, offset);
                 Ok(true)
             }
-            "trcbpat" | "trcfpat" => {
+            "trcbpat" => {
                 self.set_nested_table_row_shading(control.parameter.unwrap_or(0).max(0) as usize);
+                Ok(true)
+            }
+            "trcfpat" => {
+                self.set_nested_table_row_shading_foreground(
+                    control.parameter.unwrap_or(0).max(0) as usize
+                );
                 Ok(true)
             }
             "trshdng" => {
@@ -12015,8 +12041,14 @@ impl Parser {
                 self.set_nested_table_border_color(control.parameter);
                 Ok(true)
             }
-            "clcbpat" | "clcfpat" => {
+            "clcbpat" => {
                 self.set_nested_cell_shading(control.parameter.unwrap_or(0).max(0) as usize);
+                Ok(true)
+            }
+            "clcfpat" => {
+                self.set_nested_cell_shading_foreground(
+                    control.parameter.unwrap_or(0).max(0) as usize
+                );
                 Ok(true)
             }
             "clshdng" => {
@@ -12426,6 +12458,14 @@ impl Parser {
         });
     }
 
+    fn set_nested_cell_shading_foreground(&mut self, color_index: usize) {
+        self.update_nested_cell_properties(|properties| {
+            properties.shading_pattern = properties
+                .shading_pattern
+                .with_foreground_color_index(Some(color_index));
+        });
+    }
+
     fn set_nested_cell_shading_basis(&mut self, value: Option<i32>, offset: usize) {
         let basis = self.clamp_shading_basis(value.unwrap_or(10_000), "nested table cell", offset);
         self.update_nested_cell_properties(|properties| {
@@ -12435,7 +12475,7 @@ impl Parser {
 
     fn set_nested_cell_shading_pattern(&mut self, pattern: ShadingPattern) {
         self.update_nested_cell_properties(|properties| {
-            properties.shading_pattern = pattern;
+            properties.shading_pattern = properties.shading_pattern.with_pattern_from(pattern);
         });
     }
 
@@ -12528,6 +12568,20 @@ impl Parser {
         }
     }
 
+    fn set_nested_table_row_shading_foreground(&mut self, color_index: usize) {
+        if let Some(row) = self.current_table_row.as_mut()
+            && let Some(capture) = row.nested_table_capture.as_mut()
+        {
+            capture.current_row_shading_pattern = capture
+                .current_row_shading_pattern
+                .with_foreground_color_index(Some(color_index));
+            capture.current_cell_properties.shading_pattern = capture
+                .current_cell_properties
+                .shading_pattern
+                .with_foreground_color_index(Some(color_index));
+        }
+    }
+
     fn set_nested_table_row_shading_basis(&mut self, value: Option<i32>, offset: usize) {
         let basis = self.clamp_shading_basis(value.unwrap_or(10_000), "nested table row", offset);
         if let Some(row) = self.current_table_row.as_mut()
@@ -12542,8 +12596,13 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut()
             && let Some(capture) = row.nested_table_capture.as_mut()
         {
-            capture.current_row_shading_pattern = pattern;
-            capture.current_cell_properties.shading_pattern = pattern;
+            capture.current_row_shading_pattern = capture
+                .current_row_shading_pattern
+                .with_pattern_from(pattern);
+            capture.current_cell_properties.shading_pattern = capture
+                .current_cell_properties
+                .shading_pattern
+                .with_pattern_from(pattern);
         }
     }
 
@@ -12846,6 +12905,14 @@ impl Parser {
         }
     }
 
+    fn set_current_cell_shading_foreground(&mut self, color_index: usize) {
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.current_cell_shading_pattern = row
+                .current_cell_shading_pattern
+                .with_foreground_color_index(Some(color_index));
+        }
+    }
+
     fn set_current_cell_shading_basis(&mut self, value: Option<i32>, offset: usize) {
         let basis = self.clamp_shading_basis(value.unwrap_or(10_000), "table cell", offset);
         if let Some(row) = self.current_table_row.as_mut() {
@@ -12855,7 +12922,8 @@ impl Parser {
 
     fn set_current_cell_shading_pattern(&mut self, pattern: ShadingPattern) {
         if let Some(row) = self.current_table_row.as_mut() {
-            row.current_cell_shading_pattern = pattern;
+            row.current_cell_shading_pattern =
+                row.current_cell_shading_pattern.with_pattern_from(pattern);
         }
     }
 
@@ -12871,6 +12939,17 @@ impl Parser {
         }
     }
 
+    fn set_current_table_row_shading_foreground(&mut self, color_index: usize) {
+        if let Some(row) = self.current_table_row.as_mut() {
+            row.default_cell_shading_pattern = row
+                .default_cell_shading_pattern
+                .with_foreground_color_index(Some(color_index));
+            row.current_cell_shading_pattern = row
+                .current_cell_shading_pattern
+                .with_foreground_color_index(Some(color_index));
+        }
+    }
+
     fn set_current_table_row_shading_basis(&mut self, value: Option<i32>, offset: usize) {
         let basis = self.clamp_shading_basis(value.unwrap_or(10_000), "table row", offset);
         if let Some(row) = self.current_table_row.as_mut() {
@@ -12881,8 +12960,10 @@ impl Parser {
 
     fn set_current_table_row_shading_pattern(&mut self, pattern: ShadingPattern) {
         if let Some(row) = self.current_table_row.as_mut() {
-            row.default_cell_shading_pattern = pattern;
-            row.current_cell_shading_pattern = pattern;
+            row.default_cell_shading_pattern =
+                row.default_cell_shading_pattern.with_pattern_from(pattern);
+            row.current_cell_shading_pattern =
+                row.current_cell_shading_pattern.with_pattern_from(pattern);
         }
     }
 
@@ -47415,7 +47496,13 @@ mod tests {
 
         assert_eq!(table.rows[0].cells[0].shading_color_index, Some(1));
         assert_eq!(table.rows[0].cells[1].shading_color_index, Some(1));
-        assert_eq!(table.rows[1].cells[0].shading_color_index, Some(1));
+        assert_eq!(table.rows[1].cells[0].shading_color_index, None);
+        assert_eq!(
+            table.rows[1].cells[0]
+                .shading_pattern
+                .foreground_color_index(),
+            Some(1)
+        );
         assert_eq!(table.rows[2].cells[0].shading_color_index, None);
     }
 
@@ -56182,7 +56269,7 @@ After\par}"#;
     #[test]
     fn normalizes_paragraph_and_table_shading_pattern_controls() {
         let output = parse_rtf(
-            r"{\rtf1{\colortbl;\red255\green0\blue0;}\cbpat1\shading2500\bghoriz paragraph\par\trowd\trcbpat1\trshdng5000\trbgvert\cellx1440 row\cell\clcbpat1\clshdng7500\clbghoriz\cellx2880 cell\cell\row}",
+            r"{\rtf1{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}\cbpat1\cfpat2\shading2500\bghoriz paragraph\par\trowd\trcbpat1\trcfpat2\trshdng5000\trbgvert\cellx1440 row\cell\clcbpat2\clcfpat1\clshdng7500\clbghoriz\cellx2880 cell\cell\row}",
         )
         .unwrap();
 
@@ -56192,7 +56279,10 @@ After\par}"#;
         };
         assert_eq!(paragraph.style.shading_color_index, Some(1));
         assert_eq!(paragraph.style.shading_basis_points, 2_500);
-        assert_eq!(paragraph.style.shading_pattern, ShadingPattern::Horizontal);
+        assert_eq!(
+            paragraph.style.shading_pattern,
+            ShadingPattern::Horizontal.with_foreground_color_index(Some(2))
+        );
 
         let table = match &output.document.blocks[1] {
             Block::Table(table) => table,
@@ -56202,13 +56292,13 @@ After\par}"#;
         assert_eq!(table.rows[0].cells[0].shading_basis_points, 5_000);
         assert_eq!(
             table.rows[0].cells[0].shading_pattern,
-            ShadingPattern::Vertical
+            ShadingPattern::Vertical.with_foreground_color_index(Some(2))
         );
-        assert_eq!(table.rows[0].cells[1].shading_color_index, Some(1));
+        assert_eq!(table.rows[0].cells[1].shading_color_index, Some(2));
         assert_eq!(table.rows[0].cells[1].shading_basis_points, 7_500);
         assert_eq!(
             table.rows[0].cells[1].shading_pattern,
-            ShadingPattern::Horizontal
+            ShadingPattern::Horizontal.with_foreground_color_index(Some(1))
         );
         for forbidden in ["bghoriz", "trbgvert", "clbghoriz"] {
             assert!(
