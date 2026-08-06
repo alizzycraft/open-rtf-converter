@@ -18492,7 +18492,7 @@ fn document_protection_metadata_does_not_reach_text_or_pdf() {
         "\\",
         "par}",
     ]);
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_strict(&input);
     let text = collect_text(&parsed.document);
 
     assert!(text.contains("Visible protected body"));
@@ -18520,6 +18520,10 @@ fn document_protection_metadata_does_not_reach_text_or_pdf() {
         &output_path,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )

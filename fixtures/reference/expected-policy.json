@@ -6288,9 +6288,7 @@
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
-        "Visible protected body.",
-        "Inline body.",
-        "Visible after protection metadata."
+        "Visible protected body."
       ],
       "intentional_security_differences": [
         "Document protection flags and password hashes are stripped as metadata while visible body text remains passive.",
@@ -6322,7 +6320,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact body spacing around stripped document-protection metadata."
+        "The focused Word 16.0 audit confirms that the first group-contained passwordhash is non-printing metadata, while the malformed second ungrouped passwordhash consumes the remainder of the enclosing document group as protection payload. Word therefore prints only Visible protected body. WordCompatiblePassive now matches that recovery; StrictSpec retains the bounded token-only hash stripping path and preserves subsequent safe body text. Current/Word visible line x origins differ by 0.02 points and baselines by the established 0.83-point bundled Times-compatible residual. Both PDFs are one page with zero drawings, images, links, annotations, widgets, actions, encryption, or permission dictionaries."
       ]
     },
     {

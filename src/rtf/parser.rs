@@ -5024,7 +5024,13 @@ impl Parser {
                         offset,
                     });
                 }
-                self.state.skip_password_hash_payload = true;
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && !control_starts_group
+                {
+                    self.state.destination = Destination::Ignored;
+                } else {
+                    self.state.skip_password_hash_payload = true;
+                }
                 self.diagnostics.push(Diagnostic::warning(
                     "document protection password hash stripped before normalization",
                     Some(offset),
@@ -54056,7 +54062,7 @@ After\par}"#;
 
     #[test]
     fn document_protection_metadata_does_not_become_body_text() {
-        let output = parse_rtf(
+        let output = parse_rtf_strict(
             r"{\rtf1\formprot\revprot\annotprot{\passwordhash DEADBEEFCAFE0123456789ABCDEF0123}Visible protected body\par\passwordhash AABBCCDDEEFF Inline body\par}",
         )
         .unwrap();
@@ -54077,6 +54083,21 @@ After\par}"#;
                 "forbidden document protection metadata leaked to text: {forbidden}"
             );
         }
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("document protection password hash stripped")
+        }));
+    }
+
+    #[test]
+    fn word_treats_ungrouped_password_hash_as_remainder_destination() {
+        let output = parse_rtf(
+            r"{\rtf1{\passwordhash DEADBEEF}Visible protected body\par\passwordhash AABBCC Inline body\par Visible after\par}",
+        )
+        .unwrap();
+
+        assert_eq!(document_text(&output.document), "Visible protected body");
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message

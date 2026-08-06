@@ -4753,8 +4753,6 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             expected_pages: 1,
             must_preserve_text: &[
                 "Visible protected body.",
-                "Inline body.",
-                "Visible after protection metadata.",
             ],
             must_not_leak: &[
                 b"passwordhash",
