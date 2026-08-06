@@ -13546,9 +13546,21 @@ fn measure_text_with_document_font(
         * style.horizontal_scale()
 }
 
-fn source_dingbat_advance_points(font: Option<&FontDef>, ch: char, size: f32) -> Option<f32> {
+pub(crate) fn source_dingbat_advance_points(
+    font: Option<&FontDef>,
+    ch: char,
+    size: f32,
+) -> Option<f32> {
     let name = font?.name.to_ascii_lowercase();
-    let em = if name.contains("wingdings 3") || name.contains("wingdings3") {
+    let em = if name.contains("segoe ui symbol") {
+        match ch {
+            '\u{25a1}' | '\u{2610}' | '\u{2611}' | '\u{2612}' => 0.86,
+            '\u{2713}' | '\u{2714}' => 0.75,
+            '\u{2717}' => 0.83,
+            ch if ch.is_whitespace() => 0.27,
+            _ => return None,
+        }
+    } else if name.contains("wingdings 3") || name.contains("wingdings3") {
         match ch {
             '\u{2190}' | '\u{2192}' => 0.89,
             '\u{2191}' | '\u{2193}' => 0.602,
@@ -24426,6 +24438,18 @@ mod tests {
         assert_eq!(
             source_dingbat_advance_points(Some(&font("Wingdings 2")), '\u{2611}', size),
             Some(10.704)
+        );
+        assert_eq!(
+            source_dingbat_advance_points(Some(&font("Segoe UI Symbol")), '\u{2610}', size),
+            Some(10.32)
+        );
+        assert_eq!(
+            source_dingbat_advance_points(Some(&font("Segoe UI Symbol")), '\u{2713}', size),
+            Some(9.0)
+        );
+        assert_eq!(
+            source_dingbat_advance_points(Some(&font("Segoe UI Symbol")), '\u{2717}', size),
+            Some(9.96)
         );
     }
 

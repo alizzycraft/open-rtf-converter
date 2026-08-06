@@ -13,7 +13,7 @@ use crate::fonts::{FontAsset, FontProvider};
 use crate::layout::{
     LayoutDocument, LayoutItem, LineCap, LineJoin, LineStyle, PdfColor, PdfFontFamily,
     TextFragment, TextRotation, passive_pair_kerning_points, passive_supplied_font_fallback_name,
-    style_uses_passive_kerning, twips_to_points,
+    source_dingbat_advance_points, style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
     BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ImageToneAdjustment,
@@ -1209,7 +1209,7 @@ fn draw_text_layout_item(
     supplied_fonts: &[SuppliedPdfFont],
 ) {
     if text_fragment_renders_as_passive_vector_only(fragment) {
-        draw_passive_vector_only_dingbat_text(content, fragment);
+        draw_passive_vector_only_dingbat_text(content, fragment, layout);
         return;
     }
     let visual_text = passive_visual_text_for_fragment(fragment);
@@ -5234,7 +5234,11 @@ fn is_passive_vector_only_dingbat_char(ch: char) -> bool {
     )
 }
 
-fn draw_passive_vector_only_dingbat_text(content: &mut Content, fragment: &TextFragment) {
+fn draw_passive_vector_only_dingbat_text(
+    content: &mut Content,
+    fragment: &TextFragment,
+    layout: &LayoutDocument,
+) {
     let font_size = fragment.style.font_size_points();
     let horizontal_scale = fragment.style.horizontal_scale();
     let character_spacing = twips_to_points(fragment.style.character_spacing_twips);
@@ -5245,6 +5249,10 @@ fn draw_passive_vector_only_dingbat_text(content: &mut Content, fragment: &TextF
         .count();
     let mut visible_index = 0usize;
     let mut cursor = fragment.x;
+    let source_font = layout
+        .fonts
+        .iter()
+        .find(|font| font.index == fragment.style.font_index);
 
     content.save_state();
     set_stroke_color(content, fragment.color);
@@ -5280,7 +5288,10 @@ fn draw_passive_vector_only_dingbat_text(content: &mut Content, fragment: &TextF
         }
         if !is_zero_width_pdf_char(ch) {
             visible_index += 1;
-            let mut advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            let mut advance = source_dingbat_advance_points(source_font, ch, font_size)
+                .unwrap_or_else(|| {
+                    pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style)
+                });
             if ch == ' ' || ch == '\u{00a0}' {
                 advance += fragment.word_spacing;
             }
