@@ -3587,6 +3587,11 @@ impl Parser {
             {
                 self.push_text(" ", offset)?;
             }
+            "me" if destination_allows_visible_content(&self.state)
+                && self.office_math_direct_parent_is_nary() =>
+            {
+                self.state.character.passive_math_nary_base_id = Some(offset);
+            }
             "msub" if destination_allows_visible_content(&self.state) => {
                 if self.office_math_direct_parent_allows_script_slot() {
                     if self.state.office_math_nary_subscript_hidden {

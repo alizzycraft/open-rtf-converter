@@ -8236,6 +8236,8 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     };
     let operator_spaced_math_paragraph = apply_passive_math_operator_spacing(paragraph);
     let paragraph = operator_spaced_math_paragraph.as_ref().unwrap_or(paragraph);
+    let nary_spaced_math_paragraph = apply_passive_math_nary_base_spacing(paragraph);
+    let paragraph = nary_spaced_math_paragraph.as_ref().unwrap_or(paragraph);
     let stacked_math_limit_paragraph =
         stack_passive_math_limits(paragraph, document, font_provider);
     let paragraph = stacked_math_limit_paragraph.as_ref().unwrap_or(paragraph);
@@ -8613,6 +8615,34 @@ fn passive_math_operator_side_space_em(ch: char) -> Option<f32> {
     } else {
         None
     }
+}
+
+fn apply_passive_math_nary_base_spacing(paragraph: &Paragraph) -> Option<Paragraph> {
+    if !paragraph
+        .runs
+        .iter()
+        .any(|run| run.style.passive_math_nary_base_id.is_some())
+    {
+        return None;
+    }
+
+    let mut output = Paragraph {
+        style: paragraph.style.clone(),
+        runs: Vec::with_capacity(paragraph.runs.len().saturating_add(4)),
+    };
+    let mut active_base_id = None;
+    for run in &paragraph.runs {
+        let base_id = run.style.passive_math_nary_base_id;
+        if let Some(base_id) = base_id
+            && active_base_id != Some(base_id)
+        {
+            let operator_gap = run.style.font_size_points() * (5.0 / 18.0);
+            push_passive_math_advance(&mut output.runs, operator_gap, &run.style);
+        }
+        output.runs.push(run.clone());
+        active_base_id = base_id;
+    }
+    Some(output)
 }
 
 fn stack_passive_math_limits(

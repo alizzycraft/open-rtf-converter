@@ -24672,6 +24672,12 @@ fn office_math_nary_hidden_limits_are_stripped_passively() {
         text.contains("Before \u{2211}i After"),
         "unexpected hidden n-ary limit text: {text:?}"
     );
+    assert!(
+        run_style_for_text(&parsed.document, "i")
+            .and_then(|style| style.passive_math_nary_base_id)
+            .is_some(),
+        "n-ary base should retain bounded spacing identity"
+    );
     for forbidden in [
         "mmath",
         "moMath",
@@ -24718,6 +24724,27 @@ fn office_math_nary_hidden_limits_are_stripped_passively() {
             .iter()
             .any(|name| name.starts_with(b"TF")),
         "hidden-limit n-ary operator should use a passive supplied font"
+    );
+    let layout = LayoutEngine::layout(&parsed.document);
+    let operator_position = layout.pages[0]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Text(fragment) if fragment.text == "\u{2211}" => Some(fragment.x),
+            _ => None,
+        })
+        .expect("n-ary operator position");
+    let base_position = layout.pages[0]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Text(fragment) if fragment.text == "i" => Some(fragment.x),
+            _ => None,
+        })
+        .expect("n-ary base position");
+    assert!(
+        (9.0..=12.0).contains(&(base_position - operator_position)),
+        "n-ary base should retain Word's measured operator-side gap: operator={operator_position:?}, base={base_position:?}"
     );
     for forbidden in [
         b"mmath".as_slice(),
