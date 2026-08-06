@@ -7964,7 +7964,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of flipped-line endpoint parity and mirrored passive stroke output."
+        "The focused Word audit confirms exact mirrored geometry: both PDFs emit one red 2-point line from (216,144) to (108,108) points with identical page flow. Text origins differ by 0.03 points horizontally and about 0.95 points vertically because of shared bundled Arial-compatible metrics."
       ]
     },
     {
