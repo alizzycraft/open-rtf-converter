@@ -5311,7 +5311,7 @@ fn draw_passive_vector_only_dingbat_text(
     set_fill_color(content, fragment.color);
     content.set_line_width((font_size * 0.075).clamp(0.5, 1.25));
     for ch in fragment.text.chars() {
-        if draw_word_legacy_dingbat_outline(
+        if draw_source_dingbat_outline(
             content,
             source_font.map(|font| font.name.as_str()),
             ch,
@@ -5747,7 +5747,138 @@ const WEBDINGS_INBOX_TRAY: &[TrueTypePoint] = &[
     tt_on(1810, 634),
 ];
 
-fn draw_word_legacy_dingbat_outline(
+const SEGOE_SYMBOL_CHECK: &[TrueTypePoint] = &[
+    tt_on(147, 489),
+    tt_off(124, 512),
+    tt_off(94, 549),
+    tt_on(94, 563),
+    tt_off(94, 578),
+    tt_off(121, 601),
+    tt_off(159, 616),
+    tt_off(202, 623),
+    tt_on(217, 623),
+    tt_off(233, 623),
+    tt_off(254, 608),
+    tt_on(268, 594),
+    tt_off(362, 500),
+    tt_off(515, 284),
+    tt_on(580, 178),
+    tt_off(705, 524),
+    tt_off(1037, 1174),
+    tt_on(1245, 1458),
+    tt_off(1265, 1486),
+    tt_off(1350, 1516),
+    tt_on(1403, 1516),
+    tt_off(1420, 1516),
+    tt_off(1440, 1503),
+    tt_on(1440, 1491),
+    tt_off(1440, 1479),
+    tt_off(1434, 1462),
+    tt_on(1423, 1448),
+    tt_off(1312, 1301),
+    tt_off(1103, 979),
+    tt_off(913, 622),
+    tt_off(743, 230),
+    tt_on(672, 14),
+    tt_off(670, 8),
+    tt_off(652, -1),
+    tt_off(626, -7),
+    tt_off(594, -10),
+    tt_on(578, -10),
+    tt_off(555, -10),
+    tt_off(517, -1),
+    tt_on(508, 14),
+    tt_off(460, 96),
+    tt_off(378, 221),
+    tt_off(294, 329),
+    tt_off(203, 431),
+];
+
+const SEGOE_SYMBOL_X: &[TrueTypePoint] = &[
+    tt_on(541, 1415),
+    tt_on(555, 1384),
+    tt_off(620, 1244),
+    tt_off(749, 987),
+    tt_on(817, 860),
+    tt_off(929, 1022),
+    tt_off(1165, 1332),
+    tt_on(1292, 1481),
+    tt_off(1306, 1496),
+    tt_off(1328, 1512),
+    tt_on(1339, 1516),
+    tt_on(1341, 1493),
+    tt_on(1376, 1516),
+    tt_on(1360, 1477),
+    tt_on(1411, 1501),
+    tt_on(1399, 1470),
+    tt_on(1432, 1475),
+    tt_on(1401, 1434),
+    tt_on(1442, 1452),
+    tt_off(1437, 1441),
+    tt_off(1428, 1425),
+    tt_on(1421, 1417),
+    tt_off(1281, 1252),
+    tt_off(1021, 905),
+    tt_on(897, 715),
+    tt_off(975, 576),
+    tt_off(1150, 284),
+    tt_on(1251, 121),
+    tt_off(1258, 110),
+    tt_off(1270, 85),
+    tt_on(1278, 68),
+    tt_on(1251, 70),
+    tt_on(1257, 35),
+    tt_on(1214, 61),
+    tt_on(1231, 10),
+    tt_on(1194, 27),
+    tt_on(1192, 0),
+    tt_on(1157, 43),
+    tt_on(1163, 8),
+    tt_on(1141, 33),
+    tt_on(1141, 23),
+    tt_off(1041, 171),
+    tt_off(876, 436),
+    tt_on(803, 565),
+    tt_off(694, 391),
+    tt_off(493, 19),
+    tt_on(397, -182),
+    tt_on(381, -211),
+    tt_on(367, -195),
+    tt_on(342, -227),
+    tt_on(342, -178),
+    tt_on(305, -227),
+    tt_on(305, -188),
+    tt_on(270, -213),
+    tt_on(287, -152),
+    tt_on(248, -184),
+    tt_on(254, -147),
+    tt_on(238, -158),
+    tt_off(241, -147),
+    tt_off(245, -132),
+    tt_on(250, -123),
+    tt_off(349, 86),
+    tt_off(585, 505),
+    tt_on(721, 713),
+    tt_off(688, 773),
+    tt_off(610, 923),
+    tt_off(530, 1086),
+    tt_off(453, 1250),
+    tt_on(422, 1323),
+    tt_on(403, 1366),
+    tt_on(432, 1346),
+    tt_on(420, 1397),
+    tt_on(446, 1380),
+    tt_on(440, 1419),
+    tt_on(481, 1384),
+    tt_on(465, 1432),
+    tt_on(492, 1413),
+    tt_on(492, 1434),
+    tt_on(516, 1403),
+    tt_on(512, 1430),
+    tt_on(541, 1399),
+];
+
+fn draw_source_dingbat_outline(
     content: &mut Content,
     source_font_name: Option<&str>,
     ch: char,
@@ -5759,6 +5890,67 @@ fn draw_word_legacy_dingbat_outline(
         return false;
     };
     let name = source_font_name.to_ascii_lowercase();
+    if name.contains("segoe ui symbol") {
+        match ch {
+            '\u{25a1}' | '\u{2610}' => {
+                draw_segoe_symbol_box(content, glyph_x, baseline_y, font_size)
+            }
+            '\u{2611}' => {
+                draw_segoe_symbol_box(content, glyph_x, baseline_y, font_size);
+                draw_true_type_polygon(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    &[
+                        (695, 226),
+                        (371, 700),
+                        (623, 700),
+                        (767, 472),
+                        (1148, 1215),
+                        (1376, 1215),
+                        (870, 226),
+                    ],
+                );
+            }
+            '\u{2612}' => {
+                draw_segoe_symbol_box(content, glyph_x, baseline_y, font_size);
+                draw_true_type_polygon(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    &[
+                        (976, 717),
+                        (1404, 289),
+                        (1310, 195),
+                        (882, 623),
+                        (454, 195),
+                        (360, 289),
+                        (788, 717),
+                        (360, 1146),
+                        (454, 1240),
+                        (882, 811),
+                        (1310, 1240),
+                        (1404, 1146),
+                    ],
+                );
+            }
+            '\u{2713}' | '\u{2714}' => draw_true_type_contour(
+                content,
+                glyph_x,
+                baseline_y,
+                font_size,
+                0,
+                SEGOE_SYMBOL_CHECK,
+            ),
+            '\u{2717}' => {
+                draw_true_type_contour(content, glyph_x, baseline_y, font_size, 0, SEGOE_SYMBOL_X)
+            }
+            _ => return false,
+        }
+        return true;
+    }
     if name.contains("webdings") {
         match ch {
             '\u{1f4e5}' => {
@@ -5919,6 +6111,23 @@ fn draw_word_legacy_dingbat_outline(
         return true;
     }
     false
+}
+
+fn draw_segoe_symbol_box(content: &mut Content, glyph_x: f32, baseline_y: f32, font_size: f32) {
+    let scale = font_size / 2048.0;
+    content.rect(
+        glyph_x + 165.0 * scale,
+        baseline_y,
+        1434.0 * scale,
+        1434.0 * scale,
+    );
+    content.rect(
+        glyph_x + 289.0 * scale,
+        baseline_y + 124.0 * scale,
+        1186.0 * scale,
+        1186.0 * scale,
+    );
+    content.fill_even_odd();
 }
 
 fn draw_true_type_bullseye(content: &mut Content, glyph_x: f32, baseline_y: f32, font_size: f32) {
@@ -10988,6 +11197,10 @@ endstream
                 10,
             ),
             (include_str!("../fixtures/webdings-checkbox-passive.rtf"), 4),
+            (
+                include_str!("../fixtures/segoe-ui-symbol-checkbox-passive.rtf"),
+                7,
+            ),
         ] {
             let parsed = parse_rtf(input).unwrap();
             let layout = LayoutEngine::layout(&parsed.document);

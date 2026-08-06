@@ -6059,7 +6059,7 @@
     {
       "id": "segoe-ui-symbol-checkbox-passive-vectors",
       "input": "fixtures/segoe-ui-symbol-checkbox-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/segoe-ui-symbol-checkbox-passive.pdf",
       "word_reference_pages": [],
@@ -6095,7 +6095,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms semantic ☐☑☒ ✓✗ mapping and a 12-point Segoe advance of 10.32 points for each box, 9.00 for the check, 9.96 for the X, and 3.24 for spaces. The converter formerly advanced every vector by the generic 6.48-point Zapf estimate, compressing the sequence. Layout and vector painting now share the measured source-font advances: the first box, each subsequent glyph origin, the inter-group space, and final X origin align with Word within about 0.02 points. Passive box/check/X contours remain deliberately simpler and smaller than Segoe's proprietary glyph outlines, and vector-only symbols remain absent from searchable PDF text. Both outputs retain identical three-line flow and no links, annotations, widgets, actions, or raster images; four-times renders were visually inspected."
+        "The focused Word 16.0 audit confirms semantic ☐☑☒ ✓✗ mapping and the measured Segoe advances. Passive painting now reconstructs the registered source outlines for all three box states and the standalone curved check/X without embedding those glyphs as text. With the locally available Segoe family, every contour x bound is within 0.01 points of Word; vertical bounds retain a shared roughly 1.01-point layout-baseline residual. Browser-safe fallback keeps the same contours but accumulates a 1.12-point horizontal label-metric residual before the first symbol. Vector-only symbols remain absent from searchable PDF text, and both outputs retain identical three-line flow with no active PDF structures or raster images."
       ]
     },
     {
