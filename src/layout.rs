@@ -10,10 +10,10 @@ use crate::model::{
     DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END,
     EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
     FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
-    NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
-    PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
-    PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders, ParagraphStyle,
-    PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
+    NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering, PAGE_NUMBER_MARKER,
+    PASSIVE_ADVANCE_MARKER, PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER,
+    PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
+    ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
     StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
     StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
@@ -1630,14 +1630,16 @@ fn layout_footnote_entries(
     );
 
     for (idx, footnote) in entries {
+        let numbering = footnote_numbering_for(document, *idx);
         let note_page = pages.len().max(1);
         let sequence =
             footnote_sequence_for_rendered_page(document, *idx, rendered_footnote_pages, note_page);
         let paragraph = note_display_paragraph(
             footnote,
-            document.footnote_number_start,
+            numbering.start,
             sequence,
-            document.footnote_number_format,
+            numbering.format,
+            numbering.word_compact_label,
         );
         let markers = current_marker_context(pages, document_stats);
         layout_footnote_paragraph(
@@ -1811,12 +1813,14 @@ fn footnote_entries_block_height(
     let mut height = 9.0;
     let markers = marker_context("1".to_string(), "1".to_string(), document_stats);
     for (idx, footnote) in entries {
+        let numbering = footnote_numbering_for(document, *idx);
         let sequence = footnote_sequence_for_index(document, *idx);
         let paragraph = note_display_paragraph(
             footnote,
-            document.footnote_number_start,
+            numbering.start,
             sequence,
-            document.footnote_number_format,
+            numbering.format,
+            numbering.word_compact_label,
         );
         height += twips_to_points(effective_space_before_twips(&paragraph.style));
         height += wrap_paragraph_with_font_provider(
@@ -1859,8 +1863,34 @@ fn footnote_reservation_margin_bottom(
     (geometry.margin_bottom + reserve_height).min(max_reserved_margin)
 }
 
+fn footnote_numbering_for(document: &Document, index: usize) -> NoteNumbering {
+    document
+        .footnote_numbering
+        .get(index)
+        .copied()
+        .unwrap_or(NoteNumbering {
+            start: document.footnote_number_start,
+            format: document.footnote_number_format,
+            restart: document.footnote_number_restart,
+            word_compact_label: false,
+        })
+}
+
+fn endnote_numbering_for(document: &Document, index: usize) -> NoteNumbering {
+    document
+        .endnote_numbering
+        .get(index)
+        .copied()
+        .unwrap_or(NoteNumbering {
+            start: document.endnote_number_start,
+            format: document.endnote_number_format,
+            restart: document.endnote_number_restart,
+            word_compact_label: false,
+        })
+}
+
 fn footnote_sequence_for_index(document: &Document, index: usize) -> usize {
-    match document.footnote_number_restart {
+    match footnote_numbering_for(document, index).restart {
         NoteNumberRestart::Continuous => index.saturating_add(1),
         NoteNumberRestart::EachSection => note_sequence_for_index(
             NoteNumberRestart::EachSection,
@@ -1889,7 +1919,7 @@ fn footnote_sequence_for_rendered_page(
     rendered_footnote_pages: &[Option<usize>],
     current_page: usize,
 ) -> usize {
-    match document.footnote_number_restart {
+    match footnote_numbering_for(document, index).restart {
         NoteNumberRestart::Continuous => index.saturating_add(1),
         NoteNumberRestart::EachSection => note_sequence_for_index(
             NoteNumberRestart::EachSection,
@@ -1913,17 +1943,18 @@ fn footnote_sequence_for_rendered_page(
 }
 
 fn endnote_sequence_for_rendered_page(
-    restart: NoteNumberRestart,
-    section_indices: &[usize],
+    document: &Document,
     index: usize,
     rendered_endnote_pages: &[Option<usize>],
     current_page: usize,
 ) -> usize {
-    match restart {
+    match endnote_numbering_for(document, index).restart {
         NoteNumberRestart::Continuous => index.saturating_add(1),
-        NoteNumberRestart::EachSection => {
-            note_sequence_for_index(NoteNumberRestart::EachSection, section_indices, index)
-        }
+        NoteNumberRestart::EachSection => note_sequence_for_index(
+            NoteNumberRestart::EachSection,
+            &document.endnote_section_indices,
+            index,
+        ),
         NoteNumberRestart::EachPage => rendered_endnote_pages
             .iter()
             .enumerate()
@@ -1979,17 +2010,30 @@ fn note_display_paragraph(
     number_start: i32,
     sequence: usize,
     number_format: PageNumberFormat,
+    word_compact_label: bool,
 ) -> Paragraph {
     let mut paragraph = footnote.clone();
     if let Some(first_run) = paragraph.runs.first_mut() {
         let label = format_note_number(number_start, sequence, number_format);
         let mut label_style = first_run.style.clone();
-        label_style.baseline_shift_half_points = PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS;
-        label_style.font_size_scale_percent = PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT;
-        label_style.font_size_half_points = label_style.font_size_half_points.min(20).max(2);
-        first_run.text = format!(". {}", first_run.text);
-        first_run.style.font_size_half_points =
-            first_run.style.font_size_half_points.min(20).max(2);
+        label_style.baseline_shift_half_points = if word_compact_label {
+            0
+        } else {
+            PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS
+        };
+        label_style.font_size_scale_percent = if word_compact_label {
+            100
+        } else {
+            PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT
+        };
+        if word_compact_label {
+            label_style.font_size_half_points = label_style.font_size_half_points.max(2);
+        } else {
+            label_style.font_size_half_points = label_style.font_size_half_points.min(20).max(2);
+            first_run.text = format!(". {}", first_run.text);
+            first_run.style.font_size_half_points =
+                first_run.style.font_size_half_points.min(20).max(2);
+        }
         paragraph.runs.insert(
             0,
             Run {
@@ -1998,8 +2042,16 @@ fn note_display_paragraph(
             },
         );
     }
-    paragraph.style.space_before_twips = paragraph.style.space_before_twips.min(60);
-    paragraph.style.space_after_twips = paragraph.style.space_after_twips.min(60);
+    paragraph.style.space_before_twips = if word_compact_label {
+        paragraph.style.space_before_twips.max(26)
+    } else {
+        paragraph.style.space_before_twips.min(60)
+    };
+    paragraph.style.space_after_twips = if word_compact_label {
+        paragraph.style.space_after_twips.max(250)
+    } else {
+        paragraph.style.space_after_twips.min(60)
+    };
     paragraph
 }
 
@@ -2008,10 +2060,6 @@ fn layout_endnote_entries(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
     endnotes: &[(usize, Paragraph)],
-    section_indices: &[usize],
-    number_start: i32,
-    number_format: PageNumberFormat,
-    number_restart: NoteNumberRestart,
     content_width: f32,
     margin_left: f32,
     margin_bottom: f32,
@@ -2028,6 +2076,12 @@ fn layout_endnote_entries(
         let mut column = 0;
         start_new_page(pages, cursor_y, geometry, &mut column);
     }
+    if endnotes
+        .first()
+        .is_some_and(|(idx, _)| endnote_numbering_for(document, *idx).word_compact_label)
+    {
+        *cursor_y -= twips_to_points(86);
+    }
     push_note_separator(
         pages,
         cursor_y,
@@ -2042,15 +2096,17 @@ fn layout_endnote_entries(
     );
 
     for (idx, endnote) in endnotes {
+        let numbering = endnote_numbering_for(document, *idx);
         let note_page = pages.len().max(1);
-        let sequence = endnote_sequence_for_rendered_page(
-            number_restart,
-            section_indices,
-            *idx,
-            rendered_endnote_pages,
-            note_page,
+        let sequence =
+            endnote_sequence_for_rendered_page(document, *idx, rendered_endnote_pages, note_page);
+        let paragraph = note_display_paragraph(
+            endnote,
+            numbering.start,
+            sequence,
+            numbering.format,
+            numbering.word_compact_label,
         );
-        let paragraph = note_display_paragraph(endnote, number_start, sequence, number_format);
         let markers = current_marker_context(pages, document_stats);
         layout_endnote_paragraph(
             pages,
@@ -2150,10 +2206,6 @@ fn layout_endnotes_for_placement(
         pages,
         cursor_y,
         &entries,
-        &document.endnote_section_indices,
-        document.endnote_number_start,
-        document.endnote_number_format,
-        document.endnote_number_restart,
         content_width,
         margin_left,
         margin_bottom,
@@ -2249,10 +2301,6 @@ fn layout_endnotes_for_section(
         pages,
         cursor_y,
         &section_notes,
-        &document.endnote_section_indices,
-        document.endnote_number_start,
-        document.endnote_number_format,
-        document.endnote_number_restart,
         content_width,
         margin_left,
         margin_bottom,
@@ -10442,16 +10490,7 @@ fn resolve_footnote_reference_markers(
                 shifts.push((item_idx, fragment.baseline_y, fragment.x, delta));
             }
         }
-        for (marker_idx, baseline_y, marker_x, delta) in shifts {
-            for item in page.items.iter_mut().skip(marker_idx.saturating_add(1)) {
-                if let Some(fragment) = layout_item_text_fragment_mut(item)
-                    && (fragment.baseline_y - baseline_y).abs() < 0.01
-                    && fragment.x >= marker_x
-                {
-                    fragment.x += delta;
-                }
-            }
-        }
+        apply_late_inline_marker_shifts(page, shifts);
     }
 }
 
@@ -10499,16 +10538,30 @@ fn resolve_endnote_reference_markers(
                 shifts.push((item_idx, fragment.baseline_y, fragment.x, delta));
             }
         }
-        for (marker_idx, baseline_y, marker_x, delta) in shifts {
-            for item in page.items.iter_mut().skip(marker_idx.saturating_add(1)) {
-                if let Some(fragment) = layout_item_text_fragment_mut(item)
-                    && (fragment.baseline_y - baseline_y).abs() < 0.01
-                    && fragment.x >= marker_x
-                {
-                    fragment.x += delta;
-                }
+        apply_late_inline_marker_shifts(page, shifts);
+    }
+}
+
+fn apply_late_inline_marker_shifts(page: &mut LayoutPage, shifts: Vec<(usize, f32, f32, f32)>) {
+    let mut applied = Vec::<(f32, f32, f32)>::new();
+    for (marker_idx, baseline_y, original_marker_x, delta) in shifts {
+        let prior_delta = applied
+            .iter()
+            .filter(|(prior_baseline, prior_x, _)| {
+                (*prior_baseline - baseline_y).abs() < 0.01 && *prior_x <= original_marker_x
+            })
+            .map(|(_, _, prior_delta)| *prior_delta)
+            .sum::<f32>();
+        let marker_x = original_marker_x + prior_delta;
+        for item in page.items.iter_mut().skip(marker_idx.saturating_add(1)) {
+            if let Some(fragment) = layout_item_text_fragment_mut(item)
+                && (fragment.baseline_y - baseline_y).abs() < 0.01
+                && fragment.x >= marker_x
+            {
+                fragment.x += delta;
             }
         }
+        applied.push((baseline_y, original_marker_x, delta));
     }
 }
 
@@ -10548,23 +10601,19 @@ fn replace_endnote_reference_markers_in_text(
         output.push_str(&text[search_start..start]);
         let replacement = parse_endnote_reference_marker_id(&text[start..end])
             .map(|index| {
+                let numbering = endnote_numbering_for(document, index);
                 let note_page = rendered_endnote_pages
                     .get(index)
                     .copied()
                     .flatten()
                     .unwrap_or(1);
                 let sequence = endnote_sequence_for_rendered_page(
-                    document.endnote_number_restart,
-                    &document.endnote_section_indices,
+                    document,
                     index,
                     rendered_endnote_pages,
                     note_page,
                 );
-                format_note_number(
-                    document.endnote_number_start,
-                    sequence,
-                    document.endnote_number_format,
-                )
+                format_note_number(numbering.start, sequence, numbering.format)
             })
             .unwrap_or_else(|| "?".to_string());
         output.push_str(&replacement);
@@ -10586,17 +10635,14 @@ fn replace_footnote_reference_markers_in_text(
         output.push_str(&text[search_start..start]);
         let replacement = parse_footnote_reference_marker_id(&text[start..end])
             .map(|index| {
+                let numbering = footnote_numbering_for(document, index);
                 let sequence = footnote_sequence_for_reference_page(
                     document,
                     index,
                     reference_pages,
                     current_page,
                 );
-                format_note_number(
-                    document.footnote_number_start,
-                    sequence,
-                    document.footnote_number_format,
-                )
+                format_note_number(numbering.start, sequence, numbering.format)
             })
             .unwrap_or_else(|| "?".to_string());
         output.push_str(&replacement);
@@ -10612,7 +10658,7 @@ fn footnote_sequence_for_reference_page(
     reference_pages: &[Option<usize>],
     current_page: usize,
 ) -> usize {
-    match document.footnote_number_restart {
+    match footnote_numbering_for(document, index).restart {
         NoteNumberRestart::Continuous => index.saturating_add(1),
         NoteNumberRestart::EachSection => note_sequence_for_index(
             NoteNumberRestart::EachSection,

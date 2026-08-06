@@ -10,7 +10,7 @@ use crate::model::{
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
     FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnotePlacement,
     ImageCrop, ImageFormat, ImageToneAdjustment, LineNumberRestart, NESTED_TABLE_ANCHOR_MARKER,
-    NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
+    NoteNumberRestart, NoteNumbering, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
     PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
     PageSettings, PageVerticalAlignment, Paragraph, ParagraphStyle, PassiveMathFractionPart,
     PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern,
@@ -1932,6 +1932,9 @@ struct Parser {
     current_section_index: usize,
     current_section_column_index: usize,
     note_type_mode: NoteTypeMode,
+    current_section_footnote_numbering: Option<NoteNumbering>,
+    current_section_endnote_numbering: Option<NoteNumbering>,
+    footnote_placement_authored: bool,
     deferred_note_type_diagnostics: Vec<(NoteTypeMode, usize)>,
     deferred_footnote_placement_diagnostics: Vec<(FootnotePlacement, usize)>,
     deferred_endnote_placement_diagnostics: Vec<(EndnotePlacement, usize)>,
@@ -2147,6 +2150,9 @@ impl Parser {
             current_section_index: 1,
             current_section_column_index: 0,
             note_type_mode: NoteTypeMode::FootnotesOnly,
+            current_section_footnote_numbering: None,
+            current_section_endnote_numbering: None,
+            footnote_placement_authored: false,
             deferred_note_type_diagnostics: Vec::new(),
             deferred_footnote_placement_diagnostics: Vec::new(),
             deferred_endnote_placement_diagnostics: Vec::new(),
@@ -5779,6 +5785,14 @@ impl Parser {
             "sectd" => {
                 self.state.section_break_kind = SectionBreakKind::Page;
                 self.current_section_page = self.default_section_page_settings();
+                if self.current_section_footnote_numbering.is_some() {
+                    self.current_section_footnote_numbering =
+                        Some(self.word_default_footnote_numbering());
+                }
+                if self.current_section_endnote_numbering.is_some() {
+                    self.current_section_endnote_numbering =
+                        Some(self.word_default_endnote_numbering());
+                }
                 self.last_section_line_grid_twips = None;
                 self.current_section_page.page_number_format = Some(PageNumberFormat::Decimal);
                 self.upsert_current_section_settings();
@@ -6297,7 +6311,9 @@ impl Parser {
                     ));
                 }
             }
-            "ftntj" => self.set_footnote_placement(FootnotePlacement::BeneathText, offset),
+            "ftntj" | "sftntj" => {
+                self.set_footnote_placement(FootnotePlacement::BeneathText, offset)
+            }
             "ftnbj" => self.set_footnote_placement(FootnotePlacement::BottomOfPage, offset),
             "sftnbj" => self.set_footnote_placement(FootnotePlacement::BottomOfPage, offset),
             "aenddoc" => self.set_endnote_placement(EndnotePlacement::EndOfDocument, offset),
@@ -6312,6 +6328,11 @@ impl Parser {
             }
             "aftnrstcont" => self.set_endnote_number_restart(NoteNumberRestart::Continuous, offset),
             "aftnrstpg" => self.set_endnote_number_restart(NoteNumberRestart::EachPage, offset),
+            "sftnrestart" => self.set_section_footnote_restart(NoteNumberRestart::EachSection),
+            "sftnrstcont" => self.set_section_footnote_restart(NoteNumberRestart::Continuous),
+            "sftnrstpg" => self.set_section_footnote_restart(NoteNumberRestart::EachPage),
+            "saftnrestart" => self.set_section_endnote_restart(NoteNumberRestart::EachSection),
+            "saftnrstcont" => self.set_section_endnote_restart(NoteNumberRestart::Continuous),
             "fet" => self.set_note_type_mode(control.parameter, offset),
             "linex" => self.set_line_number_distance(control.parameter, offset),
             "linemod" => self.set_line_number_step(control.parameter, offset),
@@ -6562,6 +6583,14 @@ impl Parser {
                 self.document.endnote_number_start =
                     self.clamp_page_number_start(control.parameter, offset);
             }
+            "sftnstart" => {
+                let start = self.clamp_page_number_start(control.parameter, offset);
+                self.section_footnote_numbering_mut().start = start;
+            }
+            "saftnstart" => {
+                let start = self.clamp_page_number_start(control.parameter, offset);
+                self.section_endnote_numbering_mut().start = start;
+            }
             "ftnnar" => self.document.footnote_number_format = PageNumberFormat::Decimal,
             "ftnnruc" => self.document.footnote_number_format = PageNumberFormat::UpperRoman,
             "ftnnrlc" => self.document.footnote_number_format = PageNumberFormat::LowerRoman,
@@ -6572,6 +6601,32 @@ impl Parser {
             "aftnnrlc" => self.document.endnote_number_format = PageNumberFormat::LowerRoman,
             "aftnnauc" => self.document.endnote_number_format = PageNumberFormat::UpperLetter,
             "aftnnalc" => self.document.endnote_number_format = PageNumberFormat::LowerLetter,
+            "sftnnar" => self.section_footnote_numbering_mut().format = PageNumberFormat::Decimal,
+            "sftnnruc" => {
+                self.section_footnote_numbering_mut().format = PageNumberFormat::UpperRoman
+            }
+            "sftnnrlc" => {
+                self.section_footnote_numbering_mut().format = PageNumberFormat::LowerRoman
+            }
+            "sftnnauc" => {
+                self.section_footnote_numbering_mut().format = PageNumberFormat::UpperLetter
+            }
+            "sftnnalc" => {
+                self.section_footnote_numbering_mut().format = PageNumberFormat::LowerLetter
+            }
+            "saftnnar" => self.section_endnote_numbering_mut().format = PageNumberFormat::Decimal,
+            "saftnnruc" => {
+                self.section_endnote_numbering_mut().format = PageNumberFormat::UpperRoman
+            }
+            "saftnnrlc" => {
+                self.section_endnote_numbering_mut().format = PageNumberFormat::LowerRoman
+            }
+            "saftnnauc" => {
+                self.section_endnote_numbering_mut().format = PageNumberFormat::UpperLetter
+            }
+            "saftnnalc" => {
+                self.section_endnote_numbering_mut().format = PageNumberFormat::LowerLetter
+            }
             "nogrowautofit" => {
                 self.preserve_authored_table_widths = control.parameter.unwrap_or(1) != 0;
                 if let Some(table) = self.current_table.as_mut() {
@@ -7486,6 +7541,7 @@ impl Parser {
     }
 
     fn set_footnote_placement(&mut self, placement: FootnotePlacement, offset: usize) {
+        self.footnote_placement_authored = true;
         self.document.footnote_placement = placement;
         self.deferred_footnote_placement_diagnostics
             .push((placement, offset));
@@ -7503,6 +7559,66 @@ impl Parser {
 
     fn set_endnote_number_restart(&mut self, restart: NoteNumberRestart, _offset: usize) {
         self.document.endnote_number_restart = restart;
+    }
+
+    fn word_default_footnote_numbering(&self) -> NoteNumbering {
+        NoteNumbering {
+            start: 1,
+            format: PageNumberFormat::Decimal,
+            restart: NoteNumberRestart::Continuous,
+            word_compact_label: self.options.compatibility_mode
+                == CompatibilityMode::WordCompatiblePassive,
+        }
+    }
+
+    fn word_default_endnote_numbering(&self) -> NoteNumbering {
+        NoteNumbering {
+            start: 1,
+            format: PageNumberFormat::LowerRoman,
+            restart: NoteNumberRestart::Continuous,
+            word_compact_label: self.options.compatibility_mode
+                == CompatibilityMode::WordCompatiblePassive,
+        }
+    }
+
+    fn section_footnote_numbering_mut(&mut self) -> &mut NoteNumbering {
+        let default = self.word_default_footnote_numbering();
+        self.current_section_footnote_numbering
+            .get_or_insert(default)
+    }
+
+    fn section_endnote_numbering_mut(&mut self) -> &mut NoteNumbering {
+        let default = self.word_default_endnote_numbering();
+        self.current_section_endnote_numbering
+            .get_or_insert(default)
+    }
+
+    fn effective_footnote_numbering(&self) -> NoteNumbering {
+        self.current_section_footnote_numbering
+            .unwrap_or(NoteNumbering {
+                start: self.document.footnote_number_start,
+                format: self.document.footnote_number_format,
+                restart: self.document.footnote_number_restart,
+                word_compact_label: false,
+            })
+    }
+
+    fn effective_endnote_numbering(&self) -> NoteNumbering {
+        self.current_section_endnote_numbering
+            .unwrap_or(NoteNumbering {
+                start: self.document.endnote_number_start,
+                format: self.document.endnote_number_format,
+                restart: self.document.endnote_number_restart,
+                word_compact_label: false,
+            })
+    }
+
+    fn set_section_footnote_restart(&mut self, restart: NoteNumberRestart) {
+        self.section_footnote_numbering_mut().restart = restart;
+    }
+
+    fn set_section_endnote_restart(&mut self, restart: NoteNumberRestart) {
+        self.section_endnote_numbering_mut().restart = restart;
     }
 
     fn legacy_footnote_destination(&self) -> Destination {
@@ -7528,6 +7644,21 @@ impl Parser {
             return;
         };
         self.note_type_mode = mode;
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+            if mode != NoteTypeMode::EndnotesOnly {
+                let default = self.word_default_footnote_numbering();
+                self.current_section_footnote_numbering
+                    .get_or_insert(default);
+                if !self.footnote_placement_authored {
+                    self.document.footnote_placement = FootnotePlacement::BottomOfPage;
+                }
+            }
+            if mode != NoteTypeMode::FootnotesOnly {
+                let default = self.word_default_endnote_numbering();
+                self.current_section_endnote_numbering
+                    .get_or_insert(default);
+            }
+        }
         self.deferred_note_type_diagnostics.push((mode, offset));
     }
 
@@ -8006,16 +8137,13 @@ impl Parser {
                 footnote_reference_marker(self.document.footnotes.len())
             }
             Destination::Endnote => {
-                if self.document.endnote_number_restart == NoteNumberRestart::EachPage {
+                let numbering = self.effective_endnote_numbering();
+                if numbering.restart == NoteNumberRestart::EachPage {
                     self.next_endnote_reference_sequence();
                     endnote_reference_marker(self.document.endnotes.len())
                 } else {
                     let sequence = self.next_endnote_reference_sequence();
-                    format_note_number(
-                        self.document.endnote_number_start,
-                        sequence,
-                        self.document.endnote_number_format,
-                    )
+                    format_note_number(numbering.start, sequence, numbering.format)
                 }
             }
             _ => "1".to_string(),
@@ -8091,7 +8219,7 @@ impl Parser {
 
     fn rollback_last_footnote_reference_sequence(&mut self) {
         self.footnote_reference_count = self.footnote_reference_count.saturating_sub(1);
-        match self.document.footnote_number_restart {
+        match self.effective_footnote_numbering().restart {
             NoteNumberRestart::Continuous => {}
             NoteNumberRestart::EachSection => {
                 self.footnote_section_reference_count =
@@ -8110,7 +8238,7 @@ impl Parser {
 
     fn next_footnote_reference_sequence(&mut self) -> usize {
         self.footnote_reference_count = self.footnote_reference_count.saturating_add(1);
-        match self.document.footnote_number_restart {
+        match self.effective_footnote_numbering().restart {
             NoteNumberRestart::EachSection => {
                 let section = self.current_section_index.max(1);
                 if self.footnote_reference_section_index != section {
@@ -8142,7 +8270,7 @@ impl Parser {
 
     fn next_endnote_reference_sequence(&mut self) -> usize {
         self.endnote_reference_count = self.endnote_reference_count.saturating_add(1);
-        match self.document.endnote_number_restart {
+        match self.effective_endnote_numbering().restart {
             NoteNumberRestart::EachSection => {
                 let section = self.current_section_index.max(1);
                 if self.endnote_reference_section_index != section {
@@ -8181,8 +8309,14 @@ impl Parser {
         }
 
         let mut style = self.state.character.clone();
-        style.baseline_shift_half_points = DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
-        style.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+        let word_mixed_note_marker = self.options.compatibility_mode
+            == CompatibilityMode::WordCompatiblePassive
+            && (self.current_section_footnote_numbering.is_some()
+                || self.current_section_endnote_numbering.is_some());
+        if !word_mixed_note_marker {
+            style.baseline_shift_half_points = DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+            style.font_size_scale_percent = DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+        }
 
         let paragraph = if self.state.destination == Destination::Header {
             &mut self.current_header_paragraph
@@ -11383,7 +11517,18 @@ impl Parser {
         if note_index > self.document.footnotes.len() {
             return None;
         }
-        let sequence = match self.document.footnote_number_restart {
+        let numbering = self
+            .document
+            .footnote_numbering
+            .get(note_index)
+            .copied()
+            .unwrap_or(NoteNumbering {
+                start: self.document.footnote_number_start,
+                format: self.document.footnote_number_format,
+                restart: self.document.footnote_number_restart,
+                word_compact_label: false,
+            });
+        let sequence = match numbering.restart {
             NoteNumberRestart::Continuous => note_index + 1,
             NoteNumberRestart::EachSection => {
                 let section = self
@@ -11403,14 +11548,14 @@ impl Parser {
             }
             NoteNumberRestart::EachPage => return None,
         };
-        let value = self.document.footnote_number_start + sequence as i32 - 1;
+        let value = numbering.start + sequence as i32 - 1;
         if field_uses_numeric_formatting(instruction) {
             Some(value.to_string())
         } else {
             Some(format_note_number(
-                self.document.footnote_number_start,
+                numbering.start,
                 sequence,
-                self.document.footnote_number_format,
+                numbering.format,
             ))
         }
     }
@@ -11965,6 +12110,9 @@ impl Parser {
             self.document
                 .footnote_block_indices
                 .push(self.current_footnote_reference_block_index);
+            self.document
+                .footnote_numbering
+                .push(self.effective_footnote_numbering());
         }
         Ok(())
     }
@@ -11986,6 +12134,9 @@ impl Parser {
             self.document
                 .endnote_placements
                 .push(self.document.endnote_placement);
+            self.document
+                .endnote_numbering
+                .push(self.effective_endnote_numbering());
         }
         Ok(())
     }
@@ -49229,7 +49380,7 @@ mod tests {
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            "Body1"
+            "Bodyi"
         );
         assert!(output.document.footnotes.is_empty());
         assert_eq!(output.document.endnotes.len(), 1);
@@ -49305,10 +49456,58 @@ mod tests {
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            format!("Body{} Endb", footnote_reference_marker(0))
+            format!("Body{} Endi", footnote_reference_marker(0))
         );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
+        assert_eq!(
+            output.document.footnote_numbering[0],
+            NoteNumbering {
+                start: 1,
+                format: PageNumberFormat::Decimal,
+                restart: NoteNumberRestart::Continuous,
+                word_compact_label: true,
+            }
+        );
+        assert_eq!(
+            output.document.endnote_numbering[0],
+            NoteNumbering {
+                start: 1,
+                format: PageNumberFormat::LowerRoman,
+                restart: NoteNumberRestart::Continuous,
+                word_compact_label: true,
+            }
+        );
+    }
+
+    #[test]
+    fn section_note_numbering_controls_override_word_section_defaults() {
+        let output = parse_rtf(
+            r"{\rtf1\fet2\ftnstart1\ftnnar\aftnstart1\aftnnrlc\sftnstart4\sftnnruc\saftnstart2\saftnnalc Body\chftn{\footnote \chftn Footnote text\par} End\chftn{\footnote\ftnalt \chftn Endnote text\par}\par}",
+        )
+        .unwrap();
+        let body = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected body paragraph"),
+        };
+
+        assert_eq!(
+            body.runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            format!("Body{} Endb", footnote_reference_marker(0))
+        );
+        assert_eq!(output.document.footnote_numbering[0].start, 4);
+        assert_eq!(
+            output.document.footnote_numbering[0].format,
+            PageNumberFormat::UpperRoman
+        );
+        assert_eq!(output.document.endnote_numbering[0].start, 2);
+        assert_eq!(
+            output.document.endnote_numbering[0].format,
+            PageNumberFormat::LowerLetter
+        );
     }
 
     #[test]
@@ -49330,7 +49529,7 @@ mod tests {
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            "Bodyb"
+            "Bodyi"
         );
     }
 
@@ -49352,7 +49551,7 @@ mod tests {
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            "Bodyb"
+            "Bodyi"
         );
     }
 

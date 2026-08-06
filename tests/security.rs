@@ -76687,7 +76687,7 @@ fn fet1_legacy_footnote_groups_render_as_passive_endnotes_without_control_leakag
     assert!(parsed.document.footnotes.is_empty());
     assert_eq!(parsed.document.endnotes.len(), 1);
     assert_eq!(parsed.document.endnote_section_indices, vec![1]);
-    assert!(text.contains("Body1"));
+    assert!(text.contains("Bodyi"));
     assert!(text.contains("Legacy endnote"));
     for forbidden in ["fet1", "aenddoc", "chftn", "footnote"] {
         assert!(
@@ -76722,8 +76722,8 @@ fn fet1_legacy_footnote_groups_render_as_passive_endnotes_without_control_leakag
         .collect::<Vec<_>>();
 
     assert_eq!(page_texts.len(), 1);
-    assert!(page_texts[0].contains("Body1"));
-    assert!(page_texts[0].contains("1. Legacy endnote"));
+    assert!(page_texts[0].contains("Bodyi"));
+    assert!(page_texts[0].contains("iLegacy endnote"));
     for forbidden in [
         b"fet1".as_slice(),
         b"aenddoc",
@@ -76741,6 +76741,61 @@ fn fet1_legacy_footnote_groups_render_as_passive_endnotes_without_control_leakag
                 .windows(forbidden.len())
                 .any(|window| window == forbidden),
             "forbidden note-type content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
+fn section_note_numbering_overrides_render_without_control_leakage() {
+    let input = br"{\rtf1\fet2\sftnstart4\sftnnruc\sftnrstcont\saftnstart2\saftnnalc\saftnrstcont Body\chftn{\footnote \chftn Footnote text\par} End\chftn{\footnote\ftnalt \chftn Endnote text\par}\par}";
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            parsed_pdf
+                .get_and_decode_page_content(*page_id)
+                .map(|content| decoded_pdf_text(&content))
+                .unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered_text.contains("BodyIV Endb"), "{rendered_text:?}");
+    assert!(
+        rendered_text.contains("IVFootnote text"),
+        "{rendered_text:?}"
+    );
+    assert!(rendered_text.contains("bEndnote text"), "{rendered_text:?}");
+    for forbidden in [
+        b"sftnstart".as_slice(),
+        b"sftnnruc",
+        b"sftnrstcont",
+        b"saftnstart",
+        b"saftnnalc",
+        b"saftnrstcont",
+        b"chftn",
+        b"footnote",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "section note control leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
     }

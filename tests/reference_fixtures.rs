@@ -3563,10 +3563,10 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             input: "fixtures/note-restart-numbering-passive.rtf",
             expected_pages: 1,
             must_preserve_text: &[
-                "BodyIV MiddleV Endb",
-                "IV. First note text",
-                "V. Second note text",
-                "b. Final note text",
+                "Body1 Middle2 Endi",
+                "1First note text",
+                "2Second note text",
+                "iFinal note text",
             ],
             must_not_leak: &[
                 b"ftnrestart",

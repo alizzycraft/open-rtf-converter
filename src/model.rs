@@ -28,6 +28,8 @@ pub struct Document {
     pub endnote_number_format: PageNumberFormat,
     pub footnote_number_restart: NoteNumberRestart,
     pub endnote_number_restart: NoteNumberRestart,
+    pub footnote_numbering: Vec<NoteNumbering>,
+    pub endnote_numbering: Vec<NoteNumbering>,
     pub footnote_placement: FootnotePlacement,
     pub endnote_placement: EndnotePlacement,
     pub fonts: Vec<FontDef>,
@@ -77,6 +79,8 @@ impl Default for Document {
             endnote_number_format: PageNumberFormat::Decimal,
             footnote_number_restart: NoteNumberRestart::Continuous,
             endnote_number_restart: NoteNumberRestart::Continuous,
+            footnote_numbering: Vec::new(),
+            endnote_numbering: Vec::new(),
             footnote_placement: FootnotePlacement::BeneathText,
             endnote_placement: EndnotePlacement::AfterBody,
             fonts: vec![FontDef {
@@ -797,6 +801,14 @@ pub struct TableRow {
     pub keep_together: bool,
     pub keep_with_next: bool,
     pub no_overlap: bool,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct NoteNumbering {
+    pub start: i32,
+    pub format: PageNumberFormat,
+    pub restart: NoteNumberRestart,
+    pub word_compact_label: bool,
 }
 
 pub const TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE: i32 = -1_000_000_000;

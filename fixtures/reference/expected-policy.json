@@ -4585,10 +4585,10 @@
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
-        "BodyIV MiddleV Endb",
-        "IV. First note text",
-        "V. Second note text",
-        "b. Final note text"
+        "Body1 Middle2 Endi",
+        "1First note text",
+        "2Second note text",
+        "iFinal note text"
       ],
       "intentional_security_differences": [
         "Word note restart and numbering controls are resolved into passive visible labels, without preserving active note behavior.",
@@ -4617,7 +4617,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word baseline confirms one-page note flow; footnote and endnote numbering-control precedence remains to be matched."
+        "A fresh Word 16.0 export exposed that the former registered PDF predated the fixture's standard mixed-note rewrite. Word applies implicit section defaults when only document-level numbering controls are present: Arabic footnotes from 1, lower-Roman endnotes from i, full-size bare chftn markers, an immediate endnote band, and bottom-of-page footnotes. The converter now matches those rules while honoring explicit sftn/saftn section overrides. The endnote separator center differs by 0.02 points and its text baseline by the shared roughly one-point bundled Arial-compatible metric residual. Bottom-note text boxes differ vertically by at most 0.28 points; the passive default footnote separator remains 1.29 points lower than Word's line."
       ]
     },
     {
