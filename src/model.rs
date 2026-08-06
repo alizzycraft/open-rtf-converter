@@ -9,6 +9,7 @@ pub const DOCUMENT_WORDS_MARKER: &str = "\u{f0008}";
 pub const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
 pub const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
 pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
+pub const PASSIVE_MATH_FRACTION_RULE_MARKER: &str = "\u{f0011}";
 pub const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
 pub const INLINE_IMAGE_MARKER_BASE: u32 = 0xF1000;
 pub const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
@@ -1210,6 +1211,10 @@ pub struct CharacterStyle {
     pub right_to_left: bool,
     pub hidden: bool,
     pub form_field_shading: bool,
+    pub passive_math: bool,
+    pub passive_math_fraction_id: Option<usize>,
+    pub passive_math_fraction_part: PassiveMathFractionPart,
+    pub passive_math_fraction_has_bar: bool,
     pub baseline_shift_half_points: i32,
     pub font_size_scale_percent: i32,
     pub character_spacing_twips: i32,
@@ -1243,6 +1248,10 @@ impl Default for CharacterStyle {
             right_to_left: false,
             hidden: false,
             form_field_shading: false,
+            passive_math: false,
+            passive_math_fraction_id: None,
+            passive_math_fraction_part: PassiveMathFractionPart::None,
+            passive_math_fraction_has_bar: false,
             baseline_shift_half_points: 0,
             font_size_scale_percent: 100,
             character_spacing_twips: 0,
@@ -1263,6 +1272,14 @@ impl Default for CharacterStyle {
             },
         }
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum PassiveMathFractionPart {
+    #[default]
+    None,
+    Numerator,
+    Denominator,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

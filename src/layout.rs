@@ -11,8 +11,9 @@ use crate::model::{
     EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
     FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
     NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
-    PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
-    ParagraphStyle, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
+    PASSIVE_MATH_FRACTION_RULE_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
+    Paragraph, ParagraphBorders, ParagraphStyle, PassiveMathFractionPart, Run,
+    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
     StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
     StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
     StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
@@ -35,6 +36,9 @@ const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
 const LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER: &str = "888";
 const MAX_VERTICAL_TABLE_TEXT_WRAP_POINTS: f32 = 720.0;
 const WORD_INLINE_IMAGE_BODY_EDGE_TOLERANCE_POINTS: f32 = 1.0;
+const PASSIVE_MATH_FRACTION_RULE_WIDTH_POINTS: f32 = 0.84;
+const PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS: f32 = 3.42;
+const PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER: f32 = 1.47;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -8228,6 +8232,10 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     } else {
         paragraph
     };
+    let operator_spaced_math_paragraph = apply_passive_math_operator_spacing(paragraph);
+    let paragraph = operator_spaced_math_paragraph.as_ref().unwrap_or(paragraph);
+    let stacked_math_paragraph = stack_passive_math_fractions(paragraph, document, font_provider);
+    let paragraph = stacked_math_paragraph.as_ref().unwrap_or(paragraph);
     let mut lines = Vec::new();
     let mut current = Line {
         runs: Vec::new(),
@@ -8298,6 +8306,9 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 document,
                 font_provider,
             );
+            if is_passive_math_fraction_rule_marker(&segment.text) {
+                fit_width = passive_math_fraction_width_points(&segment.style);
+            }
             let mut intervals = line_content_intervals(current_line_top_y, current.height);
             intervals.retain(|(_, width)| *width >= 12.0);
             intervals.sort_by(|(left_a, _), (left_b, _)| left_a.total_cmp(left_b));
@@ -8366,6 +8377,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 && segment.style.fit_text_width_twips.is_none()
                 && segment.tab_stop_position.is_none()
                 && segment.text != "\t"
+                && segment.style.passive_math_fraction_id.is_none()
                 && !contains_inline_marker(&segment.text)
                 && dynamic_word.chars().count() >= 2
                 && !dynamic_word.chars().any(char::is_whitespace)
@@ -8508,6 +8520,211 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     }
 
     lines
+}
+
+fn apply_passive_math_operator_spacing(paragraph: &Paragraph) -> Option<Paragraph> {
+    let has_spaced_operator = paragraph.runs.iter().any(|run| {
+        run.style.passive_math
+            && run.text.char_indices().any(|(index, ch)| {
+                passive_math_operator_side_space_em(ch).is_some()
+                    && passive_math_operator_has_operands(&run.text, index, ch.len_utf8())
+            })
+    });
+    if !has_spaced_operator {
+        return None;
+    }
+
+    let mut output = Paragraph {
+        style: paragraph.style.clone(),
+        runs: Vec::with_capacity(paragraph.runs.len().saturating_add(8)),
+    };
+    for run in &paragraph.runs {
+        if !run.style.passive_math {
+            output.runs.push(run.clone());
+            continue;
+        }
+        let mut start = 0usize;
+        for (index, ch) in run.text.char_indices() {
+            let Some(side_space_em) = passive_math_operator_side_space_em(ch) else {
+                continue;
+            };
+            if !passive_math_operator_has_operands(&run.text, index, ch.len_utf8()) {
+                continue;
+            }
+            if start < index {
+                output.runs.push(Run {
+                    text: run.text[start..index].to_string(),
+                    style: run.style.clone(),
+                });
+            }
+            let side_space = run.style.font_size_points() * side_space_em;
+            push_passive_math_advance(&mut output.runs, side_space, &run.style);
+            output.runs.push(Run {
+                text: ch.to_string(),
+                style: run.style.clone(),
+            });
+            push_passive_math_advance(&mut output.runs, side_space, &run.style);
+            start = index + ch.len_utf8();
+        }
+        if start < run.text.len() {
+            output.runs.push(Run {
+                text: run.text[start..].to_string(),
+                style: run.style.clone(),
+            });
+        }
+    }
+    Some(output)
+}
+
+fn passive_math_operator_has_operands(text: &str, index: usize, operator_len: usize) -> bool {
+    text[..index].chars().any(|ch| !ch.is_whitespace())
+        && text[index + operator_len..]
+            .chars()
+            .any(|ch| !ch.is_whitespace())
+}
+
+fn passive_math_operator_side_space_em(ch: char) -> Option<f32> {
+    if matches!(
+        ch,
+        '=' | '<' | '>' | '\u{2260}' | '\u{2248}' | '\u{2264}' | '\u{2265}'
+    ) {
+        Some(5.0 / 18.0)
+    } else if matches!(
+        ch,
+        '+' | '-' | '\u{2212}' | '\u{00b1}' | '\u{2213}' | '\u{00d7}' | '\u{00f7}'
+    ) {
+        Some(1.0 / 7.0)
+    } else {
+        None
+    }
+}
+
+fn stack_passive_math_fractions(
+    paragraph: &Paragraph,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> Option<Paragraph> {
+    if !paragraph
+        .runs
+        .iter()
+        .any(|run| run.style.passive_math_fraction_id.is_some())
+    {
+        return None;
+    }
+
+    let mut output = Paragraph {
+        style: paragraph.style.clone(),
+        runs: Vec::with_capacity(paragraph.runs.len().saturating_add(6)),
+    };
+    let mut start = 0usize;
+    while start < paragraph.runs.len() {
+        let Some(fraction_id) = paragraph.runs[start].style.passive_math_fraction_id else {
+            output.runs.push(paragraph.runs[start].clone());
+            start += 1;
+            continue;
+        };
+        let mut end = start + 1;
+        while end < paragraph.runs.len()
+            && paragraph.runs[end].style.passive_math_fraction_id == Some(fraction_id)
+        {
+            end += 1;
+        }
+        let fraction_runs = &paragraph.runs[start..end];
+        let numerator = fraction_runs
+            .iter()
+            .filter(|run| {
+                run.style.passive_math_fraction_part == PassiveMathFractionPart::Numerator
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let denominator = fraction_runs
+            .iter()
+            .filter(|run| {
+                run.style.passive_math_fraction_part == PassiveMathFractionPart::Denominator
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if numerator.is_empty() || denominator.is_empty() {
+            output.runs.extend_from_slice(fraction_runs);
+            start = end;
+            continue;
+        }
+
+        let numerator_width =
+            passive_math_model_runs_width(&numerator, &paragraph.style, document, font_provider);
+        let denominator_width =
+            passive_math_model_runs_width(&denominator, &paragraph.style, document, font_provider);
+        let fraction_width = numerator_width.max(denominator_width).max(0.1);
+        let mut marker_style = fraction_runs[0].style.clone();
+        marker_style.passive_math_fraction_part = PassiveMathFractionPart::None;
+        marker_style.baseline_shift_half_points = 0;
+        marker_style.font_size_scale_percent = 100;
+        marker_style.character_spacing_twips = points_to_bounded_twips(fraction_width);
+        output.runs.push(Run {
+            text: PASSIVE_MATH_FRACTION_RULE_MARKER.to_string(),
+            style: marker_style.clone(),
+        });
+
+        let numerator_start = (fraction_width - numerator_width) / 2.0;
+        push_passive_math_advance(&mut output.runs, numerator_start, &marker_style);
+        output.runs.extend(numerator);
+        let denominator_start = (fraction_width - denominator_width) / 2.0;
+        push_passive_math_advance(
+            &mut output.runs,
+            denominator_start - numerator_start - numerator_width,
+            &marker_style,
+        );
+        output.runs.extend(denominator);
+        push_passive_math_advance(
+            &mut output.runs,
+            fraction_width - denominator_start - denominator_width,
+            &marker_style,
+        );
+        start = end;
+    }
+    Some(output)
+}
+
+fn passive_math_model_runs_width(
+    runs: &[Run],
+    paragraph_style: &ParagraphStyle,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
+    runs.iter()
+        .map(|run| {
+            let flow = FlowRun {
+                text: run.text.clone(),
+                style: run.style.clone(),
+                width: 0.0,
+                line_height_points: run.style.font_size_points(),
+                tab_leader: TabLeader::None,
+                tab_alignment: TabAlignment::Left,
+                tab_stop_position: None,
+                soft_hyphen_after: false,
+            };
+            measure_flow_run(&flow, 0.0, paragraph_style, document, font_provider)
+        })
+        .sum()
+}
+
+fn push_passive_math_advance(runs: &mut Vec<Run>, width: f32, base_style: &CharacterStyle) {
+    if width.abs() < 0.01 {
+        return;
+    }
+    let mut style = base_style.clone();
+    style.baseline_shift_half_points = 0;
+    style.character_spacing_twips = points_to_bounded_twips(width);
+    runs.push(Run {
+        text: PASSIVE_ADVANCE_MARKER.to_string(),
+        style,
+    });
+}
+
+fn points_to_bounded_twips(points: f32) -> i32 {
+    (points * 20.0)
+        .round()
+        .clamp(i32::MIN as f32, i32::MAX as f32) as i32
 }
 
 fn apply_fit_text_scaling_to_run_groups(
@@ -8853,9 +9070,13 @@ fn natural_line_height_for_runs(
                     && !is_passive_advance_marker(&run.text)
             })
             .map(|run| {
-                (run.line_height_points * 1.15)
-                    + run.style.baseline_shift_points().abs()
-                    + (character_border_inset(&run.style) * 2.0)
+                if is_passive_math_fraction_rule_marker(&run.text) {
+                    run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER
+                } else {
+                    (run.line_height_points * 1.15)
+                        + run.style.baseline_shift_points().abs()
+                        + (character_border_inset(&run.style) * 2.0)
+                }
             })
             .filter(|height| *height > 0.0)
             .reduce(f32::max)
@@ -9118,6 +9339,7 @@ fn contains_inline_marker(text: &str) -> bool {
         || text.contains(ENDNOTE_REFERENCE_MARKER)
         || text.contains(ENDNOTE_REFERENCE_MARKER_END)
         || text.contains(PASSIVE_ADVANCE_MARKER)
+        || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
         || text.contains(NESTED_TABLE_ANCHOR_MARKER)
 }
 
@@ -9730,7 +9952,8 @@ fn remove_internal_stat_markers(text: &str) -> String {
         .replace(DOCUMENT_WORDS_MARKER, "")
         .replace(DOCUMENT_CHARS_MARKER, "")
         .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "")
-        .replace(PASSIVE_ADVANCE_MARKER, "");
+        .replace(PASSIVE_ADVANCE_MARKER, "")
+        .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "");
     while let Some((start, end)) = next_bookmark_page_marker_range(&cleaned, 0) {
         cleaned.replace_range(start..end, "");
     }
@@ -10550,8 +10773,10 @@ fn push_text_segments_preserving_tabs(
     let mut start = 0;
     for (idx, ch) in text.char_indices() {
         let is_passive_advance = ch.to_string() == PASSIVE_ADVANCE_MARKER;
+        let is_math_fraction_rule = ch.to_string() == PASSIVE_MATH_FRACTION_RULE_MARKER;
         let inline_image_index = inline_image_marker_index(&ch.to_string());
-        if ch == '\t' || is_passive_advance || inline_image_index.is_some() {
+        if ch == '\t' || is_passive_advance || is_math_fraction_rule || inline_image_index.is_some()
+        {
             if start < idx {
                 let text = text[start..idx].replace('\u{00ad}', "");
                 if !text.is_empty() {
@@ -10563,6 +10788,20 @@ fn push_text_segments_preserving_tabs(
                     text: PASSIVE_ADVANCE_MARKER.to_string(),
                     style: style.clone(),
                     width: passive_advance_width_points(style),
+                    line_height_points: 0.0,
+                    tab_leader: TabLeader::None,
+                    tab_alignment: TabAlignment::Left,
+                    tab_stop_position: None,
+                    soft_hyphen_after: false,
+                });
+                start = idx + ch.len_utf8();
+                continue;
+            }
+            if is_math_fraction_rule {
+                output.push(FlowRun {
+                    text: PASSIVE_MATH_FRACTION_RULE_MARKER.to_string(),
+                    style: style.clone(),
+                    width: 0.0,
                     line_height_points: 0.0,
                     tab_leader: TabLeader::None,
                     tab_alignment: TabAlignment::Left,
@@ -11016,6 +11255,9 @@ fn flow_run_line_height(
     if is_passive_advance_marker(&run.text) {
         return 0.0;
     }
+    if is_passive_math_fraction_rule_marker(&run.text) {
+        return run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER;
+    }
     let border_extra = character_border_inset(&run.style) * 2.0;
     if run.text.chars().any(is_passive_checkbox_char) {
         return (run.line_height_points * 1.15)
@@ -11085,6 +11327,9 @@ fn measure_flow_run(
     }
     if is_passive_advance_marker(&run.text) {
         return passive_advance_width_points(&run.style);
+    }
+    if is_passive_math_fraction_rule_marker(&run.text) {
+        return 0.0;
     }
     if run.text == "\t" {
         return next_tab_position(current_line_width, paragraph_style, document)
@@ -11157,6 +11402,10 @@ fn is_passive_advance_marker(text: &str) -> bool {
     text == PASSIVE_ADVANCE_MARKER
 }
 
+fn is_passive_math_fraction_rule_marker(text: &str) -> bool {
+    text == PASSIVE_MATH_FRACTION_RULE_MARKER
+}
+
 fn inline_image_for_marker<'a>(document: &'a Document, text: &str) -> Option<&'a StaticImage> {
     document.inline_images.get(inline_image_marker_index(text)?)
 }
@@ -11167,6 +11416,10 @@ fn passive_advance_width_points(style: &CharacterStyle) -> f32 {
 
 fn passive_advance_baseline_delta_points(style: &CharacterStyle) -> f32 {
     style.baseline_shift_points()
+}
+
+fn passive_math_fraction_width_points(style: &CharacterStyle) -> f32 {
+    twips_to_points(style.character_spacing_twips).max(0.0)
 }
 
 fn next_tab_position(
@@ -11365,7 +11618,10 @@ fn push_line_with_rotation(
     let page = pages.last_mut().expect("layout always has a page");
 
     let last_spaced_run_index = line.runs.iter().rposition(|run| {
-        !is_passive_advance_marker(&run.text) && run.text != "\t" && !run.text.is_empty()
+        !is_passive_advance_marker(&run.text)
+            && !is_passive_math_fraction_rule_marker(&run.text)
+            && run.text != "\t"
+            && !run.text.is_empty()
     });
     for (run_index, run) in line.runs.iter().enumerate() {
         if run.text.is_empty() {
@@ -11375,6 +11631,35 @@ fn push_line_with_rotation(
         if is_passive_advance_marker(&run.text) {
             cursor_advance += run.width;
             cursor_baseline_delta += passive_advance_baseline_delta_points(&run.style);
+            continue;
+        }
+        if is_passive_math_fraction_rule_marker(&run.text) {
+            if run.style.passive_math_fraction_has_bar {
+                let fraction_width = passive_math_fraction_width_points(&run.style);
+                let (x1, y1) = rotated_line_run_origin(
+                    x,
+                    baseline_y,
+                    cursor_advance,
+                    cursor_baseline_delta + PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS,
+                    rotation,
+                );
+                let (x2, y2) = rotated_line_run_origin(
+                    x,
+                    baseline_y,
+                    cursor_advance + fraction_width,
+                    cursor_baseline_delta + PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS,
+                    rotation,
+                );
+                page.items.push(LayoutItem::Line {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    width: PASSIVE_MATH_FRACTION_RULE_WIDTH_POINTS,
+                    color: style_color(document, &run.style),
+                    style: LineStyle::Solid,
+                });
+            }
             continue;
         }
         if let Some(image) = inline_image_for_marker(document, &run.text) {

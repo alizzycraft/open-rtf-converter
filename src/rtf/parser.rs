@@ -10,8 +10,9 @@ use crate::model::{
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
     FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnotePlacement,
     ImageCrop, ImageFormat, ImageToneAdjustment, LineNumberRestart, NESTED_TABLE_ANCHOR_MARKER,
-    NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageNumberFormat, PageSettings,
-    PageVerticalAlignment, Paragraph, ParagraphStyle, Run, SECTION_NUMBER_MARKER,
+    NoteNumberRestart, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
+    PASSIVE_MATH_FRACTION_RULE_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
+    Paragraph, ParagraphStyle, PassiveMathFractionPart, Run, SECTION_NUMBER_MARKER,
     SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
     StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageVectorRaster,
@@ -30,6 +31,9 @@ use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
 const DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS: i32 = 6;
 const DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS: i32 = -6;
 const DEFAULT_SCRIPT_FONT_SCALE_PERCENT: i32 = 65;
+const OFFICE_MATH_FRACTION_NUMERATOR_SHIFT_HALF_POINTS: i32 = 14;
+const OFFICE_MATH_FRACTION_DENOMINATOR_SHIFT_HALF_POINTS: i32 = -12;
+const OFFICE_MATH_FRACTION_SCRIPT_FONT_SCALE_PERCENT: i32 = 71;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 0;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
@@ -173,6 +177,8 @@ struct ParserState {
     office_math_fraction_type_capture: bool,
     office_math_fraction_type_text: String,
     office_math_fraction_kind: OfficeMathFractionKind,
+    office_math_fraction_id: Option<usize>,
+    office_math_script_container_direct: bool,
     office_math_border_box_container_direct: bool,
     office_math_border_box_property_direct: bool,
     office_math_box_container_direct: bool,
@@ -332,6 +338,8 @@ impl Default for ParserState {
             office_math_fraction_type_capture: false,
             office_math_fraction_type_text: String::new(),
             office_math_fraction_kind: OfficeMathFractionKind::Bar,
+            office_math_fraction_id: None,
+            office_math_script_container_direct: false,
             office_math_border_box_container_direct: false,
             office_math_border_box_property_direct: false,
             office_math_box_container_direct: false,
@@ -413,7 +421,7 @@ enum OfficeMathFractionKind {
 
 impl OfficeMathFractionKind {
     fn uses_slash(self) -> bool {
-        !matches!(self, Self::NoBar)
+        matches!(self, Self::Linear | Self::Skewed)
     }
 
     fn uses_stacked_scripts(self) -> bool {
@@ -2287,6 +2295,7 @@ impl Parser {
         child.office_math_fraction_container_direct = false;
         child.office_math_fraction_property_direct = false;
         child.office_math_fraction_type_capture = false;
+        child.office_math_script_container_direct = false;
         child.office_math_border_box_container_direct = false;
         child.office_math_border_box_property_direct = false;
         child.office_math_box_container_direct = false;
@@ -3185,6 +3194,7 @@ impl Parser {
             "mf" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_fraction_container_direct = true;
                 self.state.office_math_fraction_kind = OfficeMathFractionKind::Bar;
+                self.state.office_math_fraction_id = Some(offset);
             }
             "mfPr"
                 if destination_allows_visible_content(&self.state)
@@ -3200,14 +3210,18 @@ impl Parser {
                 self.state.office_math_fraction_type_text.clear();
             }
             "mnum" if destination_allows_visible_content(&self.state) => {
-                if self
-                    .office_math_direct_parent_fraction_kind()
-                    .uses_stacked_scripts()
-                {
+                let fraction_kind = self.office_math_direct_parent_fraction_kind();
+                if fraction_kind.uses_stacked_scripts() {
+                    self.state.character.passive_math_fraction_id =
+                        self.office_math_direct_parent_fraction_id();
+                    self.state.character.passive_math_fraction_part =
+                        PassiveMathFractionPart::Numerator;
+                    self.state.character.passive_math_fraction_has_bar =
+                        fraction_kind == OfficeMathFractionKind::Bar;
                     self.state.character.baseline_shift_half_points =
-                        DEFAULT_SUPERSCRIPT_SHIFT_HALF_POINTS;
+                        OFFICE_MATH_FRACTION_NUMERATOR_SHIFT_HALF_POINTS;
                     self.state.character.font_size_scale_percent =
-                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                        OFFICE_MATH_FRACTION_SCRIPT_FONT_SCALE_PERCENT;
                 }
             }
             "mden" if destination_allows_visible_content(&self.state) => {
@@ -3216,11 +3230,22 @@ impl Parser {
                     self.push_text("\u{2044}", offset)?;
                 }
                 if fraction_kind.uses_stacked_scripts() {
+                    self.state.character.passive_math_fraction_id =
+                        self.office_math_direct_parent_fraction_id();
+                    self.state.character.passive_math_fraction_part =
+                        PassiveMathFractionPart::Denominator;
+                    self.state.character.passive_math_fraction_has_bar =
+                        fraction_kind == OfficeMathFractionKind::Bar;
                     self.state.character.baseline_shift_half_points =
-                        DEFAULT_SUBSCRIPT_SHIFT_HALF_POINTS;
+                        OFFICE_MATH_FRACTION_DENOMINATOR_SHIFT_HALF_POINTS;
                     self.state.character.font_size_scale_percent =
-                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                        OFFICE_MATH_FRACTION_SCRIPT_FONT_SCALE_PERCENT;
                 }
+            }
+            "msPre" | "msSub" | "msSubSup" | "msSup"
+                if destination_allows_visible_content(&self.state) =>
+            {
+                self.state.office_math_script_container_direct = true;
             }
             "mbar" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_bar_container_direct = true;
@@ -3546,23 +3571,27 @@ impl Parser {
                 self.push_text(" ", offset)?;
             }
             "msub" if destination_allows_visible_content(&self.state) => {
-                if self.state.office_math_nary_subscript_hidden {
-                    self.state.character.hidden = true;
-                } else {
-                    self.state.character.baseline_shift_half_points =
-                        self.office_math_direct_parent_nary_limit_shift(true);
-                    self.state.character.font_size_scale_percent =
-                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                if self.office_math_direct_parent_allows_script_slot() {
+                    if self.state.office_math_nary_subscript_hidden {
+                        self.state.character.hidden = true;
+                    } else {
+                        self.state.character.baseline_shift_half_points =
+                            self.office_math_direct_parent_nary_limit_shift(true);
+                        self.state.character.font_size_scale_percent =
+                            DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                    }
                 }
             }
             "msup" if destination_allows_visible_content(&self.state) => {
-                if self.state.office_math_nary_superscript_hidden {
-                    self.state.character.hidden = true;
-                } else {
-                    self.state.character.baseline_shift_half_points =
-                        self.office_math_direct_parent_nary_limit_shift(false);
-                    self.state.character.font_size_scale_percent =
-                        DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                if self.office_math_direct_parent_allows_script_slot() {
+                    if self.state.office_math_nary_superscript_hidden {
+                        self.state.character.hidden = true;
+                    } else {
+                        self.state.character.baseline_shift_half_points =
+                            self.office_math_direct_parent_nary_limit_shift(false);
+                        self.state.character.font_size_scale_percent =
+                            DEFAULT_SCRIPT_FONT_SCALE_PERCENT;
+                    }
                 }
             }
             name if is_office_math_control(name)
@@ -3570,6 +3599,10 @@ impl Parser {
                 && !is_office_math_delimiter_metadata_control(name) =>
             {
                 if name == "mmath" || name == "moMath" {
+                    self.state.character.passive_math = true;
+                    if let Some(font_index) = self.office_math_font_index() {
+                        self.state.character.font_index = font_index;
+                    }
                     self.diagnostics.push(Diagnostic::warning(
                         "Office math rendered as bounded passive math text",
                         Some(offset),
@@ -7988,6 +8021,30 @@ impl Parser {
             .filter(|state| state.office_math_fraction_container_direct)
             .map(|state| state.office_math_fraction_kind)
             .unwrap_or(OfficeMathFractionKind::Bar)
+    }
+
+    fn office_math_direct_parent_fraction_id(&self) -> Option<usize> {
+        self.stack
+            .last()
+            .filter(|state| state.office_math_fraction_container_direct)
+            .and_then(|state| state.office_math_fraction_id)
+    }
+
+    fn office_math_direct_parent_allows_script_slot(&self) -> bool {
+        self.stack.last().is_some_and(|state| {
+            state.office_math_script_container_direct || state.office_math_nary_container_direct
+        })
+    }
+
+    fn office_math_font_index(&self) -> Option<i32> {
+        self.document.fonts.iter().find_map(|font| {
+            (font.name.trim().eq_ignore_ascii_case("Cambria Math")
+                || font
+                    .alternate_name
+                    .as_deref()
+                    .is_some_and(|name| name.trim().eq_ignore_ascii_case("Cambria Math")))
+            .then_some(font.index)
+        })
     }
 
     fn office_math_direct_parent_is_nary(&self) -> bool {
@@ -30154,6 +30211,7 @@ fn is_internal_marker(text: &str) -> bool {
             | DOCUMENT_CHARS_MARKER
             | DOCUMENT_CHARS_WITH_SPACES_MARKER
             | PASSIVE_ADVANCE_MARKER
+            | PASSIVE_MATH_FRACTION_RULE_MARKER
             | PENDING_NOTE_REFERENCE_MARKER
             | FOOTNOTE_REFERENCE_MARKER
             | FOOTNOTE_REFERENCE_MARKER_END
@@ -30171,6 +30229,7 @@ fn contains_internal_marker(text: &str) -> bool {
         || text.contains(DOCUMENT_CHARS_MARKER)
         || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
         || text.contains(PASSIVE_ADVANCE_MARKER)
+        || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
         || text.contains(PENDING_NOTE_REFERENCE_MARKER)
         || text.contains(FOOTNOTE_REFERENCE_MARKER)
         || text.contains(FOOTNOTE_REFERENCE_MARKER_END)
@@ -30190,6 +30249,7 @@ fn sanitize_internal_markers(text: &str) -> String {
         .replace(DOCUMENT_CHARS_MARKER, "\u{fffd}")
         .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "\u{fffd}")
         .replace(PASSIVE_ADVANCE_MARKER, "\u{fffd}")
+        .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "\u{fffd}")
         .replace(PENDING_NOTE_REFERENCE_MARKER, "\u{fffd}")
         .replace(FOOTNOTE_REFERENCE_MARKER, "\u{fffd}")
         .replace(FOOTNOTE_REFERENCE_MARKER_END, "\u{fffd}")

@@ -13,8 +13,8 @@ use open_rtf_converter::model::{
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, ENDNOTE_REFERENCE_MARKER,
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
     FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, ImageToneAdjustment,
-    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
+    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, PassiveMathFractionPart,
+    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
     StaticImageVectorPathSegment, StaticImageWrapSide, StaticShapeArrowhead, StaticShapeKind,
     StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER,
@@ -22283,9 +22283,22 @@ fn office_math_text_renders_passively_without_math_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(text.contains("Before E=mc2 After"));
-    let superscript_style = run_style_for_text(&parsed.document, "2").expect("superscript run");
-    assert!(superscript_style.baseline_shift_half_points > 0);
-    assert!(superscript_style.font_size_scale_percent < 100);
+    let math_style = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => paragraph
+                .runs
+                .iter()
+                .find(|run| run.text.contains('2'))
+                .map(|run| &run.style),
+            _ => None,
+        })
+        .expect("math run");
+    assert!(math_style.passive_math);
+    assert_eq!(math_style.baseline_shift_half_points, 0);
+    assert_eq!(math_style.font_size_scale_percent, 100);
     for forbidden in ["mmath", "moMath", "mtext", "msup", "mctrlPr"] {
         assert!(
             !text.contains(forbidden),
@@ -22324,12 +22337,6 @@ fn office_math_text_renders_passively_without_math_control_leakage() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("Before E=mc2 After"));
-    let base_position = pdf_first_text_position_for_text(&content, "E=mc").expect("base text");
-    let script_position = pdf_first_text_position_for_text(&content, "2").expect("script text");
-    assert!(
-        script_position.1 > base_position.1,
-        "Office math superscript should render above the base text: base={base_position:?}, script={script_position:?}"
-    );
     for forbidden in [
         b"mmath".as_slice(),
         b"moMath",
@@ -22376,14 +22383,26 @@ fn office_math_fractions_render_readable_passive_text() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("Before x+1\u{2044}y After"));
+    assert!(text.contains("Before x+1y After"));
     let numerator_style = run_style_for_text(&parsed.document, "x+1").expect("fraction numerator");
     assert!(numerator_style.baseline_shift_half_points > 0);
     assert!(numerator_style.font_size_scale_percent < 100);
+    assert_eq!(
+        numerator_style.passive_math_fraction_part,
+        PassiveMathFractionPart::Numerator
+    );
     let denominator_style =
         run_style_for_text(&parsed.document, "y").expect("fraction denominator");
     assert!(denominator_style.baseline_shift_half_points < 0);
     assert!(denominator_style.font_size_scale_percent < 100);
+    assert_eq!(
+        denominator_style.passive_math_fraction_part,
+        PassiveMathFractionPart::Denominator
+    );
+    assert_eq!(
+        numerator_style.passive_math_fraction_id,
+        denominator_style.passive_math_fraction_id
+    );
     for forbidden in ["mmath", "moMath", "mf", "mnum", "mden", "mtext"] {
         assert!(
             !text.contains(forbidden),
@@ -22405,13 +22424,37 @@ fn office_math_fractions_render_readable_passive_text() {
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("Before x+1"));
     assert!(rendered_text.contains("y After"));
-    let numerator_position =
-        pdf_first_text_position_for_text(&content, "x+1").expect("fraction numerator position");
-    let denominator_position =
-        pdf_first_text_position_for_text(&content, "y").expect("fraction denominator position");
+    let layout = LayoutEngine::layout(&parsed.document);
+    let page = &layout.pages[0];
+    let numerator_fragment = page.items.iter().find_map(|item| match item {
+        LayoutItem::Text(fragment) if fragment.text == "x" => Some(fragment),
+        _ => None,
+    });
+    let denominator_fragment = page.items.iter().find_map(|item| match item {
+        LayoutItem::Text(fragment) if fragment.text == "y" => Some(fragment),
+        _ => None,
+    });
+    let fraction_rule = page.items.iter().find_map(|item| match item {
+        LayoutItem::Line {
+            x1,
+            y1,
+            x2,
+            y2,
+            width,
+            ..
+        } if (*y1 - *y2).abs() < 0.01 && (*width - 0.84).abs() < 0.01 => Some((*x1, *y1, *x2)),
+        _ => None,
+    });
+    let numerator_fragment = numerator_fragment.expect("stacked numerator fragment");
+    let denominator_fragment = denominator_fragment.expect("stacked denominator fragment");
+    let (rule_x1, rule_y, rule_x2) = fraction_rule.expect("passive fraction rule");
+    assert!(numerator_fragment.baseline_y > denominator_fragment.baseline_y);
+    assert!((numerator_fragment.x - rule_x1).abs() < 0.1);
+    assert!(denominator_fragment.x > numerator_fragment.x);
+    assert!(rule_x2 > denominator_fragment.x);
     assert!(
-        numerator_position.1 > denominator_position.1,
-        "Office math fraction numerator should render above denominator: numerator={numerator_position:?}, denominator={denominator_position:?}"
+        rule_y < numerator_fragment.baseline_y && rule_y > denominator_fragment.baseline_y,
+        "fraction rule should sit between numerator and denominator"
     );
     assert!(
         pdf_text_font_names(&content)
@@ -22529,7 +22572,7 @@ fn office_math_fraction_types_are_bounded_passive_metadata() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
     assert!(
-        text.contains("Before AB and C\u{2044}D and E\u{2044}F After"),
+        text.contains("Before AB and CD and E\u{2044}F After"),
         "unexpected fraction type text: {text:?}"
     );
     let no_bar_denominator_style =
@@ -23406,7 +23449,7 @@ fn office_math_style_metadata_is_bounded_and_passive() {
     let wrapped = run_style_for_text(&parsed.document, "Wrapped").expect("wrapped math run");
     assert!(!wrapped.bold);
     assert!(wrapped.italic);
-    let plain = run_style_for_text(&parsed.document, " and Plain After").expect("plain math run");
+    let plain = run_style_for_text(&parsed.document, "Plain").expect("plain math run");
     assert!(!plain.bold);
     assert!(!plain.italic);
     for forbidden in [
@@ -25452,8 +25495,8 @@ fn office_math_equation_arrays_render_passive_rows() {
             "equation-array visible text missing from PDF text: {visible}; got {rendered_text:?}"
         );
     }
-    let x_position = pdf_first_text_position_for_text(&content, "X=1").expect("X=1 position");
-    let y_position = pdf_first_text_position_for_text(&content, "Y=2").expect("Y=2 position");
+    let x_position = pdf_first_text_position_for_text(&content, "X").expect("X=1 position");
+    let y_position = pdf_first_text_position_for_text(&content, "Y").expect("Y=2 position");
     assert!(
         y_position.1 < x_position.1,
         "Office math equation-array rows should render below prior rows: X=1={x_position:?}, Y=2={y_position:?}"
@@ -25574,7 +25617,7 @@ fn office_math_limits_render_passive_lower_and_upper_scripts() {
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("Before limx=0maxn After"));
     let lower_base = pdf_first_text_position_for_text(&content, "lim").expect("lim base");
-    let lower_limit = pdf_first_text_position_for_text(&content, "x=0").expect("lower limit");
+    let lower_limit = pdf_first_text_position_for_text(&content, "x").expect("lower limit");
     let upper_base = pdf_first_text_position_for_text(&content, "max").expect("max base");
     let upper_limit = pdf_first_text_position_for_text(&content, "n").expect("upper limit");
     assert!(

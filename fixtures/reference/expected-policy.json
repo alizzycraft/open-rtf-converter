@@ -2023,7 +2023,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact superscript baseline and fraction visual layout."
+        "The focused Word audit confirms that the fixture's standalone lowercase \\msup slot is not a valid script container and remains 12-point baseline text. Math zones now select the declared Cambria Math family, apply bounded relation/binary-operator spacing without changing searchable model text, and stack bar fractions as one centered inline object. Current/Word fraction widths differ by 0.02 points; numerator baseline offset differs by 0.08 points, while denominator and rule offsets match exactly. Browser-safe rendering substitutes bundled Tinos for Cambria Math, leaving about 2.98 points of accumulated equation width difference and the shared 0.95-point vertical font-metric residual. The stripped adjacent OLE object remains an intentional security difference."
       ]
     },
     {
