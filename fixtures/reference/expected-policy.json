@@ -6016,7 +6016,7 @@
     {
       "id": "webdings-checkbox-passive-vectors",
       "input": "fixtures/webdings-checkbox-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/webdings-checkbox-passive.pdf",
       "word_reference_pages": [],
@@ -6053,7 +6053,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Webdings spaces advance by a measured half em and its icon glyphs by a full em; the converter preserves those advances and Word's 13.8-point baseline interval around bounded vectors. Source 0x3F is normalized to semantic U+1F4E5 rather than the incorrect ballot-box-with-X mapping and renders as a passive inbox tray with outlined incoming paper geometry matching Word's visible meaning. Minor icon contour differences remain."
+        "Word's Webdings half-em spaces and full-em icon advances are preserved around bounded passive vectors. Source 0x3F remains semantic U+1F4E5 and now reproduces Word's exact three-contour incoming-paper/tray outline; the filled check and full-em hollow box likewise use the registered source geometry. Authored and SYMBOL-result contour x bounds are within 0.24 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual."
       ]
     },
     {

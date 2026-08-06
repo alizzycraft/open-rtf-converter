@@ -5650,6 +5650,103 @@ const WINGDINGS2_X: &[TrueTypePoint] = &[
     tt_on(670, 554),
 ];
 
+const WEBDINGS_INBOX_PAPER: &[TrueTypePoint] = &[
+    tt_on(1905, 969),
+    tt_off(1832, 939),
+    tt_on(1764, 908),
+    tt_off(1601, 834),
+    tt_on(1491, 767),
+    tt_off(1388, 703),
+    tt_on(1265, 563),
+    tt_on(1229, 569),
+    tt_off(1266, 613),
+    tt_on(1305, 651),
+    tt_off(1396, 742),
+    tt_on(1475, 789),
+    tt_off(1628, 881),
+    tt_on(1860, 977),
+    tt_off(1789, 1014),
+    tt_on(1728, 1050),
+    tt_off(1580, 1137),
+    tt_on(1503, 1205),
+    tt_off(1408, 1290),
+    tt_on(1273, 1472),
+    tt_off(1207, 1437),
+    tt_on(1146, 1403),
+    tt_off(1002, 1319),
+    tt_on(911, 1247),
+    tt_off(785, 1148),
+    tt_on(666, 1000),
+    tt_off(711, 976),
+    tt_on(752, 949),
+    tt_off(852, 886),
+    tt_on(920, 825),
+    tt_off(998, 754),
+    tt_on(1095, 595),
+    tt_on(1039, 603),
+    tt_off(1017, 644),
+    tt_on(993, 680),
+    tt_off(937, 767),
+    tt_on(882, 816),
+    tt_off(801, 888),
+    tt_on(621, 993),
+    tt_off(658, 1039),
+    tt_on(698, 1083),
+    tt_off(793, 1187),
+    tt_on(884, 1259),
+    tt_off(1030, 1374),
+    tt_on(1274, 1500),
+    tt_off(1316, 1443),
+    tt_on(1356, 1394),
+    tt_off(1452, 1275),
+    tt_on(1521, 1213),
+    tt_off(1644, 1104),
+];
+
+const WEBDINGS_INBOX_PAPER_CUTOUT: &[TrueTypePoint] = &[
+    tt_on(1728, 978),
+    tt_off(1446, 1024),
+    tt_on(1263, 1025),
+    tt_off(1266, 829),
+    tt_on(1191, 662),
+    tt_on(1098, 789),
+    tt_off(1121, 824),
+    tt_on(1138, 860),
+    tt_off(1179, 946),
+    tt_on(1185, 1022),
+    tt_off(1052, 1013),
+    tt_on(852, 976),
+    tt_on(768, 1027),
+    tt_off(891, 1049),
+    tt_on(1186, 1079),
+    tt_off(1192, 1264),
+    tt_on(1257, 1378),
+    tt_on(1303, 1321),
+    tt_off(1260, 1244),
+    tt_on(1261, 1080),
+    tt_off(1405, 1078),
+    tt_on(1615, 1053),
+];
+
+const WEBDINGS_INBOX_TRAY: &[TrueTypePoint] = &[
+    tt_on(1810, 51),
+    tt_on(1017, -274),
+    tt_on(171, 51),
+    tt_on(171, 634),
+    tt_on(885, 777),
+    tt_on(913, 773),
+    tt_off(944, 737),
+    tt_on(1002, 651),
+    tt_on(661, 711),
+    tt_on(560, 688),
+    tt_on(1278, 551),
+    tt_on(1410, 579),
+    tt_on(1311, 597),
+    tt_off(1339, 641),
+    tt_on(1411, 695),
+    tt_on(1810, 634),
+];
+
 fn draw_word_legacy_dingbat_outline(
     content: &mut Content,
     source_font_name: Option<&str>,
@@ -5662,6 +5759,64 @@ fn draw_word_legacy_dingbat_outline(
         return false;
     };
     let name = source_font_name.to_ascii_lowercase();
+    if name.contains("webdings") {
+        match ch {
+            '\u{1f4e5}' => {
+                add_true_type_contour(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    0,
+                    WEBDINGS_INBOX_PAPER,
+                );
+                add_true_type_contour(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    0,
+                    WEBDINGS_INBOX_PAPER_CUTOUT,
+                );
+                add_true_type_contour(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    0,
+                    WEBDINGS_INBOX_TRAY,
+                );
+                content.fill_nonzero();
+            }
+            '\u{2713}' | '\u{2714}' => draw_true_type_polygon(
+                content,
+                glyph_x,
+                baseline_y,
+                font_size,
+                &[
+                    (1408, 640),
+                    (832, 64),
+                    (512, 384),
+                    (512, 768),
+                    (832, 449),
+                    (1408, 1024),
+                ],
+            ),
+            '\u{25a1}' | '\u{2610}' => {
+                let scale = font_size / 2048.0;
+                content.rect(glyph_x, baseline_y - 410.0 * scale, font_size, font_size);
+                content.rect(
+                    glyph_x + 128.0 * scale,
+                    baseline_y - 282.0 * scale,
+                    font_size - 256.0 * scale,
+                    font_size - 256.0 * scale,
+                );
+                content.fill_even_odd();
+            }
+            _ => return false,
+        }
+        return true;
+    }
     if name.contains("wingdings 2") || name.contains("wingdings2") {
         match ch {
             '\u{2717}' => {
@@ -5830,6 +5985,25 @@ fn draw_true_type_contour(
     x_offset_units: i16,
     source: &[TrueTypePoint],
 ) {
+    add_true_type_contour(
+        content,
+        glyph_x,
+        baseline_y,
+        font_size,
+        x_offset_units,
+        source,
+    );
+    content.fill_nonzero();
+}
+
+fn add_true_type_contour(
+    content: &mut Content,
+    glyph_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+    x_offset_units: i16,
+    source: &[TrueTypePoint],
+) {
     if source.is_empty() {
         return;
     }
@@ -5883,7 +6057,6 @@ fn draw_true_type_contour(
         }
     }
     content.close_path();
-    content.fill_nonzero();
 }
 
 fn draw_passive_checkbox_tick(
@@ -10805,9 +10978,16 @@ endstream
 
     #[test]
     fn writes_word_legacy_checkbox_outlines_as_filled_passive_vectors() {
-        for input in [
-            include_str!("../fixtures/wingdings-checkbox-passive.rtf"),
-            include_str!("../fixtures/wingdings2-checkbox-passive.rtf"),
+        for (input, minimum_filled_paths) in [
+            (
+                include_str!("../fixtures/wingdings-checkbox-passive.rtf"),
+                10,
+            ),
+            (
+                include_str!("../fixtures/wingdings2-checkbox-passive.rtf"),
+                10,
+            ),
+            (include_str!("../fixtures/webdings-checkbox-passive.rtf"), 4),
         ] {
             let parsed = parse_rtf(input).unwrap();
             let layout = LayoutEngine::layout(&parsed.document);
@@ -10821,7 +11001,10 @@ endstream
                 .filter(|operation| matches!(operation.operator.as_str(), "f" | "f*"))
                 .count();
 
-            assert!(filled_paths >= 10, "expected filled legacy glyph contours");
+            assert!(
+                filled_paths >= minimum_filled_paths,
+                "expected filled legacy glyph contours"
+            );
             assert!(
                 content
                     .operations
