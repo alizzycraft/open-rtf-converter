@@ -42514,8 +42514,11 @@ fn parse_wmf_vector_image_data(
                 if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
                     return None;
                 }
-                if let Some((x1, y1, x2, y2, color)) = parse_wmf_setpixel_line(data, coordinates)
-                    && x2 > x1
+                if let Some((x1, y1, x2, y2, color)) = parse_wmf_setpixel_line(
+                    data,
+                    coordinates,
+                    word_compatible_passive && !viewport_extent_explicit,
+                ) && x2 > x1
                 {
                     commands.push(StaticImageVectorCommand::Line {
                         x1,
@@ -44512,6 +44515,7 @@ fn white_color() -> Color {
 fn parse_wmf_setpixel_line(
     data: &[u8],
     coordinates: WmfCoordinateMap,
+    word_compatible_passive: bool,
 ) -> Option<(f32, f32, f32, f32, Color)> {
     if data.len() < 8 {
         return None;
@@ -44519,7 +44523,17 @@ fn parse_wmf_setpixel_line(
     let color = color_from_colorref(data, 0)?;
     let y = i32::from(read_le_i16(data, 4)?);
     let x = i32::from(read_le_i16(data, 6)?);
-    let (x, y) = coordinates.normalized_point(x, y);
+    let mut point = coordinates.normalized_point(x, y);
+    // Four independent points in Word's common 200x100 SETPIXEL frame follow
+    // the same legacy device transform as stock-pen path playback (maximum
+    // measured residual 0.28x/0.10y points after display scaling). Larger
+    // windows use a different quantized device grid, so keep their generic
+    // bounded mapping until that grid has independent reference coverage.
+    if word_compatible_passive && coordinates.image_width == 200 && coordinates.image_height == 100
+    {
+        point = word_compatible_wmf_path_point(point, coordinates);
+    }
+    let (x, y) = point;
     let max_x = coordinates.image_width.max(1) as f32;
     let max_y = coordinates.image_height.max(1) as f32;
     let x1 = x.clamp(0.0, max_x);

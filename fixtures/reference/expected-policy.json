@@ -698,7 +698,7 @@
         " S"
       ],
       "known_gaps": [
-        "The converter now matches Word's red 1.87784-point stroke width and 0.8577-point segment length exactly. Its command point remains displaced about 3.89 points left and 3.36 points up because Word applies a SETPIXEL-specific legacy device mapping that needs additional multi-point reference evidence.",
+        "A focused four-point 200x100 logical-window probe establishes that Word applies the same bounded legacy device transform used by stock-pen path playback. WordCompatiblePassive now uses that transform for this independently covered frame: the registered point origin is within about 0.20 points horizontally and 0.10 vertically, while its red 1.87784-point stroke width and 0.8577-point segment length match exactly. Larger logical windows remain on the generic bounded mapping because their quantized device grids differ; StrictSpec retains authored logical coordinates.",
         "The converter intentionally supports only bounded passive pixel strokes; malformed SETPIXEL records remain placeholdered or stripped."
       ]
     },

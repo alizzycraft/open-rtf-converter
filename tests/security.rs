@@ -38389,6 +38389,7 @@ fn wmf_hatched_brush_renders_passive_clipped_lines_without_payload_leakage() {
             } if color.red == 255 && color.green == 0 && color.blue == 0
         )
     }));
+
     assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in [
         "wmetafile",
@@ -43073,16 +43074,34 @@ fn wmf_setpixel_renders_word_sized_passive_stroke_without_payload_leakage() {
                 stroke_color: Some(color),
                 stroke_width,
                 ..
-            } if (*x1 - 64.0).abs() < 0.01
-                && (*y1 - 32.0).abs() < 0.01
-                && (*x2 - 65.5883).abs() < 0.01
-                && (*y2 - 32.0).abs() < 0.01
+            } if (*x1 - 71.5633).abs() < 0.01
+                && (*y1 - 41.581).abs() < 0.01
+                && (*x2 - 73.1516).abs() < 0.01
+                && (*y2 - 41.581).abs() < 0.01
                 && (*stroke_width - 4.172978).abs() < 0.0001
                 && color.red == 255
                 && color.green == 0
                 && color.blue == 0
         )
     }));
+    let strict = parse_rtf_bytes_strict(&input);
+    let strict_image = strict
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("strict-spec WMF SETPIXEL vector preview image");
+    assert!(matches!(
+        strict_image.vector_commands.as_slice(),
+        [StaticImageVectorCommand::Line { x1, y1, x2, y2, .. }]
+            if (*x1 - 64.0).abs() < 0.01
+                && (*y1 - 32.0).abs() < 0.01
+                && (*x2 - 65.5883).abs() < 0.01
+                && (*y2 - 32.0).abs() < 0.01
+    ));
     assert_no_wmf_preview_warning(&parsed.diagnostics);
     for forbidden in ["wmetafile", "041f", "ff0000", "JavaScript"] {
         assert!(
