@@ -3174,7 +3174,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word baseline confirms that contiguous authored runs under one fit-text width form a single fitted region; Strip mode now ends that region within 0.17 points of Word (172.75 versus 172.92). Placeholder mode intentionally inserts a separate visible security notice for the resultless object and therefore cannot preserve Word's object-suppressed one-line appearance. Exact kerning-threshold behavior still needs a focused Word probe."
+        "The Word baseline confirms that contiguous authored runs under one fit-text width form a single fitted region; Strip mode ends that region within 0.17 points of Word (172.75 versus 172.92). Placeholder mode intentionally inserts a separate visible security notice for the resultless object and therefore cannot preserve Word's object-suppressed one-line appearance. A focused 11.5/12/12.5/24/24.5-point Arial probe proves that `\\kerningN` activates inclusively at N half-points. Supplied bundled fonts now use their bounded legacy kern tables for both layout measurement and positioned CID painting: AVAVAV relative widths differ from Word by at most 0.10 points across the active sizes, while the below-threshold line remains unkerned."
       ]
     },
     {

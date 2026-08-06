@@ -202,6 +202,53 @@ impl FontProvider {
         glyph_metrics_for_asset(asset, ch)
     }
 
+    pub(crate) fn pair_kerning_points_for_chars_with_style(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        left: char,
+        right: char,
+        font_size_points: f32,
+    ) -> Option<f32> {
+        let family_name = normalized_family_name(family_name);
+        if family_name.is_empty() {
+            return None;
+        }
+        let asset = self
+            .assets
+            .iter()
+            .filter(|asset| asset.matches_family(&family_name))
+            .filter(|asset| font_asset_supports_pair(asset, left, right))
+            .min_by_key(|asset| {
+                (
+                    asset.family_match_priority(&family_name).unwrap_or(u8::MAX),
+                    supplied_font_style_mismatch_score(asset.style, style),
+                )
+            })?;
+        font_asset_pair_kerning_points(asset, left, right, font_size_points)
+    }
+
+    pub(crate) fn exact_pair_kerning_points_for_chars_with_style(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        left: char,
+        right: char,
+        font_size_points: f32,
+    ) -> Option<f32> {
+        let family_name = normalized_family_name(family_name);
+        if family_name.is_empty() {
+            return None;
+        }
+        let asset = self
+            .assets
+            .iter()
+            .filter(|asset| asset.family_match_priority(&family_name) == Some(0))
+            .filter(|asset| font_asset_supports_pair(asset, left, right))
+            .min_by_key(|asset| supplied_font_style_mismatch_score(asset.style, style))?;
+        font_asset_pair_kerning_points(asset, left, right, font_size_points)
+    }
+
     fn best_metric_asset_for_family_style_char(
         &self,
         family_name: &str,
@@ -444,6 +491,44 @@ fn glyph_metrics_for_asset(asset: &FontAsset, ch: char) -> Option<FontGlyphMetri
         descender_units: face.descender(),
         line_gap_units: face.line_gap(),
     })
+}
+
+fn font_asset_supports_pair(asset: &FontAsset, left: char, right: char) -> bool {
+    Face::parse(&asset.bytes, 0)
+        .ok()
+        .is_some_and(|face| face.glyph_index(left).is_some() && face.glyph_index(right).is_some())
+}
+
+pub(crate) fn font_asset_pair_kerning_points(
+    asset: &FontAsset,
+    left: char,
+    right: char,
+    font_size_points: f32,
+) -> Option<f32> {
+    let face = Face::parse(&asset.bytes, 0).ok()?;
+    let left = face.glyph_index(left)?;
+    let right = face.glyph_index(right)?;
+    let units_per_em = i32::from(face.units_per_em()).max(1);
+    let adjustment_units = face
+        .tables()
+        .kern
+        .map(|table| {
+            table
+                .subtables
+                .into_iter()
+                .filter(|subtable| {
+                    subtable.horizontal
+                        && !subtable.variable
+                        && !subtable.has_cross_stream
+                        && !subtable.has_state_machine
+                })
+                .filter_map(|subtable| subtable.glyphs_kerning(left, right))
+                .fold(0_i32, |total, value| total.saturating_add(i32::from(value)))
+        })
+        .unwrap_or(0)
+        .clamp(-units_per_em, units_per_em);
+    let points = font_size_points * adjustment_units as f32 / units_per_em as f32;
+    points.is_finite().then_some(points)
 }
 
 fn supplied_font_style_mismatch_score(

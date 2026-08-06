@@ -9,7 +9,7 @@ use pdf_writer::types::{
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
 use ttf_parser::{Face, name_id};
 
-use crate::fonts::{FontAsset, FontProvider};
+use crate::fonts::{FontAsset, FontProvider, font_asset_pair_kerning_points};
 use crate::layout::{
     LayoutDocument, LayoutItem, LineCap, LineJoin, LineStyle, PdfColor, PdfFontFamily,
     TextFragment, TextRotation, passive_pair_kerning_points, passive_supplied_font_fallback_name,
@@ -357,6 +357,7 @@ struct SuppliedGlyph {
 struct SuppliedTextEncoding {
     font_index: usize,
     encoded: Vec<u8>,
+    kerning_points: Vec<f32>,
 }
 
 impl fmt::Display for PassivePdfError {
@@ -1229,6 +1230,9 @@ fn draw_text_layout_item(
         font_name_for_style(fragment.font_family, &fragment.style).0
     };
     let passive_kerning_family = supplied_encoding.is_none().then_some(fragment.font_family);
+    let supplied_kerning_points = supplied_encoding
+        .as_ref()
+        .map(|supplied| supplied.kerning_points.as_slice());
     let encoded = supplied_encoding
         .as_ref()
         .map(|supplied| supplied.encoded.as_slice())
@@ -1240,6 +1244,7 @@ fn draw_text_layout_item(
             text,
             font_resource,
             passive_kerning_family,
+            supplied_kerning_points,
             &fragment.style,
             fragment.word_spacing,
             fragment.x + shadow_offset(&fragment.style),
@@ -1259,6 +1264,7 @@ fn draw_text_layout_item(
             text,
             font_resource,
             passive_kerning_family,
+            supplied_kerning_points,
             &fragment.style,
             fragment.word_spacing,
             fragment.x + first_dx,
@@ -1273,6 +1279,7 @@ fn draw_text_layout_item(
             text,
             font_resource,
             passive_kerning_family,
+            supplied_kerning_points,
             &fragment.style,
             fragment.word_spacing,
             fragment.x + second_dx,
@@ -1295,6 +1302,7 @@ fn draw_text_layout_item(
         text,
         font_resource,
         passive_kerning_family,
+        supplied_kerning_points,
         &fragment.style,
         fragment.word_spacing,
         fragment.x + final_dx,
@@ -1696,9 +1704,31 @@ fn encode_supplied_text_fragment_with_text(
     let font_index = supplied_fonts
         .iter()
         .position(|font| font.asset_index == asset_index)?;
+    let asset = font_provider.assets.get(asset_index)?;
+    let mut kerning_points = Vec::with_capacity(encoded.len() / 2);
+    let mut previous = None;
+    for ch in text.chars().filter(|ch| !is_zero_width_pdf_char(*ch)) {
+        let adjustment = if style_uses_passive_kerning(&fragment.style) {
+            previous
+                .and_then(|left| {
+                    font_asset_pair_kerning_points(
+                        asset,
+                        left,
+                        ch,
+                        fragment.style.font_size_points(),
+                    )
+                })
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        kerning_points.push(adjustment);
+        previous = Some(ch);
+    }
     Some(SuppliedTextEncoding {
         font_index,
         encoded,
+        kerning_points,
     })
 }
 
@@ -3624,6 +3654,7 @@ fn draw_passive_vector_text(
             HELVETICA_REGULAR
         },
         Some(PdfFontFamily::Helvetica),
+        None,
         &style,
         word_extra,
         metrics.x,
@@ -3807,6 +3838,7 @@ fn draw_passive_image_placeholder(content: &mut Content, fragment: &crate::layou
         label,
         font_name_for_style(PdfFontFamily::Helvetica, &style).0,
         Some(PdfFontFamily::Helvetica),
+        None,
         &style,
         0.0,
         fragment.x + PASSIVE_IMAGE_PLACEHOLDER_LABEL_PADDING,
@@ -6238,6 +6270,7 @@ fn write_text_fragment(
     text: &str,
     font_resource: &[u8],
     passive_kerning_family: Option<PdfFontFamily>,
+    supplied_kerning_points: Option<&[f32]>,
     style: &CharacterStyle,
     word_spacing: f32,
     x: f32,
@@ -6255,7 +6288,11 @@ fn write_text_fragment(
     content.set_char_spacing(twips_to_points(style.character_spacing_twips));
     content.set_horizontal_scaling(style.character_scaling_percent as f32);
     set_text_position(content, x, baseline_y, rotation);
-    if let Some(font_family) = passive_kerning_family
+    if let Some(adjustments) = supplied_kerning_points
+        && adjustments.iter().any(|adjustment| *adjustment != 0.0)
+    {
+        write_positioned_supplied_text(content, encoded, adjustments, style);
+    } else if let Some(font_family) = passive_kerning_family
         && style_uses_passive_kerning(style)
         && text_has_passive_kerning(text, font_family, style)
     {
@@ -6270,6 +6307,27 @@ fn write_text_fragment(
         content.set_text_rendering_mode(TextRenderingMode::Fill);
     }
     content.end_text();
+}
+
+fn write_positioned_supplied_text(
+    content: &mut Content,
+    encoded: &[u8],
+    adjustments: &[f32],
+    style: &CharacterStyle,
+) {
+    if encoded.len() != adjustments.len().saturating_mul(2) {
+        content.show(Str(encoded));
+        return;
+    }
+    let mut positioned = content.show_positioned();
+    let mut items = positioned.items();
+    let font_size = style.font_size_points().max(1.0);
+    for (encoded_glyph, adjustment) in encoded.chunks_exact(2).zip(adjustments) {
+        if *adjustment != 0.0 {
+            items.adjust((-adjustment * 1000.0 / font_size).clamp(-1000.0, 1000.0));
+        }
+        items.show(Str(encoded_glyph));
+    }
 }
 
 fn set_text_position(content: &mut Content, x: f32, baseline_y: f32, rotation: TextRotation) {
@@ -10410,6 +10468,72 @@ endstream
                     .any(|window| window == forbidden)
             );
         }
+    }
+
+    #[test]
+    fn supplied_font_kerning_uses_positioned_cids_at_inclusive_threshold() {
+        let provider = FontProvider::browser_safe_defaults();
+        let render = |font_size_half_points| {
+            let mut document = Document::default();
+            document.fonts = vec![FontDef {
+                index: 0,
+                name: "Arial".to_string(),
+                alternate_name: None,
+                charset: None,
+                code_page: None,
+                family: FontFamilyHint::Swiss,
+                pitch: FontPitch::Default,
+            }];
+            document.blocks = vec![Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![Run {
+                    text: "AVAVAV".to_string(),
+                    style: CharacterStyle {
+                        font_size_half_points,
+                        character_kerning_half_points: 24,
+                        ..Default::default()
+                    },
+                }],
+            })];
+            let layout = LayoutEngine::layout_with_font_provider(&document, Some(&provider));
+            render_pdf_with_font_provider(&layout, Some(&provider))
+        };
+
+        let below_threshold = render(23);
+        let below = lopdf::Document::load_mem(&below_threshold).unwrap();
+        let below_page = *below.get_pages().values().next().expect("page");
+        let below_content = below.get_and_decode_page_content(below_page).unwrap();
+        assert!(
+            below_content
+                .operations
+                .iter()
+                .all(|operation| operation.operator != "TJ")
+        );
+
+        let at_threshold = render(24);
+        let at = lopdf::Document::load_mem(&at_threshold).unwrap();
+        let at_page = *at.get_pages().values().next().expect("page");
+        let at_content = at.get_and_decode_page_content(at_page).unwrap();
+        let positioned = at_content
+            .operations
+            .iter()
+            .find(|operation| operation.operator == "TJ")
+            .expect("supplied-font kerning should position CIDs at the inclusive threshold");
+        assert!(positioned.operands.iter().any(|operand| {
+            operand.as_array().is_ok_and(|items| {
+                items.iter().any(|item| {
+                    matches!(item, lopdf::Object::Integer(value) if *value > 0)
+                        || matches!(item, lopdf::Object::Real(value) if *value > 0.0)
+                })
+            })
+        }));
+        assert!(
+            at_threshold
+                .windows(b"/Subtype /Type0".len())
+                .any(|window| window == b"/Subtype /Type0")
+        );
+        audit_passive_pdf_bytes(&below_threshold).unwrap();
+        audit_passive_pdf_bytes(&at_threshold).unwrap();
     }
 
     #[test]

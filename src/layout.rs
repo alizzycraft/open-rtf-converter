@@ -13584,8 +13584,9 @@ fn measure_text_with_document_font(
             .map(|metrics| metrics.advance_points(size));
         width += font_width.unwrap_or_else(|| base14_char_width_points(ch, size, family, style));
     }
-    (width + character_spacing_width(text, style) + passive_kerning_width(text, style, family))
-        * style.horizontal_scale()
+    let kerning_width =
+        passive_kerning_width_with_document_font(text, style, family, source_font, font_provider);
+    (width + character_spacing_width(text, style) + kerning_width) * style.horizontal_scale()
 }
 
 pub(crate) fn source_dingbat_advance_points(
@@ -13961,6 +13962,88 @@ fn passive_kerning_width(text: &str, style: &CharacterStyle, family: PdfFontFami
         previous = Some(ch);
     }
     total
+}
+
+fn passive_kerning_width_with_document_font(
+    text: &str,
+    style: &CharacterStyle,
+    family: PdfFontFamily,
+    source_font: Option<&FontDef>,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
+    if !style_uses_passive_kerning(style) {
+        return 0.0;
+    }
+    let mut total = 0.0;
+    let mut previous = None;
+    for ch in text.chars().filter(|ch| !is_zero_width_format_char(*ch)) {
+        if let Some(left) = previous {
+            total += supplied_font_pair_kerning_points(font_provider, source_font, style, left, ch)
+                .unwrap_or_else(|| passive_pair_kerning_points(left, ch, family, style));
+        }
+        previous = Some(ch);
+    }
+    total
+}
+
+fn supplied_font_pair_kerning_points(
+    provider: Option<&FontProvider>,
+    font: Option<&FontDef>,
+    style: &CharacterStyle,
+    left: char,
+    right: char,
+) -> Option<f32> {
+    let provider = provider?;
+    let font = font?;
+    let asset_style = FontAssetStyle {
+        bold: style.bold,
+        italic: style.italic,
+    };
+    let size = style.font_size_points();
+    provider
+        .exact_pair_kerning_points_for_chars_with_style(&font.name, asset_style, left, right, size)
+        .or_else(|| {
+            font.alternate_name.as_deref().and_then(|alternate| {
+                provider.exact_pair_kerning_points_for_chars_with_style(
+                    alternate,
+                    asset_style,
+                    left,
+                    right,
+                    size,
+                )
+            })
+        })
+        .or_else(|| {
+            passive_supplied_font_fallback_name(font).and_then(|fallback| {
+                provider.exact_pair_kerning_points_for_chars_with_style(
+                    fallback,
+                    asset_style,
+                    left,
+                    right,
+                    size,
+                )
+            })
+        })
+        .or_else(|| {
+            provider.pair_kerning_points_for_chars_with_style(
+                &font.name,
+                asset_style,
+                left,
+                right,
+                size,
+            )
+        })
+        .or_else(|| {
+            font.alternate_name.as_deref().and_then(|alternate| {
+                provider.pair_kerning_points_for_chars_with_style(
+                    alternate,
+                    asset_style,
+                    left,
+                    right,
+                    size,
+                )
+            })
+        })
 }
 
 pub fn passive_pair_kerning_points(
