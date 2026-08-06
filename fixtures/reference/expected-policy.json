@@ -5892,7 +5892,7 @@
     {
       "id": "wingdings-checkbox-passive-vectors",
       "input": "fixtures/wingdings-checkbox-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wingdings-checkbox-passive.pdf",
       "word_reference_pages": [],
@@ -5931,13 +5931,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Wingdings space glyph advances by a full 12-point em; the converter preserves that measured spacing around bounded vectors. Source 0xA3 is normalized to a semantic bullseye and rendered as a bounded even-odd ring matching Word. Passive checkbox lines now retain Word's 13.8-point baseline interval independently of installed font metrics. The remaining gap is fine check/X vector geometry."
+        "Word's Wingdings spacing, bullseye, checkbox, check, and asymmetric X outlines are reproduced as bounded passive vectors without embedding the legacy font. Passive SYMBOL results retain source-family style only long enough to select the same vector template. All measured contour x bounds are within 0.23 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual."
       ]
     },
     {
       "id": "wingdings2-checkbox-passive-vectors",
       "input": "fixtures/wingdings2-checkbox-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wingdings2-checkbox-passive.pdf",
       "word_reference_pages": [],
@@ -5971,7 +5971,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Wingdings 2 spaces advance by a full 12-point em and its mapped checkbox advances are preserved around bounded vectors. Passive vector lines now retain Word's 13.8-point baseline interval independently of installed font metrics. The remaining gap is exact checkbox/check/X geometry."
+        "Word's Wingdings 2 spacing and filled check/X contours are reproduced as bounded passive vectors without embedding the legacy font. Source 0x51, 0x53, and 0x54 remain distinct through normalization so the script, light, and bold boxed-X designs are not collapsed. Authored and SYMBOL-result contour x bounds are within 0.23 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual."
       ]
     },
     {

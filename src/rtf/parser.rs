@@ -29340,7 +29340,7 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
         .filter(|half_points| *half_points > 0);
     let font_name = field_switch_string_value(instruction, b'f')
         .filter(|name| !contains_active_pdf_marker_text(name));
-    let mut passive_font_name = font_name.clone();
+    let passive_font_name = font_name.clone();
     let text = if let Some(name) = font_name.as_deref()
         && name.eq_ignore_ascii_case("Symbol")
         && value <= u8::MAX as u32
@@ -29349,7 +29349,6 @@ fn passive_symbol_field_result(instruction: &str) -> Option<PassiveFieldResult> 
     } else if let Some(name) = font_name.as_deref()
         && let Some(mapped) = map_dingbats_codepoint(&name.to_ascii_lowercase(), value)
     {
-        passive_font_name = Some("ZapfDingbats".to_string());
         mapped.to_string()
     } else {
         let ch = char::from_u32(value)?;
@@ -32065,8 +32064,13 @@ fn map_wingdings2_codepoint(codepoint: u32) -> Option<char> {
     match code {
         0x4f => Some('\u{2717}'),
         0x50 => Some('\u{2713}'),
-        0x51 | 0x53 | 0x54 => Some('\u{2612}'),
+        0x51 => Some('\u{2612}'),
         0x52 => Some('\u{2611}'),
+        // Wingdings 2 has three visibly different boxed-X glyphs. Keep the
+        // script, light, and bold variants distinct until passive vector
+        // emission instead of collapsing all three to U+2612.
+        0x53 => Some('\u{1f5f5}'),
+        0x54 => Some('\u{1f5f7}'),
         _ => None,
     }
 }
@@ -47137,7 +47141,7 @@ mod tests {
 
         assert_eq!(
             paragraph.runs[0].text,
-            "\u{2717} \u{2713} \u{2612} \u{2611} \u{2612} \u{2612}"
+            "\u{2717} \u{2713} \u{2612} \u{2611} \u{1f5f5} \u{1f5f7}"
         );
         assert_eq!(paragraph.runs[0].style.font_index, 1);
     }

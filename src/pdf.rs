@@ -5280,6 +5280,8 @@ fn is_passive_vector_only_dingbat_char(ch: char) -> bool {
             | '\u{2714}'
             | '\u{2717}'
             | '\u{2751}'
+            | '\u{1f5f5}'
+            | '\u{1f5f7}'
             | '\u{1f4e5}'
     )
 }
@@ -5309,32 +5311,47 @@ fn draw_passive_vector_only_dingbat_text(
     set_fill_color(content, fragment.color);
     content.set_line_width((font_size * 0.075).clamp(0.5, 1.25));
     for ch in fragment.text.chars() {
-        match ch {
-            '\u{25c9}' => draw_passive_bullseye(content, cursor, fragment.baseline_y, font_size),
-            '\u{25a1}' | '\u{2610}' | '\u{2751}' => {
-                draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size)
+        if draw_word_legacy_dingbat_outline(
+            content,
+            source_font.map(|font| font.name.as_str()),
+            ch,
+            cursor,
+            fragment.baseline_y,
+            font_size,
+        ) {
+            // The source-font-specific outline has already been emitted.
+        } else {
+            match ch {
+                '\u{25c9}' => {
+                    draw_passive_bullseye(content, cursor, fragment.baseline_y, font_size)
+                }
+                '\u{25a1}' | '\u{2610}' | '\u{2751}' => {
+                    draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size)
+                }
+                '\u{2611}' => {
+                    draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size);
+                    draw_passive_checkbox_tick(content, cursor, fragment.baseline_y, font_size);
+                }
+                '\u{2612}' => {
+                    draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size);
+                    draw_passive_checkbox_x(content, cursor, fragment.baseline_y, font_size);
+                }
+                '\u{2713}' | '\u{2714}' => {
+                    draw_passive_checkbox_tick(content, cursor, fragment.baseline_y, font_size)
+                }
+                '\u{2717}' => {
+                    draw_passive_checkbox_x(content, cursor, fragment.baseline_y, font_size)
+                }
+                '\u{263a}' => draw_passive_smiley(content, cursor, fragment.baseline_y, font_size),
+                '\u{1f4e5}' => draw_passive_inbox_tray(
+                    content,
+                    cursor,
+                    fragment.baseline_y,
+                    font_size,
+                    fragment.color,
+                ),
+                _ => {}
             }
-            '\u{2611}' => {
-                draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size);
-                draw_passive_checkbox_tick(content, cursor, fragment.baseline_y, font_size);
-            }
-            '\u{2612}' => {
-                draw_passive_checkbox_box(content, cursor, fragment.baseline_y, font_size);
-                draw_passive_checkbox_x(content, cursor, fragment.baseline_y, font_size);
-            }
-            '\u{2713}' | '\u{2714}' => {
-                draw_passive_checkbox_tick(content, cursor, fragment.baseline_y, font_size)
-            }
-            '\u{2717}' => draw_passive_checkbox_x(content, cursor, fragment.baseline_y, font_size),
-            '\u{263a}' => draw_passive_smiley(content, cursor, fragment.baseline_y, font_size),
-            '\u{1f4e5}' => draw_passive_inbox_tray(
-                content,
-                cursor,
-                fragment.baseline_y,
-                font_size,
-                fragment.color,
-            ),
-            _ => {}
         }
         if !is_zero_width_pdf_char(ch) {
             visible_index += 1;
@@ -5478,6 +5495,395 @@ fn draw_passive_checkbox_overlays(content: &mut Content, fragment: &TextFragment
         }
     }
     content.restore_state();
+}
+
+#[derive(Clone, Copy)]
+struct TrueTypePoint {
+    x: i16,
+    y: i16,
+    on_curve: bool,
+}
+
+const fn tt_on(x: i16, y: i16) -> TrueTypePoint {
+    TrueTypePoint {
+        x,
+        y,
+        on_curve: true,
+    }
+}
+
+const fn tt_off(x: i16, y: i16) -> TrueTypePoint {
+    TrueTypePoint {
+        x,
+        y,
+        on_curve: false,
+    }
+}
+
+const WINGDINGS_CHECK: &[TrueTypePoint] = &[
+    tt_on(1500, 1568),
+    tt_on(1535, 1518),
+    tt_off(1321, 1357),
+    tt_off(797, 687),
+    tt_on(659, 396),
+    tt_on(585, 346),
+    tt_off(493, 282),
+    tt_on(460, 251),
+    tt_off(447, 298),
+    tt_on(403, 405),
+    tt_on(375, 470),
+    tt_off(315, 610),
+    tt_off(212, 744),
+    tt_on(148, 766),
+    tt_off(256, 880),
+    tt_on(346, 880),
+    tt_off(423, 880),
+    tt_on(517, 671),
+    tt_on(548, 601),
+    tt_off(717, 886),
+    tt_off(1247, 1424),
+];
+
+const WINGDINGS_X: &[TrueTypePoint] = &[
+    tt_on(645, 551),
+    tt_on(630, 530),
+    tt_off(474, 294),
+    tt_on(374, 294),
+    tt_off(259, 294),
+    tt_on(148, 481),
+    tt_off(163, 480),
+    tt_on(170, 480),
+    tt_off(301, 480),
+    tt_on(462, 680),
+    tt_on(489, 714),
+    tt_on(454, 752),
+    tt_off(307, 908),
+    tt_on(307, 1017),
+    tt_off(307, 1106),
+    tt_on(468, 1227),
+    tt_off(491, 1072),
+    tt_on(605, 925),
+    tt_on(635, 887),
+    tt_on(659, 918),
+    tt_off(826, 1131),
+    tt_on(962, 1131),
+    tt_off(1068, 1131),
+    tt_on(1123, 970),
+    tt_off(1107, 972),
+    tt_on(1100, 972),
+    tt_off(1052, 972),
+    tt_off(878, 843),
+    tt_on(818, 762),
+    tt_on(788, 721),
+    tt_on(817, 693),
+    tt_off(978, 537),
+    tt_on(1153, 537),
+    tt_off(1059, 347),
+    tt_on(957, 347),
+    tt_off(865, 347),
+    tt_on(691, 509),
+];
+
+const WINGDINGS2_CHECK: &[TrueTypePoint] = &[
+    tt_on(1464, 1568),
+    tt_on(1494, 1516),
+    tt_off(1201, 1309),
+    tt_off(701, 675),
+    tt_on(590, 371),
+    tt_on(546, 342),
+    tt_off(489, 305),
+    tt_on(448, 268),
+    tt_off(441, 304),
+    tt_on(409, 384),
+    tt_on(386, 441),
+    tt_off(311, 626),
+    tt_off(208, 773),
+    tt_on(148, 779),
+    tt_off(229, 853),
+    tt_on(289, 853),
+    tt_off(372, 853),
+    tt_on(471, 630),
+    tt_on(507, 550),
+    tt_off(684, 867),
+    tt_off(1185, 1401),
+];
+
+const WINGDINGS2_X: &[TrueTypePoint] = &[
+    tt_on(623, 605),
+    tt_on(598, 573),
+    tt_off(411, 328),
+    tt_on(307, 328),
+    tt_off(229, 328),
+    tt_on(148, 456),
+    tt_off(176, 450),
+    tt_on(191, 450),
+    tt_off(322, 450),
+    tt_on(489, 665),
+    tt_on(528, 714),
+    tt_on(500, 748),
+    tt_off(298, 983),
+    tt_on(298, 1078),
+    tt_off(298, 1146),
+    tt_on(408, 1251),
+    tt_off(454, 1045),
+    tt_on(600, 862),
+    tt_on(622, 834),
+    tt_on(664, 885),
+    tt_off(870, 1140),
+    tt_on(992, 1140),
+    tt_off(1052, 1140),
+    tt_on(1091, 1081),
+    tt_off(1098, 1071),
+    tt_on(1111, 1053),
+    tt_off(956, 983),
+    tt_on(764, 770),
+    tt_on(723, 724),
+    tt_on(753, 691),
+    tt_off(935, 491),
+    tt_on(1089, 491),
+    tt_off(1134, 491),
+    tt_on(1173, 501),
+    tt_off(1123, 397),
+    tt_off(1056, 333),
+    tt_on(998, 333),
+    tt_off(872, 333),
+    tt_on(670, 554),
+];
+
+fn draw_word_legacy_dingbat_outline(
+    content: &mut Content,
+    source_font_name: Option<&str>,
+    ch: char,
+    glyph_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+) -> bool {
+    let Some(source_font_name) = source_font_name else {
+        return false;
+    };
+    let name = source_font_name.to_ascii_lowercase();
+    if name.contains("wingdings 2") || name.contains("wingdings2") {
+        match ch {
+            '\u{2717}' => {
+                draw_true_type_contour(content, glyph_x, baseline_y, font_size, 0, WINGDINGS2_X)
+            }
+            '\u{2713}' | '\u{2714}' => {
+                draw_true_type_contour(content, glyph_x, baseline_y, font_size, 0, WINGDINGS2_CHECK)
+            }
+            '\u{2612}' => {
+                draw_true_type_box(content, glyph_x, baseline_y, font_size, 99);
+                draw_true_type_contour(content, glyph_x, baseline_y, font_size, 253, WINGDINGS2_X);
+            }
+            '\u{2611}' => {
+                draw_true_type_box(content, glyph_x, baseline_y, font_size, 98);
+                draw_true_type_contour(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    274,
+                    WINGDINGS2_CHECK,
+                );
+            }
+            '\u{1f5f5}' => {
+                draw_true_type_box(content, glyph_x, baseline_y, font_size, 99);
+                draw_true_type_polygon(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    &[
+                        (913, 810),
+                        (1297, 1194),
+                        (1367, 1124),
+                        (983, 740),
+                        (1367, 356),
+                        (1297, 287),
+                        (913, 670),
+                        (529, 287),
+                        (460, 356),
+                        (843, 740),
+                        (460, 1124),
+                        (529, 1194),
+                    ],
+                );
+            }
+            '\u{1f5f7}' => {
+                draw_true_type_box(content, glyph_x, baseline_y, font_size, 148);
+                draw_true_type_polygon(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    &[
+                        (913, 845),
+                        (1279, 1211),
+                        (1384, 1106),
+                        (1018, 740),
+                        (1384, 374),
+                        (1279, 269),
+                        (913, 635),
+                        (547, 269),
+                        (442, 374),
+                        (808, 740),
+                        (442, 1106),
+                        (547, 1211),
+                    ],
+                );
+            }
+            _ => return false,
+        }
+        return true;
+    }
+    if name.contains("wingdings") {
+        match ch {
+            '\u{25c9}' => draw_true_type_bullseye(content, glyph_x, baseline_y, font_size),
+            '\u{2713}' | '\u{2714}' => {
+                draw_true_type_contour(content, glyph_x, baseline_y, font_size, 0, WINGDINGS_CHECK)
+            }
+            '\u{2717}' => {
+                draw_true_type_contour(content, glyph_x, baseline_y, font_size, 0, WINGDINGS_X)
+            }
+            '\u{2611}' => {
+                draw_true_type_box(content, glyph_x, baseline_y, font_size, 148);
+                draw_true_type_contour(
+                    content,
+                    glyph_x,
+                    baseline_y,
+                    font_size,
+                    243,
+                    WINGDINGS_CHECK,
+                );
+            }
+            '\u{2612}' => {
+                draw_true_type_box(content, glyph_x, baseline_y, font_size, 148);
+                draw_true_type_contour(content, glyph_x, baseline_y, font_size, 262, WINGDINGS_X);
+            }
+            _ => return false,
+        }
+        return true;
+    }
+    false
+}
+
+fn draw_true_type_bullseye(content: &mut Content, glyph_x: f32, baseline_y: f32, font_size: f32) {
+    let scale = font_size / 2048.0;
+    let center_x = glyph_x + 913.0 * scale;
+    let center_y = baseline_y + 740.0 * scale;
+    add_passive_circle_path(content, center_x, center_y, 740.0 * scale);
+    add_passive_circle_path(content, center_x, center_y, 296.0 * scale);
+    content.fill_even_odd();
+}
+
+fn draw_true_type_box(
+    content: &mut Content,
+    glyph_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+    inset_units: i16,
+) {
+    let scale = font_size / 2048.0;
+    let outer_left = glyph_x + 173.0 * scale;
+    let outer_bottom = baseline_y;
+    let outer_size = 1480.0 * scale;
+    let inset = f32::from(inset_units) * scale;
+    content.rect(outer_left, outer_bottom, outer_size, outer_size);
+    content.rect(
+        outer_left + inset,
+        outer_bottom + inset,
+        outer_size - 2.0 * inset,
+        outer_size - 2.0 * inset,
+    );
+    content.fill_even_odd();
+}
+
+fn draw_true_type_polygon(
+    content: &mut Content,
+    glyph_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+    points: &[(i16, i16)],
+) {
+    let Some(&(first_x, first_y)) = points.first() else {
+        return;
+    };
+    let scale = font_size / 2048.0;
+    content.move_to(
+        glyph_x + f32::from(first_x) * scale,
+        baseline_y + f32::from(first_y) * scale,
+    );
+    for &(x, y) in &points[1..] {
+        content.line_to(
+            glyph_x + f32::from(x) * scale,
+            baseline_y + f32::from(y) * scale,
+        );
+    }
+    content.close_path();
+    content.fill_nonzero();
+}
+
+fn draw_true_type_contour(
+    content: &mut Content,
+    glyph_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+    x_offset_units: i16,
+    source: &[TrueTypePoint],
+) {
+    if source.is_empty() {
+        return;
+    }
+    let mut points = Vec::with_capacity(source.len() * 2);
+    for (index, point) in source.iter().copied().enumerate() {
+        points.push(point);
+        let next = source[(index + 1) % source.len()];
+        if !point.on_curve && !next.on_curve {
+            points.push(tt_on(
+                ((i32::from(point.x) + i32::from(next.x)) / 2) as i16,
+                ((i32::from(point.y) + i32::from(next.y)) / 2) as i16,
+            ));
+        }
+    }
+    let Some(start) = points.iter().position(|point| point.on_curve) else {
+        return;
+    };
+    let scale = font_size / 2048.0;
+    let map = |point: TrueTypePoint| {
+        (
+            glyph_x + f32::from(point.x + x_offset_units) * scale,
+            baseline_y + f32::from(point.y) * scale,
+        )
+    };
+    let (start_x, start_y) = map(points[start]);
+    content.move_to(start_x, start_y);
+    let mut current = points[start];
+    let mut step = 1usize;
+    while step <= points.len() {
+        let point = points[(start + step) % points.len()];
+        if point.on_curve {
+            let (x, y) = map(point);
+            content.line_to(x, y);
+            current = point;
+            step += 1;
+        } else {
+            let end = points[(start + step + 1) % points.len()];
+            let (current_x, current_y) = map(current);
+            let (control_x, control_y) = map(point);
+            let (end_x, end_y) = map(end);
+            content.cubic_to(
+                current_x + (control_x - current_x) * (2.0 / 3.0),
+                current_y + (control_y - current_y) * (2.0 / 3.0),
+                end_x + (control_x - end_x) * (2.0 / 3.0),
+                end_y + (control_y - end_y) * (2.0 / 3.0),
+                end_x,
+                end_y,
+            );
+            current = end;
+            step += 2;
+        }
+    }
+    content.close_path();
+    content.fill_nonzero();
 }
 
 fn draw_passive_checkbox_tick(
@@ -6085,7 +6491,7 @@ fn encode_symbol_char(ch: char) -> u8 {
 fn encode_zapf_dingbats_char(ch: char) -> u8 {
     match ch {
         '\u{25a1}' | '\u{25c9}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{2751}'
-        | '\u{1f4e5}' => b'q',
+        | '\u{1f5f5}' | '\u{1f5f7}' | '\u{1f4e5}' => b'q',
         '\u{263a}' => b'J',
         '\u{2713}' | '\u{2714}' => b'3',
         '\u{2717}' => b'7',
@@ -6444,6 +6850,7 @@ mod tests {
         StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, Table, TableCell,
         TableCellBorder, TableRow, TableRowWrapMargins, UnderlineStyle,
     };
+    use crate::rtf::parse_rtf;
     use lopdf::{Dictionary, Object};
 
     use super::*;
@@ -10394,6 +10801,35 @@ endstream
                 .iter()
                 .any(|operation| operation.operator == "S")
         );
+    }
+
+    #[test]
+    fn writes_word_legacy_checkbox_outlines_as_filled_passive_vectors() {
+        for input in [
+            include_str!("../fixtures/wingdings-checkbox-passive.rtf"),
+            include_str!("../fixtures/wingdings2-checkbox-passive.rtf"),
+        ] {
+            let parsed = parse_rtf(input).unwrap();
+            let layout = LayoutEngine::layout(&parsed.document);
+            let pdf = render_pdf(&layout);
+            let parsed_pdf = lopdf::Document::load_mem(&pdf).unwrap();
+            let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+            let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+            let filled_paths = content
+                .operations
+                .iter()
+                .filter(|operation| matches!(operation.operator.as_str(), "f" | "f*"))
+                .count();
+
+            assert!(filled_paths >= 10, "expected filled legacy glyph contours");
+            assert!(
+                content
+                    .operations
+                    .iter()
+                    .any(|operation| operation.operator == "c"),
+                "legacy check and X contours should retain bounded curves"
+            );
+        }
     }
 
     #[test]

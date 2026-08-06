@@ -12806,6 +12806,8 @@ fn is_passive_checkbox_text(text: &str) -> bool {
                 | '\u{2714}'
                 | '\u{2717}'
                 | '\u{2751}'
+                | '\u{1f5f5}'
+                | '\u{1f5f7}'
                 | '\u{1f4e5}'
         ) {
             has_checkbox = true;
@@ -12860,6 +12862,8 @@ fn is_passive_checkbox_char(ch: char) -> bool {
             | '\u{2714}'
             | '\u{2717}'
             | '\u{2751}'
+            | '\u{1f5f5}'
+            | '\u{1f5f7}'
             | '\u{1f4e5}'
     )
 }
@@ -13660,13 +13664,13 @@ pub(crate) fn source_dingbat_advance_points(
         match ch {
             '\u{2717}' => 0.645,
             '\u{2713}' | '\u{2714}' => 0.766,
-            '\u{25c9}' | '\u{2610}' | '\u{2611}' | '\u{2612}' => 0.892,
+            '\u{25c9}' | '\u{2610}' | '\u{2611}' | '\u{2612}' | '\u{1f5f5}' | '\u{1f5f7}' => 0.892,
             ch if ch.is_whitespace() => 1.0,
             _ => return None,
         }
     } else if name.contains("wingdings") {
         match ch {
-            '\u{2610}' | '\u{2611}' | '\u{2612}' => 0.892,
+            '\u{25c9}' | '\u{2610}' | '\u{2611}' | '\u{2612}' => 0.892,
             '\u{2713}' | '\u{2714}' => 0.786,
             '\u{2717}' => 0.635,
             ch if ch.is_whitespace() => 1.0,

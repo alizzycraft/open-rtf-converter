@@ -20297,7 +20297,7 @@ fn wingdings2_checkbox_glyphs_render_passively_without_font_payload_leakage() {
     let input = br#"{\rtf1{\fonttbl{\f0 Arial;}{\f1 Wingdings 2;}}\f1 O P Q R S T\par {\field{\*\fldinst SYMBOL 82 \\f "Wingdings 2"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
-    assert!(text.contains("\u{2717} \u{2713} \u{2612} \u{2611} \u{2612} \u{2612}"));
+    assert!(text.contains("\u{2717} \u{2713} \u{2612} \u{2611} \u{1f5f5} \u{1f5f7}"));
     assert!(text.contains("\u{2611}"));
     for forbidden in ["fonttbl", "Wingdings 2", "fldinst", "SYMBOL"] {
         assert!(
@@ -99425,8 +99425,8 @@ fn assert_passive_checkbox_vectors_without_zapf(
         content
             .operations
             .iter()
-            .any(|operation| operation.operator == "S"),
-        "{context} should render checkbox marks as passive stroked vector paths"
+            .any(|operation| matches!(operation.operator.as_str(), "S" | "f" | "f*")),
+        "{context} should render checkbox marks as passive vector paths"
     );
 }
 
