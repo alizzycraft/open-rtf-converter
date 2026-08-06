@@ -12,8 +12,8 @@ use ttf_parser::{Face, name_id};
 use crate::fonts::{FontAsset, FontProvider};
 use crate::layout::{
     LayoutDocument, LayoutItem, LineCap, LineJoin, LineStyle, PdfColor, PdfFontFamily,
-    TextFragment, TextRotation, passive_pair_kerning_points, style_uses_passive_kerning,
-    twips_to_points,
+    TextFragment, TextRotation, passive_pair_kerning_points, passive_supplied_font_fallback_name,
+    style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
     BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ImageToneAdjustment,
@@ -1748,11 +1748,7 @@ fn supplied_text_encoding_parts_for_text(
 }
 
 fn supplied_font_asset_matches_font(asset: &FontAsset, font: &crate::model::FontDef) -> bool {
-    asset.matches_family(&font.name)
-        || font
-            .alternate_name
-            .as_deref()
-            .is_some_and(|alternate| asset.matches_family(alternate))
+    supplied_font_asset_match_priority(asset, font).is_some()
 }
 
 fn supplied_font_asset_match_priority(
@@ -1764,7 +1760,23 @@ fn supplied_font_asset_match_priority(
         .alternate_name
         .as_deref()
         .and_then(|name| asset.family_match_priority(name));
-    primary.into_iter().chain(alternate).min()
+    if primary
+        .into_iter()
+        .chain(alternate)
+        .any(|priority| priority == 0)
+    {
+        return Some(0);
+    }
+    if passive_supplied_font_fallback_name(font)
+        .is_some_and(|fallback| asset.family_match_priority(fallback) == Some(0))
+    {
+        return Some(1);
+    }
+    primary
+        .into_iter()
+        .chain(alternate)
+        .any(|priority| priority == 1)
+        .then_some(2)
 }
 
 fn supplied_pdf_font_base_name(asset: &FontAsset, font_index: usize) -> Vec<u8> {
@@ -9357,6 +9369,55 @@ endstream
                     .any(|window| window == forbidden)
             );
         }
+    }
+
+    #[test]
+    fn bundled_family_hint_substitutes_outrank_the_sans_wildcard() {
+        let provider = FontProvider::browser_safe_defaults();
+        let best_asset = |font: &FontDef| {
+            provider
+                .assets
+                .iter()
+                .enumerate()
+                .filter_map(|(index, asset)| {
+                    supplied_font_asset_match_priority(asset, font)
+                        .map(|priority| (priority, index))
+                })
+                .min()
+                .map(|(_, index)| &provider.assets[index])
+                .expect("family fallback")
+        };
+        let roman = FontDef {
+            index: 1,
+            name: "Mystery Serif".to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Roman,
+            pitch: FontPitch::Default,
+        };
+        let modern = FontDef {
+            index: 2,
+            name: "Mystery Mono".to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Modern,
+            pitch: FontPitch::Default,
+        };
+
+        assert!(
+            best_asset(&roman)
+                .family_names
+                .iter()
+                .any(|name| name == "Times New Roman")
+        );
+        assert!(
+            best_asset(&modern)
+                .family_names
+                .iter()
+                .any(|name| name == "Calibri")
+        );
     }
 
     #[test]

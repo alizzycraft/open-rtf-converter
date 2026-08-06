@@ -5462,7 +5462,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact family/theme font substitution metrics once bundled or caller-provided fonts are available."
+        "The focused Word 16.0 audit shows host substitution by hint category: froman Mystery Serif becomes Cambria, fmodern Mystery Mono becomes Calibri, flomajor Mystery Heading becomes Times New Roman, and fhiminor Mystery Body becomes Aptos. The bundled provider formerly let its Sans wildcard mask every family hint. Exact bundled family aliases now outrank that wildcard, producing Tinos serif for the Roman/major-heading lines and Liberation Sans for the Modern/minor-body lines; exact caller-provided names still win and a caller wildcard remains the final fallback. All four current/Word lines start within 0.02 points horizontally; bundled endpoint residuals range from 1.65 to 5.70 points and cumulative baselines from 1.07 to 2.03 points because the proprietary Word fonts are not copied or required. Both PDFs are one page with zero drawings, images, links, annotations, widgets, or actions; focused geometry was inspected."
       ]
     },
     {

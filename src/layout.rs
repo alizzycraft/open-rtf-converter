@@ -12650,6 +12650,18 @@ pub(crate) fn passive_pdf_font_family_for_font(font: &FontDef) -> PdfFontFamily 
     }
 }
 
+pub(crate) fn passive_supplied_font_fallback_name(font: &FontDef) -> Option<&'static str> {
+    if font.pitch == FontPitch::Fixed {
+        Some("Courier New")
+    } else {
+        match font.family {
+            FontFamilyHint::Roman => Some("Times New Roman"),
+            FontFamilyHint::Modern | FontFamilyHint::Swiss => Some("Calibri"),
+            _ => None,
+        }
+    }
+}
+
 fn passive_pdf_style_for_run(document: &Document, style: &CharacterStyle) -> CharacterStyle {
     let scale_percent = passive_source_font_width_scale_percent(document, style);
     if scale_percent == 100 {
@@ -13583,7 +13595,18 @@ fn supplied_font_glyph_metrics(
         italic: style.italic,
     };
     provider
-        .glyph_metrics_for_char_with_style(&font.name, asset_style, ch)
+        .exact_glyph_metrics_for_char_with_style(&font.name, asset_style, ch)
+        .or_else(|| {
+            font.alternate_name.as_deref().and_then(|alternate| {
+                provider.exact_glyph_metrics_for_char_with_style(alternate, asset_style, ch)
+            })
+        })
+        .or_else(|| {
+            passive_supplied_font_fallback_name(font).and_then(|fallback| {
+                provider.exact_glyph_metrics_for_char_with_style(fallback, asset_style, ch)
+            })
+        })
+        .or_else(|| provider.glyph_metrics_for_char_with_style(&font.name, asset_style, ch))
         .or_else(|| {
             font.alternate_name.as_deref().and_then(|alternate| {
                 provider.glyph_metrics_for_char_with_style(alternate, asset_style, ch)

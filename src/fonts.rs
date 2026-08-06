@@ -183,6 +183,25 @@ impl FontProvider {
         glyph_metrics_for_asset(asset, ch)
     }
 
+    pub(crate) fn exact_glyph_metrics_for_char_with_style(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        ch: char,
+    ) -> Option<FontGlyphMetrics> {
+        let family_name = normalized_family_name(family_name);
+        if family_name.is_empty() {
+            return None;
+        }
+        let asset = self
+            .assets
+            .iter()
+            .filter(|asset| asset.family_match_priority(&family_name) == Some(0))
+            .filter(|asset| glyph_metrics_for_asset(asset, ch).is_some())
+            .min_by_key(|asset| supplied_font_style_mismatch_score(asset.style, style))?;
+        glyph_metrics_for_asset(asset, ch)
+    }
+
     fn best_metric_asset_for_family_style_char(
         &self,
         family_name: &str,
