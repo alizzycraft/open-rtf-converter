@@ -38766,13 +38766,17 @@ fn strict_spec_wmf_polybezierto_records_update_current_point_without_payload_lea
     assert!(matches!(
         word_image.vector_commands.as_slice(),
         [StaticImageVectorCommand::Line {
-            x1: 10.0,
-            y1: 10.0,
-            x2: 90.0,
-            y2: 60.0,
+            x1,
+            y1,
+            x2,
+            y2,
             stroke_width,
             ..
-        }] if (*stroke_width - 4.172_978).abs() < f32::EPSILON
+        }] if (*x1 - 9.747_124).abs() < 0.001
+            && (*y1 - 10.975_914).abs() < 0.001
+            && (*x2 - 88.837_28).abs() < 0.001
+            && (*y2 - 64.649_986).abs() < 0.001
+            && (*stroke_width - 4.172_978).abs() < f32::EPSILON
     ));
 
     let parsed = parse_rtf_bytes_strict(&input);

@@ -469,7 +469,7 @@
         " S"
       ],
       "known_gaps": [
-        "Focused Word comparison confirms the authored four-unit dashed pen has matching 1.87784-point width and 3:1 cadence; direct custom-pen coordinates leave bounded residuals of 1.10 points horizontally and 0.70 points vertically.",
+        "Focused Word comparison confirms the authored four-unit dashed pen has matching 1.87784-point width and 3:1 cadence. The shared custom-pen MoveTo/LineTo recovery map reduces the prior 1.10-by-0.70-point coordinate gap to at most 0.22 points horizontally and 0.083 points vertically; eight-times renders are visually equivalent.",
         "The converter intentionally supports only a hardened passive WMF pen subset; unsupported pen records remain inert, placeholder, or stripped."
       ]
     },
@@ -604,7 +604,7 @@
         " S"
       ],
       "known_gaps": [
-        "The surviving Word-compatible MoveTo-to-LineTo stroke has Word's exact 1.87784-point minimum custom-pen width; direct custom-pen mapping leaves bounded edge residuals up to 1.73 points.",
+        "The surviving Word-compatible MoveTo-to-LineTo stroke has Word's exact 1.87784-point minimum custom-pen width. The shared custom-pen recovery map reduces prior edge residuals up to 1.73 points to at most 0.10 points horizontally and 0.053 points vertically; eight-times renders are visually equivalent.",
         "The converter intentionally supports only complete bounded passive BezierTo runs; malformed or partial WMF BezierTo records remain no-ops, placeholders, or stripped."
       ]
     },

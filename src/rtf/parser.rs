@@ -41782,6 +41782,8 @@ fn parse_wmf_vector_image_data(
                         && !viewport_extent_explicit
                     {
                         point = word_compatible_wmf_path_point(point, coordinates);
+                    } else if word_compatible_passive && !viewport_extent_explicit {
+                        point = word_compatible_wmf_custom_line_point(point, coordinates);
                     }
                     current_point = point;
                 }
@@ -41794,6 +41796,8 @@ fn parse_wmf_vector_image_data(
                         && !viewport_extent_explicit
                     {
                         end = word_compatible_wmf_path_point(end, coordinates);
+                    } else if word_compatible_passive && !viewport_extent_explicit {
+                        end = word_compatible_wmf_custom_line_point(end, coordinates);
                     }
                     if segment_is_visible(current_point, end) {
                         if commands.len() >= MAX_PASSIVE_WMF_COMMANDS {
@@ -42919,6 +42923,24 @@ fn word_compatible_wmf_path_point((x, y): (f32, f32), coordinates: WmfCoordinate
             + coordinates.image_width.max(1) as f32 * WMF_WORD_PATH_X_OFFSET_RATIO,
         y * WMF_WORD_PATH_Y_SCALE
             + coordinates.image_height.max(1) as f32 * WMF_WORD_PATH_Y_OFFSET_RATIO,
+    )
+}
+
+fn word_compatible_wmf_custom_line_point(
+    (x, y): (f32, f32),
+    coordinates: WmfCoordinateMap,
+) -> (f32, f32) {
+    // Word's direct custom-pen MoveTo/LineTo playback uses a milder device
+    // transform than its stock-pen path recovery. The bounded affine fit is
+    // backed by four independent coordinates across the dashed-line and
+    // POLYBEZIERTO registered references.
+    const X_SCALE: f32 = 0.988_626_96;
+    const Y_SCALE: f32 = 1.073_481_4;
+    const X_OFFSET_RATIO: f32 = -0.000_695_731_4;
+    const Y_OFFSET_RATIO: f32 = 0.002_410_996_5;
+    (
+        x * X_SCALE + coordinates.image_width.max(1) as f32 * X_OFFSET_RATIO,
+        y * Y_SCALE + coordinates.image_height.max(1) as f32 * Y_OFFSET_RATIO,
     )
 }
 
