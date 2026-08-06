@@ -610,6 +610,7 @@ pub enum StaticImageVectorCommand {
         x: f32,
         y: f32,
         height: f32,
+        bold: bool,
         text: String,
         color: Option<Color>,
         background_color: Option<Color>,

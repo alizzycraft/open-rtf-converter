@@ -193,7 +193,12 @@ impl FontProvider {
             .iter()
             .filter(|asset| asset.matches_family(family_name))
             .filter(|asset| glyph_metrics_for_asset(asset, ch).is_some())
-            .min_by_key(|asset| supplied_font_style_mismatch_score(asset.style, style))
+            .min_by_key(|asset| {
+                (
+                    asset.family_match_priority(family_name).unwrap_or(u8::MAX),
+                    supplied_font_style_mismatch_score(asset.style, style),
+                )
+            })
     }
 }
 
@@ -346,6 +351,23 @@ impl FontAsset {
                 .iter()
                 .any(|candidate| font_family_names_match(candidate, &family_name))
     }
+
+    pub(crate) fn family_match_priority(&self, family_name: &str) -> Option<u8> {
+        let family_name = normalized_family_name(family_name);
+        if family_name.is_empty() {
+            return None;
+        }
+        let mut wildcard = false;
+        for candidate in &self.family_names {
+            let candidate = normalized_family_name(candidate);
+            if is_wildcard_font_family_alias(&candidate) {
+                wildcard = true;
+            } else if font_family_names_match(&candidate, &family_name) {
+                return Some(0);
+            }
+        }
+        wildcard.then_some(1)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -367,6 +389,7 @@ pub struct FontGlyphMetrics {
     pub advance_units: u16,
     pub ascender_units: i16,
     pub descender_units: i16,
+    pub line_gap_units: i16,
 }
 
 impl FontGlyphMetrics {
@@ -381,7 +404,8 @@ impl FontGlyphMetrics {
         if self.units_per_em == 0 {
             return None;
         }
-        let height_units = i32::from(self.ascender_units) - i32::from(self.descender_units);
+        let height_units = i32::from(self.ascender_units) - i32::from(self.descender_units)
+            + i32::from(self.line_gap_units).max(0);
         if height_units <= 0 {
             return None;
         }
@@ -399,6 +423,7 @@ fn glyph_metrics_for_asset(asset: &FontAsset, ch: char) -> Option<FontGlyphMetri
         advance_units,
         ascender_units: face.ascender(),
         descender_units: face.descender(),
+        line_gap_units: face.line_gap(),
     })
 }
 
@@ -653,6 +678,41 @@ mod tests {
     }
 
     #[test]
+    fn exact_family_alias_outranks_an_earlier_wildcard_fallback() {
+        let wildcard = FontAsset {
+            family_names: vec!["*".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/LiberationSans-Regular.ttf").to_vec(),
+        };
+        let exact = FontAsset {
+            family_names: vec!["Times New Roman".to_string()],
+            style: FontAssetStyle::default(),
+            bytes: include_bytes!("../fixtures/fonts/Tinos-Regular.ttf").to_vec(),
+        };
+        let provider = FontProvider {
+            assets: vec![wildcard, exact],
+            limits: FontProviderLimits::default(),
+        };
+
+        assert_eq!(
+            provider.assets[0].family_match_priority("Times New Roman"),
+            Some(1)
+        );
+        assert_eq!(
+            provider.assets[1].family_match_priority("Times New Roman"),
+            Some(0)
+        );
+        let selected = provider
+            .best_metric_asset_for_family_style_char(
+                "Times New Roman",
+                FontAssetStyle::default(),
+                'A',
+            )
+            .expect("exact Times asset");
+        assert_eq!(selected.family_names, vec!["Times New Roman".to_string()]);
+    }
+
+    #[test]
     fn browser_safe_defaults_bundle_bounded_metric_assets() {
         let provider = FontProvider::browser_safe_defaults();
         provider.validate().unwrap();
@@ -724,6 +784,22 @@ mod tests {
             provider.coverage_for_char("Unknown Word Font", 'A'),
             FontCoverage::Covered
         );
+    }
+
+    #[test]
+    fn bundled_sans_metrics_include_the_authored_line_gap() {
+        let provider = FontProvider::browser_safe_defaults();
+        let metrics = provider
+            .glyph_metrics_for_char("Arial", 'A')
+            .expect("bundled Arial-compatible metrics");
+        let without_gap = 12.0
+            * (i32::from(metrics.ascender_units) - i32::from(metrics.descender_units)) as f32
+            / f32::from(metrics.units_per_em);
+        let with_gap = metrics.line_height_points(12.0).expect("line height");
+
+        assert!(metrics.line_gap_units > 0);
+        assert!(with_gap > without_gap);
+        assert!((with_gap - 13.7988).abs() < 0.01, "{with_gap}");
     }
 
     #[test]
