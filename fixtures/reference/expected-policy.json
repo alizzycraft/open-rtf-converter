@@ -2966,7 +2966,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact QUOTE/IF/COMPARE/MACROBUTTON spacing, case switch behavior, and SHAPE stored-result placement."
+        "The focused Word 16.0 audit confirms that every QUOTE, IF, COMPARE, MACROBUTTON, and SHAPE field position reserves roughly 1.8 points of invisible layout space on each side, including resultless positions. WordCompatiblePassive now applies bounded 36-twip layout-only side bearings to safe evaluated values, stored SHAPE results, placeholders, and stripped blank results; StrictSpec retains the former zero-bearing model. Safe MACROBUTTON and stored SHAPE result origins now differ from Word by 0.10 and 0.05 points respectively, with following text within 0.13 points. Word leaves resultless QUOTE, IF, COMPARE, and SHAPE fields blank and prints the unsafe quoted MACROBUTTON label /Launch, while the converter intentionally keeps deterministic bounded evaluation and replaces active PDF marker text with placeholders. That security difference adds an extra wrapped line but prevents actions, annotations, widgets, or unsafe marker text. Both outputs remain one-page text-only PDFs with zero drawings or images, and the layout marker never enters searchable PDF text. Four-times renders were visually inspected."
       ]
     },
     {

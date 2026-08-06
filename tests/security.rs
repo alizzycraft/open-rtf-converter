@@ -4342,7 +4342,8 @@ fn resultless_passive_field_inside_explicit_list_marker_stays_marker_text() {
         .map(|run| run.text.as_str())
         .collect::<String>();
 
-    assert_eq!(text, "Q\tBody");
+    assert_eq!(text.replace(PASSIVE_ADVANCE_MARKER, ""), "Q\tBody");
+    assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 2);
     assert!(!text.contains("QUOTE"));
     assert!(!text.contains("fldinst"));
     assert!(
@@ -14071,8 +14072,9 @@ fn resultless_if_fields_render_passive_branches_without_instruction_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
-    assert!(text.contains("Status Greater and Different."));
+    assert!(visible_text.contains("Status Greater and Different."));
     for forbidden in [
         "IF",
         "Alpha",
@@ -14135,9 +14137,10 @@ fn resultless_if_fields_resolve_passive_references_without_instruction_leakage()
     let input = br#"{\rtf1{\field{\*\fldinst SET Units "7"}}If {\field{\*\fldinst IF Units > 5 "High" "Low"}} {\*\bkmkstart Rate}4{\*\bkmkend Rate} rate {\field{\*\fldinst IF Rate = 4 "Match" "Miss" \\* Upper}} missing {\field{\*\fldinst IF Missing = 1 "Yes" "No"}} unsafe {\field{\*\fldinst SET Bad "PAYLOAD /JavaScript"}}{\field{\*\fldinst IF Bad = 1 "Yes" "No"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = strip_bookmark_page_markers(&collect_text(&parsed.document));
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
     assert!(
-        text.contains("If High 4 rate MATCH missing No unsafe No"),
+        visible_text.contains("If High 4 rate MATCH missing No unsafe No"),
         "text did not contain passive IF reference values: {text:?}"
     );
     for forbidden in [
@@ -14239,9 +14242,11 @@ fn resultless_compare_fields_render_bounded_passive_values_without_instruction_l
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
     assert!(
-        text.contains("Compare 1 and 0 and I and malformed [Field removed: no passive result]."),
+        visible_text
+            .contains("Compare 1 and 0 and I and malformed [Field removed: no passive result]."),
         "text was {text:?}"
     );
     for forbidden in [
@@ -14307,9 +14312,10 @@ fn resultless_compare_fields_resolve_passive_references_without_instruction_leak
     let input = br#"{\rtf1{\field{\*\fldinst SET Units "7"}}Compare {\field{\*\fldinst COMPARE Units > 5}} {\*\bkmkstart Rate}4{\*\bkmkend Rate} rate {\field{\*\fldinst COMPARE Rate = 4 \\* ROMAN}} missing {\field{\*\fldinst COMPARE Missing = 1}} unsafe {\field{\*\fldinst SET Bad "PAYLOAD /JavaScript"}}{\field{\*\fldinst COMPARE Bad = 1}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = strip_bookmark_page_markers(&collect_text(&parsed.document));
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
     assert!(
-        text.contains("Compare 1 4 rate I missing 0 unsafe 0"),
+        visible_text.contains("Compare 1 4 rate I missing 0 unsafe 0"),
         "text did not contain passive COMPARE reference values: {text:?}"
     );
     for forbidden in [
@@ -14408,9 +14414,10 @@ fn resultless_field_case_switches_render_passively_without_instruction_leakage()
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
     assert!(
-        text.contains("Values MIXED CASE and Mixed case and Checked Status."),
+        visible_text.contains("Values MIXED CASE and Mixed case and Checked Status."),
         "normalized field switch text was {text:?}"
     );
     for forbidden in [
@@ -14552,9 +14559,10 @@ fn resultless_field_number_switches_render_passively_without_instruction_leakage
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
     assert!(
-        text.contains(
+        visible_text.contains(
             "Values IV v aa AA FF 7th. forty-two five hundred thirteenth. forty-two and 00/100. - 9 -."
         ),
         "normalized field number-switch text was {text:?}"
@@ -14684,9 +14692,10 @@ fn resultless_numeric_picture_switches_render_passively_without_instruction_leak
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
     assert!(
-        text.contains("Values 0042 1,234,567 $5.00 -008."),
+        visible_text.contains("Values 0042 1,234,567 $5.00 -008."),
         "normalized numeric-picture text was {text:?}"
     );
     for forbidden in [
@@ -14757,8 +14766,9 @@ fn resultless_quote_fields_render_without_executing_field_instruction() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
-    assert!(text.contains("Before Visible quoted text After"));
+    assert!(visible_text.contains("Before Visible quoted text After"));
     assert!(!text.contains("QUOTE"));
     assert!(!text.contains("fldinst"));
     assert!(!text.contains("[Field removed"));
@@ -14796,6 +14806,7 @@ fn resultless_quote_fields_render_without_executing_field_instruction() {
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
+        PASSIVE_ADVANCE_MARKER.as_bytes(),
     ] {
         assert!(
             !pdf.windows(forbidden.len())
@@ -14825,8 +14836,9 @@ fn resultless_quote_field_instruction_unicode_renders_without_control_leakage() 
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
-    assert!(text.contains("Before Code A value After"));
+    assert!(visible_text.contains("Before Code A value After"));
     for forbidden in ["QUOTE", "fldinst", "u65", "? value"] {
         assert!(
             !text.contains(forbidden),
@@ -14877,9 +14889,10 @@ fn resultless_instruction_literal_fields_reject_active_pdf_markers_before_pdf() 
     let input = br#"{\rtf1 quote {\field{\*\fldinst QUOTE "/JavaScript"}} if {\field{\*\fldinst IF 1 = 1 "/EmbeddedFile" "Safe"}} macro {\field{\*\fldinst MACROBUTTON LaunchPayload "/Launch"}} go {\field{\*\fldinst GOTOBUTTON Target "/OpenAction"}} merge {\field{\*\fldinst MERGEFIELD "/URI"}}\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
     assert!(
-        text.contains(
+        visible_text.contains(
             "quote [Field removed: no passive result] if [Field removed: no passive result] macro [Field removed: no passive result] go [Field removed: no passive result] merge [Field removed: no passive result]"
         ),
         "normalized text did not contain passive placeholders: {text:?}"
@@ -14932,6 +14945,7 @@ fn resultless_instruction_literal_fields_reject_active_pdf_markers_before_pdf() 
         b"/OpenAction",
         b"/URI",
         b"fldinst",
+        PASSIVE_ADVANCE_MARKER.as_bytes(),
     ] {
         assert!(
             !output
@@ -14961,8 +14975,9 @@ fn resultless_macrobutton_fields_render_without_executing_macro() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
-    assert!(text.contains("Before Visible button text After"));
+    assert!(visible_text.contains("Before Visible button text After"));
     assert!(!text.contains("MACROBUTTON"));
     assert!(!text.contains("LaunchPayload"));
     assert!(!text.contains("fldinst"));
@@ -15002,6 +15017,7 @@ fn resultless_macrobutton_fields_render_without_executing_macro() {
         b"/EmbeddedFile",
         b"/Launch",
         b"/OpenAction",
+        PASSIVE_ADVANCE_MARKER.as_bytes(),
     ] {
         assert!(
             !pdf.windows(forbidden.len())
@@ -16340,11 +16356,12 @@ visible after\par}"#
         .to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
 
-    assert!(text.contains("Visible before"));
-    assert!(text.contains("stored Visible drawing fallback"));
-    assert!(text.contains("resultless [Field removed: no passive result]"));
-    assert!(text.contains("visible after"));
+    assert!(visible_text.contains("Visible before"));
+    assert!(visible_text.contains("stored Visible drawing fallback"));
+    assert!(visible_text.contains("resultless [Field removed: no passive result]"));
+    assert!(visible_text.contains("visible after"));
     for forbidden in ["SHAPE", "MERGEFORMAT", "fldinst", "fldrslt"] {
         assert!(
             !text.contains(forbidden),
@@ -16385,6 +16402,7 @@ visible after\par}"#
         b"/JavaScript",
         b"/EmbeddedFile",
         b"/Launch",
+        PASSIVE_ADVANCE_MARKER.as_bytes(),
         b"/OpenAction",
     ] {
         assert!(

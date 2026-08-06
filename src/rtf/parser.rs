@@ -39,6 +39,7 @@ const OFFICE_MATH_LOWER_LIMIT_SHIFT_HALF_POINTS: i32 = -15;
 const OFFICE_MATH_UPPER_LIMIT_SHIFT_HALF_POINTS: i32 = 17;
 const OFFICE_MATH_LIMIT_FONT_SCALE_PERCENT: i32 = 71;
 const WORD_LEGACY_NUMBER_FIELD_LEADING_TWIPS: i32 = 40;
+const WORD_LITERAL_DRAWING_FIELD_SIDE_BEARING_TWIPS: i32 = 36;
 const MAX_BASELINE_SHIFT_HALF_POINTS: i32 = 96;
 const DEFAULT_TABLE_CELL_GAP_TWIPS: i32 = 0;
 const DEFAULT_SHAPE_WRAP_MARGIN_TWIPS: i32 = 120;
@@ -2670,6 +2671,18 @@ impl Parser {
                 self.state = previous;
                 let has_visible_stored_result =
                     field_result_seen && field_result_has_visible_content;
+                let word_literal_drawing_side_bearings = !field_hidden
+                    && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && field_instruction_name(&field_instruction)
+                        .is_some_and(is_word_literal_drawing_side_bearing_field);
+                if word_literal_drawing_side_bearings && !field_result_seen {
+                    self.push_passive_advance_marker(
+                        field_owner_destination,
+                        WORD_LITERAL_DRAWING_FIELD_SIDE_BEARING_TWIPS,
+                        0,
+                        offset,
+                    )?;
+                }
                 if has_visible_stored_result && !field_hidden {
                     self.warn_stored_field_result(&field_instruction, offset);
                 } else if !has_visible_stored_result
@@ -3101,6 +3114,14 @@ impl Parser {
                             )?;
                         }
                     }
+                }
+                if word_literal_drawing_side_bearings {
+                    self.push_passive_advance_marker(
+                        field_owner_destination,
+                        WORD_LITERAL_DRAWING_FIELD_SIDE_BEARING_TWIPS,
+                        0,
+                        offset,
+                    )?;
                 }
                 return Ok(());
             }
@@ -4966,6 +4987,17 @@ impl Parser {
             "fldrslt"
                 if self.state.inside_field && destination_allows_field_result(&self.state) =>
             {
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && field_instruction_name(&self.state.field_instruction)
+                        .is_some_and(is_word_literal_drawing_side_bearing_field)
+                {
+                    self.push_passive_advance_marker(
+                        self.state.field_owner_destination,
+                        WORD_LITERAL_DRAWING_FIELD_SIDE_BEARING_TWIPS,
+                        0,
+                        offset,
+                    )?;
+                }
                 self.state.field_result_seen = true;
                 self.state.field_result_form_field_shading = self.form_field_shading
                     && field_instruction_name(&self.state.field_instruction)
@@ -28312,6 +28344,10 @@ fn is_drawing_canvas_resultless_field(name: &str) -> bool {
     matches!(name, "SHAPE")
 }
 
+fn is_word_literal_drawing_side_bearing_field(name: &str) -> bool {
+    matches!(name, "QUOTE" | "IF" | "COMPARE" | "MACROBUTTON" | "SHAPE")
+}
+
 fn is_active_control_resultless_field(name: &str) -> bool {
     matches!(
         name,
@@ -45356,6 +45392,10 @@ mod tests {
             .collect::<String>()
     }
 
+    fn visible_document_text(document: &Document) -> String {
+        document_text(document).replace(PASSIVE_ADVANCE_MARKER, "")
+    }
+
     fn parse_rtf_strict(input: &str) -> Result<ParseOutput, ParseError> {
         parse_rtf_bytes_with_options(
             input.as_bytes(),
@@ -50281,9 +50321,10 @@ After\par}"#;
         let input = r#"{\rtf1 Stored {\field{\*\fldinst SHAPE \\* MERGEFORMAT}{\fldrslt Visible drawing fallback}} resultless {\field{\*\fldinst SHAPE \\* MERGEFORMAT}} After\par}"#;
         let output = parse_rtf(input).unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains("Stored Visible drawing fallback resultless [Field removed: no passive result] After"),
+            visible_text.contains("Stored Visible drawing fallback resultless [Field removed: no passive result] After"),
             "text was {text:?}"
         );
         for forbidden in ["SHAPE", "MERGEFORMAT", "fldinst", "fldrslt"] {
@@ -50304,8 +50345,9 @@ After\par}"#;
         };
         let stripped = parse_rtf_bytes_with_options(input.as_bytes(), &strip_options).unwrap();
         let stripped_text = document_text(&stripped.document);
+        let stripped_visible_text = visible_document_text(&stripped.document);
         assert!(
-            stripped_text.contains("Stored Visible drawing fallback resultless  After"),
+            stripped_visible_text.contains("Stored Visible drawing fallback resultless  After"),
             "stripped text was {stripped_text:?}"
         );
         assert!(!stripped_text.contains("[Field removed"));
@@ -50314,6 +50356,41 @@ After\par}"#;
                 .message
                 .contains("drawing field SHAPE stripped without synthesizing drawing canvas output")
         }));
+    }
+
+    #[test]
+    fn word_literal_and_drawing_fields_apply_bounded_layout_only_side_bearings() {
+        let input = r#"{\rtf1 Quote {\field{\*\fldinst QUOTE "Visible"}} if {\field{\*\fldinst IF 1 = 1 "Yes" "No"}} compare {\field{\*\fldinst COMPARE 2 > 1}} macro {\field{\*\fldinst MACROBUTTON SafeMacro Button}} stored {\field{\*\fldinst SHAPE}{\fldrslt Drawing}} empty {\field{\*\fldinst SHAPE}}\par}"#;
+        let output = parse_rtf(input).unwrap();
+        let text = document_text(&output.document);
+        let advances = output
+            .document
+            .blocks
+            .iter()
+            .flat_map(|block| match block {
+                Block::Paragraph(paragraph) => paragraph.runs.iter().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .filter(|run| run.text == PASSIVE_ADVANCE_MARKER)
+            .collect::<Vec<_>>();
+
+        assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 12);
+        assert_eq!(advances.len(), 12);
+        assert!(advances.iter().all(|run| {
+            run.style.character_spacing_twips == WORD_LITERAL_DRAWING_FIELD_SIDE_BEARING_TWIPS
+                && run.style.baseline_shift_half_points == 0
+        }));
+        assert!(visible_document_text(&output.document).contains(
+            "Quote Visible if Yes compare 1 macro Button stored Drawing empty [Field removed: no passive result]"
+        ));
+
+        let strict = parse_rtf_strict(input).unwrap();
+        assert_eq!(
+            document_text(&strict.document)
+                .matches(PASSIVE_ADVANCE_MARKER)
+                .count(),
+            0
+        );
     }
 
     #[test]
@@ -50567,7 +50644,7 @@ After\par}"#;
                 .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Before Visible literal After"));
+        assert!(visible_document_text(&output.document).contains("Before Visible literal After"));
         assert!(!text.contains("QUOTE"));
         assert!(!text.contains("fldinst"));
         assert!(!text.contains("[Field removed"));
@@ -50585,7 +50662,9 @@ After\par}"#;
                 .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Before Caf\u{00e9} \u{03a9} After"));
+        assert!(
+            visible_document_text(&output.document).contains("Before Caf\u{00e9} \u{03a9} After")
+        );
         assert!(!text.contains("QUOTE"));
         assert!(!text.contains("fldinst"));
         assert!(!text.contains('?'));
@@ -50599,9 +50678,10 @@ After\par}"#;
         )
         .unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains(
+            visible_text.contains(
                 "quote [Field removed: no passive result] if [Field removed: no passive result] macro [Field removed: no passive result] go [Field removed: no passive result] merge [Field removed: no passive result]"
             ),
             "text was {text:?}"
@@ -50634,7 +50714,9 @@ After\par}"#;
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Before Greater and Different After"));
+        assert!(
+            visible_document_text(&output.document).contains("Before Greater and Different After")
+        );
         for forbidden in ["IF", "Alpha", "Beta", "fldinst", "[Field removed"] {
             assert!(
                 !text.contains(forbidden),
@@ -50655,9 +50737,10 @@ After\par}"#;
         )
         .unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains("If High 4 rate MATCH missing No unsafe No"),
+            visible_text.contains("If High 4 rate MATCH missing No unsafe No"),
             "text was {text:?}"
         );
         for forbidden in [
@@ -50685,9 +50768,10 @@ After\par}"#;
         )
         .unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains("Before 1 and 0 and I After"),
+            visible_text.contains("Before 1 and 0 and I After"),
             "text was {text:?}"
         );
         for forbidden in [
@@ -50717,9 +50801,10 @@ After\par}"#;
         )
         .unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains("Compare 1 4 rate I missing 0 unsafe 0"),
+            visible_text.contains("Compare 1 4 rate I missing 0 unsafe 0"),
             "text was {text:?}"
         );
         for forbidden in [
@@ -50749,9 +50834,10 @@ After\par}"#;
         )
         .unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains("Before [Field removed: no passive result] After"),
+            visible_text.contains("Before [Field removed: no passive result] After"),
             "text was {text:?}"
         );
         for forbidden in ["COMPARE", "HIDDEN-TRAIL", "fldinst"] {
@@ -50769,9 +50855,10 @@ After\par}"#;
         )
         .unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains("Before MIXED CASE and Mixed case and Checked Status After"),
+            visible_text.contains("Before MIXED CASE and Mixed case and Checked Status After"),
             "normalized field switch text was {text:?}"
         );
         for forbidden in [
@@ -50798,9 +50885,10 @@ After\par}"#;
         )
         .unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains(
+            visible_text.contains(
                 "Values IV v aa AA FF 7th forty-two five hundred thirteenth forty-two and 00/100 - 9 -"
             ),
             "normalized field number-switch text was {text:?}"
@@ -51444,9 +51532,10 @@ After\par}"#;
         )
         .unwrap();
         let text = document_text(&output.document);
+        let visible_text = visible_document_text(&output.document);
 
         assert!(
-            text.contains("Values 0042 1,234,567 $5.00 -008"),
+            visible_text.contains("Values 0042 1,234,567 $5.00 -008"),
             "normalized numeric-picture text was {text:?}"
         );
         for forbidden in [
@@ -51472,7 +51561,9 @@ After\par}"#;
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains("Before Visible button text After"));
+        assert!(
+            visible_document_text(&output.document).contains("Before Visible button text After")
+        );
         assert!(!text.contains("MACROBUTTON"));
         assert!(!text.contains("LaunchPayload"));
         assert!(!text.contains("fldinst"));
