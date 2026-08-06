@@ -2269,8 +2269,8 @@
       "id": "generated-reference-fields-passive-placeholders",
       "input": "fixtures/generated-reference-fields-passive.rtf",
       "category": "must_match_closely",
-      "word_reference_status": "pending_word_export",
-      "word_reference_pdf": null,
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/generated-reference-fields-passive.pdf",
       "word_reference_pages": [],
       "expected_pages": 1,
       "must_preserve_text": [
@@ -2313,7 +2313,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of placeholder placement and line flow around generated reference fields."
+        "Word omits all five resultless generated fields at zero width, leaving the authored labels on seven 13.8-point lines. The converter intentionally retains explicit safety placeholders; they now remain inline with each label and wrap only at normal text-width boundaries, producing nine 13.8-point lines. Both outputs retain one page, zero images/drawings, and uninterrupted authored order."
       ]
     },
     {

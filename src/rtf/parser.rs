@@ -11619,6 +11619,13 @@ impl Parser {
                 ));
                 Ok(())
             }
+            destination if text == "[Field removed: no passive result]" => {
+                let previous_destination = self.state.destination;
+                self.state.destination = destination;
+                self.push_text(&text, offset)?;
+                self.state.destination = previous_destination;
+                Ok(())
+            }
             _ => self.push_placeholder(text, offset),
         }
     }
@@ -48934,6 +48941,8 @@ After\par}"#;
             text.matches("[Field removed: no passive result]").count(),
             5
         );
+        assert_eq!(output.document.blocks.len(), 1);
+        assert!(matches!(output.document.blocks[0], Block::Paragraph(_)));
         for forbidden in [
             "INCLUDEPICTURE",
             "INCLUDETEXT",
@@ -49434,6 +49443,8 @@ After\par}"#;
             text.matches("[Field removed: no passive result]").count(),
             5
         );
+        assert_eq!(output.document.blocks.len(), 1);
+        assert!(matches!(output.document.blocks[0], Block::Paragraph(_)));
         for forbidden in [
             "TOC",
             "INDEX",
