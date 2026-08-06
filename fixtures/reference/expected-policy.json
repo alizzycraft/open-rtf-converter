@@ -7112,7 +7112,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact late SECTIONPAGES replacement, wrapping, and per-section page-count behavior."
+        "The registered Word 16.0 reference confirms exact late SECTIONPAGES replacement and per-section pagination: the first section spans pages 1-2 and prints 2, while the second section occupies page 3 and prints 1. Current and Word are three-page text-only PDFs with identical normalized text and zero drawings/images. Text x origins differ by at most 0.17 points; the remaining 0.95-point vertical offset is the established bundled Arial-compatible metric residual."
       ]
     },
     {
