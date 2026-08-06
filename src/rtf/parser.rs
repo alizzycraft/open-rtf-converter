@@ -5419,7 +5419,7 @@ impl Parser {
             {
                 self.count_skipped_destination_bytes(name.len(), offset)?;
             }
-            "par" => self.finish_current_paragraph_for_destination(offset)?,
+            "par" => self.finish_explicit_paragraph_for_destination(offset)?,
             "line" => self.push_visible_control_text("\n", offset)?,
             "chpgn" => {
                 if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
@@ -11990,6 +11990,37 @@ impl Parser {
             }
         }
         Ok(())
+    }
+
+    fn finish_explicit_paragraph_for_destination(
+        &mut self,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.destination == Destination::Body
+            && self.current_table.is_some()
+            && self.current_table_row.is_none()
+        {
+            self.finish_table(offset)?;
+        }
+        if self.state.destination == Destination::Body {
+            self.flush_pending_paragraph_list_marker(offset)?;
+        }
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+            && self.state.destination == Destination::Body
+            && self.current_output_paragraph_is_empty()
+            && !self.current_paragraph_has_modern_shape_anchor
+        {
+            let run = Run {
+                text: String::new(),
+                style: self.state.character.clone(),
+            };
+            if let Some(row) = self.current_table_row.as_mut() {
+                row.current_cell_paragraph.runs.push(run);
+            } else {
+                self.current_paragraph.runs.push(run);
+            }
+        }
+        self.finish_current_paragraph_for_destination(offset)
     }
 
     fn finish_header_paragraph(&mut self, offset: usize) -> Result<(), ParseError> {
@@ -19990,9 +20021,21 @@ impl Parser {
     }
 
     fn finish_list_level(&mut self, offset: usize) -> Result<(), ParseError> {
-        let Some(level) = self.current_list_level.take() else {
+        let Some(mut level) = self.current_list_level.take() else {
             return Ok(());
         };
+        let symbol_font = self.document.fonts.iter().any(|font| {
+            font.index == level.character_style.font_index
+                && (font.charset == Some(2)
+                    || is_legacy_symbol_font_name(&font.name.to_ascii_lowercase()))
+        });
+        if symbol_font {
+            level.text_template = level
+                .text_template
+                .chars()
+                .map(map_symbol_unicode_char)
+                .collect();
+        }
         if self.state.destination == Destination::ListOverrideTable {
             if let Some(level_override) = self.current_list_override_level.as_mut() {
                 level_override.level_definition = Some(level);
@@ -31980,6 +32023,14 @@ fn map_symbol_char(ch: char) -> char {
         0xff => '\u{23ad}',
         _ => ch,
     }
+}
+
+fn map_symbol_unicode_char(ch: char) -> char {
+    let code = ch as u32;
+    if (0xf000..=0xf0ff).contains(&code) {
+        return map_symbol_char(char::from_u32(code - 0xf000).unwrap_or(ch));
+    }
+    map_symbol_char(ch)
 }
 
 fn is_wingdings_font_name(name: &str) -> bool {
@@ -46033,6 +46084,33 @@ mod tests {
     }
 
     #[test]
+    fn word_compatibility_retains_explicit_empty_paragraphs() {
+        let output = parse_rtf(r"{\rtf1\ansi A\par\par B\par}").unwrap();
+        assert_eq!(output.document.blocks.len(), 3);
+        let Block::Paragraph(empty) = &output.document.blocks[1] else {
+            panic!("expected explicit empty paragraph");
+        };
+        assert_eq!(empty.runs.len(), 1);
+        assert!(empty.runs[0].text.is_empty());
+
+        let strict = parse_rtf_strict(r"{\rtf1\ansi A\par\par B\par}").unwrap();
+        assert_eq!(strict.document.blocks.len(), 2);
+    }
+
+    #[test]
+    fn word_empty_paragraph_after_table_keeps_source_order() {
+        let output =
+            parse_rtf(r"{\rtf1\ansi\trowd\cellx1000\intbl A\cell\row\pard\par B\par}").unwrap();
+        assert!(matches!(output.document.blocks[0], Block::Table(_)));
+        let Block::Paragraph(empty) = &output.document.blocks[1] else {
+            panic!("expected empty paragraph after table");
+        };
+        assert_eq!(empty.runs.len(), 1);
+        assert!(empty.runs[0].text.is_empty());
+        assert!(matches!(output.document.blocks[2], Block::Paragraph(_)));
+    }
+
+    #[test]
     fn extracts_unicode_and_skips_fallback() {
         let output = parse_rtf(r"{\rtf1\ansi\uc1 Hello \u8212- world\par}").unwrap();
         let paragraph = match &output.document.blocks[0] {
@@ -53793,7 +53871,35 @@ After\par}"#;
             _ => panic!("expected paragraph"),
         };
 
-        assert_eq!(paragraph.runs[0].text, "\u{2022}\tBullet");
+        assert_eq!(
+            paragraph
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "\u{2022}\tBullet"
+        );
+    }
+
+    #[test]
+    fn normalizes_symbol_private_use_bullets_from_list_tables() {
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0 Arial;}{\f1\fcharset2 Symbol;}}{\*\listtable{\list{\listlevel\levelnfc23{\leveltext\'01\u-3913 ?;}{\levelnumbers;}\f1}\listid7}}{\*\listoverridetable{\listoverride\listid7\ls2}}\pard\ls2\ilvl0 Bullet\par}",
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(
+            paragraph
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "\u{2022}\tBullet"
+        );
     }
 
     #[test]
