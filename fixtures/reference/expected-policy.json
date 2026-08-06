@@ -6441,7 +6441,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact body spacing around stripped private metadata."
+        "Word exposes private/script-like payload text and creates two links, while the converter intentionally strips those active destinations. Both outputs retain five 13.8-point lines with identical safe surrounding order; current/Word line starts differ by 0.02 points and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
       ]
     },
     {
@@ -6454,7 +6454,7 @@
       "expected_pages": 1,
       "must_preserve_text": [
         "Visible before review metadata.",
-        "Comment  after comment.",
+        "Comment after comment.",
         "Bookmark visible after bookmark.",
         "Revision  visible after Inserted text.",
         "Visible after review metadata."
@@ -6500,7 +6500,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact body spacing around stripped review, bookmark, and deleted-text metadata."
+        "Word and current output share identical five-line safe text after annotation-boundary recovery: the removed annotation collapses its two boundary spaces to one, bookmark text remains inline, deleted text leaves Word's observed double space, and revised text remains visible. Line starts differ by 0.02 points and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
       ]
     },
     {
@@ -6654,7 +6654,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact body spacing around stripped macro/script metadata."
+        "Word visibly prints the authored macro command and script payload, while the converter intentionally strips macro, script, VBA, ActiveX, and metadata payloads. Both outputs retain six 13.8-point lines with identical safe surrounding order; current/Word line starts differ by 0.02 points and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
       ]
     },
     {
@@ -6711,7 +6711,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact visible text spacing around stripped encapsulated HTML and custom XML markup."
+        "Word visibly prints the authored script tag and HTML base URL, while the converter intentionally strips them. Both outputs retain three bold 13.8-point lines; the safe XML line preserves Word's double boundary space exactly, starts differ by 0.02 points, and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
       ]
     },
     {
@@ -6854,7 +6854,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact visual impact of paragraph and linked character style metadata."
+        "Word-compatible mode and Word both leave the fixture's paragraph and linked-character style references visually inert, producing three plain Calibri-category lines at the 72-point origin. Bundled Liberation Sans endpoints differ by 0.18-10.20 points, the first baseline by 1.07 points, and cadence is 13.8 rather than Word's 14.64 points."
       ]
     },
     {
@@ -6915,7 +6915,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact text spacing around stripped structural metadata and hidden metadata REF placeholders."
+        "Word exposes two hidden font/color hyperlinks, creates two links plus one thin filled hyperlink-decoration drawing, and leaves hidden-metadata REF fields blank. The converter intentionally strips those payloads and actions and emits deterministic missing-result placeholders, producing three lines instead of Word's two; retained visible body/bookmark text stays in authored order with 0.02-point line-start residuals."
       ]
     },
     {
@@ -6952,7 +6952,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of whether outline/grid metadata has any visible pagination or spacing impact for this fixture."
+        "Word's outline-level and character-grid metadata have no visible pagination, indentation, or spacing effect in this fixture. Both outputs are one-page, two-line, text-only PDFs with exact 13.8-point cadence; line starts differ by 0.02 points, endpoints by at most 3.04 points, and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
       ]
     },
     {
@@ -7924,7 +7924,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of hidden Office drawing output and shape text suppression."
+        "Word and the converter both suppress the hidden Office shape, its fill/stroke, and all shape text completely. Both PDFs contain two 13.8-point Arial-category lines and zero drawings/images/links; line starts differ by 0.02 points, endpoints by at most 3.40 points, and baselines by 0.95-0.96 points under bundled Liberation Sans metrics."
       ]
     },
     {

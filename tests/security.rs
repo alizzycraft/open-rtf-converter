@@ -19290,7 +19290,7 @@ fn review_bookmark_and_annotation_payloads_do_not_reach_text_or_pdf() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Visible before  visible after Inserted text"));
+    assert!(text.contains("Visible before visible after Inserted text"));
     for forbidden in [
         "Hidden comment",
         "Hidden result",

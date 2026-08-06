@@ -4878,7 +4878,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             expected_pages: 1,
             must_preserve_text: &[
                 "Visible before review metadata.",
-                "Comment  after comment.",
+                "Comment after comment.",
                 "Bookmark visible after bookmark.",
                 "Revision  visible after Inserted text.",
                 "Visible after review metadata.",

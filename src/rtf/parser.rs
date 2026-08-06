@@ -101,6 +101,27 @@ fn is_word_double_byte_character(ch: char) -> bool {
     )
 }
 
+fn destination_emits_visible_text(destination: Destination) -> bool {
+    matches!(
+        destination,
+        Destination::Body
+            | Destination::ListText
+            | Destination::Header
+            | Destination::FirstPageHeader
+            | Destination::EvenPageHeader
+            | Destination::Footer
+            | Destination::FirstPageFooter
+            | Destination::EvenPageFooter
+            | Destination::ShapeText
+            | Destination::Footnote
+            | Destination::Endnote
+            | Destination::FootnoteSeparator
+            | Destination::FootnoteContinuationSeparator
+            | Destination::EndnoteSeparator
+            | Destination::EndnoteContinuationSeparator
+    )
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct ParserState {
     character: CharacterStyle,
@@ -1927,6 +1948,7 @@ struct Parser {
     skipped_destination_bytes: usize,
     output_text_chars: usize,
     last_offset: usize,
+    collapse_next_annotation_boundary_space: bool,
 }
 
 pub fn parse_rtf(input: &str) -> Result<ParseOutput, ParseError> {
@@ -2141,6 +2163,7 @@ impl Parser {
             skipped_destination_bytes: 0,
             output_text_chars: 0,
             last_offset: 0,
+            collapse_next_annotation_boundary_space: false,
         }
     }
 
@@ -3855,6 +3878,8 @@ impl Parser {
                 && destination_allows_safe_structural_content(&self.state)
                 && self.state.destination != Destination::Ignored =>
             {
+                self.collapse_next_annotation_boundary_space =
+                    self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive;
                 self.handle_active_content("annotation metadata", offset)?;
                 self.state.destination = Destination::Metadata;
                 self.state.inside_metadata = true;
@@ -6630,6 +6655,18 @@ impl Parser {
         if self.state.skip_password_hash_payload {
             return self.apply_password_hash_payload_text(text, offset);
         }
+        let text = if self.collapse_next_annotation_boundary_space
+            && destination_emits_visible_text(self.state.destination)
+        {
+            self.collapse_next_annotation_boundary_space = false;
+            if self.current_output_paragraph_ends_with_space() {
+                text.strip_prefix(' ').unwrap_or(text)
+            } else {
+                text
+            }
+        } else {
+            text
+        };
         if self.state.office_math_delimiter_capture.is_some() {
             return self.push_office_math_delimiter_text(text, offset);
         }
@@ -6743,7 +6780,15 @@ impl Parser {
             return self.push_picture_hex_text(&text, offset);
         }
 
-        let visible_text = self.decode_direct_text_bytes(bytes);
+        let mut visible_text = self.decode_direct_text_bytes(bytes);
+        if self.collapse_next_annotation_boundary_space
+            && destination_emits_visible_text(self.state.destination)
+        {
+            self.collapse_next_annotation_boundary_space = false;
+            if self.current_output_paragraph_ends_with_space() && visible_text.starts_with(' ') {
+                visible_text.remove(0);
+            }
+        }
         if self.state.office_math_delimiter_capture.is_some() {
             return self.push_office_math_delimiter_text(&visible_text, offset);
         }
@@ -18881,6 +18926,41 @@ impl Parser {
         } else {
             self.current_paragraph.runs.is_empty()
         }
+    }
+
+    fn current_output_paragraph_ends_with_space(&self) -> bool {
+        let paragraph = match self.state.destination {
+            Destination::Header => &self.current_header_paragraph,
+            Destination::FirstPageHeader => &self.current_first_page_header_paragraph,
+            Destination::EvenPageHeader => &self.current_even_page_header_paragraph,
+            Destination::Footer => &self.current_footer_paragraph,
+            Destination::FirstPageFooter => &self.current_first_page_footer_paragraph,
+            Destination::EvenPageFooter => &self.current_even_page_footer_paragraph,
+            Destination::Footnote => &self.current_footnote_paragraph,
+            Destination::Endnote => &self.current_endnote_paragraph,
+            Destination::FootnoteSeparator => &self.current_footnote_separator_paragraph,
+            Destination::FootnoteContinuationSeparator => {
+                &self.current_footnote_continuation_separator_paragraph
+            }
+            Destination::EndnoteSeparator => &self.current_endnote_separator_paragraph,
+            Destination::EndnoteContinuationSeparator => {
+                &self.current_endnote_continuation_separator_paragraph
+            }
+            Destination::ShapeText => self
+                .current_shape
+                .as_ref()
+                .map(|shape| &shape.current_text_paragraph)
+                .unwrap_or(&self.current_paragraph),
+            _ => self
+                .current_table_row
+                .as_ref()
+                .map(|row| &row.current_cell_paragraph)
+                .unwrap_or(&self.current_paragraph),
+        };
+        paragraph
+            .runs
+            .last()
+            .is_some_and(|run| run.text.ends_with(' '))
     }
 
     fn synthesize_list_marker(
@@ -54268,6 +54348,9 @@ After\par}"#;
         assert!(!text.contains("SecretBookmark"));
         assert!(!text.contains("Deleted text"));
         assert!(!text.contains("414243"));
+
+        let spaced = parse_rtf(r"{\rtf1 Before {\annotation Hidden comment} after\par}").unwrap();
+        assert_eq!(document_text(&spaced.document), "Before after");
     }
 
     #[test]
