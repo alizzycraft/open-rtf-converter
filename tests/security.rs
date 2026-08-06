@@ -2735,9 +2735,9 @@ fn nested_table_content_normalizes_passively_without_control_leakage() {
         .flat_map(|page| page.items.iter())
         .filter(|item| matches!(item, LayoutItem::Line { .. }))
         .count();
-    assert!(
-        line_count >= 5,
-        "nested table should contribute a bounded inner grid, got {line_count} lines"
+    assert_eq!(
+        line_count, 0,
+        "unbordered nested cells must not synthesize passive grid lines"
     );
 
     let dir = tempdir().unwrap();

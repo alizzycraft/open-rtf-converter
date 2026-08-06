@@ -998,34 +998,34 @@ fn nested_table_from_capture(
                     for (cell_index, cell) in cells.iter_mut().enumerate() {
                         if cell_index == 0
                             && let Some(border) = left_border
-                            && cell.borders.left == TableCellBorder::default()
+                            && !cell.borders.left.visible
                         {
                             cell.borders.left = border;
                         }
                         if cell_index + 1 == cell_count
                             && let Some(border) = right_border
-                            && cell.borders.right == TableCellBorder::default()
+                            && !cell.borders.right.visible
                         {
                             cell.borders.right = border;
                         }
                         if let Some(border) = top_border
-                            && cell.borders.top == TableCellBorder::default()
+                            && !cell.borders.top.visible
                         {
                             cell.borders.top = border;
                         }
                         if let Some(border) = bottom_border
-                            && cell.borders.bottom == TableCellBorder::default()
+                            && !cell.borders.bottom.visible
                         {
                             cell.borders.bottom = border;
                         }
                         if let Some(border) = horizontal_border
-                            && cell.borders.bottom == TableCellBorder::default()
+                            && !cell.borders.bottom.visible
                         {
                             cell.borders.bottom = border;
                         }
                         if cell_index + 1 < cell_count
                             && let Some(border) = vertical_border
-                            && cell.borders.right == TableCellBorder::default()
+                            && !cell.borders.right.visible
                         {
                             cell.borders.right = border;
                         }
@@ -12558,7 +12558,9 @@ impl Parser {
                 text: NESTED_TABLE_ANCHOR_MARKER.to_string(),
                 style: self.state.character.clone(),
             });
-            row.nested_table_capture = Some(NestedTableCapture::default());
+            let mut capture = NestedTableCapture::default();
+            capture.current_cell_borders = hidden_table_cell_borders();
+            row.nested_table_capture = Some(capture);
         }
     }
 
@@ -12586,6 +12588,7 @@ impl Parser {
             capture
                 .current_row_borders
                 .push(std::mem::take(&mut capture.current_cell_borders));
+            capture.current_cell_borders = hidden_table_cell_borders();
             capture
                 .current_row_properties
                 .push(std::mem::take(&mut capture.current_cell_properties));
@@ -47009,6 +47012,32 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn unbordered_nested_cells_remain_unbordered() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\cellx4680 Outer {\trowd\itap2\cellx1000 Inner A\nestcell\cellx2000 Inner B\nestrow}\cell\row}",
+        )
+        .unwrap();
+        let Block::Table(table) = &output.document.blocks[0] else {
+            panic!("expected table");
+        };
+        let nested = table.rows[0].cells[0]
+            .nested_table
+            .as_ref()
+            .expect("nested table");
+
+        assert!(!nested.borders_visible);
+        assert!(nested.rows[0].cells.iter().all(|cell| {
+            let borders = cell.borders;
+            !borders.left.visible
+                && !borders.right.visible
+                && !borders.top.visible
+                && !borders.bottom.visible
+                && !borders.diagonal_down.visible
+                && !borders.diagonal_up.visible
+        }));
     }
 
     #[test]

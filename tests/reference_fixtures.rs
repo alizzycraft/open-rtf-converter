@@ -3983,7 +3983,9 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
                 b"/Annots",
             ],
             must_contain_pdf: &[],
-            must_emit_diagnostics: &[],
+            must_emit_diagnostics: &[
+                "nested table normalized into its containing cell; nested borders and layout use a bounded passive approximation",
+            ],
         },
         ReferenceFixture {
             input: "fixtures/old-style-list-passive.rtf",

@@ -17667,11 +17667,11 @@ mod tests {
     #[test]
     fn does_not_repeat_nested_grid_on_split_outer_row_fragments() {
         let mut input = String::from(
-            r"{\rtf1{\colortbl;\red255\green220\blue180;}\trowd\cellx6000 Outer {\trowd\itap2\clcbpat1\cellx1000 Inner A\nestcell\cellx3000 Inner B\nestrow}",
+            r"{\rtf1{\colortbl;\red255\green220\blue180;}\trowd\cellx6000 Outer {\trowd\itap2\clcbpat1\clbrdrl\brdrs\clbrdrr\brdrs\clbrdrt\brdrs\clbrdrb\brdrs\cellx1000 Inner A\nestcell\clbrdrl\brdrs\clbrdrr\brdrs\clbrdrt\brdrs\clbrdrb\brdrs\cellx3000 Inner B\nestrow}",
         );
         for index in 0..100 {
             input.push_str(&format!(
-                r"{{\trowd\itap2\cellx1000 Row {index}\nestcell\cellx3000 Value {index}\nestrow}}"
+                r"{{\trowd\itap2\clbrdrl\brdrs\clbrdrr\brdrs\clbrdrt\brdrs\clbrdrb\brdrs\cellx1000 Row {index}\nestcell\clbrdrl\brdrs\clbrdrr\brdrs\clbrdrt\brdrs\clbrdrb\brdrs\cellx3000 Value {index}\nestrow}}"
             ));
         }
         input.push_str(r" Outer after\cell\row}");

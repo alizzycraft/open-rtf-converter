@@ -5134,7 +5134,9 @@
         "Nested table content is flattened into bounded passive text inside the outer cell instead of preserving editable nested table structure.",
         "Nested table properties, floating-table positioning hints, row direction, padding, spacing, and raw cell boundary controls are stripped before PDF rendering."
       ],
-      "expected_diagnostics": [],
+      "expected_diagnostics": [
+        "nested table normalized into its containing cell; nested borders and layout use a bounded passive approximation"
+      ],
       "forbidden_pdf_markers": [
         "trowd",
         "itap",
@@ -5168,7 +5170,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact nested-table flattening order, spacing, and approximation versus true nested table geometry."
+        "The focused Word 16.0 audit confirms that this malformed floating nested row uses true overlapping table geometry: Word places Outer after beside the nested area, stacks Outer before and Inner A vertically, and omits the unterminated Inner B cell. The converter intentionally preserves all six safe strings, including Inner B, in deterministic containing-cell order rather than reproducing Word's malformed overlap or dropping visible input. A real defect was corrected: unbordered nested cells formerly inherited visible default borders and emitted eight synthetic 0.5-point grid lines; nested capture now starts and resets each cell with hidden borders, so both PDFs contain zero drawings. Word and current preserve identical before/after paragraph x origins within 0.12 points, while inner positioning and final flow differ by the documented safe-content/geometry approximation. Both outputs are one page with zero images, links, annotations, widgets, or actions; four-times renders were visually inspected."
       ]
     },
     {
