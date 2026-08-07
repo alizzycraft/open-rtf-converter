@@ -804,6 +804,7 @@ struct Line {
     natural_height: f32,
     height: f32,
     segmented_flow: bool,
+    inline_image_baseline_context: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -9836,6 +9837,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
         natural_height: 14.0,
         height: 14.0,
         segmented_flow: false,
+        inline_image_baseline_context: false,
     };
     let mut is_first_line = true;
     let mut current_line_top_y = first_line_top_y;
@@ -10217,6 +10219,15 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
 
     if lines.is_empty() {
         lines.push(empty_line());
+    }
+
+    let mut inline_image_baseline_context = false;
+    for line in &mut lines {
+        inline_image_baseline_context |= line
+            .runs
+            .iter()
+            .any(|run| inline_image_marker_index(&run.text).is_some());
+        line.inline_image_baseline_context = inline_image_baseline_context;
     }
 
     lines
@@ -13092,6 +13103,7 @@ fn empty_line() -> Line {
         natural_height: 14.0,
         height: 14.0,
         segmented_flow: false,
+        inline_image_baseline_context: false,
     }
 }
 
@@ -14014,6 +14026,9 @@ fn push_line_with_rotation(
 }
 
 fn word_compatible_source_line_baseline_delta_points(line: &Line, document: &Document) -> f32 {
+    if line.inline_image_baseline_context {
+        return 0.0;
+    }
     let source_inset = line
         .runs
         .iter()
@@ -17647,6 +17662,46 @@ mod tests {
             after.baseline_y,
             trailing.baseline_y
         );
+    }
+
+    #[test]
+    fn inline_image_establishes_word_baselines_for_later_paragraph_lines() {
+        let parsed = parse_rtf(include_str!("../fixtures/wmf-vector-passive.rtf")).unwrap();
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        let page = &layout.pages[0];
+        let before = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.starts_with("Before") => Some(text),
+                _ => None,
+            })
+            .expect("text before inline WMF");
+        let after = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.starts_with("After") => Some(text),
+                _ => None,
+            })
+            .expect("text on inline WMF line");
+        let trailing = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text)
+                    if text.text.starts_with("vector") && text.baseline_y < after.baseline_y =>
+                {
+                    Some(text)
+                }
+                _ => None,
+            })
+            .expect("text after inline WMF line");
+
+        assert!((page.height - before.baseline_y - 47.30).abs() < 0.03);
+        assert!((page.height - after.baseline_y - 85.82).abs() < 0.03);
+        assert!((page.height - trailing.baseline_y - 99.62).abs() < 0.03);
     }
 
     #[test]
@@ -23439,6 +23494,7 @@ mod tests {
                 natural_height: height,
                 height,
                 segmented_flow: false,
+                inline_image_baseline_context: false,
             },
             style,
             paragraph_index,
@@ -23498,6 +23554,7 @@ mod tests {
                 natural_height: 10.0,
                 height: 10.0,
                 segmented_flow: false,
+                inline_image_baseline_context: false,
             },
             style,
             paragraph_index,

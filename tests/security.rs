@@ -23675,6 +23675,39 @@ fn times_source_baseline_recovery_covers_explicit_and_legacy_defaults() {
 }
 
 #[test]
+fn inline_wmf_establishes_word_baselines_without_payload_leakage() {
+    let output = convert_rtf_to_pdf(
+        include_bytes!("../fixtures/wmf-vector-passive.rtf"),
+        &ConvertOptions::browser_safe_defaults(),
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let after = pdf_first_text_position_for_text(&content, "After").expect("text after WMF");
+
+    assert!(
+        (after.1 - 310.18).abs() < 0.03,
+        "inline WMF line should use Word's image-established baseline: {after:?}"
+    );
+    for forbidden in [
+        b"wmetafile".as_slice(),
+        b"0100090000032a",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
     let input = rtf(&[
         "{",

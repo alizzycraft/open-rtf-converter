@@ -288,8 +288,9 @@
       ],
         "known_gaps": [
           "Word-compatible legacy playback recovery now uses record-specific transforms for rectangles and ellipses. Current rectangle and ellipse bounds are within 0.07 points of Word on every edge, with matching fill, 1.878-point stock-pen stroke, page count, and paragraph flow.",
-        "The converter intentionally supports only a hardened passive WMF subset; unsupported WMF/EMF behavior remains placeholder or stripped."
-      ]
+        "The converter intentionally supports only a hardened passive WMF subset; unsupported WMF/EMF behavior remains placeholder or stripped.",
+          "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
+        ]
     },
     {
       "id": "wmf-text-passive-output",
@@ -333,7 +334,8 @@
       "expected_pdf_markers": [],
       "known_gaps": [
         "The bounded inline-image model matches Word's 72-by-36-point in-paragraph image slot. Fontless WMF EXTTEXTOUT recovers Word's stock bold face, 6.52-point logical scale, opaque background state, and frame-bounded character advance, so both PDFs visibly paint only the clipped `H`. A bounded 81% stock-font vertical playback scale compensates for Base14 Helvetica-Bold's taller glyph box without changing the logical advance or background frame: current bounds are (147.35,44.65)-(152.04,51.90) points versus Word's (147.58,44.55)-(152.29,51.83). The remaining 0.23-point x offset is shared inline-frame/bundled-font positioning.",
-        "The converter intentionally supports only a hardened passive WMF text subset; unsupported WMF text options remain placeholder or stripped."
+        "The converter intentionally supports only a hardened passive WMF text subset; unsupported WMF text options remain placeholder or stripped.",
+        "After paragraph-local inline-image baseline recovery, surrounding text baselines differ from Word by at most 0.03 points; the independently positioned recovered WMF vector-text glyph remains within 0.18 points."
       ]
     },
     {
@@ -378,8 +380,9 @@
       ],
         "known_gaps": [
           "Word-compatible legacy playback recovery now matches the visible clipped rectangle within 0.10 points on every edge, with matching gray fill, black 1.878-point stock-pen stroke, page count, and paragraph flow.",
-        "The converter intentionally supports only a hardened passive WMF clipping subset; unsupported clip operations remain placeholder or stripped."
-      ]
+        "The converter intentionally supports only a hardened passive WMF clipping subset; unsupported clip operations remain placeholder or stripped.",
+          "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
+        ]
     },
     {
       "id": "wmf-hatch-brush-passive-lines",
@@ -424,7 +427,8 @@
       ],
       "known_gaps": [
         "Word-compatible playback reproduces Word's clipped legacy bitmap-hatch band as bounded passive vector output: the recovered center differs by 0.0002 points, band thickness by 0.0001 points, and no raster or WMF payload is retained.",
-        "The converter intentionally supports only a hardened passive WMF brush subset; unsupported brush records remain inert, placeholder, or stripped."
+        "The converter intentionally supports only a hardened passive WMF brush subset; unsupported brush records remain inert, placeholder, or stripped.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -470,7 +474,8 @@
       ],
       "known_gaps": [
         "Focused Word comparison confirms the authored four-unit dashed pen has matching 1.87784-point width and 3:1 cadence. The shared custom-pen MoveTo/LineTo recovery map reduces the prior 1.10-by-0.70-point coordinate gap to at most 0.22 points horizontally and 0.083 points vertically; eight-times renders are visually equivalent.",
-        "The converter intentionally supports only a hardened passive WMF pen subset; unsupported pen records remain inert, placeholder, or stripped."
+        "The converter intentionally supports only a hardened passive WMF pen subset; unsupported pen records remain inert, placeholder, or stripped.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -517,7 +522,8 @@
       ],
       "known_gaps": [
         "Word-compatible recovery now matches Word's opposite 270-degree open-arc sweep, chord and pie closure, gray fill, three-drawing structure, and 1.87784-point stock-pen width; every visible bound is within 0.08 points. The converter uses a bounded 48-segment passive approximation where Word emits five cubic segments, with no visible contour difference in the 12x audit.",
-        "The converter intentionally supports only a hardened passive WMF arc subset; unsupported arc behavior remains placeholder or stripped."
+        "The converter intentionally supports only a hardened passive WMF arc subset; unsupported arc behavior remains placeholder or stripped.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -559,7 +565,8 @@
       "expected_pdf_markers": [],
       "known_gaps": [
         "Visible output now matches Word's blank POLYBEZIER playback while preserving identical surrounding text and inline picture flow.",
-        "POLYBEZIERTO remains independently supported because the adjacent Word reference renders its complete cubic continuation."
+        "POLYBEZIERTO remains independently supported because the adjacent Word reference renders its complete cubic continuation.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -605,7 +612,8 @@
       ],
       "known_gaps": [
         "The surviving Word-compatible MoveTo-to-LineTo stroke has Word's exact 1.87784-point minimum custom-pen width. The shared custom-pen recovery map reduces prior edge residuals up to 1.73 points to at most 0.10 points horizontally and 0.053 points vertically; eight-times renders are visually equivalent.",
-        "The converter intentionally supports only complete bounded passive BezierTo runs; malformed or partial WMF BezierTo records remain no-ops, placeholders, or stripped."
+        "The converter intentionally supports only complete bounded passive BezierTo runs; malformed or partial WMF BezierTo records remain no-ops, placeholders, or stripped.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -653,7 +661,8 @@
       ],
       "known_gaps": [
           "Word-compatible path recovery now matches the compound winding fill and stroke bounds within 0.12 points on every edge, with matching paint order, page count, and paragraph flow.",
-        "The converter intentionally supports only bounded passive compound path geometry; malformed or excessive WMF POLYPOLYGON records remain placeholdered or stripped."
+        "The converter intentionally supports only bounded passive compound path geometry; malformed or excessive WMF POLYPOLYGON records remain placeholdered or stripped.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -699,7 +708,8 @@
       ],
       "known_gaps": [
         "A focused four-point 200x100 logical-window probe establishes Word's independently quantized horizontal SETPIXEL device grid. WordCompatiblePassive now uses its bounded affine fit and Word's projecting-square cap: the registered red stroke origin differs by 0.05 points horizontally and 0.09 vertically, while its 1.87784-point width and 0.8577-point centerline length match exactly. Twelve-times current/Word renders are visually equivalent. Larger logical windows remain on the generic bounded mapping because their quantized device grids differ; StrictSpec retains authored logical coordinates and flat caps.",
-        "The converter intentionally supports only bounded passive pixel strokes; malformed SETPIXEL records remain placeholdered or stripped."
+        "The converter intentionally supports only bounded passive pixel strokes; malformed SETPIXEL records remain placeholdered or stripped.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -745,8 +755,9 @@
       ],
         "known_gaps": [
           "Word-compatible legacy playback recovery now matches the outer bounds within 0.07 points and preserves Word's independently scaled horizontal and vertical corner radii, green fill, black 1.878-point stock-pen stroke, page count, and paragraph flow.",
-        "The converter intentionally supports only bounded passive rounded-rectangle geometry; malformed ROUNDRECT records remain placeholdered or stripped."
-      ]
+        "The converter intentionally supports only bounded passive rounded-rectangle geometry; malformed ROUNDRECT records remain placeholdered or stripped.",
+          "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
+        ]
     },
     {
       "id": "wmf-line-poly-paths-passive",
@@ -794,7 +805,8 @@
       ],
       "known_gaps": [
           "Word-compatible path recovery now matches line, polygon, and connected-polyline bounds within 0.13 points on every edge, with matching three-drawing structure, 1.878-point stock-pen strokes, page count, and paragraph flow.",
-        "The converter intentionally supports only bounded passive path geometry; malformed or excessive WMF point-list records remain placeholdered or stripped."
+        "The converter intentionally supports only bounded passive path geometry; malformed or excessive WMF point-list records remain placeholdered or stripped.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -841,7 +853,8 @@
       ],
       "known_gaps": [
         "Word-compatible PATBLT recovery matches Word's solid red brush and rectangle edges within 0.07 points using the measured bounded legacy playback map.",
-        "The converter intentionally supports only safe source-independent raster operations; unsupported raster operations remain placeholdered or stripped."
+        "The converter intentionally supports only safe source-independent raster operations; unsupported raster operations remain placeholdered or stripped.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -886,7 +899,8 @@
       "expected_pdf_markers": [],
       "known_gaps": [
         "Visible output now matches Word's blank STRETCHBLT PATCOPY playback and identical surrounding text flow.",
-        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data."
+        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -929,7 +943,8 @@
       "expected_pdf_markers": [],
       "known_gaps": [
         "Visible output now matches Word's blank BITBLT PATCOPY playback and identical surrounding text flow.",
-        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data."
+        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -977,7 +992,8 @@
       ],
       "known_gaps": [
         "Word-compatible DIBBITBLT PATCOPY recovery matches Word's selected brown brush and rectangle edges within 0.07 points using its distinct bounded legacy playback map.",
-        "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data."
+        "The converter intentionally treats source-ignoring PATCOPY transfers as passive brush fills and strips the source payload instead of preserving raw raster data.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -1020,7 +1036,8 @@
       "expected_pdf_markers": [],
       "known_gaps": [
         "Visible output now matches Word's blank DIBSTRETCHBLT PATCOPY playback and identical surrounding text flow.",
-        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data."
+        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -1063,7 +1080,8 @@
       "expected_pdf_markers": [],
       "known_gaps": [
         "Visible output now matches Word's blank STRETCHDIB PATCOPY playback and identical surrounding text flow.",
-        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data."
+        "StrictSpec retains the hardened source-ignoring brush-fill interpretation without preserving raw raster data.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -1106,7 +1124,8 @@
       ],
       "known_gaps": [
         "Focused Word audit confirms the two-pixel red/green order and orientation match. Word-compatible playback now applies Word's shared source-raster origin transform and record-specific STRETCHDIB extents: current bounds are (99.5023,59.3499)-(141.9317,74.7787) points versus Word's (99.5030,59.4107)-(141.9324,74.8395). Width matches exactly, height differs by 0.000002 points, and the remaining 0.0007-by-0.0608-point origin residual is shared inline-frame/font positioning.",
-        "The converter preserves only normalized passive pixels; source DIB headers and raw metafile transfer records remain outside the PDF layer."
+        "The converter preserves only normalized passive pixels; source DIB headers and raw metafile transfer records remain outside the PDF layer.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -1147,7 +1166,8 @@
       "expected_pdf_markers": [],
       "known_gaps": [
         "Visible output now matches Word's blank SETDIBTODEV playback and identical surrounding text flow.",
-        "StrictSpec preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
+        "StrictSpec preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -1192,7 +1212,8 @@
       ],
       "known_gaps": [
         "Focused Word audit confirms the visible DIBBITBLT two-pixel red/green order matches and neither renderer paints the fixture's trailing DIBSTRETCHBLT record. Word-compatible playback now reproduces Word's source-bitmap-width and destination-row scaling: current size is 0.857144 by 0.489797 points versus Word's 0.857147 by 0.489797. The remaining 0.086-by-0.061-point origin residual follows the preceding bundled-font/inline-frame positioning.",
-        "The converter preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
+        "The converter preserves only normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
@@ -1238,7 +1259,8 @@
       ],
       "known_gaps": [
         "Focused Word audit confirms record-specific source-window orientation and geometry now match: bottom-up STRETCHDIB selects dark pixels (40,50,60)/(70,80,90), while DIBBITBLT selects medium pixels (130,140,150)/(160,170,180). STRETCHDIB size matches Word at 42.42939 by 15.42875 points; cropped DIBBITBLT is 1.285717 by 0.489797 versus Word's 1.285712 by 0.489797. Both origins retain only a shared 0.012-by-0.061-point inline-frame/font residual.",
-        "The converter preserves only cropped normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer."
+        "The converter preserves only cropped normalized passive pixels; source DIB headers, trailing source bytes, and raw metafile records remain outside the PDF layer.",
+        "After paragraph-local inline-image baseline recovery, matching surrounding text baselines in this reference differ from Word by at most 0.03 points."
       ]
     },
     {
