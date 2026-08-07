@@ -7684,6 +7684,49 @@ fn layout_scissors_page_border_art(
     // Word's ID-42 tile starts with a clipped scissors glyph. These bounded
     // primitives preserve its visible silhouette without retaining Office art payloads.
     page.items.push(LayoutItem::Ellipse {
+        x: left + 5.33,
+        y: top + 22.97,
+        width: 7.25,
+        height: 8.95,
+        stroke_width: 0.0,
+        stroke_color: color,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(color),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+    page.items.push(LayoutItem::Polygon {
+        points: vec![
+            LayoutPoint {
+                x: left + 11.52,
+                y: top + 17.54,
+            },
+            LayoutPoint {
+                x: left + 2.76,
+                y: top + 17.54,
+            },
+            LayoutPoint {
+                x: left + 6.216,
+                y: top + 20.4,
+            },
+            LayoutPoint {
+                x: left + 15.216,
+                y: top + 20.4,
+            },
+        ],
+        paths: Vec::new(),
+        overlay_paths: Vec::new(),
+        fill_rule: StaticImageVectorFillRule::Winding,
+        stroke_width: 0.0,
+        stroke_color: color,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(color),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+    // Word restores the lower ring contours after painting the filled joint.
+    // Keeping that order prevents the joint from leaking into the white hole.
+    page.items.push(LayoutItem::Ellipse {
         x: left - 0.12,
         y: top + 13.34,
         width: 9.46,
@@ -7707,64 +7750,23 @@ fn layout_scissors_page_border_art(
         fill_gradient_color: None,
         fill_pattern: ShadingPattern::None,
     });
-    page.items.push(LayoutItem::Ellipse {
-        x: left + 5.33,
-        y: top + 22.97,
-        width: 7.25,
-        height: 8.95,
-        stroke_width: 0.0,
-        stroke_color: color,
-        stroke_style: LineStyle::Solid,
-        fill_color: Some(color),
-        fill_gradient_color: None,
-        fill_pattern: ShadingPattern::None,
-    });
     page.items.push(LayoutItem::Polygon {
         points: vec![
             LayoutPoint {
-                x: left + 4.65,
-                y: top + 13.8,
+                x: left + 7.824,
+                y: top + 24.6,
             },
             LayoutPoint {
                 x: left + 11.04,
-                y: top + 17.6,
+                y: top + 20.4,
             },
             LayoutPoint {
-                x: left + 16.25,
-                y: top + 17.6,
-            },
-            LayoutPoint {
-                x: left + 8.4,
-                y: top + 14.9,
-            },
-        ],
-        paths: Vec::new(),
-        overlay_paths: Vec::new(),
-        fill_rule: StaticImageVectorFillRule::Winding,
-        stroke_width: 0.0,
-        stroke_color: color,
-        stroke_style: LineStyle::Solid,
-        fill_color: Some(color),
-        fill_gradient_color: None,
-        fill_pattern: ShadingPattern::None,
-    });
-    page.items.push(LayoutItem::Polygon {
-        points: vec![
-            LayoutPoint {
-                x: left + 7.8,
-                y: top + 20.6,
+                x: left + 14.16,
+                y: top + 20.4,
             },
             LayoutPoint {
                 x: left + 11.04,
-                y: top + 16.4,
-            },
-            LayoutPoint {
-                x: left + 14.15,
-                y: top + 16.4,
-            },
-            LayoutPoint {
-                x: left + 10.9,
-                y: top + 20.6,
+                y: top + 24.6,
             },
         ],
         paths: Vec::new(),
@@ -28729,6 +28731,35 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(art.len(), 16);
+        assert!(matches!(
+            art[1],
+            LayoutItem::Polygon { points, stroke_width, .. }
+                if *stroke_width == 0.0
+                    && points.as_slice() == [
+                        LayoutPoint { x: 47.52, y: 389.54 },
+                        LayoutPoint { x: 38.76, y: 389.54 },
+                        LayoutPoint { x: 42.216, y: 392.4 },
+                        LayoutPoint { x: 51.216, y: 392.4 },
+                    ]
+        ));
+        assert!(matches!(
+            (art[2], art[3]),
+            (
+                LayoutItem::Ellipse { fill_color: Some(color), .. },
+                LayoutItem::Ellipse { fill_color: Some(hole), .. },
+            ) if *color == PdfColor::default() && *hole == PdfColor { red: 1.0, green: 1.0, blue: 1.0 }
+        ));
+        assert!(matches!(
+            art[4],
+            LayoutItem::Polygon { points, stroke_width, .. }
+                if *stroke_width == 0.0
+                    && points.as_slice() == [
+                        LayoutPoint { x: 43.824, y: 396.6 },
+                        LayoutPoint { x: 47.04, y: 392.4 },
+                        LayoutPoint { x: 50.16, y: 392.4 },
+                        LayoutPoint { x: 47.04, y: 396.6 },
+                    ]
+        ));
         assert!(art.iter().any(|item| matches!(
             item,
             LayoutItem::Ellipse { x, y, width, height, .. }

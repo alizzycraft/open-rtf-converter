@@ -3174,7 +3174,7 @@
         "Body inside passive page border fallback."
       ],
       "intentional_security_differences": [
-        "Word page border art is rendered as a bounded passive line border fallback instead of preserving art payload semantics."
+        "Word page border art is reconstructed from a bounded passive vector template instead of preserving proprietary art payload semantics."
       ],
       "expected_diagnostics": [
         "page border art 42 rendered as bounded passive vector template"
@@ -3192,7 +3192,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that border-art ID 42 is a scissors-and-dashed-strip tile rendered as 34 vector paths. WordCompatiblePassive now recognizes that ID and emits a bounded 16-primitive passive template with the same scissors identity, outlined blades, complete-tile dash cadence, lead/final corners, and page clipping. Its clipped union is (35.88,-7.92)-(250.11,24.12) points versus Word's (35.88,-7.92)-(250.16,24.18); the simplified ring/joint contours remain an acceptable passive approximation. Unknown border-art IDs retain the bounded authored-width line fallback. Body text origins differ by 0.02 points horizontally and the established 0.95-point bundled Arial-compatible vertical residual. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; eight-times crops and full pages were visually inspected."
+        "The focused Word 16.0 audit confirms that border-art ID 42 is a scissors-and-dashed-strip tile rendered as 34 vector paths. WordCompatiblePassive emits a bounded 16-primitive passive template with measured joint quadrilaterals, Word's ring-over-joint paint order, outlined blades, complete-tile dash cadence, lead/final corners, and page clipping. Its clipped union is (35.88,-7.92)-(250.11,24.12) points versus Word's (35.88,-7.92)-(250.16,24.18); the ellipse-based rings replace Word's segmented cubic contours but are visually equivalent at eight-times inspection. Unknown border-art IDs retain the bounded authored-width line fallback. Body text origins differ by 0.02 points horizontally and the established 0.95-point bundled Arial-compatible vertical residual. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; eight-times crops and full pages were visually inspected."
       ]
     },
     {
