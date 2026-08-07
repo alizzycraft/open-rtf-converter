@@ -31719,17 +31719,8 @@ fn trim_style_ref_trailing_number_delimiters(text: &str) -> Option<String> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-fn word_compatible_style_ref_number_text(text: &str, mode: StyleRefNumberMode) -> Option<String> {
-    let text = trim_style_ref_trailing_number_delimiters(text)?;
-    if mode != StyleRefNumberMode::Rendered {
-        return Some(text);
-    }
-
-    text.rsplit(|ch: char| {
-        matches!(ch, '.' | ')' | ':' | '-' | '\u{2013}' | '\u{2014}') || ch.is_whitespace()
-    })
-    .find(|part| !part.is_empty())
-    .map(str::to_string)
+fn word_compatible_style_ref_number_text(text: &str, _mode: StyleRefNumberMode) -> Option<String> {
+    trim_style_ref_trailing_number_delimiters(text)
 }
 
 fn push_text_to_runs(runs: &mut Vec<Run>, text: &str, character_style: &CharacterStyle) {

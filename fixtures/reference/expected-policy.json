@@ -2949,7 +2949,58 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that STYLEREF selects the latest preceding safe paragraph using the named style, so the text result is NUMBERED TITLE rather than the earlier VISIBLE TITLE. The fixture omits mandatory \\levelstartat metadata; Word recovers the marker as 0., and WordCompatiblePassive now does the same while StrictSpec retains the historical one-based recovery. Word's \\n, \\r, and \\w STYLEREF results all omit trailing list punctuation and produce 0 for this single-level list; the converter now matches those bounded results. The malformed \\nfoo field remains an intentional difference: Word emits a wrapped bold host-generated error, while the converter emits a deterministic passive placeholder. Both outputs are one-page text-only PDFs with zero drawings, images, links, annotations, or widgets; safe lines share x origins within 0.02 points and the established 0.83-point bundled Times-compatible vertical residual. Multi-level relative-context selection remains a bounded passive approximation until a dedicated registered reference exercises that case."
+        "The focused Word 16.0 audit confirms that STYLEREF selects the latest preceding safe paragraph using the named style, so the text result is NUMBERED TITLE rather than the earlier VISIBLE TITLE. The fixture omits mandatory \\levelstartat metadata; Word recovers the marker as 0., and WordCompatiblePassive now does likewise while StrictSpec retains historical one-based recovery. Word's \\n, \\r, and \\w results all omit trailing punctuation and produce 0 for this single-level list. The malformed \\nfoo field remains an intentional difference: Word emits a wrapped bold host-generated error, while the converter emits a deterministic passive placeholder. Both outputs are one-page text-only PDFs with zero drawings, images, links, annotations, or widgets; safe lines share x origins within 0.02 points and the established 0.83-point bundled Times-compatible vertical residual. Multilevel authored-context behavior is covered by a separate registered reference."
+      ]
+    },
+    {
+      "id": "styleref-multilevel-passive-fields",
+      "input": "fixtures/styleref-multilevel-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/styleref-multilevel-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Root target",
+        "Child target",
+        "Leaf target",
+        "Number 1.1.1 relative 1.1.1 full 1.1.1",
+        "Context number 1.1.1 relative 1.1.1",
+        "full 1.1.1"
+      ],
+      "word_must_preserve_text": [
+        "Number 1.1.1 relative 1.1.1 full 1.1.1",
+        "Context number 1.1.1 relative 1.1.1",
+        "full 1.1.1"
+      ],
+      "intentional_security_differences": [
+        "Resultless STYLEREF fields resolve only from bounded prior style/list state; the converter never executes or preserves the field instruction."
+      ],
+      "expected_diagnostics": [
+        "rendering passive field STYLEREF without executing field instruction"
+      ],
+      "forbidden_pdf_markers": [
+        "STYLEREF",
+        "TargetStyle",
+        "ContextStyle",
+        "fldinst",
+        "stylesheet",
+        "listtable",
+        "listoverridetable",
+        "leveltext",
+        "levelnumbers",
+        "/Action",
+        "/Annots",
+        "/URI",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "The registered Word 16.0 reference proves that a level-three list template containing its parent placeholders yields 1.1.1 for all three STYLEREF number switches (\\n, \\r, and \\w), both in ordinary body flow and from a following level-three list paragraph. WordCompatiblePassive now retains the complete authored context instead of reducing \\n to the final component. Current and Word have identical eight-line grouping; matching lines begin within 0.03 points horizontally and retain the established 0.95-point bundled Arial-compatible vertical residual. Current line endpoints are up to about 3.44 points shorter because of bundled font metrics. Both PDFs are one-page text-only output with zero drawings, images, links, annotations, widgets, or actions."
       ]
     },
     {

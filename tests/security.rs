@@ -13015,6 +13015,76 @@ fn resultless_styleref_number_context_switches_render_without_payload_leakage() 
 }
 
 #[test]
+fn word_multilevel_styleref_switches_retain_authored_parent_context_passively() {
+    let input = include_bytes!("../fixtures/styleref-multilevel-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let text = collect_text(&parsed.document);
+    for expected in [
+        "1.1.1.\tLeaf target",
+        "Number 1.1.1 relative 1.1.1 full 1.1.1",
+        "1.1.2.\tContext number 1.1.1 relative 1.1.1 full 1.1.1",
+    ] {
+        assert!(
+            text.contains(expected),
+            "Word-compatible multilevel STYLEREF text omitted {expected:?}: {text:?}"
+        );
+    }
+
+    let strict = parse_rtf_bytes_with_options(
+        input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    let strict_text = collect_text(&strict.document);
+    assert!(
+        strict_text.contains("Number 1.1.1. relative 1.1.1 full 1.1.1."),
+        "StrictSpec should retain authored list delimiters: {strict_text:?}"
+    );
+
+    let output = convert_rtf_to_pdf(
+        input,
+        &ConvertOptions {
+            diagnostics: true,
+            ..ConvertOptions::default()
+        },
+    )
+    .unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    assert!(
+        rendered_text.contains("Number 1.1.1 relative 1.1.1 full 1.1.1"),
+        "decoded PDF omitted passive multilevel STYLEREF context: {rendered_text:?}"
+    );
+    for forbidden in [
+        b"STYLEREF".as_slice(),
+        b"TargetStyle",
+        b"ContextStyle",
+        b"listtable",
+        b"leveltext",
+        b"levelnumbers",
+        b"fldinst",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "forbidden multilevel STYLEREF content leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn resultless_styleref_fields_resolve_unicode_style_names_without_control_leakage() {
     let input = rtf(&[
         "{",
