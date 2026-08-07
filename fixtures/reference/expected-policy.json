@@ -6845,7 +6845,7 @@
     {
       "id": "font-code-page-passive-decoding",
       "input": "fixtures/font-code-page-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/font-code-page-passive.pdf",
       "word_reference_pages": [],
@@ -6878,13 +6878,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit proves that Word ignores explicit per-font cpg437/cpg10000 declarations for these authored text bytes, uses the document Windows-1252 code page to produce cafe ‚ / box ³ and ÒHelloÓ, and substitutes the missing legacy faces with Calibri. WordCompatiblePassive now matches that decoding and normalizes a safe Calibri alternate without overriding an exact caller-supplied face; StrictSpec continues honoring the declared IBM437/MacRoman mapping. Bounded Calibri/Carlito source line and covered character advances position bundled Liberation Sans output. All final non-space glyph origins differ from Word by at most 0.12 points horizontally; Calibri-line baselines differ by 0.44/0.43 points instead of accumulating to 1.91 points, and following Arial flow differs by 0.94 instead of 2.64 points. The final accented Calibri contour retains a 1.27-point bundled-font edge residual. Both outputs retain identical four-line flow and zero drawings and remain free of images, links, annotations, widgets, and actions."
+        "The focused Word 16.0 audit proves that Word ignores explicit per-font cpg437/cpg10000 declarations for these authored text bytes, uses the document Windows-1252 code page to produce cafe ‚ / box ³ and ÒHelloÓ, and substitutes the missing legacy faces with Calibri. WordCompatiblePassive matches that decoding and normalizes a safe Calibri alternate without overriding an exact caller-supplied face; StrictSpec continues honoring the declared IBM437/MacRoman mapping. Bounded Calibri/Carlito source line, character-advance, and source-baseline metrics position bundled Liberation Sans output. All final non-space glyph origins differ from Word by at most 0.12 points horizontally; Calibri baselines differ by at most 0.01 points and surrounding Arial flow by at most 0.02 points. The final accented Calibri contour retains a 1.27-point bundled-font edge residual. Both outputs retain identical four-line flow and zero drawings and remain free of images, links, annotations, widgets, and actions; four-times renders were visually inspected."
       ]
     },
     {
       "id": "font-charset-legacy-code-page-passive-decoding",
       "input": "fixtures/font-charset-legacy-code-page-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/font-charset-legacy-code-page-passive.pdf",
       "word_reference_pages": [],
@@ -6917,7 +6917,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic MacRoman and OEM decoding and PDF extraction for “Hello”, café, and │ when the code page is selected through fcharset77/fcharset255. WordCompatiblePassive now normalizes Word's missing-face Calibri substitution without overriding an exact caller-supplied Mac/OEM face, uses bounded Calibri/Carlito source line and covered character-advance metrics, and continues embedding only safe Liberation Sans contours. Current/Word final non-space glyph origins differ by at most 0.08 points horizontally; Calibri-line baselines differ by 0.43-0.44 points instead of accumulating to 2.63 points, and the following Arial baseline differs by 0.94 points. Smart-quote and box-drawing contour edges retain at most 1.49 points of safe bundled-font residual. Both outputs have identical four-line text and zero drawings."
+        "The focused Word 16.0 audit confirms exact semantic MacRoman and OEM decoding and PDF extraction for “Hello”, café, and │ when the code page is selected through fcharset77/fcharset255. WordCompatiblePassive normalizes Word's missing-face Calibri substitution without overriding an exact caller-supplied Mac/OEM face, uses bounded Calibri/Carlito source line, covered character-advance, and source-baseline metrics, and continues embedding only safe Liberation Sans contours. Current/Word final non-space glyph origins differ by at most 0.08 points horizontally; Calibri baselines differ by at most 0.01 points and surrounding Arial flow by at most 0.02 points. Smart-quote and box-drawing contour edges retain at most 1.49 points of safe bundled-font residual. Both outputs have identical four-line text and zero drawings; four-times renders were visually inspected."
       ]
     },
     {
@@ -7914,7 +7914,7 @@
     {
       "id": "word-metadata-session-passive-classification",
       "input": "fixtures/word-metadata-session-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/word-metadata-session-passive.pdf",
       "word_reference_pages": [],
@@ -7997,13 +7997,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Bundled Liberation Sans supplies safe glyph contours for Word's Calibri, while layout uses bounded Calibri/Carlito source line, ASCII advance, and independently covered regular kerning metrics. Current and Word have matching one-page flow and 14.648/14.64-point cadence; corresponding baselines differ by 0.42-0.43 points, and all three final glyph origins differ by at most 0.07 points. A bounded layout-only close-range advance reproduces Word's invisible custom-XML boundary spacing. Remaining final contour-edge residuals are at most 0.30 points from the bundled font."
+        "Bundled Liberation Sans supplies safe glyph contours for Word's Calibri, while layout uses bounded Calibri/Carlito source line, ASCII advance, independently covered regular kerning, and source-baseline metrics. Current and Word have matching one-page flow and 14.648/14.64-point cadence; corresponding baselines differ by at most 0.02 points, and all three final glyph origins differ by at most 0.07 points. A bounded layout-only close-range advance reproduces Word's invisible custom-XML boundary spacing. Remaining final contour-edge residuals are at most 0.30 points from the bundled font; four-times renders were visually inspected."
       ]
     },
     {
       "id": "stylesheet-metadata-passive-classification",
       "input": "fixtures/stylesheet-metadata-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/stylesheet-metadata-passive.pdf",
       "word_reference_pages": [],
@@ -8051,7 +8051,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-compatible mode and Word both leave the fixture's paragraph and linked-character style references visually inert, producing three plain Calibri-category lines at the 72-point origin. Layout uses bounded Calibri/Carlito source line and style-specific ASCII advance metrics while embedding safe Liberation Sans contours: current and Word cadence is 14.648/14.64 points, baselines differ by 0.42-0.43 points, and final non-space glyph origins differ by at most 0.12 points. The last bundled glyph contour edge differs by at most 0.90 points; Word's non-painted trailing paragraph spaces remain normalized away. Three-times renders were visually inspected."
+        "Word-compatible mode and Word both leave the fixture's paragraph and linked-character style references visually inert, producing three plain Calibri-category lines at the 72-point origin. Layout uses bounded Calibri/Carlito source line, style-specific ASCII advance, and source-baseline metrics while embedding safe Liberation Sans contours: current and Word cadence is 14.648/14.64 points, baselines differ by at most 0.02 points, and final non-space glyph origins differ by at most 0.12 points. The last bundled glyph contour edge differs by at most 0.90 points; Word's non-painted trailing paragraph spaces remain normalized away. Four-times renders were visually inspected."
       ]
     },
     {

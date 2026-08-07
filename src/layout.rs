@@ -46,6 +46,7 @@ const PASSIVE_MATH_FRACTION_RULE_WIDTH_POINTS: f32 = 0.84;
 const PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS: f32 = 3.42;
 const PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER: f32 = 1.47;
 const WORD_ARIAL_BASELINE_INSET_EM: f32 = 19.0 / 240.0;
+const WORD_CALIBRI_BASELINE_INSET_EM: f32 = 13.0 / 360.0;
 const WORD_TIMES_BASELINE_INSET_EM: f32 = 5.0 / 72.0;
 const WORD_CAMBRIA_MATH_NARY_BASELINE_RISE_EM: f32 = 0.04;
 const MAX_ABSOLUTE_FRAME_LAYOUT_REFINEMENTS: usize = 4;
@@ -3770,6 +3771,7 @@ fn layout_shape_text(
                 text_x,
                 cursor_y,
                 document,
+                font_provider,
                 word_spacing,
                 character_spacing,
             );
@@ -4614,6 +4616,7 @@ fn layout_repeating_header_footer(
                     x,
                     line_cursor_y,
                     document,
+                    font_provider,
                     word_spacing,
                     character_spacing,
                 );
@@ -4765,6 +4768,7 @@ fn layout_legacy_auto_page_numbers(
             x,
             line_cursor_y,
             document,
+            font_provider,
             0.0,
             0.0,
         );
@@ -6700,6 +6704,7 @@ fn push_table_row(
                     x,
                     current_line_top,
                     document,
+                    font_provider,
                     word_spacing,
                     character_spacing,
                 );
@@ -6724,6 +6729,7 @@ fn push_table_row(
                     rotated_x,
                     rotated_y,
                     document,
+                    font_provider,
                     word_spacing,
                     character_spacing,
                     rotation,
@@ -8387,6 +8393,7 @@ fn layout_framed_paragraph_group(
                     rotated_x,
                     rotated_y,
                     document,
+                    font_provider,
                     word_spacing,
                     character_spacing,
                     rotation,
@@ -9284,6 +9291,7 @@ fn layout_paragraph_with_auto_footnotes(
                 state,
                 paragraph.style.suppress_line_numbers,
                 document,
+                font_provider,
             );
         }
         push_bar_tab_stops(pages, &paragraph.style, x, *cursor_y, line.height);
@@ -9293,6 +9301,7 @@ fn layout_paragraph_with_auto_footnotes(
             x,
             *cursor_y,
             document,
+            font_provider,
             word_spacing,
             character_spacing,
         );
@@ -9704,6 +9713,7 @@ fn push_passive_line_number(
     state: &mut LineNumberState,
     suppress_number: bool,
     document: &Document,
+    font_provider: Option<&FontProvider>,
 ) {
     if !geometry.line_numbering.enabled || !line_has_visible_text(line) {
         return;
@@ -9726,7 +9736,7 @@ fn push_passive_line_number(
     let x = (margin_left - distance - width).max(0.0);
     let baseline_y = top_y - line.height
         + (line.height * 0.25)
-        + word_compatible_source_line_baseline_delta_points(line, document);
+        + word_compatible_source_line_baseline_delta_points(line, document, font_provider);
     let Some(page) = pages.last_mut() else {
         return;
     };
@@ -13727,6 +13737,7 @@ fn push_line(
     x: f32,
     top_y: f32,
     document: &Document,
+    font_provider: Option<&FontProvider>,
     word_spacing: f32,
     character_spacing: f32,
 ) {
@@ -13736,6 +13747,7 @@ fn push_line(
         x,
         top_y,
         document,
+        font_provider,
         word_spacing,
         character_spacing,
         TextRotation::None,
@@ -13748,6 +13760,7 @@ fn push_line_with_rotation(
     x: f32,
     top_y: f32,
     document: &Document,
+    font_provider: Option<&FontProvider>,
     word_spacing: f32,
     character_spacing: f32,
     rotation: TextRotation,
@@ -13777,7 +13790,7 @@ fn push_line_with_rotation(
     };
     let mut cursor_advance = 0.0;
     let mut cursor_baseline_delta =
-        word_compatible_source_line_baseline_delta_points(line, document);
+        word_compatible_source_line_baseline_delta_points(line, document, font_provider);
     let page = pages.last_mut().expect("layout always has a page");
 
     let last_spaced_run_index = line.runs.iter().rposition(|run| {
@@ -14050,7 +14063,11 @@ fn push_line_with_rotation(
     }
 }
 
-fn word_compatible_source_line_baseline_delta_points(line: &Line, document: &Document) -> f32 {
+fn word_compatible_source_line_baseline_delta_points(
+    line: &Line,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
     if line.inline_image_baseline_context {
         return 0.0;
     }
@@ -14068,6 +14085,9 @@ fn word_compatible_source_line_baseline_delta_points(line: &Line, document: &Doc
                     let name = font.name.trim().to_ascii_lowercase();
                     if matches!(name.as_str(), "arial" | "liberation sans") {
                         WORD_ARIAL_BASELINE_INSET_EM
+                    } else if font_uses_source_family(font, font_provider, &["calibri", "carlito"])
+                    {
+                        WORD_CALIBRI_BASELINE_INSET_EM
                     } else if name == "tinos"
                         || name == "times new roman"
                         || name.starts_with("times new roman ")
@@ -27839,6 +27859,15 @@ mod tests {
         .expect("Calibri line");
 
         assert!((line.height - 14.648_437_5).abs() < 0.001);
+        assert!(
+            (word_compatible_source_line_baseline_delta_points(
+                &line,
+                &document,
+                Some(&FontProvider::default()),
+            ) + (12.0 * WORD_CALIBRI_BASELINE_INSET_EM))
+                .abs()
+                < 0.001
+        );
 
         let font = &document.fonts[0];
         for (bold, italic, units) in [
@@ -28353,6 +28382,31 @@ mod tests {
 
         assert!((twelve_point_page_height - twelve_point_baseline - 47.30).abs() < 0.03);
         assert!((twenty_four_point_page_height - twenty_four_point_baseline - 40.60).abs() < 0.03);
+    }
+
+    #[test]
+    fn calibri_lines_use_word_source_baselines() {
+        let parsed =
+            parse_rtf(include_str!("../fixtures/stylesheet-metadata-passive.rtf")).unwrap();
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        let page = &layout.pages[0];
+        let baseline_from_top = |needle: &str| {
+            page.height
+                - page
+                    .items
+                    .iter()
+                    .find_map(|item| match item {
+                        LayoutItem::Text(fragment) if fragment.text.contains(needle) => {
+                            Some(fragment.baseline_y)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("missing text fragment containing {needle:?}"))
+        };
+        let heading = baseline_from_top("Heading");
+
+        assert!((heading - 83.42).abs() < 0.03, "heading baseline={heading}");
     }
 
     #[test]
